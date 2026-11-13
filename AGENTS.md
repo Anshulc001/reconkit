@@ -24,6 +24,7 @@ plan (5-10 lines, assumptions) -> implement -> tests (normal, empty, malformed, 
 - No new dependencies without asking me.
 - Every deviation from the docs goes in the report AND in `docs/PROGRESS.md` "Deviations". Docs change first, then code.
 - Adapters never import `store`, `scope`, `ui`, `cli`.
+- Do not create modules, files or CLI commands that are not in `docs/03` and `docs/02`. If one seems needed, change the docs first and tell me.
 
 ## 1. Project context
 

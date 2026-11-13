@@ -25,15 +25,15 @@ mypy src/reconkit
 | a | done | `f4d81e2` | Package skeleton, pyproject, config.yaml, docs |
 | b | done | `0e39f18`, `9423eaa` | `errors`, `models`, `config`, `core/runner` + tests |
 | c | done | `45b0ba8` | `core/scope` gate + tests |
-| d | next | - | `core/pacing.py`: delays, per-tool rate limits, host ordering, speed presets |
-| e | pending | - | `core/store.py`: SQLite schema/queries per `docs/04_DATABASE.md` |
-| f | pending | - | `core/consensus.py`: merge records, confidence tiers, disagreements |
-| g | pending | - | `core/workspace.py` + `ui/`: raw output files, Rich tables |
-| h | pending | - | `cli/` + engine: Typer commands, stage registry, `--mock`, exit codes |
-| i | pending | - | Passive adapters (crtsh, certspotter, otx, hackertarget, subfinder, assetfinder, dnspython) |
-| j | pending | - | Live/ports adapters (pyprobe, httpx, pyscan, naabu) + `doctor`/installer |
+| d | done | `git log -1` | `core/pacing.py`: delays, jitter, ordering, parallel limits, rate args, RateLimiter |
+| e | next | - | `core/store.py`: schema, migrations, `redact()` helper, diff queries (`docs/04_DATABASE.md`) |
+| f | pending | - | `adapters/base.py`, `adapters/registry.py` + 11 Phase 2 adapters with fixtures/tests |
+| g | pending | - | `core/wildcard.py` + `engine.py` + `core/workspace.py`: stage pipeline, consensus/confidence inside `engine.py`, host states, resume, exit codes |
+| h | pending | - | `ui.py` + `cli.py`: all commands, `--mock`, `--json` |
+| i | pending | - | `installer/` + `doctor.py` |
+| j | pending | - | docs sync, README, final check |
 
-Letters d-j are mapped from `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTURE.md`; adjust if the original task list differs.
+Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTURE.md` section 5. There is no `core/consensus.py`: consensus lives in `engine.py`.
 
 ## Module map
 
@@ -42,6 +42,7 @@ Letters d-j are mapped from `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTURE
 - `config.py`: `load_config(path, speed=, delay=)`, `resolve_speed`, `parse_delay`, `SpeedPreset`; `_StrictModel` forbids unknown keys; `Webhook` model.
 - `core/runner.py`: `run_exec(argv, timeout=, env=, max_output_bytes=, cwd=)` (only `subprocess` user), `validate_target` (root, strict RFC-1123), `validate_host` (discovered: allows `_`, strips `*.`), `ExecResult`; timeout kills the process group, output capped, env values redacted.
 - `core/scope.py`: `load_scope`, `require_active` -> `ActiveCheck(scope, match, hosts, dropped)`, `check_target`, `ip_allowed`, `passive_warning`, `ScopeGate`; `out_of_scope` always wins.
+- `core/pacing.py`: `Pacer(preset, rate_flags=, rng=, sleep=)` with `before_tool(mode)` (first tool free, `reset()` per stage), `before_host`, `order(items, kind=)`, `parallel_limit`, `tool_rate_args`, `next_pause_range`; `RateLimiter(rate, clock=, sleep=)` for HTTP adapters. No I/O, no printing, injected clock.
 
 ## Deviations and assumptions
 
@@ -57,7 +58,9 @@ Letters d-j are mapped from `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTURE
 - `check_target` reports `out_of_scope` before expiry (out always wins) and raises `ValueError` on an invalid target.
 - `AGENTS.md` environment corrected from Kali to Ubuntu to match the actual machine.
 - Consolidated to a single Windows checkout on the Desktop; the WSL clone is no longer used. Pushes come from the Desktop checkout (`git push reconkit main`).
+- The project moved from Kali to Ubuntu, so any apt package that exists only on Kali must be checked on Ubuntu before install steps are coded.
 - `_kill_tree` guards on `sys.platform != "win32"` so mypy passes on Windows; the process-group kill itself only runs on POSIX.
+- `Pacer.order()` takes an optional `kind="host"|"port"` because config has separate shuffle flags; `tool_rate_args()` uses the active request rate (CLI tools are active-stage).
 - Commits are authored by `Anshul <anshulc4444@gmail.com>` with no AI co-author trailer.
 
 ## Open risks
@@ -70,4 +73,4 @@ Letters d-j are mapped from `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTURE
 
 ## Next task
 
-**Task d: `core/pacing.py`.** Replace the `Pacer` stub with the real pacer: random delays from the speed preset, per-tool rate limits, host ordering/shuffling, and a fake-clock-friendly API. Read `docs/03_ARCHITECTURE.md` and `docs/09_TOOL_CONTRACTS.md` first.
+**Task e: `core/store.py`.** SQLite schema, migrations, `redact()` helper and diff queries per `docs/04_DATABASE.md`; only this module imports `sqlite3`. Read `docs/04_DATABASE.md` and `docs/05_SECURITY.md` first.

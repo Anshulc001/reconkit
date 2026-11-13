@@ -50,6 +50,8 @@ select = ["E", "F", "I", "B", "UP", "S"]
 "tests/**" = ["S101"]   # pytest uses asserts
 "tests/fakebin/**" = ["S603"]   # fixtures start their own child process
 "src/reconkit/core/runner.py" = ["S603"]   # argv is validated; sole subprocess entry
+"src/reconkit/core/pacing.py" = ["S311"]   # jitter randomness, not cryptographic
+"tests/test_pacing.py" = ["S311"]   # seeded RNG for deterministic shuffle tests
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

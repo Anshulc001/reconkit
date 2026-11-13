@@ -103,7 +103,7 @@ workspaces/<domain>/
 ## 7. Pacing Engine (`core/pacing.py`)
 
 - Single `Pacer` object per run, built from the chosen speed preset plus `--delay` overrides.
-- API: `await pacer.before_tool()`, `await pacer.before_host()`, `pacer.order(items)`, `pacer.parallel_limit`, `pacer.tool_rate_args(tool)`.
+- API: `await pacer.before_tool(mode)`, `await pacer.before_host()`, `pacer.order(items, kind="host"|"port")`, `pacer.parallel_limit(mode)`, `pacer.tool_rate_args(tool)`, `pacer.next_pause_range(mode)` for the progress line, `pacer.reset()` per stage.
 - Randomness (`random.uniform`) and sleeping are **injected** (rng, sleep) so tests run instantly with a fake clock.
 - Passive stages also use the Pacer (third-party APIs ban bursts).
 - Per-source HTTP adapters share an async rate limiter (requests/second from the preset).
