@@ -56,6 +56,23 @@ Tools may declare `requires_apt` (example: naabu needs `libpcap-dev`) and `requi
 - `resolve_plan()` returns the primary plan followed by its fallback, so the caller tries them in order.
 - An unknown method, a missing `package`/`repo`, or a malformed field raises `ConfigError` before anything is downloaded.
 
+## 3d. Backends: argv, child environment, sudo
+
+Every backend goes through `core.runner.run_exec`, which creates the child with **only** the keys passed in `env` (docs/05 section 4). The exact dicts, no more and no less:
+
+| Backend | argv | child env |
+|---|---|---|
+| `apt` | `sudo -n apt-get install -y <package...>` | `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`, `DEBIAN_FRONTEND=noninteractive`, `LC_ALL=C` |
+| `go_install` | `go install <package>@<version>` | `HOME`, `GOBIN=<bin dir>`, `PATH` (copied from the parent so `go` is found; nothing else is copied) |
+| `pipx` | `pipx install <spec>` | `HOME`, `PATH`, `PIPX_BIN_DIR=<bin dir>`, `PIPX_HOME=$HOME/.local/pipx` |
+
+- `sudo -n` is deliberate. `run_exec` gives the child `stdin` from `DEVNULL` and captures its output, so an interactive sudo password prompt cannot work; `-n` fails immediately instead of hanging. A failure whose output says a password is required is reported as `skipped` with "sudo needs a password: run `sudo -v` in this terminal and retry". reconkit never runs as root and never reads or passes a sudo password.
+- Confirmation: every apt action calls a `confirm(message)` callback supplied by the caller. `False` means **no subprocess starts at all**; the tool is marked `skipped`. The installer modules neither print nor prompt themselves, so the CLI owns the prompt text and tests can prove a declined prompt skips the call.
+- Installing `pipx` is a prerequisite with its own confirmation line ("pipx is required for wafw00f: sudo apt-get install -y pipx"), separate from the tool's own ("wafw00f: pipx install wafw00f"). A sudo-bearing prerequisite is never folded into one ambiguous message.
+- Package names are validated before they reach argv: apt `^[a-z0-9][a-z0-9+.-]*$`; go and pipx specs `^[A-Za-z0-9._+/-]+(@[A-Za-z0-9._-]+)?$`, plus `git+https://github.com/...` for pipx (dnsreaper). Anything else is a `ConfigError`, never a command line.
+- After an apt, go or pipx install, `version_cmd` runs as the post-install check. Package-manager installs have **no** `.prev` rollback (nothing safe to roll back to); a failed check marks the tool `failed` and the report says so.
+- `--dry-run` prints the argv and the sudo requirement and starts no process, prompts nothing.
+
 ## 4. Verification (fail closed)
 
 For `github_release`:
@@ -116,7 +133,9 @@ reconkit install --all --dry-run
 | GitHub API rate limit | Suggest setting `GITHUB_TOKEN`; skip remaining |
 | Asset not found for arch | Try fallback method; otherwise report |
 | Checksum mismatch | Refuse install; keep old version |
-| apt declined | Skip apt tools; mark `skipped` |
+| apt declined | Skip apt tools; mark `skipped`, no process starts |
+| sudo needs a password | Skip; tell the user to run `sudo -v` and retry (never prompt for the password ourselves) |
+| pipx missing | Ask to `apt install pipx` as its own confirmed step, then install the tool |
 | Go missing for fallback | Say how to install `golang-go` |
 
 ## 9. Tests

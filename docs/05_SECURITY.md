@@ -42,7 +42,7 @@ Implemented in `core/scope.py`. Rules:
 
 - Sources only from `tools.yaml`; GitHub releases over HTTPS; checksum verification when published; fail closed.
 - No `curl | bash`. No running downloaded scripts.
-- sudo only for `apt`, shown to the user with a confirmation prompt. Never run the whole program as root.
+- sudo only for `apt`, shown to the user with a confirmation prompt. Never run the whole program as root. sudo runs non-interactively (`sudo -n`); if it needs a password the install is skipped with "run `sudo -v` and retry", because reconkit never handles a sudo password itself.
 
 ## 6. Secrets
 

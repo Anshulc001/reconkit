@@ -127,6 +127,9 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 
 ## Open risks
 
+- `_fetch_text`'s default 64 KiB cap has no dedicated test; the cap is only exercised through an explicit `max_bytes=64` argument in the test, so a regression in the default would pass the suite.
+- Non-UTF-8 checksums-file rejection (`InstallError: checksums file is not UTF-8`) has no test.
+
 - `doctor --fix` is accepted but refuses until the `install` CLI exists (10e); it never pretends to have fixed anything.
 - `doctor` checks apt packages by reading `/var/lib/dpkg/status`; on a non-Debian system every package reports `unknown` instead of guessing. `dnsutils` is not covered because it appears only in the `dig` entry's `install` block.
 - `rustscan` is excluded from 10c's download path. Its real release assets (tag 2.4.1, repo redirects to bee-san/RustScan) are named `x86_64-linux-rustscan.zip` / `aarch64-linux-rustscan.zip`, which do not match the `{arch}` values (`amd64`/`arm64`) the registry uses, and no checksums asset was listed; `tools.yaml` still holds the literal placeholder. Resolve this before any install path includes rustscan.
