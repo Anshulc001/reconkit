@@ -10,7 +10,7 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 4. Suggestion line: `Missing tools: 14. Run: reconkit install --all`
 
 - **Success:** exit code 0 with warnings listed.
-- **Failure:** Python < 3.11 or not Linux: clear message, exit code 1.
+- **Failure:** Python < 3.11 or an unreadable `config.yaml`: clear message, exit code 1. `doctor` also runs on native Windows; only `install` and `update` refuse there (docs/10 §2).
 
 ## Flow 2 - Install tools
 

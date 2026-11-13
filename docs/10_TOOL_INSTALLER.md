@@ -5,20 +5,21 @@ Goal: users do not have the tools installed, so `reconkit install` and `reconkit
 ## 1. Commands
 
 ```
-reconkit install [TOOL...|--all] [--stage subs] [--dry-run] [--yes]
+reconkit install [TOOL...|--all] [--dry-run]
 reconkit update  [TOOL...|--all] [--dry-run]
 reconkit doctor [--fix]            # --fix = offer to install what is missing
 ```
 
 - `--all` installs `core` tier tools only. `opt_in` tools install only when named.
-- `--dry-run` prints every action (download URL, checksum source, target path, apt packages) and changes nothing.
-- `--yes` skips confirmations except the sudo/apt one.
-- On an interactive TTY, `install` asks once: "Free only, or add keys?". Choosing keys copies `.env.example` to `.env` (never overwrites) and prints the path plus the Keys table. Non-TTY, `--silent` and `--json` never prompt and default to free mode (policy in `docs/05_SECURITY.md` §6.1, implemented in task i).
+- `--dry-run` prints every action (download URL, checksum source, target path, apt packages) and makes no filesystem changes. Resolving the latest release is a read-only GitHub API request (mocked in tests), so nothing remote is changed either.
+- `apt` always asks before `sudo`; no flag skips that confirmation (docs/05 §5). `--stage` and `--yes` are not part of this build; docs/02 §2 is the command surface.
+- On an interactive TTY, `install` asks once: "Free only, or add keys?". Choosing keys copies `.env.example` to `.env` (never overwrites) and prints the path plus the Keys table. With no TTY on stdin it never prompts and defaults to free mode; `install` has no `--silent`/`--json` flags in this build (policy in `docs/05_SECURITY.md` §6.1, implemented in Part 10).
 
 ## 2. Platform
 
 - Supported: Linux (Kali in WSL2, Kali, Debian/Ubuntu), amd64 and arm64.
-- On native Windows or macOS: print `Use WSL2 Kali (see SETUP.md)` and exit. Do not attempt a half-working install.
+- `doctor` runs on every platform and reports what it finds; `--mock` and the pure-Python adapters also work on native Windows (docs/MASTER_PLAN.md Part 10).
+- On native Windows, `install` and `update` print `Use WSL2 Kali (see SETUP.md)` and exit `1`. On macOS they print `Linux is required (see SETUP.md)` and exit `1`. They never run `apt` and never attempt a half-working install (docs/08 Flow 1).
 
 ## 3. Install Methods (from `tools.yaml`)
 
@@ -32,9 +33,18 @@ reconkit doctor [--fix]            # --fix = offer to install what is missing
 
 Order: `github_release`, then its `fallback` (usually `go_install`).
 
+Version policy: `@latest` in a `go_install` package means the newest release. A `tool_versions` pin in `config.yaml` overrides `@latest` for `go_install`, and selects the pinned release for `github_release`; without a pin the latest release is used.
+
 ## 3a. Required system packages
 
 Tools may declare `requires_apt` (example: naabu needs `libpcap-dev`) and `requires` (other tools, example: puredns needs massdns). The installer installs dependencies first and reports them in `--dry-run`.
+
+## 3b. Prerequisites
+
+- `system_packages` in `tools.yaml` is the authoritative list (python3, python3-venv, python3-pip, git, golang-go, libpcap-dev, jq, curl). The `dig` entry additionally installs the `dnsutils` package, which is not in that list.
+- Python 3.11 or newer, from the interpreter that runs reconkit; never a pinned apt Python.
+- Go tools use `GOBIN=~/.reconkit/bin`; that directory comes first in the run-time lookup order (§5), so no PATH edit is needed to run a Go tool. `scripts/bootstrap.sh` also prepends it to the venv `activate` script.
+- `pipx` is installed with `apt` when a `pipx` tool is chosen, using the same sudo confirmation as every other apt action.
 
 ## 4. Verification (fail closed)
 
@@ -45,7 +55,7 @@ For `github_release`:
 4. After install run `version_cmd`; if it fails, remove the binary and report `failed`.
 
 Other rules:
-- HTTPS only. Download hosts: `api.github.com`, `github.com`, GitHub release asset hosts. Nothing else.
+- HTTPS only. `github_release` downloads come from `api.github.com`, `github.com` and the GitHub release asset hosts. `go_install` uses the Go module proxy and `pipx` uses PyPI; no other host is contacted.
 - Download to a temp dir with a size limit; extract only the expected binary name; refuse archive paths that escape the temp dir (zip-slip).
 - Files get mode `0755`. The directory `~/.reconkit/bin` is `0700`.
 - No `curl | bash`, no running scripts from downloads.
@@ -58,12 +68,25 @@ Other rules:
 
 `doctor` shows which copy is used and warns when a same-named but different program is found first (the `httpx` Python CLI case).
 
+## 5a. Doctor
+
+`doctor` implements docs/01 Feature 2 and docs/08 Flow 1, and changes nothing:
+
+- tool table: installed, version, resolved path, identity verified, tier;
+- per-stage coverage (`subs 6/11 ready`);
+- system packages (`libpcap-dev`, `dnsutils`, `jq`), Python version, `scope.yaml` presence, DB writability and `config.yaml` presence;
+- the Keys table (tool, set/missing, what it adds, sign-up URL), names only, never values;
+- `Missing tools: N. Run: reconkit install --all` when anything is missing;
+- `--json` writes one document; warnings keep exit code `0`. Python < 3.11 or an unreadable `config.yaml` exits `1`.
+
+`--fix` offers the same actions as `install` for the missing tools.
+
 ## 6. Update Behavior
 
 - `update` compares installed version (from `version_cmd`) with latest release (or the pin in `config.yaml` `tool_versions`) and updates only when different.
 - Updates never happen silently during a scan. Only `update` (and `install`) change tools.
 - After updating `nuclei`, also refresh templates (`nuclei -ut` once confirmed against `--help`).
-- `doctor` warns when a tool's major version is newer than the version its fixture parser was tested against.
+- `doctor` warns when a tool's major version is newer than the version its parser fixture was recorded against. This needs per-tool fixture metadata that `tools.yaml` does not carry yet, so the warning is Phase 3.
 - Rollback: previous binary kept as `<name>.prev` until the new version passes its version check.
 
 ## 7. Output Examples
@@ -92,5 +115,5 @@ reconkit install --all --dry-run
 - Asset name templating (`{name}`, `{version}`, `{arch}`).
 - Checksum verification pass/fail with local files.
 - Zip-slip rejection.
-- `--dry-run` makes no filesystem or network changes (use mocked HTTP).
+- `--dry-run` makes no filesystem changes; HTTP is mocked, so no real network request is made.
 - Non-Linux platform message.
