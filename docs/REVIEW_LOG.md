@@ -9,7 +9,7 @@ cannot contain its own hash.
 - Step 1 (`docs: add master plan, review log, check script, resume block`): `09a5bce`
 - Part 3-AUDIT (`fix: close the phase-2 review gaps in store, keys and adapters`): `75eb261`
 - Part 0 (`docs: record the Part 0 baseline and f1 review`): `e675079`
-- Part 4 (`feat: add the phase-2 binary adapters`): hash filled by the Part 5 commit
+- Part 4 (`feat: add the phase-2 binary adapters`): `ee06075`
 - Entries A, B and C below are the Part 3-AUDIT evidence. That audit was
   committed before Step 1 and Part 0 because the audit instruction arrived
   first; the ordering inversion is logged in the Step 1 entry and in Part 0.

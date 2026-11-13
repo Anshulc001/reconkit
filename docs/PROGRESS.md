@@ -3,7 +3,7 @@
 ## RESUME HERE
 
 - Status: Part 4 done; Part 5 (wildcard + workspace) next
-- Last commit: e675079 (docs); Part 4's hash is filled by the Part 5 commit (`git log --oneline -1`)
+- Last code commit: `ee06075`; run `git log --oneline -1` because docs commits may be newer
 - Baseline: 295 passed, 1 skipped; all four checks PASS (twice)
 - Next action: implement Part 5 in docs/MASTER_PLAN.md: `core/wildcard.py` + `core/workspace.py`
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
@@ -40,7 +40,7 @@ mypy src/reconkit
 | e | done | `1ba2fd8` | `core/store.py`: schema, migrations, `redact()` helper, diff queries (`docs/04_DATABASE.md`) |
 | f1 | done | 89ba34f | `adapters/base.py`, `adapters/registry.py`, `crtsh`, `certspotter`, `otx`, `hackertarget` |
 | f2 | done | 80ddd93 | pure-Python adapters: `dnspython`, `pyprobe`, `pyscan` |
-| f3 | done | filled in Part 5 | remaining phase-2 tools: binary adapters `subfinder`, `assetfinder`, `httpx`, `naabu` |
+| f3 | done | ee06075 | remaining phase-2 tools: binary adapters `subfinder`, `assetfinder`, `httpx`, `naabu` |
 | g | pending | - | `core/wildcard.py` + `engine.py` + `core/workspace.py`: stage pipeline, consensus/confidence inside `engine.py`, host states, resume, exit codes |
 | h | pending | - | `ui.py` + `cli.py`: all commands, `--mock`, `--json` |
 | i | pending | - | `installer/` + `doctor.py` |
@@ -128,7 +128,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `RunContext` now carries `limiter` and `ports`, and `HostStatusRecord` carries `location`; all were documented in docs/09 before their code landed. The engine builds one limiter per stage.
 - `dnspython` resolves A/AAAA/CNAME only: the record models have no NS/MX/TXT fields, and adding them would change the database schema. `pyscan` sends no payload and reads no banner (the banner read is optional).
 - `HttpAdapter` is documented in docs/09 section 3. Domain filtering happens in `run()` because the contract's `parse_output(raw)` receives no target; `parse_output` normalizes and validates only.
-- Seven fixtures are synthetic, written to the documented shapes: `dnspython`, `pyprobe`, `pyscan` (`.json`) and `subfinder`, `assetfinder` (`.txt`), `httpx`, `naabu` (`.jsonl`) under `tests/fixtures/`. No adapter test touches the network or a real binary.
+- Seven fixtures are synthetic, written to the documented shapes: `tests/fixtures/{dnspython,pyprobe,pyscan}/example.com.synthetic.json`, `tests/fixtures/{subfinder,assetfinder}/example.com.synthetic.txt`, `tests/fixtures/{httpx,naabu}/example.com.synthetic.jsonl`. No adapter test touches the network or a real binary.
 - Binary-adapter identity is based on the official banner/version text, not a live run: no real binary is installed here. `httpx` distinguishes ProjectDiscovery's tool from the Python CLI by requiring `projectdiscovery`/`current version`.
 - `tests/test_store.py` imports `sqlite3` for `IntegrityError`; the "only store.py imports sqlite3" rule is enforced for `src/`.
 - Installer refuses to run on native Windows; decide how to handle that before task i.
