@@ -66,10 +66,11 @@ Option C: in Windows Explorer, type `\\wsl$\kali-linux\home\<your-kali-user>\rec
 
 ```bash
 cd ~/reconkit
-python3 -m venv .venv
+./scripts/bootstrap.sh
 source .venv/bin/activate
-pip install -e ".[dev]"
 ```
+
+`scripts/bootstrap.sh` uses `uv` when it is installed (creates a Python 3.11 venv) and otherwise falls back to `python3 -m venv` (which needs the `python3-venv` package). The manual equivalent is `python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"`.
 
 Run `source .venv/bin/activate` again every time you open a new terminal.
 

@@ -161,7 +161,7 @@ Speed controls how many run at once: slow = 1, normal = 2-3 (passive) / 2 (activ
     This state rule is unconditional: no other input can change it.
   - "At least 2 agreeing checks when 2 are available" only sets confidence (LOW when only one check is available). It never changes the state.
   - Responses that look like WAF/CDN blocks (for example 403/429 with CDN markers) still count as `ALIVE`.
-- **CDN/WAF pre-check (Phase 2):** before an active port scan, skip hosts whose stored `HostStatusRecord.waf` is set (populated from the `httpx` CDN/WAF JSON fields). `cdncheck` and `wafw00f` are Phase 3. If no CDN data exists for a host, scan it and print a warning that the CDN check was skipped.
+- **Port-scan pre-check (Phase 2):** port scans require a stored `live` result for the host. If none is stored, skip the host and print a warning (`run live first`). If the stored `HostStatusRecord.waf` is set (from the `httpx` CDN/WAF JSON fields), skip it as CDN/WAF-fronted. `cdncheck` and `wafw00f` are Phase 3.
 - **Ports:** `open` if at least one tool saw it open. If one tool saw open and another (that scanned the same port) saw closed, store `unconfirmed` with both in `port_sources`. Verified by a service fingerprint (nmap -sV, banner) raises confidence by one level.
 
 ### Passive ports (smap)

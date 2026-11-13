@@ -1,4 +1,5 @@
 # secrets and private data
+.agents/
 .env
 scope.yaml
 recon.db

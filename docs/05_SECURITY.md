@@ -16,7 +16,7 @@ Implemented in `core/scope.py`. Rules:
 4. Matching: exact host, `*.domain` wildcard (any depth), `re:` regex entries. Hosts are lowercased, trailing dot stripped.
 5. **Every host is re-checked** right before it is probed (not only the root target). Out-of-scope hosts are dropped and counted in the summary.
 6. **IPs:** probe an IP only if it is inside `in_scope_cidrs`. If no CIDRs are defined, scan hostnames only and skip resolved IPs.
-7. **CDN/WAF pre-check:** skip port scans on hosts detected as CDN/WAF-fronted (shared infrastructure, not the target's own address). Phase 2 has no `cdncheck`; the detection source is the CDN/WAF marker the `httpx` live adapter parses from its JSON output and stores on the host status (`HostStatusRecord.waf`, column `host_status_history.waf`). Phase 3 may add `cdncheck`/`wafw00f`. If no CDN data is stored for a host, run the port scan anyway and print a warning that the CDN check was skipped.
+7. **Port-scan pre-check:** port scans require a stored `live` result for the host. If no live result is stored, skip that host and print a warning (`run live first`); do not resolve and scan it directly. If the stored host status has `waf` set (the CDN/WAF marker the `httpx` live adapter parses from its JSON output, column `host_status_history.waf`), skip it as CDN/WAF-fronted. Phase 2 has no `cdncheck`; Phase 3 may add `cdncheck`/`wafw00f`.
 8. `max_speed` in `scope.yaml` caps `--speed`.
 9. **No bypass.** No flag, env var, or hidden option may disable the gate. Violations exit with code 3.
 
