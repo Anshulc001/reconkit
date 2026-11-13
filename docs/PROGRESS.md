@@ -120,6 +120,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `chmod 0600` on the subfinder temp file is best-effort on Windows; the file is still deleted, and the open risk is recorded in REVIEW_LOG Part 4.
 - Known pitfalls table + regression rules added by user addendum; `scripts/check.ps1` now warns on a `fix:` commit without a test change, and existing guards carry `Regression:` docstrings (no behavior change).
 - Part 5 uses an injected, limiter-bound DNS probe and a required injected `rng` (no S311 default); `Workspace` rejects Windows-reserved target labels and chmods only its own dirs; `Workspace.write` is synchronous (`fsync` + `os.replace`), so the engine must offload large outputs.
+- `src/reconkit/adapters/dns_python.py` is dead code: a 59-byte tracked stub created by `f4d81e2` from the docs/03 name; the real adapter is `dnspython.py` (`80ddd93`, updated in `75eb261`). Nothing imports it, but `docs/03_ARCHITECTURE.md:70` still names it. Kept pending the docs/03 fix (Part 11); do not use it.
 
 ## Open risks
 
@@ -135,11 +136,10 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Installer refuses to run on native Windows; decide how to handle that before task i.
 - `scope.yaml` cannot exclude IP ranges (no out-of-scope CIDRs).
 - CLI must catch `ValueError` from `check_target`/`validate_target` and exit 2.
-- OTX refuses anonymous requests (429), so `otx/example.com.synthetic.json` is synthetic and the adapter has not parsed a real OTX response yet.
+- OTX anonymous requests return 429 (synthetic fixture); HackerTarget's free tier returned one row for example.com, so multi-row parsing is only covered by MockTransport tests.
 - subfinder keys are bridged by its adapter into a temporary 0600 `provider-config.yaml`; only certspotter, chaos, github and virustotal are configured. The other keyed providers' free tiers and sign-up URLs remain unverified, and no real subfinder has accepted the generated file yet.
 - assetfinder's `FB_APP_ID`/`FB_APP_SECRET` (Facebook developer app) and `SPYSE_API_TOKEN` were omitted: the Facebook source is no longer a documented free subdomain API, and the Spyse service status is unverified.
 - `urlscan`, `chaos` and `github_subdomains` now carry `keys`; their adapters are still Phase 3. `URLSCAN_API_KEY` is reconkit's own name, `PDCP_API_KEY` and `GITHUB_TOKEN` are the tools' real names.
-- HackerTarget's free tier returned one row for example.com; multi-row parsing is only covered by MockTransport tests.
 - Part 6a: one `scan_runs` row per executed stage; `ScanOptions.speed` is `SpeedName`; `Store.transaction()` uses SQLite's implicit transaction (explicit `BEGIN` failed inside one); `check_installed()` runs via `asyncio.to_thread`; workspace/scope reads stay synchronous and short; `FindingRecord` is not persisted because the findings table is deferred.
 - Cert Spotter's authenticated quota is undocumented, so no rate number is shown for a key; only the unauthenticated limit is described.
 - `keys` is the only per-tool key field; `.env.example` lists only env names used by `tools.yaml` (Chaos's real name is `PDCP_API_KEY`).
