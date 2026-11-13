@@ -129,11 +129,11 @@ One live line per stage: stage name, current tool, `done/total` tools, elapsed, 
 | 1 | Unexpected error |
 | 2 | Usage error (bad flags) |
 | 3 | Scope violation (target not allowed, scope missing or expired) |
-
-If passive stages have already completed and an active stage is denied by scope, the run still exits `3`; the passive results already collected are kept and reported.
 | 4 | No usable tool for the stage |
 | 5 | Partial success (some tools failed or timed out) |
 | 130 | Interrupted by user (state saved, resumable) |
+
+If passive stages have already completed and an active stage is denied by scope, the run still exits `3`; the passive results already collected are kept and reported.
 
 ## 7. Accessibility
 - Readable with `--no-color`; no information carried only by color.
