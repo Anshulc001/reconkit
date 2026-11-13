@@ -169,6 +169,7 @@ CREATE TABLE monitor_changes (            -- Phase 3
 - No DNS answer (NXDOMAIN) means `DEAD`, unless the previous known state was `ALIVE` or `DNS_ONLY`, which makes it `SHUT_DOWN`. This state rule is unconditional; agreeing checks affect `confidence` only.
 - `fqdn` stored lowercase, no trailing dot, validated before insert.
 - `Store.scan_runs(target_id)` and `Store.subdomains(target_id)` are read queries used by engine resume; both return plain dictionaries and never expose the connection.
+- `Store.host_rows(target_id)` returns the latest host state/confidence, latest status code, distinct source tools and open ports for the UI. `Store.recent_scan_runs(limit)` returns recent stage runs joined to target domains for `status`. `Store.completed_run_ids(target_id, stage)` returns completed/partial run ids newest-first for `diff`; all three are read-only and never expose the connection.
 
 ## 6. Diff Queries (core of `diff`)
 

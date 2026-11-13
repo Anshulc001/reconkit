@@ -12,7 +12,7 @@
 
 ## 2. Command Grammar
 
-`reconkit <command> [target] [flags]`. Target is `-d DOMAIN` or `-l FILE` (one domain per line).
+`reconkit <command> [target] [flags]`. Target is `-d DOMAIN` or `-l FILE` (one domain per line). With no command, `reconkit -d X` is shorthand for `lite` (the passive pipeline).
 
 ### Setup and health
 | Command | Purpose | Phase |
@@ -109,6 +109,8 @@ One JSON document is written to stdout; tables and progress stay on stderr. The 
 ```
 
 The `hosts` objects always carry `state`, `confidence` and `sources`; the top-level `summary` object carries the counts. `ToolResult` objects under `stages[].results` use the schemas in docs/09.
+
+`diff --json` writes one document with `type: diff`, the two run ids, and arrays `new`, `gone`, `state_changes`, `ports_opened` and `ports_closed`. `status --json` writes one document with `type: status` and a `runs` array; each run carries its target, stage, speed, status and timestamps.
 
 ### Colors (Rich theme)
 

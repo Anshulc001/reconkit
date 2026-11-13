@@ -14,7 +14,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from reconkit.engine import ScanSummary
+from reconkit.engine import DiffSnapshot, RunSnapshot, ScanSummary
 from reconkit.models import Confidence, HostState, ToolResult, ToolStatus
 
 _STATE_STYLES: dict[HostState, str] = {
@@ -254,11 +254,168 @@ def render_rate_limit_hint(
         target.print(Text(hint, style="yellow"))
 
 
+def render_message(
+    message: str,
+    *,
+    console: Console | None = None,
+    no_color: bool = False,
+) -> None:
+    """Render one non-error line on stderr."""
+
+    target = console if console is not None else make_console(no_color=no_color)
+    target.print(Text(message))
+
+
 def render_error(message: str, *, console: Console | None = None, no_color: bool = False) -> None:
     """Render one error line on stderr; errors are never silenced."""
 
     target = console if console is not None else make_console(no_color=no_color)
     target.print(Text(message, style="red"))
+
+
+def diff_document(report: DiffSnapshot) -> dict[str, object]:
+    """Build the one-document diff shape documented in docs/02."""
+
+    return {
+        "type": "diff",
+        "target": report.target,
+        "previous_run_id": report.previous_run_id,
+        "latest_run_id": report.latest_run_id,
+        "new": list(report.new),
+        "gone": list(report.gone),
+        "state_changes": [
+            {"fqdn": fqdn, "old_state": old, "new_state": new}
+            for fqdn, old, new in report.state_changes
+        ],
+        "ports_opened": [{"fqdn": fqdn, "port": port} for fqdn, port in report.ports_opened],
+        "ports_closed": [{"fqdn": fqdn, "port": port} for fqdn, port in report.ports_closed],
+    }
+
+
+def render_diff(
+    report: DiffSnapshot,
+    *,
+    json_output: bool = False,
+    silent: bool = False,
+    no_color: bool = False,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+    console: Console | None = None,
+) -> int:
+    """Render a diff report and return 0; data has no failure exit state."""
+
+    if json_output:
+        target = stdout if stdout is not None else sys.stdout
+        target.write(
+            json.dumps(diff_document(report), ensure_ascii=False, separators=(",", ":")) + "\n"
+        )
+        target.flush()
+        return 0
+    if silent:
+        return 0
+    target = console if console is not None else make_console(stderr, no_color=no_color)
+    if report.latest_run_id is None:
+        target.print(Text("No completed discovery run for this target.", style="yellow"))
+        return 0
+    if report.previous_run_id is None:
+        target.print(
+            Text(f"First run for this target (#{report.latest_run_id}). Nothing to compare.")
+        )
+        return 0
+    changes = (
+        len(report.new)
+        + len(report.gone)
+        + len(report.state_changes)
+        + len(report.ports_opened)
+        + len(report.ports_closed)
+    )
+    if not changes:
+        target.print(Text(f"No changes since run #{report.previous_run_id}."))
+        return 0
+    table = Table(title="Changes", header_style="bold")
+    table.add_column("Change")
+    table.add_column("Item")
+    table.add_column("Detail")
+    for fqdn in report.new:
+        table.add_row(Text("NEW"), Text(fqdn), Text("-"))
+    for fqdn in report.gone:
+        table.add_row(Text("GONE"), Text(fqdn), Text("-"))
+    for fqdn, old, new in report.state_changes:
+        table.add_row(Text("STATE"), Text(fqdn), Text(f"{old} -> {new}"))
+    for fqdn, port in report.ports_opened:
+        table.add_row(Text("PORT OPEN"), Text(fqdn), Text(str(port)))
+    for fqdn, port in report.ports_closed:
+        table.add_row(Text("PORT CLOSED"), Text(fqdn), Text(str(port)))
+    target.print(table)
+    return 0
+
+
+def status_document(runs: Iterable[RunSnapshot]) -> dict[str, object]:
+    """Build the one-document status shape documented in docs/02."""
+
+    return {
+        "type": "status",
+        "runs": [
+            {
+                "id": run.id,
+                "target": run.target,
+                "stage": run.stage,
+                "speed": run.speed,
+                "status": run.status,
+                "started_at": run.started_at,
+                "finished_at": run.finished_at,
+            }
+            for run in runs
+        ],
+    }
+
+
+def render_status(
+    runs: Iterable[RunSnapshot],
+    *,
+    json_output: bool = False,
+    silent: bool = False,
+    no_color: bool = False,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+    console: Console | None = None,
+) -> int:
+    """Render recent stage runs and return 0."""
+
+    items = list(runs)
+    if json_output:
+        target = stdout if stdout is not None else sys.stdout
+        target.write(
+            json.dumps(status_document(items), ensure_ascii=False, separators=(",", ":")) + "\n"
+        )
+        target.flush()
+        return 0
+    if silent:
+        return 0
+    target = console if console is not None else make_console(stderr, no_color=no_color)
+    if not items:
+        target.print(Text("No runs yet.", style="yellow"))
+        return 0
+    table = Table(title="Runs", header_style="bold")
+    table.add_column("ID")
+    table.add_column("Target")
+    table.add_column("Stage")
+    table.add_column("Speed")
+    table.add_column("Status")
+    table.add_column("Started")
+    table.add_column("Finished")
+    for run in items:
+        table.add_row(
+            Text(str(run.id)),
+            Text(run.target),
+            Text(run.stage),
+            Text(run.speed),
+            Text(run.status),
+            Text(run.started_at),
+            Text(run.finished_at or "-"),
+        )
+    target.print(table)
+    return 0
 
 
 def render(

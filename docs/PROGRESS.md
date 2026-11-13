@@ -2,10 +2,10 @@
 
 ## RESUME HERE
 
-- Status: Part 7 done; Part 8 (`cli.py`) next
-- Last code commit: run `git log --oneline -1`; Part 7 is the newest `feat:` commit
-- Baseline: 395 passed, 2 skipped; all four checks PASS (twice)
-- Next action: implement Part 8 in `docs/MASTER_PLAN.md`: CLI commands/flags, exit-code mapping, and `ui.render` wiring
+- Status: Part 8 done; Part 9 (installer + doctor) next
+- Last code commit: run `git log --oneline -1`; Part 8 is the newest `feat:` commit
+- Baseline: 437 passed, 2 skipped; all four checks PASS (twice)
+- Next action: implement Part 9 in `docs/MASTER_PLAN.md`: docs/10 installer/doctor, then replace the CLI stubs
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: none
@@ -42,7 +42,7 @@ mypy src/reconkit
 | f2 | done | 80ddd93 | pure-Python adapters: `dnspython`, `pyprobe`, `pyscan` |
 | f3 | done | ee06075 | remaining phase-2 tools: binary adapters `subfinder`, `assetfinder`, `httpx`, `naabu` |
 | g | done | 36cd3a4, 6b hash in Part 7 | wildcard, workspace, engine, confidence, host states, resume, exit codes done |
-| h | pending | Part 7 hash in Part 8 | `ui.py` done; `cli.py` remains |
+| h | done | Part 8 hash in Part 9 | `ui.py` + `cli.py`; installer/doctor stubs remain for i |
 | i | pending | - | `installer/` + `doctor.py` |
 | j | pending | - | docs sync, README, final check |
 
@@ -62,20 +62,6 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `adapters/crtsh.py`, `certspotter.py`, `otx.py`, `hackertarget.py`: async parsers and request metadata; keys only from `ctx.env`.
 - `adapters/dnspython.py` / `pyprobe.py` / `pyscan.py`: structured `DnsOutcome` (only NXDOMAIN -> DEAD), no-redirect probe that records `Location`, bounded TCP connect scan. All three validate hosts and count invalid ones.
 - `core/pacing.py`: `Pacer(preset, rate_flags=, rng=, sleep=)` with `before_tool(mode)` (first tool free, `reset()` per stage), `before_host`, `order(items, kind=)`, `parallel_limit`, `tool_rate_args(tool, mode)`, `next_pause_range`; `RateLimiter(rate, clock=, sleep=)` for HTTP adapters. No I/O, no printing, injected clock.
-
-## Notes for task g
-
-- The engine must call `pacer.reset()` at the start of every stage.
-- `diff_new`/`diff_gone` rely on per-run `*_sources` rows, so a stage-only run would make every host look GONE. Diffs must compare runs of the same kind; docs/04 section 6 says which.
-- Raw stderr/output files written by `workspace.py` must go through `redact()` before they hit disk.
-- The engine builds one `RateLimiter` per stage (passive requests/second from the preset) and puts it in `RunContext`; HTTP adapters never build their own.
-- `Store` is used only from the event-loop thread (no `asyncio.to_thread`).
-- Per-call commits are slow for thousands of hosts. Add a `transaction()` context manager or a batch insert method when the engine needs it.
-- A discovered host with no probe result keeps the schema default `UNKNOWN`; only the live/DNS stages append `host_status_history` rows.
-- The engine passes each tool only the env names listed in that tool's `keys` in `tools.yaml`, never the whole environment.
-- When a tool fails with "rate limited" and its keys are unset, the UI should hint at the free key (env name and sign-up URL from `tools.yaml`).
-- `registry.load_tools()` reloads `tools.yaml` on every call, so the engine should load the specs once and reuse them.
-- Read queries for the engine/CLI (list subdomains with sources, `tool_runs` of a run for resume, latest run for a target, ports, export) are added in tasks g/h with tests.
 
 ## Fixtures
 
@@ -124,6 +110,8 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Part 6b adds `--resume` (docs/02); resume is stage-level and reruns an interrupted stage because asset writes are batched at stage end. State timestamps use the injected `now` source (default `store.utc_now()`); `Store.scan_runs()`/`subdomains()` are the resume reads. CNAME warnings stay in `ScanSummary.warnings` because the schema has no CNAME column. Double-confirmation is intentional: an established `ALIVE`/`DNS_ONLY` host has prior evidence, so one NXDOMAIN only means `SHUT_DOWN`; a second consecutive NXDOMAIN is required for `DEAD`. A never-probed host has no prior service to confirm, so its first NXDOMAIN is `DEAD`. This avoids one transient resolver failure erasing an established host while still recording genuine new non-existence.
 - Part 7: docs/09 said `--json` was JSONL, but the Part 7 requirement/master plan says ONE JSON document; docs/02 now defines that shape, docs/09 was aligned, and `ui.write_json` emits `type:summary` with `hosts`/`stages`/`summary`. `HostRow` is a UI input type populated by the CLI; `ui.py` does not compute confidence/state.
 - Part 7: `ScanSummary` does not carry skipped tools, so the Tools table renders executed `ToolResult`s (ok/failed/timeout) only; skipped adapter rows remain in `tool_runs` and are a Part 8 wiring concern. The zero-tool empty state uses the explicit "skipped or excluded" line instead of docs/02's 3-tool example.
+- Part 8: no command is shorthand for `lite`; `--json` accepts one target (multiple `-l` targets are rejected with exit 2); `--timeout-<stage>` is not implemented, so only `--phase-timeout` sets a stage limit; `doctor`/`install`/`update` are Part 9 stubs, and `db list`, `db export`, `export` and `scope import` are explicit exit-1 stubs.
+- Part 8: `Engine.open` loads `.env` values and the CLI has no `os.environ`/`getenv`; shell-exported key variables are therefore ignored. The active fast-mode typed confirmation runs outside `--mock`, where no traffic is possible.
 
 ## Open risks
 
@@ -143,6 +131,8 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Resume is stage-level; tools completed inside a crashed stage are rerun. CNAME dangling warnings are not persisted, and real NXDOMAIN/CNAME behavior has not been exercised.
 - Part 7 rendering is tested with `StringIO`/fake TTY only; real terminal widths and the CLI's `HostRow` source are unverified until Part 8.
 - `docs/09_TOOL_CONTRACTS.md` has now contradicted docs/02 twice (the earlier `needs_key` registry issue and Part 7's JSONL-vs-single-document contract), so it needs a full fresh-eyes pass against docs/02 before the Part 11 final docs sync; do not treat docs/09 as authoritative until then.
+- Part 8: `db list`/`db export`/`export` are command stubs, and `diff` compares only the latest two completed `subs` runs plus matched `live`/`ports` runs; real tools, real terminals and the stubs remain unverified.
+- Part 8: `--timeout-<stage>` is missing; `--phase-timeout` is the only stage-timeout flag, and multi-target `--json` is rejected pending a batch document shape.
 
 ## Fix backlog
 

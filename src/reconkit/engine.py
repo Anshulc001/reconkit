@@ -17,8 +17,10 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
+
+from dotenv import dotenv_values
 
 from reconkit.adapters import ADAPTERS
 from reconkit.adapters.base import BaseToolAdapter
@@ -277,6 +279,45 @@ class ScanSummary:
         return [result for stage in self.stages for result in stage.results]
 
 
+@dataclass(frozen=True)
+class HostSnapshot:
+    """One stored host row, already decided by the engine (UI input)."""
+
+    fqdn: str
+    state: HostState
+    confidence: Confidence
+    sources: tuple[str, ...]
+    status_code: int | None
+    ports: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class DiffSnapshot:
+    """Latest two same-kind runs; empty tuples mean nothing to compare."""
+
+    target: str
+    previous_run_id: int | None
+    latest_run_id: int | None
+    new: tuple[str, ...]
+    gone: tuple[str, ...]
+    state_changes: tuple[tuple[str, str, str], ...]
+    ports_opened: tuple[tuple[str, int], ...]
+    ports_closed: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True)
+class RunSnapshot:
+    """Recent stage run for the status command."""
+
+    id: int
+    target: str
+    stage: str
+    speed: str
+    status: str
+    started_at: str
+    finished_at: str | None
+
+
 class Engine:
     """One target's pipeline. Built by the CLI, reusable across targets."""
 
@@ -312,6 +353,90 @@ class Engine:
         self._now = now if now is not None else utc_now
         self._secrets = tuple(value for value in self.env.values() if value)
         self._warnings: list[str] = []
+
+    @classmethod
+    def open(
+        cls,
+        config: AppConfig,
+        *,
+        db_path: Path | str | None = None,
+        scope_path: Path | str | None = None,
+        env_file: Path | str | None = None,
+        **kwargs: Any,
+    ) -> Engine:
+        """Build the CLI-facing engine: open the store and load optional .env values."""
+        env = kwargs.pop("env", None)
+        if env is None:
+            values = dotenv_values(env_file)
+            env = {key: value for key, value in values.items() if value is not None}
+        store = Store(db_path if db_path is not None else config.db_path)
+        try:
+            return cls(config, store, scope_path=scope_path, env=env, **kwargs)
+        except BaseException:
+            store.close()
+            raise
+
+    def close(self) -> None:
+        """Close the store owned by this engine."""
+        self.store.close()
+
+    def host_rows(self, target_id: int) -> list[HostSnapshot]:
+        """Read stored host rows for the UI without exposing Store to the CLI."""
+        rows: list[HostSnapshot] = []
+        for row in self.store.host_rows(target_id):
+            raw_sources = cast(tuple[str, ...], row["sources"])
+            raw_ports = cast(tuple[int, ...], row["ports"])
+            raw_status = row["status_code"]
+            rows.append(
+                HostSnapshot(
+                    fqdn=str(row["fqdn"]),
+                    state=HostState(str(row["state"])),
+                    confidence=Confidence(str(row["confidence"])),
+                    sources=tuple(str(value) for value in raw_sources),
+                    status_code=raw_status if isinstance(raw_status, int) else None,
+                    ports=tuple(int(value) for value in raw_ports),
+                )
+            )
+        return rows
+
+    def recent_runs(self, limit: int = 20) -> list[RunSnapshot]:
+        """Read recent stage runs for the status command."""
+        return [
+            RunSnapshot(
+                id=cast(int, row["id"]),
+                target=str(row["target"]),
+                stage=str(row["stage"]),
+                speed=str(row["speed"]),
+                status=str(row["status"]),
+                started_at=str(row["started_at"]),
+                finished_at=None if row["finished_at"] is None else str(row["finished_at"]),
+            )
+            for row in self.store.recent_scan_runs(limit)
+        ]
+
+    def diff(self, target: str) -> DiffSnapshot:
+        """Compare the latest two discovery runs and available status/port runs."""
+        normalized = validate_target(target)
+        target_id = self.store.get_target(normalized)
+        if target_id is None:
+            return DiffSnapshot(normalized, None, None, (), (), (), (), ())
+        discovery = self.store.completed_run_ids(target_id, Stage.SUBS.value)
+        latest = discovery[0] if discovery else None
+        previous = discovery[1] if len(discovery) > 1 else None
+        if latest is None or previous is None:
+            return DiffSnapshot(normalized, previous, latest, (), (), (), (), ())
+        live = self.store.completed_run_ids(target_id, Stage.LIVE.value)
+        ports = self.store.completed_run_ids(target_id, Stage.PORTS.value)
+        return DiffSnapshot(
+            normalized,
+            previous,
+            latest,
+            tuple(self.store.diff_new(latest)),
+            tuple(self.store.diff_gone(previous, latest)),
+            tuple(self.store.diff_state_changed(live[1], live[0])) if len(live) > 1 else (),
+            tuple(self.store.diff_ports_opened(ports[1], ports[0])) if len(ports) > 1 else (),
+            tuple(self.store.diff_ports_closed(ports[1], ports[0])) if len(ports) > 1 else (),
+        )
 
     async def run(self, target: str, options: ScanOptions | None = None) -> ScanSummary:
         opts = options or ScanOptions()

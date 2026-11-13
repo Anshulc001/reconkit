@@ -97,7 +97,9 @@ workspaces/<domain>/
 
 ### Engine API (`engine.py`)
 
+- `Engine.open(config, *, db_path=..., scope_path=..., env_file=..., ...)` is the CLI-facing factory: it creates the `Store`, loads optional `.env` values inside the engine, and returns an `Engine`. `close()` closes the store. The constructor remains injectable for tests.
 - `Engine(config, store, now=...).run(target, ScanOptions(...))` runs the selected stages in the fixed order `subs, dns, live, ports, tech, urls, vulns`. `ScanOptions` carries `stages`, `tools`, `exclude`, `include_noisy`, `active`, `no_keys`, `mock`, `speed`, `phase_timeout`, `min_sources` and `resume`.
+- `Engine.host_rows(target_id)` returns typed `HostSnapshot` rows (fqdn, state, confidence, sources, status code, open ports) for the UI; `Engine.diff(target)` returns the latest two same-kind run comparison; `Engine.recent_runs(limit)` returns recent stage runs for `status`.
 - `now` is an injected timestamp source (default `store.utc_now`) used for `targets.created_at`, `scan_runs.started_at/finished_at` and `host_status_history.checked_at`; tests pass a fixed clock. The engine never calls `datetime.now()` or `time.time()` directly.
 - `ScanSummary.exit_code` is a typed `ExitCode` (`0` success, `1` unexpected, `2` usage, `3` scope, `4` no usable tool, `5` partial, `130` interrupted). The engine never calls `sys.exit()`; the CLI maps the value.
 - Tools are selected from `tools.yaml` once per run. A `--tools` name must exist; `intrusive` tools are refused, `opt_in` tools need `--include-noisy` or an explicit `--tools`, and `--exclude` always wins. Every selected or skipped tool gets a `tool_runs` row with its redacted error.
@@ -148,6 +150,7 @@ workspaces/<domain>/
 ## 8b. UI API (`ui.py`)
 
 - `ui.render(summary, hosts, *, json_output=False, silent=False, no_color=False, stdout=None, stderr=None, console=None) -> int` writes the human tables/progress to stderr or the single JSON document to stdout, then returns `int(summary.exit_code)`.
+- `ui.render_message(...)` writes one non-error line; `ui.render_diff(...)` and `ui.render_status(...)` render the `diff`/`status` documents to stderr or stdout JSON.
 - `HostRow` is the plain input for the host table/JSON: `fqdn`, `state`, `confidence`, `sources`, `status_code`, `ports`. The engine or CLI supplies these precomputed values; `ui.py` never computes confidence or state.
 - `ui.py` imports only Rich, the standard library and shared output types; it never imports `core.store`, `core.scope`, adapters or `cli.py`.
 

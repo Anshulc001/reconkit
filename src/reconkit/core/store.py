@@ -304,6 +304,57 @@ class Store:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def host_rows(self, target_id: int) -> list[dict[str, object]]:
+        """Latest host state, confidence, sources, status and open ports for the UI."""
+        rows = self._conn.execute(
+            "SELECT s.fqdn, s.state, s.confidence,"
+            " (SELECT h.status_code FROM host_status_history h"
+            "  WHERE h.subdomain_id = s.id ORDER BY h.id DESC LIMIT 1) AS status_code,"
+            " COALESCE((SELECT GROUP_CONCAT(DISTINCT x.tool) FROM subdomain_sources x"
+            "  WHERE x.subdomain_id = s.id), '') AS sources,"
+            " COALESCE((SELECT GROUP_CONCAT(DISTINCT p.port) FROM ports p"
+            "  WHERE p.subdomain_id = s.id AND p.state = 'open'), '') AS ports"
+            " FROM subdomains s WHERE s.target_id = ? ORDER BY s.fqdn",
+            (target_id,),
+        ).fetchall()
+        result: list[dict[str, object]] = []
+        for row in rows:
+            sources = str(row["sources"] or "")
+            ports = str(row["ports"] or "")
+            result.append(
+                {
+                    "fqdn": str(row["fqdn"]),
+                    "state": str(row["state"]),
+                    "confidence": str(row["confidence"]),
+                    "status_code": None if row["status_code"] is None else int(row["status_code"]),
+                    "sources": tuple(sorted(part for part in sources.split(",") if part)),
+                    "ports": tuple(sorted(int(part) for part in ports.split(",") if part)),
+                }
+            )
+        return result
+
+    def recent_scan_runs(self, limit: int = 20) -> list[dict[str, object]]:
+        """Recent stage runs joined to their target domain (status command)."""
+        if limit < 1:
+            return []
+        rows = self._conn.execute(
+            "SELECT r.id, t.domain AS target, r.stage, r.speed, r.status,"
+            " r.started_at, r.finished_at"
+            " FROM scan_runs r JOIN targets t ON t.id = r.target_id"
+            " ORDER BY r.id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def completed_run_ids(self, target_id: int, stage: str) -> list[int]:
+        """Completed/partial run ids for one stage, newest first (diff command)."""
+        rows = self._conn.execute(
+            "SELECT id FROM scan_runs WHERE target_id = ? AND stage = ?"
+            " AND status IN ('completed', 'partial') ORDER BY id DESC",
+            (target_id, stage),
+        ).fetchall()
+        return [int(row["id"]) for row in rows]
+
     def create_scan_run(
         self,
         target_id: int,
