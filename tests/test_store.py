@@ -51,6 +51,18 @@ def test_schema_tables_created(store: Store) -> None:
     assert store.schema_version == SCHEMA_VERSION
 
 
+def test_run_indexes_created(store: Store) -> None:
+    names = {
+        str(row["name"])
+        for row in store._conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")
+    }
+    assert {
+        "idx_subdomain_sources_run",
+        "idx_port_sources_run",
+        "idx_hsh_run",
+    } <= names
+
+
 def test_pragmas(store: Store) -> None:
     assert store._conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     assert store._conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
@@ -117,6 +129,93 @@ def test_upsert_subdomain_does_not_duplicate(store: Store) -> None:
     assert row["first_seen_run"] == run_a
     assert row["last_seen_run"] == run_b
     assert row["state"] == "ALIVE"
+
+
+def test_upsert_subdomain_keeps_values_when_omitted(store: Store) -> None:
+    target_id, run_a = make_run(store)
+    _, run_b = make_run(store)
+    sub_id = store.upsert_subdomain(
+        target_id,
+        "api.example.com",
+        run_id=run_a,
+        state="ALIVE",
+        confidence="HIGH",
+        source_count=3,
+        is_wildcard=True,
+    )
+    store.upsert_subdomain(target_id, "api.example.com", run_id=run_b)
+    row = store._conn.execute(
+        "SELECT state, confidence, source_count, is_wildcard, last_seen_run"
+        " FROM subdomains WHERE id = ?",
+        (sub_id,),
+    ).fetchone()
+    assert row["state"] == "ALIVE"
+    assert row["confidence"] == "HIGH"
+    assert row["source_count"] == 3
+    assert row["is_wildcard"] == 1
+    assert row["last_seen_run"] == run_b
+
+
+def test_upsert_subdomain_explicit_state_overwrites(store: Store) -> None:
+    target_id, run_a = make_run(store)
+    _, run_b = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "api.example.com", run_id=run_a, state="ALIVE")
+    store.upsert_subdomain(target_id, "api.example.com", run_id=run_b, state="DEAD")
+    row = store._conn.execute("SELECT state FROM subdomains WHERE id = ?", (sub_id,)).fetchone()
+    assert row["state"] == "DEAD"
+
+
+def test_upsert_subdomain_fresh_insert_uses_defaults(store: Store) -> None:
+    target_id, run_id = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "api.example.com", run_id=run_id)
+    row = store._conn.execute(
+        "SELECT state, confidence, source_count, is_wildcard FROM subdomains WHERE id = ?",
+        (sub_id,),
+    ).fetchone()
+    assert (row["state"], row["confidence"], row["source_count"], row["is_wildcard"]) == (
+        "UNKNOWN",
+        "LOW",
+        0,
+        0,
+    )
+
+
+def test_upsert_port_keeps_service_when_omitted(store: Store) -> None:
+    target_id, run_a = make_run(store)
+    _, run_b = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "a.example.com", run_id=run_a)
+    port_id = store.upsert_port(
+        sub_id, "203.0.113.5", 443, run_id=run_a, state="open", service="https", version="1.1"
+    )
+    store.upsert_port(sub_id, "203.0.113.5", 443, run_id=run_b, state="open")
+    row = store._conn.execute(
+        "SELECT service, version FROM ports WHERE id = ?", (port_id,)
+    ).fetchone()
+    assert (row["service"], row["version"]) == ("https", "1.1")
+    store.upsert_port(sub_id, "203.0.113.5", 443, run_id=run_b, state="open", service="http/ssl")
+    row = store._conn.execute("SELECT service FROM ports WHERE id = ?", (port_id,)).fetchone()
+    assert row["service"] == "http/ssl"
+
+
+def test_upsert_url_keeps_category_when_omitted(store: Store) -> None:
+    target_id, run_a = make_run(store)
+    _, run_b = make_run(store)
+    url_id = store.upsert_url(
+        target_id,
+        "https://a.example.com/x",
+        run_id=run_a,
+        category="html",
+        patterns=["xss"],
+    )
+    store.upsert_url(target_id, "https://a.example.com/x", run_id=run_b)
+    row = store._conn.execute(
+        "SELECT category, patterns_json FROM urls WHERE id = ?", (url_id,)
+    ).fetchone()
+    assert row["category"] == "html"
+    assert row["patterns_json"] == '["xss"]'
+    store.upsert_url(target_id, "https://a.example.com/x", run_id=run_b, category="json")
+    row = store._conn.execute("SELECT category FROM urls WHERE id = ?", (url_id,)).fetchone()
+    assert row["category"] == "json"
 
 
 def test_subdomain_sources_are_unique(store: Store) -> None:
@@ -230,10 +329,17 @@ def test_hostile_fqdn_is_stored_literally(store: Store) -> None:
     ("raw", "expected"),
     [
         ("api_key=abc123", "api_key=***"),
-        ("Authorization: Bearer sk-abc", "authorization: ***"),
+        ("Authorization: Bearer sk-abc", "Authorization: ***"),
         ("https://user:pass@example.com/x", "https://***:***@example.com/x"),
         ("https://x.example.com/?token=abc123", "https://x.example.com/?token=***"),
         ("password=hunter2&next=1", "password=***&next=1"),
+        ("nuclei -u https://x --token abc123", "nuclei -u https://x --token ***"),
+        ("tool -api-key abc123", "tool -api-key ***"),
+        ("tool --password hunter2", "tool --password ***"),
+        ("tool --secret 'two words'", "tool --secret ***"),
+        ("Cookie: session=abc123; theme=dark", "Cookie: ***"),
+        ("Set-Cookie: sid=abc123; Path=/", "Set-Cookie: ***"),
+        ("nmap --delay 1.5", "nmap --delay 1.5"),
         ("nothing secret here", "nothing secret here"),
     ],
 )

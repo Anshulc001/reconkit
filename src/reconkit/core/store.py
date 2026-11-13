@@ -69,6 +69,7 @@ CREATE TABLE subdomain_sources (
   tool         TEXT NOT NULL,
   PRIMARY KEY (subdomain_id, run_id, tool)
 );
+CREATE INDEX idx_subdomain_sources_run ON subdomain_sources(run_id);
 
 CREATE TABLE host_status_history (
   id           INTEGER PRIMARY KEY,
@@ -84,6 +85,7 @@ CREATE TABLE host_status_history (
   checked_at   TEXT NOT NULL
 );
 CREATE INDEX idx_hsh_sub ON host_status_history(subdomain_id, id);
+CREATE INDEX idx_hsh_run ON host_status_history(run_id);
 
 CREATE TABLE ports (
   id            INTEGER PRIMARY KEY,
@@ -108,6 +110,7 @@ CREATE TABLE port_sources (
   seen    TEXT NOT NULL CHECK (seen IN ('open','closed')),
   PRIMARY KEY (port_id, run_id, tool)
 );
+CREATE INDEX idx_port_sources_run ON port_sources(run_id);
 
 CREATE TABLE urls (
   id            INTEGER PRIMARY KEY,
@@ -136,9 +139,20 @@ _COUNT_SQL: dict[str, str] = {
     "urls": "SELECT COUNT(*) FROM urls",
 }
 
-_AUTH_HEADER = re.compile(r"(?i)\bauthorization\b(\s*[:=]\s*)[^\r\n,]+")
+_AUTH_HEADER = re.compile(r"(?i)\b(authorization)\b(\s*[:=]\s*)[^\r\n,]+")
+_COOKIE_HEADER = re.compile(r"(?i)\b((?:set-)?cookie)\b(\s*[:=]\s*)[^\r\n]+")
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
 _URL_CREDENTIALS = re.compile(r"(?i)(https?://)[^/\s:@]+:[^/\s@]+@")
+_FLAG_VALUE = re.compile(r"(?i)(?<![\w-])(-{1,2}[a-z0-9][a-z0-9_-]*)(\s+)(\"[^\"]*\"|'[^']*'|\S+)")
+_SECRET_FLAG_WORDS = (
+    "token",
+    "secret",
+    "passw",
+    "api-key",
+    "api_key",
+    "apikey",
+    "cookie",
+)
 _SECRET_PAIR = re.compile(
     r"(?i)\b(api[_-]?key|apikey|token|access[_-]?token|secret|password|passwd|cookie)"
     r"(\s*[:=]\s*)(['\"]?)([^\s'\",;&]+)"
@@ -149,14 +163,23 @@ def _utc_now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _mask_secret_flag(match: re.Match[str]) -> str:
+    flag = match.group(1).lower()
+    if not any(word in flag for word in _SECRET_FLAG_WORDS) and flag not in ("--key", "-key"):
+        return match.group(0)
+    return f"{match.group(1)}{match.group(2)}{REDACTED}"
+
+
 def redact(text: str, secrets: Iterable[str] = ()) -> str:
     """Mask credentials and secret values before text is stored (docs/04 section 10)."""
     result = text
     for secret in sorted({value for value in secrets if len(value) >= 3}, key=len, reverse=True):
         result = result.replace(secret, REDACTED)
-    result = _AUTH_HEADER.sub(lambda match: f"authorization{match.group(1)}{REDACTED}", result)
+    result = _AUTH_HEADER.sub(lambda match: f"{match.group(1)}{match.group(2)}{REDACTED}", result)
+    result = _COOKIE_HEADER.sub(lambda match: f"{match.group(1)}{match.group(2)}{REDACTED}", result)
     result = _BEARER.sub(f"Bearer {REDACTED}", result)
     result = _URL_CREDENTIALS.sub(rf"\1{REDACTED}:{REDACTED}@", result)
+    result = _FLAG_VALUE.sub(_mask_secret_flag, result)
     result = _SECRET_PAIR.sub(
         lambda match: f"{match.group(1)}{match.group(2)}{match.group(3)}{REDACTED}", result
     )
@@ -278,23 +301,33 @@ class Store:
         fqdn: str,
         *,
         run_id: int,
-        state: str = "UNKNOWN",
-        confidence: str = "LOW",
-        source_count: int = 0,
-        is_wildcard: bool = False,
+        state: str | None = None,
+        confidence: str | None = None,
+        source_count: int | None = None,
+        is_wildcard: bool | None = None,
     ) -> int:
         self._conn.execute(
             "INSERT INTO subdomains"
             " (target_id, fqdn, state, confidence, source_count, is_wildcard,"
             "  first_seen_run, last_seen_run)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            " VALUES (:target_id, :fqdn, COALESCE(:state, 'UNKNOWN'),"
+            "  COALESCE(:confidence, 'LOW'), COALESCE(:source_count, 0),"
+            "  COALESCE(:is_wildcard, 0), :run_id, :run_id)"
             " ON CONFLICT(target_id, fqdn) DO UPDATE SET"
             "  last_seen_run = excluded.last_seen_run,"
-            "  state = excluded.state,"
-            "  confidence = excluded.confidence,"
-            "  source_count = excluded.source_count,"
-            "  is_wildcard = excluded.is_wildcard",
-            (target_id, fqdn, state, confidence, source_count, int(is_wildcard), run_id, run_id),
+            "  state = COALESCE(:state, subdomains.state),"
+            "  confidence = COALESCE(:confidence, subdomains.confidence),"
+            "  source_count = COALESCE(:source_count, subdomains.source_count),"
+            "  is_wildcard = COALESCE(:is_wildcard, subdomains.is_wildcard)",
+            {
+                "target_id": target_id,
+                "fqdn": fqdn,
+                "state": state,
+                "confidence": confidence,
+                "source_count": source_count,
+                "is_wildcard": None if is_wildcard is None else int(is_wildcard),
+                "run_id": run_id,
+            },
         )
         self._conn.commit()
         row = self._conn.execute(
@@ -361,12 +394,12 @@ class Store:
             "INSERT INTO ports"
             " (subdomain_id, ip, port, protocol, state, service, version, confidence,"
             "  first_seen_run, last_seen_run)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'LOW'), ?, ?)"
             " ON CONFLICT(subdomain_id, ip, port, protocol) DO UPDATE SET"
             "  last_seen_run = excluded.last_seen_run,"
             "  state = excluded.state,"
-            "  service = excluded.service,"
-            "  version = excluded.version,"
+            "  service = COALESCE(excluded.service, ports.service),"
+            "  version = COALESCE(excluded.version, ports.version),"
             "  confidence = excluded.confidence",
             (
                 subdomain_id,
@@ -402,20 +435,28 @@ class Store:
         *,
         run_id: int,
         category: str | None = None,
-        patterns: Sequence[str] = (),
+        patterns: Sequence[str] | None = None,
         source_count: int = 0,
     ) -> int:
         self._conn.execute(
             "INSERT INTO urls"
             " (target_id, url, category, patterns_json, source_count,"
             "  first_seen_run, last_seen_run)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)"
+            " VALUES (:target_id, :url, :category, COALESCE(:patterns_json, '[]'),"
+            "  :source_count, :run_id, :run_id)"
             " ON CONFLICT(target_id, url) DO UPDATE SET"
             "  last_seen_run = excluded.last_seen_run,"
-            "  category = excluded.category,"
-            "  patterns_json = excluded.patterns_json,"
+            "  category = COALESCE(:category, urls.category),"
+            "  patterns_json = COALESCE(:patterns_json, urls.patterns_json),"
             "  source_count = excluded.source_count",
-            (target_id, url, category, json.dumps(list(patterns)), source_count, run_id, run_id),
+            {
+                "target_id": target_id,
+                "url": url,
+                "category": category,
+                "patterns_json": None if patterns is None else json.dumps(list(patterns)),
+                "source_count": source_count,
+                "run_id": run_id,
+            },
         )
         self._conn.commit()
         row = self._conn.execute(

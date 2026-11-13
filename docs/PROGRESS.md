@@ -26,8 +26,9 @@ mypy src/reconkit
 | b | done | `0e39f18`, `9423eaa` | `errors`, `models`, `config`, `core/runner` + tests |
 | c | done | `45b0ba8` | `core/scope` gate + tests |
 | d | done | `0a3010b` | `core/pacing.py`: delays, jitter, ordering, parallel limits, rate args, RateLimiter |
-| e | done | `HEAD` | `core/store.py`: schema, migrations, `redact()` helper, diff queries (`docs/04_DATABASE.md`) |
-| f | pending | - | `adapters/base.py`, `adapters/registry.py` + 11 Phase 2 adapters with fixtures/tests |
+| e | done | `1ba2fd8` | `core/store.py`: schema, migrations, `redact()` helper, diff queries (`docs/04_DATABASE.md`) |
+| f1 | pending | - | `adapters/base.py`, `adapters/registry.py`, `crtsh`, `certspotter`, `otx`, `hackertarget` |
+| f2 | pending | - | `subfinder`, `assetfinder`, `dnspython`, `pyprobe`, `httpx`, `pyscan`, `naabu` |
 | g | pending | - | `core/wildcard.py` + `engine.py` + `core/workspace.py`: stage pipeline, consensus/confidence inside `engine.py`, host states, resume, exit codes |
 | h | pending | - | `ui.py` + `cli.py`: all commands, `--mock`, `--json` |
 | i | pending | - | `installer/` + `doctor.py` |
@@ -48,6 +49,11 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 ## Notes for task g
 
 - The engine must call `pacer.reset()` at the start of every stage.
+- `diff_new`/`diff_gone` rely on per-run `*_sources` rows, so a stage-only run would make every host look GONE. Diffs must compare runs of the same kind; docs/04 section 6 says which.
+- Raw stderr/output files written by `workspace.py` must go through `redact()` before they hit disk.
+- `Store` is used only from the event-loop thread (no `asyncio.to_thread`).
+- Per-call commits are slow for thousands of hosts. Add a `transaction()` context manager or a batch insert method when the engine needs it.
+- Read queries for the engine/CLI (list subdomains with sources, `tool_runs` of a run for resume, latest run for a target, ports, export) are added in tasks g/h with tests.
 
 ## Deviations and assumptions
 
@@ -73,14 +79,15 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 ## Open risks
 
 - `urls` is created in task e per the review list even though docs/04 labels it Phase 3; `findings` and `monitor_changes` stay deferred.
+- The v1 migration was edited in place to add `idx_subdomain_sources_run`, `idx_port_sources_run` and `idx_hsh_run`; no real `recon.db` exists yet, so no v2 is needed. docs/04 section 3 lists the indexes.
+- docs/04 section 6 now states that diffs only compare runs of the same kind (discovery with discovery, ports with ports).
 - `tests/test_store.py` imports `sqlite3` for `IntegrityError`; the "only store.py imports sqlite3" rule is enforced for `src/`.
 - Installer refuses to run on native Windows; decide how to handle that before task i.
 - `scope.yaml` cannot exclude IP ranges (no out-of-scope CIDRs).
 - CLI must catch `ValueError` from `check_target`/`validate_target` and exit 2.
 - Real `httpx` JSON field names are not verified yet; confirm with `--help`/sample output before writing the adapter.
 - Scope behavior is only unit-tested; engine tests must prove an out-of-scope host is never probed.
-- Redaction only masks env values; `tool_runs.error` still needs a general `redact()` for tokens and credential-bearing URLs.
 
 ## Next task
 
-**Task f: adapters.** `adapters/base.py`, `adapters/registry.py` and the 11 Phase 2 adapters with sanitized fixtures and parser tests. Read `docs/09_TOOL_CONTRACTS.md`, `docs/03_ARCHITECTURE.md` (dependency rules) and `tools.yaml` first; confirm every tool flag from the real `--help`.
+**Task f1: adapters (part 1).** `adapters/base.py`, `adapters/registry.py`, `crtsh`, `certspotter`, `otx`, `hackertarget` with fixtures and parser tests. Read `docs/09_TOOL_CONTRACTS.md`, `docs/03_ARCHITECTURE.md` (dependency rules), `tools.yaml` and `.env.example` first.

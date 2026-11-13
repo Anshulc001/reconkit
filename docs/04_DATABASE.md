@@ -70,6 +70,7 @@ CREATE TABLE subdomain_sources (
   tool         TEXT NOT NULL,
   PRIMARY KEY (subdomain_id, run_id, tool)
 );
+CREATE INDEX idx_subdomain_sources_run ON subdomain_sources(run_id);
 
 CREATE TABLE host_status_history (
   id           INTEGER PRIMARY KEY,
@@ -85,6 +86,7 @@ CREATE TABLE host_status_history (
   checked_at   TEXT NOT NULL
 );
 CREATE INDEX idx_hsh_sub ON host_status_history(subdomain_id, id);
+CREATE INDEX idx_hsh_run ON host_status_history(run_id);
 
 CREATE TABLE ports (
   id            INTEGER PRIMARY KEY,
@@ -109,6 +111,7 @@ CREATE TABLE port_sources (
   seen    TEXT NOT NULL CHECK (seen IN ('open','closed')),   -- what that tool reported
   PRIMARY KEY (port_id, run_id, tool)
 );
+CREATE INDEX idx_port_sources_run ON port_sources(run_id);
 
 CREATE TABLE urls (                       -- Phase 3
   id            INTEGER PRIMARY KEY,
@@ -169,6 +172,7 @@ CREATE TABLE monitor_changes (            -- Phase 3
 - **NOW DEAD:** the latest `host_status_history` row for the subdomain is `DEAD` and the previous known state was not `DEAD`.
 - **State change:** compare last two `host_status_history` rows per subdomain.
 - **Port change:** compare `ports.state` and presence between runs.
+- **Same kind only:** `diff_new`/`diff_gone` rely on per-run `*_sources` rows, so diffs compare discovery runs with discovery runs and port runs with port runs. A single-stage run must never be compared with a run that covered different stages, or every unrelated host would look GONE.
 
 ## 7. Data Validation
 
