@@ -2,10 +2,10 @@
 
 ## RESUME HERE
 
-- Status: Part 5 code in `d9cf6c7` (wip); regression/pitfalls addendum done; Part 5 review/commit next
-- Last code commit: `d9cf6c7`; run `git log --oneline -1` because docs commits may be newer
+- Status: Part 5 done; Part 6a (engine skeleton, gating, mock pipeline) next
+- Last code commit: `d9cf6c7` (Part 5); run `git log --oneline -1` because docs commits may be newer
 - Baseline: 342 passed, 2 skipped; all four checks PASS (twice)
-- Next action: apply the REGRESSION AND PITFALLS addendum, then finish the Part 5 REVIEW_LOG entry
+- Next action: implement Part 6a in docs/MASTER_PLAN.md; bind the DNS probe to the run context for wildcard detection and use `Workspace.create` for raw output
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: none
@@ -41,7 +41,7 @@ mypy src/reconkit
 | f1 | done | 89ba34f | `adapters/base.py`, `adapters/registry.py`, `crtsh`, `certspotter`, `otx`, `hackertarget` |
 | f2 | done | 80ddd93 | pure-Python adapters: `dnspython`, `pyprobe`, `pyscan` |
 | f3 | done | ee06075 | remaining phase-2 tools: binary adapters `subfinder`, `assetfinder`, `httpx`, `naabu` |
-| g | pending | - | `core/wildcard.py` + `engine.py` + `core/workspace.py`: stage pipeline, consensus/confidence inside `engine.py`, host states, resume, exit codes |
+| g | in progress | d9cf6c7 (Part 5) | wildcard + workspace done; `engine.py` pipeline, host states, resume, exit codes pending (Part 6) |
 | h | pending | - | `ui.py` + `cli.py`: all commands, `--mock`, `--json` |
 | i | pending | - | `installer/` + `doctor.py` |
 | j | pending | - | docs sync, README, final check |
@@ -119,7 +119,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `subfinder` now carries four `keys` and the adapter writes them to a temporary `provider-config.yaml` (0600) passed with `-pc`, deleted in `finally`. This replaces the audit's earlier "no env bridge" decision because Part 4 requires the bridge.
 - `chmod 0600` on the subfinder temp file is best-effort on Windows; the file is still deleted, and the open risk is recorded in REVIEW_LOG Part 4.
 - Known pitfalls table + regression rules added by user addendum; `scripts/check.ps1` now warns on a `fix:` commit without a test change, and existing guards carry `Regression:` docstrings (no behavior change).
-- Review entries for the phase-2 commits live in `docs/REVIEW_LOG.md`.
+- Part 5 uses an injected, limiter-bound DNS probe and a required injected `rng` (no S311 default); `Workspace` rejects Windows-reserved target labels and chmods only its own dirs; `Workspace.write` is synchronous (`fsync` + `os.replace`), so the engine must offload large outputs.
 
 ## Open risks
 
@@ -146,4 +146,4 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 
 ## Next task
 
-**Part 5: `core/wildcard.py` + `core/workspace.py`.** Quote docs/03 and docs/04 first; wildcard detection returns an explicit unknown state on resolver timeout; workspace writes are traversal-safe, atomic and redacted.
+**Part 6a: engine skeleton, gating, mock pipeline.** Re-read docs/09 stage pipeline/confidence and docs/02 exit codes; wire `WildcardDetector(probe=partial(dns.resolve_host, ctx), rng=random.Random(), probes=...)` and `Workspace.create(...)`, and record out-of-scope hosts without probing them.
