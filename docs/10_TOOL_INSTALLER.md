@@ -13,6 +13,7 @@ reconkit doctor [--fix]            # --fix = offer to install what is missing
 - `--all` installs `core` tier tools only. `opt_in` tools install only when named.
 - `--dry-run` prints every action (download URL, checksum source, target path, apt packages) and changes nothing.
 - `--yes` skips confirmations except the sudo/apt one.
+- On an interactive TTY, `install` asks once: "Free only, or add keys?". Choosing keys copies `.env.example` to `.env` (never overwrites) and prints the path plus the Keys table. Non-TTY, `--silent` and `--json` never prompt and default to free mode (policy in `docs/05_SECURITY.md` §6.1, implemented in task i).
 
 ## 2. Platform
 

@@ -1,7 +1,8 @@
 # reconkit tool registry. The ONLY list of tools the program may run or install.
 # Fields: stage, kind (http|python|binary), tier (core|opt_in|intrusive), mode (passive|active),
 #   phase (build phase: 2 = working adapter in Phase 2, 3 = later), binary, version_cmd,
-#   rate_flag (how the speed engine passes requests/second), install (method + source), needs_key (env var names), notes.
+#   rate_flag (how the speed engine passes requests/second), install (method + source), needs_key (phase-3 env var names),
+#   keys (optional list of {env,url,adds} for keys that are free to obtain; policy in docs/05_SECURITY.md 6.1), notes.
 # Install methods: github_release | go_install | apt | pipx | none.
 # Release asset names must be verified against the real release when implementing the installer.
 # If an asset or checksum is missing, the installer must fail safely (docs/10_TOOL_INSTALLER.md).
@@ -27,12 +28,46 @@ x-pd-release: &pd_release
 tools:
   # ---------------- subs (passive) ----------------
   crtsh:        {stage: subs, kind: http, tier: core, mode: passive, phase: 2, install: {method: none}, notes: "Certificate Transparency via crt.sh JSON. Rate-limit friendly in slow mode."}
-  certspotter:  {stage: subs, kind: http, tier: core, mode: passive, phase: 2, install: {method: none}, needs_key: [CERTSPOTTER_API_KEY], notes: "Key optional (higher limits)."}
-  otx:          {stage: subs, kind: http, tier: core, mode: passive, phase: 2, install: {method: none}, needs_key: [OTX_API_KEY], notes: "AlienVault OTX passive DNS. Key optional."}
+  certspotter:
+    stage: subs
+    kind: http
+    tier: core
+    mode: passive
+    phase: 2
+    install: {method: none}
+    keys:
+      - env: CERTSPOTTER_API_KEY
+        url: "https://sslmate.com/ct_search_api"
+        adds: "Free Cert Spotter account: authenticated queries and 100 queries/hour; anonymous requests are rate limited."
+    notes: "Key optional (higher limits)."
+  otx:
+    stage: subs
+    kind: http
+    tier: core
+    mode: passive
+    phase: 2
+    install: {method: none}
+    keys:
+      - env: OTX_API_KEY
+        url: "https://otx.alienvault.com/"
+        adds: "Free OTX account: authenticated passive DNS with higher limits; anonymous requests are rate limited."
+    notes: "AlienVault OTX passive DNS. Key optional."
   hackertarget: {stage: subs, kind: http, tier: core, mode: passive, phase: 2, install: {method: none}, notes: "Free tier has a low daily limit; treat HTTP 429 as skipped."}
   urlscan:      {stage: subs, kind: http, tier: core, mode: passive, phase: 3, install: {method: none}, needs_key: [URLSCAN_API_KEY]}
   subfinder:    {stage: subs, kind: binary, tier: core, mode: passive, phase: 2, binary: subfinder, version_cmd: [subfinder, -version], rate_flag: "-rl", install: {<<: *pd_release, name: subfinder, repo: projectdiscovery/subfinder, fallback: {method: go_install, package: "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"}}}
-  assetfinder:  {stage: subs, kind: binary, tier: core, mode: passive, phase: 2, binary: assetfinder, version_cmd: [assetfinder, -h], install: {method: go_install, package: "github.com/tomnomnom/assetfinder@latest"}}
+  assetfinder:
+    stage: subs
+    kind: binary
+    tier: core
+    mode: passive
+    phase: 2
+    binary: assetfinder
+    version_cmd: [assetfinder, -h]
+    install: {method: go_install, package: "github.com/tomnomnom/assetfinder@latest"}
+    keys:
+      - env: VT_API_KEY
+        url: "https://www.virustotal.com/gui/join-us"
+        adds: "Free VirusTotal Public API key: adds the virustotal source (4 requests/minute, 500/day)."
   amass:        {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: amass, version_cmd: [amass, -version], install: {method: apt, package: amass}, notes: "Always run in passive mode (-passive). Slow."}
   findomain:    {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: findomain, version_cmd: [findomain, --version], install: {method: github_release, repo: Findomain/Findomain, asset_pattern: "findomain-linux.zip"}}
   chaos:        {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: chaos, version_cmd: [chaos, -version], needs_key: [CHAOS_API_KEY], install: {<<: *pd_release, name: chaos-client, repo: projectdiscovery/chaos-client}}

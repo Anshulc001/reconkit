@@ -43,6 +43,52 @@ def test_rate_flags_come_from_tools_yaml() -> None:
     assert "crtsh" not in flags
 
 
+def test_keys_are_parsed() -> None:
+    certspotter = get_spec("certspotter").keys
+    assert [key.env for key in certspotter] == ["CERTSPOTTER_API_KEY"]
+    assert certspotter[0].url == "https://sslmate.com/ct_search_api"
+    assert "100 queries/hour" in certspotter[0].adds
+    assert [key.env for key in get_spec("otx").keys] == ["OTX_API_KEY"]
+    assert [key.env for key in get_spec("assetfinder").keys] == ["VT_API_KEY"]
+
+
+def test_tool_without_keys_has_no_entries() -> None:
+    assert get_spec("crtsh").keys == ()
+
+
+@pytest.mark.parametrize(
+    ("entry", "match"),
+    [
+        ("keys: [{env: lower_case, url: 'https://x.example', adds: a}]", "must match"),
+        ("keys: [{env: OK_KEY, url: 'http://x.example', adds: a}]", "must be https"),
+        ("keys: [{env: OK_KEY, url: 'https://' , adds: a}]", "must be https"),
+        ("keys: [{env: OK_KEY, url: 'https://x.example'}]", "missing 'adds'"),
+        ("keys: notalist", "keys must be a list"),
+        ("keys: [nope]", "must be a mapping"),
+    ],
+)
+def test_malformed_keys_raise_config_error(tmp_path: Path, entry: str, match: str) -> None:
+    bad = tmp_path / "tools.yaml"
+    bad.write_text(
+        "tools:\n  weird: {stage: subs, kind: http, tier: core, mode: passive, " + entry + "}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match=match):
+        load_tools(bad)
+
+
+def test_every_key_env_is_in_env_example() -> None:
+    example = (REPO / ".env.example").read_text(encoding="utf-8")
+    names = {
+        line.split("=", 1)[0].strip()
+        for line in example.splitlines()
+        if "=" in line and not line.lstrip().startswith("#")
+    }
+    for spec in load_tools().values():
+        for key in spec.keys:
+            assert key.env in names, f"{key.env} missing from .env.example"
+
+
 def test_unknown_tool_raises_config_error() -> None:
     with pytest.raises(ConfigError, match="unknown tool 'nope'"):
         get_adapter("nope")

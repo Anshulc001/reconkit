@@ -5,6 +5,7 @@ This is the most-read file for agents. It defines the adapter interface, normali
 ## 1. Conventions
 
 - Tools are listed only in `tools.yaml`. Each has a `stage`, `kind` (`http` | `python` | `binary`), `tier` (`core` | `opt_in` | `intrusive`), `mode` (`passive` | `active`).
+- A tool may list `keys`: a list of `{env, url, adds}` entries (`env` name, https sign-up URL, what the key adds). Free mode needs no keys (policy in `docs/05_SECURITY.md` §6.1). `registry.ToolSpec.keys` exposes them; `env` must match `^[A-Z][A-Z0-9_]*$`, `url` must be https, and a malformed entry raises `ConfigError`.
 - An adapter is one class in `src/reconkit/adapters/<tool>.py`.
 - Adapters never touch the DB, scope gate, or UI. They return data.
 - Targets are validated before reaching an adapter (see docs/05_SECURITY.md).

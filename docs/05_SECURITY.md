@@ -51,6 +51,16 @@ Implemented in `core/scope.py`. Rules:
 - `doctor` shows key **names** and set/unset, never values (not even partial).
 - Redact secrets in logs, errors and stored `tool_runs.error`.
 
+### 6.1 API Keys: Free Mode by Default
+
+This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 flags, install prompt), `docs/09_TOOL_CONTRACTS.md` (§2 `keys` schema) and `docs/10_TOOL_INSTALLER.md` (§1 install prompt).
+
+1. **Free mode is the default.** Every `core` tool must produce useful results with zero keys. Enhanced mode turns on per tool as soon as that tool's key is set.
+2. **Keys come only from `.env`** (loaded at startup). Never from CLI flags, never logged, never in URLs or query strings; `redact()` covers them in errors, logs and `tool_runs.error`.
+3. **Only keys that are free to obtain are supported.** A tool whose only key is paid gets no key support at all (it runs free or is skipped).
+4. **`doctor` always shows a Keys table** (tool, set/missing, what it adds, sign-up URL). `--no-keys` forces free mode and ignores `.env` (flag list in `docs/02_CLI_UX.md`, implemented in task h). `install` on an interactive TTY asks once: "Free only, or add keys?". Choosing keys copies `.env.example` to `.env` (never overwrites) and prints the path plus the table. Non-TTY, `--silent` and `--json` never prompt and default to free (implemented in task i).
+5. **`tools.yaml` schema:** an optional `keys:` list per tool, each entry `{env, url, adds}`. A tool without keys has no `keys` entry. `registry.ToolSpec` exposes `keys` and validates them: `env` must match `^[A-Z][A-Z0-9_]*$`, `url` must be `https`, and any malformed entry raises `ConfigError`.
+
 ## 7. Environment Variables
 
 - **Optional keys:** `CERTSPOTTER_API_KEY`, `OTX_API_KEY`, `URLSCAN_API_KEY`, `CHAOS_API_KEY`, `GITHUB_TOKEN`, `VIRUSTOTAL_API_KEY`, `SECURITYTRAILS_API_KEY`, `SHODAN_API_KEY`

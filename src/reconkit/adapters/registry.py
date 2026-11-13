@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -16,6 +18,16 @@ from reconkit.models import Mode, Stage, Tier
 TOOLS_PATH = Path(__file__).resolve().parents[3] / "tools.yaml"
 
 Kind = Literal["http", "python", "binary"]
+ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+@dataclass(frozen=True)
+class ToolKey:
+    """One optional API key: env name, sign-up URL and what it adds."""
+
+    env: str
+    url: str
+    adds: str
 
 
 @dataclass(frozen=True)
@@ -29,6 +41,7 @@ class ToolSpec:
     mode: Mode
     phase: int
     rate_flag: str | None = None
+    keys: tuple[ToolKey, ...] = ()
 
 
 def load_tools(path: str | Path | None = None) -> dict[str, ToolSpec]:
@@ -104,4 +117,33 @@ def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
         mode=mode,
         phase=phase,
         rate_flag=rate_flag,
+        keys=_keys(name, entry),
     )
+
+
+def _keys(name: str, entry: dict[str, Any]) -> tuple[ToolKey, ...]:
+    raw = entry.get("keys")
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ConfigError(f"tool {name!r} in tools.yaml: keys must be a list")
+    keys: list[ToolKey] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ConfigError(f"tool {name!r} in tools.yaml: every keys entry must be a mapping")
+        for field in ("env", "url", "adds"):
+            value = item.get(field)
+            if not isinstance(value, str) or not value.strip():
+                raise ConfigError(f"tool {name!r} in tools.yaml: keys entry is missing {field!r}")
+        env = item["env"]
+        url = item["url"]
+        adds = item["adds"]
+        if not ENV_NAME.fullmatch(env):
+            raise ConfigError(
+                f"tool {name!r} in tools.yaml: keys env {env!r} must match {ENV_NAME.pattern}"
+            )
+        parts = urlsplit(url)
+        if parts.scheme != "https" or not parts.netloc:
+            raise ConfigError(f"tool {name!r} in tools.yaml: keys url {url!r} must be https")
+        keys.append(ToolKey(env=env, url=url, adds=adds))
+    return tuple(keys)

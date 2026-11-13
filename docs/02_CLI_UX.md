@@ -17,8 +17,8 @@
 ### Setup and health
 | Command | Purpose | Phase |
 |---|---|---|
-| `doctor [--fix]` | Tools, versions, system packages, wordlists, API key names, per-stage coverage | 2 |
-| `install [TOOL...\|--all] [--dry-run]` | Install missing tools into `~/.reconkit/bin` | 2 |
+| `doctor [--fix]` | Tools, versions, system packages, wordlists, API key names + Keys table, per-stage coverage | 2 |
+| `install [TOOL...\|--all] [--dry-run]` | Install missing tools into `~/.reconkit/bin`; interactive TTY asks once about API keys (docs/05 §6.1, task i) | 2 |
 | `update [TOOL...\|--all] [--dry-run]` | Update tools (and nuclei templates) | 2 |
 | `scope check -d DOMAIN` | Show whether a target is allowed by `scope.yaml` | 2 |
 | `scope import` | Build `scope.yaml` from a bug bounty program | 3 |
@@ -63,6 +63,7 @@
 | `--min-sources N` | Hide results confirmed by fewer than N tools |
 | `--phase-timeout SEC` / `--timeout-<stage> SEC` | Stage time limits |
 | `--mock` | Use fixtures instead of real tools/network |
+| `--no-keys` | Force free mode: ignore API keys from `.env` (task h; policy in docs/05 §6.1) |
 | `--json` | JSON (JSONL for streams) on stdout, no colors or progress |
 | `--no-color`, `-v/--verbose`, `-q/--quiet` | Output control |
 | `--config PATH`, `--scope PATH`, `--db PATH` | Override file locations |

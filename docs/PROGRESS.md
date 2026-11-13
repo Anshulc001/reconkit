@@ -72,6 +72,14 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `otx/example.com.synthetic.json` - synthetic, documented `passive_dns` shape; the real endpoint returned HTTP 429 for anonymous access on 2026-11-13 (`https://otx.alienvault.com/api/v1/indicators/domain/example.com/passive_dns`).
 - `hackertarget/example.com.txt` - real response, fetched 2026-11-13 from `https://api.hackertarget.com/hostsearch/?q=example.com` (the free quota returned a single row).
 
+## Key sources
+
+- All fetched 2026-11-13.
+- Cert Spotter: `https://sslmate.com/help/reference/ct_search_api_v1` (Bearer API key; a free account allows 100 queries/hour, anonymous requests are limited). Sign-up: `https://sslmate.com/ct_search_api`.
+- OTX: `https://otx.alienvault.com/api` (`X-OTX-API-KEY`; a free account provides the key).
+- assetfinder: `https://github.com/tomnomnom/assetfinder` (`VT_API_KEY`); VirusTotal Public API is free at 4 requests/minute and 500/day: `https://docs.virustotal.com/reference/public-vs-premium-api`.
+- subfinder: `https://docs.projectdiscovery.io/opensource/subfinder/install` stores provider keys only in `$HOME/.config/subfinder/provider-config.yaml`; no per-provider env var names are documented, so it has no `keys` entry.
+
 ## Deviations and assumptions
 
 - `core/pacing.py` holds a temporary `Pacer` stub so `RunContext` type-checks; task d replaces it.
@@ -106,6 +114,9 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `scope.yaml` cannot exclude IP ranges (no out-of-scope CIDRs).
 - CLI must catch `ValueError` from `check_target`/`validate_target` and exit 2.
 - OTX refuses anonymous requests (429), so `otx/example.com.synthetic.json` is synthetic and the adapter has not parsed a real OTX response yet.
+- subfinder takes provider keys from `provider-config.yaml`, not env vars; its free-tier provider list and any env-var bridge are unverified, so `tools.yaml` gives it no `keys` entry until task f3.
+- assetfinder's `FB_APP_ID`/`FB_APP_SECRET` (Facebook developer app) and `SPYSE_API_TOKEN` were omitted: the Facebook source is no longer a documented free subdomain API, and the Spyse service status is unverified.
+- Phase-3 tools (`urlscan`, `chaos`, `github_subdomains`) still use the old `needs_key` field; migrate them to `keys` when their adapters land in Phase 3.
 - HackerTarget's free tier returned one row for example.com; multi-row parsing is only covered by MockTransport tests.
 - Scope behavior is only unit-tested; engine tests must prove an out-of-scope host is never probed.
 
