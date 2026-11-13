@@ -142,6 +142,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Wildcard detection is still not wired into the engine: `is_wildcard` stays 0 and no wildcard-unknown warning is emitted.
 - Resume is stage-level; tools completed inside a crashed stage are rerun. CNAME dangling warnings are not persisted, and real NXDOMAIN/CNAME behavior has not been exercised.
 - Part 7 rendering is tested with `StringIO`/fake TTY only; real terminal widths and the CLI's `HostRow` source are unverified until Part 8.
+- `docs/09_TOOL_CONTRACTS.md` has now contradicted docs/02 twice (the earlier `needs_key` registry issue and Part 7's JSONL-vs-single-document contract), so it needs a full fresh-eyes pass against docs/02 before the Part 11 final docs sync; do not treat docs/09 as authoritative until then.
 
 ## Fix backlog
 
