@@ -43,6 +43,12 @@ def test_github_release_plan_keeps_its_fallback() -> None:
     assert [item.method for item in chain] == ["github_release", "go_install"]
 
 
+def test_version_args_come_from_version_cmd() -> None:
+    assert plan_for("subfinder").version_args == ("-version",)
+    assert plan_for("nmap").version_args == ("--version",)
+    assert plan_for("crtsh").version_args == ()
+
+
 def test_requires_and_requires_apt_are_carried() -> None:
     assert plan_for("naabu").requires_apt == ("libpcap-dev",)
     assert plan_for("puredns").requires == ("massdns",)

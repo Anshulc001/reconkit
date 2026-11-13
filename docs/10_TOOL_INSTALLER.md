@@ -50,7 +50,7 @@ Tools may declare `requires_apt` (example: naabu needs `libpcap-dev`) and `requi
 
 `installer/registry.py` turns each `tools.yaml` entry into one `InstallPlan`:
 
-- `name`, `binary` (defaults to the tool name), `method` (`github_release`, `go_install`, `apt`, `pipx` or `none`), `package` (Go package, apt package or pipx spec), `repo`, `asset_pattern`, `checksums_pattern`, `asset_name`, `version` (default `latest`), `fallback` (one nested plan), `requires_apt` and `requires`.
+- `name`, `binary` (defaults to the tool name), `method` (`github_release`, `go_install`, `apt`, `pipx` or `none`), `package` (Go package, apt package or pipx spec), `repo`, `asset_pattern`, `checksums_pattern`, `asset_name`, `version` (default `latest`), `version_args` (from `version_cmd`, the post-install check), `fallback` (one nested plan), `requires_apt` and `requires`.
 - A `tool_versions` pin in `config.yaml` sets `version` and rewrites a `go_install` package's trailing `@latest` to `@<pin>`. Without a pin the version is `latest`.
 - An entry with no `install` block (for example `httpx_tech`, which reuses the `httpx` binary) becomes a `none` plan.
 - `resolve_plan()` returns the primary plan followed by its fallback, so the caller tries them in order.

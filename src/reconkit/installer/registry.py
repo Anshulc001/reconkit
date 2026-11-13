@@ -28,6 +28,7 @@ class InstallPlan:
     checksums_pattern: str | None = None
     asset_name: str | None = None
     version: str = "latest"
+    version_args: tuple[str, ...] = ()
     fallback: InstallPlan | None = None
     requires_apt: tuple[str, ...] = ()
     requires: tuple[str, ...] = ()
@@ -66,11 +67,20 @@ def _plan(name: str, entry: Mapping[str, Any], version: str) -> InstallPlan:
     install = entry.get("install")
     requires_apt = _names(entry.get("requires_apt"), "requires_apt", name)
     requires = _names(entry.get("requires"), "requires", name)
+    version_cmd = entry.get("version_cmd")
+    version_args: tuple[str, ...] = ()
+    if version_cmd is not None:
+        if not isinstance(version_cmd, list) or not all(
+            isinstance(part, str) for part in version_cmd
+        ):
+            raise ConfigError(f"tool {name!r} in tools.yaml has an invalid version_cmd")
+        version_args = tuple(version_cmd[1:])
     if install is None:
         return InstallPlan(
             name=name,
             method="none",
             binary=binary,
+            version_args=version_args,
             requires_apt=requires_apt,
             requires=requires,
         )
@@ -108,6 +118,7 @@ def _plan(name: str, entry: Mapping[str, Any], version: str) -> InstallPlan:
         checksums_pattern=_text(install.get("checksums_pattern"), "checksums_pattern", name),
         asset_name=_text(install.get("name"), "name", name) or name,
         version=version,
+        version_args=version_args,
         fallback=fallback,
         requires_apt=requires_apt,
         requires=requires,
@@ -153,6 +164,7 @@ def load_plans(
             checksums_pattern=plan.checksums_pattern,
             asset_name=plan.asset_name,
             version=plan.version,
+            version_args=plan.version_args,
             fallback=plan.fallback,
             requires_apt=specs[name].requires_apt,
             requires=plan.requires,
