@@ -126,3 +126,25 @@ def test_unknown_tool_is_a_config_error() -> None:
 def test_resolve_plan_without_fallback_is_one_step() -> None:
     plan = InstallPlan(name="crtsh", method="none", binary="crtsh")
     assert resolve_plan(plan) == (plan,)
+
+
+def test_member_and_checksum_override_are_parsed_from_the_registry() -> None:
+    chaos = plan_for("chaos")
+    assert chaos.member == "chaos-client"
+    assert chaos.verify_checksums is None
+    assert plan_for("findomain").verify_checksums is False
+    assert plan_for("dnsreaper").method == "none"
+    assert plan_for("puredns").version_args == ("--version",)
+
+
+def test_a_duplicate_plan_copy_keeps_the_override_fields(tmp_path: Path) -> None:
+    path = tmp_path / "tools.yaml"
+    path.write_text(
+        "version: 1\ntools:\n  echo: {stage: subs, kind: binary, tier: core, mode: passive,\n"
+        "         install: {method: github_release, repo: a/b, asset_pattern: x.zip,\n"
+        "                   member: renamed, verify_checksums: false}}\n",
+        encoding="utf-8",
+    )
+    plan = load_plans(path)["echo"]
+    assert plan.member == "renamed"
+    assert plan.verify_checksums is False

@@ -235,6 +235,8 @@ def install_release(
     version_timeout: float = VERSION_TIMEOUT_S,
 ) -> InstallOutcome:
     """Install one github_release tool, or describe the steps under --dry-run."""
+    if plan.verify_checksums is not None:
+        verify_checksums = plan.verify_checksums
     release = release_for(plan, client=client, arch=arch)
     destination = bin_dir / plan.binary
     steps = (
@@ -263,7 +265,7 @@ def install_release(
                     f"{release.asset_name}"
                 )
             verify_checksum(archive, expected)
-        extracted = extract_binary(archive, plan.binary, work / "bin")
+        extracted = extract_binary(archive, plan.member or plan.binary, work / "bin")
         previous = destination.with_name(f"{destination.name}.prev")
         if destination.exists():
             shutil.copy2(destination, previous)

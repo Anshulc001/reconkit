@@ -269,7 +269,10 @@ def test_pipx_already_installed_needs_one_prompt(tmp_path: Path) -> None:
 
 
 def test_pipx_git_spec_is_allowed_and_other_specs_are_rejected(tmp_path: Path) -> None:
-    assert pipx.pipx_spec(plan_for("dnsreaper")) == "git+https://github.com/punk-security/dnsReaper"
+    git_plan = replace(
+        plan_for("wafw00f"), package="git+https://github.com/punk-security/dnsReaper"
+    )
+    assert pipx.pipx_spec(git_plan) == "git+https://github.com/punk-security/dnsReaper"
     plan = replace(plan_for("wafw00f"), package="wafw00f; rm -rf /")
     with pytest.raises(ConfigError, match="invalid pipx package"):
         pipx.install_pipx_tool(

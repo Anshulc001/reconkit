@@ -57,7 +57,9 @@ Tools may declare `requires_apt` (example: naabu needs `libpcap-dev`) and `requi
 
 `installer/registry.py` turns each `tools.yaml` entry into one `InstallPlan`:
 
-- `name`, `binary` (defaults to the tool name), `tier` (from `tools.yaml`, used by `--all` to select `core` only), `method` (`github_release`, `go_install`, `apt`, `pipx` or `none`), `package` (Go package, apt package or pipx spec), `repo`, `asset_pattern`, `checksums_pattern`, `asset_name`, `version` (default `latest`), `version_args` (from `version_cmd`, the post-install check), `fallback` (one nested plan), `requires_apt` and `requires`.
+- `name`, `binary` (defaults to the tool name), `tier` (from `tools.yaml`, used by `--all` to select `core` only), `method` (`github_release`, `go_install`, `apt`, `pipx` or `none`), `package` (Go package, apt package or pipx spec), `repo`, `asset_pattern`, `checksums_pattern`, `asset_name`, `member` (the archive member to extract when the release renames the binary; defaults to `binary`), `verify_checksums` (per-plan override of the `install.verify_checksums` config key; `false` only for a release that publishes no checksums), `version` (default `latest`), `version_args` (from `version_cmd`, the post-install check), `fallback` (one nested plan), `requires_apt` and `requires`.
+- A `none` plan means "reconkit cannot install this": the tool reuses another binary (`httpx_tech`) or has no supported distribution (for example `dnsreaper`, whose repository has no `setup.py`/`pyproject.toml`, so `pipx` refuses it). `install`/`update` report `nothing to install` and `doctor` keeps reporting the tool as missing until the user installs it by hand.
+- Registry values verified against real releases on 2026-11-13: `findomain` publishes no checksums asset, so its plan sets `verify_checksums: false`; the `chaos-client` zip contains the binary `chaos-client`, so its plan sets `member: chaos-client`; `puredns` has no `version` subcommand and uses `--version`.
 - A `tool_versions` pin in `config.yaml` sets `version` and rewrites a `go_install` package's trailing `@latest` to `@<pin>`. Without a pin the version is `latest`.
 - An entry with no `install` block (for example `httpx_tech`, which reuses the `httpx` binary) becomes a `none` plan.
 - `resolve_plan()` returns the primary plan followed by its fallback, so the caller tries them in order.
@@ -74,7 +76,7 @@ Every backend goes through `core.runner.run_exec`, which creates the child with 
 | `pipx` | `pipx install <spec>` | `HOME`, `PATH`, `PIPX_BIN_DIR=<bin dir>`, `PIPX_HOME=$HOME/.local/pipx` |
 
 - `sudo -n` is deliberate. `run_exec` gives the child `stdin` from `DEVNULL` and captures its output, so an interactive sudo password prompt cannot work; `-n` fails immediately instead of hanging. A failure whose output says a password is required is reported as `skipped` with "sudo needs a password: run `sudo -v` in this terminal and retry". reconkit never runs as root and never reads or passes a sudo password.
-- Confirmation: every apt action calls a `confirm(message)` callback supplied by the caller. `False` means **no subprocess starts at all**; the tool is marked `skipped`. The installer modules neither print nor prompt themselves, so the CLI owns the prompt text and tests can prove a declined prompt skips the call.
+- Confirmation: every apt action calls a `confirm(message)` callback supplied by the caller. `False` means **no subprocess starts at all**; the tool is marked `skipped`. The installer modules neither print nor prompt themselves, so the CLI owns the prompt text and tests can prove a declined prompt skips the call. With no TTY on stdin (CI, a pipe, `ssh host reconkit install`) the CLI does not prompt at all: the answer is `False`, so only that sudo tool is skipped and the rest of the selection still runs. `typer.confirm` on a TTY-less stdin would abort the whole run instead.
 - Installing `pipx` is a prerequisite with its own confirmation line ("pipx is required for wafw00f: sudo apt-get install -y pipx"), separate from the tool's own ("wafw00f: pipx install wafw00f"). A sudo-bearing prerequisite is never folded into one ambiguous message.
 - Package names are validated before they reach argv: apt `^[a-z0-9][a-z0-9+.-]*$`; go and pipx specs `^[A-Za-z0-9._+/-]+(@[A-Za-z0-9._-]+)?$`, plus `git+https://github.com/...` for pipx (dnsreaper). Anything else is a `ConfigError`, never a command line.
 - Residual risk, accepted and named: `go_install` and `pipx` inherit `PATH` from the parent process. `go` and `pipx` can live in asdf shims, snap paths, `/usr/local/go/bin` or a user prefix, so a hardcoded path list would either run the wrong toolchain or fail on a working setup. This is the only parent-environment value that reaches any child, it is passed explicitly as a single key (never the whole environment), and the `apt` path stays hardcoded because `sudo` and `apt-get` always live in the system directories. No other parent variable is forwarded; The `nuclei -ut` template refresh is part of the same exception: it passes `HOME` and `PATH` and nothing else. If a future backend needs one, it needs its own line here.
@@ -94,7 +96,7 @@ Other rules:
 - Download to a temp dir with a size limit: `ARCHIVE_LIMIT` is 200 MiB for the archive and `MEMBER_LIMIT` is 100 MiB for one extracted member, and `CHECKSUMS_LIMIT` is 64 KiB for the checksums file. Extract only the expected binary name (`<binary>` or `<binary>.exe`); refuse archive paths that are absolute or contain `..` (zip-slip). A zip or tar.gz containing no such member is a failed install, never a silent success.
 - Files get mode `0755`. The directory `~/.reconkit/bin` is `0700`.
 - No `curl | bash`, no running scripts from downloads.
-- Optional `GITHUB_TOKEN` is used only to raise API rate limits and is never logged.
+- Release lookups are **unauthenticated**: `release_for` sends no token, so the limit is GitHub's 60 requests/hour per source IP and 13 `github_release` tools can exhaust it in one run. When that happens every remaining `github_release` tool reports `release lookup failed with HTTP 403` and the run continues; wait for `x-ratelimit-reset` and retry. Authenticated lookups are not implemented yet (see the Open risk in `docs/PROGRESS.md`); a `GITHUB_TOKEN` in `.env` currently only reaches `github_subdomains`.
 
 ## 5. Lookup Order at Run Time
 
@@ -116,9 +118,11 @@ Other rules:
 
 `--fix` runs the same selection as `install --all`; tools that are already installed are skipped by the idempotency rule in section 1, so it never reinstalls a working tool.
 
+A tool's `installed` state comes from its adapter when it has one. Most phase-3 tools have no adapter yet, so `doctor` falls back to the same resolution an install uses (section 5: the managed copy first, then `PATH`) and runs the plan's `version_cmd` as the identity probe; a copy that exists but whose `version_cmd` fails is reported as `wrong program`, never as installed. A `none` plan (for example `dnsreaper`) stays `missing` because reconkit cannot install it.
+
 ## 6. Update Behavior
 
-- `update` compares installed version (from `version_cmd`) with latest release (or the pin in `config.yaml` `tool_versions`) and updates only when different. `apt` and `pipx` have no such comparison and re-run their package-manager install; section 1 states that limitation and the extra sudo prompts it causes.
+- `update` compares installed version (from `version_cmd`) with latest release (or the pin in `config.yaml` `tool_versions`) and updates only when different. `apt` and `pipx` have no such comparison and re-run their package-manager install; section 1 states that limitation and the extra sudo prompts it causes. A `go_install` tool pinned to a version is compared against the pin; an `@latest` Go tool carries no installed-version metadata to compare, so `update` re-runs `go install` and reports `installed` even when nothing changed. That re-run is a byte-level no-op (Go's build cache): `reconkit update assetfinder` on 2026-11-13 left `sha256 d5173bdac4eb2054438adaea2c4c1b7173923224516976bf6df7e40fc6def4e7` unchanged. It is a reporting gap, not a corrupting reinstall.
 - Updates never happen silently during a scan. Only `update` (and `install`) change tools.
 - After installing or updating `nuclei`, templates are refreshed with `nuclei -ut` (implemented; `-ut, -update-templates` confirmed from `nuclei --help`, engine v3.11.1). A failed refresh is reported but does not mark the tool failed.
 - `doctor` warns when a tool's major version is newer than the version its parser fixture was recorded against. This needs per-tool fixture metadata that `tools.yaml` does not carry yet, so the warning is Phase 3.
@@ -138,9 +142,11 @@ reconkit install --all --dry-run
 | Situation | Behavior |
 |---|---|
 | No internet | Report per tool; exit 5 |
-| GitHub API rate limit | Suggest setting `GITHUB_TOKEN`; skip remaining |
+| GitHub API rate limit | Every `github_release` tool reports `release lookup failed with HTTP 403` and the run continues (exit 5). The limit is per source IP, 60/hour unauthenticated; this release-lookup client sends no token, so wait for `x-ratelimit-reset` or use an authenticated IP. Recommended before a first-time `install --all` on a shared IP: see the Open risk in `docs/PROGRESS.md` |
 | Asset not found for arch | Try fallback method; otherwise report |
 | Checksum mismatch | Refuse install; keep old version |
+| Release publishes no checksums | Only when the plan says `verify_checksums: false`; otherwise fail closed |
+| Tool has no supported distribution | `none` plan: report `nothing to install`, keep it in doctor as missing |
 | apt declined | Skip apt tools; mark `skipped`, no process starts |
 | sudo needs a password | Skip; tell the user to run `sudo -v` and retry (never prompt for the password ourselves) |
 | pipx missing | Ask to `apt install pipx` as its own confirmed step, then install the tool |

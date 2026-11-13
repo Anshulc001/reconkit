@@ -523,7 +523,14 @@ def doctor_command(
 
 
 def _install_confirm(message: str) -> bool:
-    """The only confirmation prompt for sudo; the installer never prompts."""
+    """The only confirmation prompt for sudo; the installer never prompts.
+
+    Without a TTY there is nobody to answer (CI, `ssh host reconkit install`,
+    a pipe). `typer.confirm` would abort the whole run there; a refusal only
+    skips that one sudo tool, which is what docs/10 section 3d promises.
+    """
+    if not sys.stdin.isatty():
+        return False
     return typer.confirm(message, default=False)
 
 

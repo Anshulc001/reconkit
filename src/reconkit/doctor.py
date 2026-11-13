@@ -14,6 +14,8 @@ from reconkit.adapters import ADAPTERS
 from reconkit.adapters.registry import ToolSpec, load_system_packages, load_tools
 from reconkit.config import DEFAULT_CONFIG_PATH, AppConfig
 from reconkit.core.scope import DEFAULT_SCOPE_PATH
+from reconkit.installer.github_release import installed_copy, installed_version
+from reconkit.installer.registry import InstallPlan, bin_dir, load_plans
 from reconkit.models import InstallStatus, Stage, Tier
 
 MIN_PYTHON = (3, 11)
@@ -90,12 +92,28 @@ class DoctorReport:
     warnings: tuple[str, ...]
 
 
-def default_status(spec: ToolSpec) -> InstallStatus:
-    """Ask the tool's adapter whether its binary is present and is the real one."""
+def default_status(spec: ToolSpec, plans: Mapping[str, InstallPlan] | None = None) -> InstallStatus:
+    """Adapter identity check first, else the install plan's own binary probe.
+
+    Most tools still have no adapter (they are `phase: 3`), so asking adapters
+    alone reported every one of them as missing even after a clean install. The
+    fallback is the same resolution an install uses: the managed copy first,
+    then `PATH`, and the plan's `version_cmd` as the identity probe.
+    """
     adapter = ADAPTERS.get(spec.name)
-    if adapter is None:
+    if adapter is not None:
+        return adapter().check_installed()
+    plan = (load_plans() if plans is None else plans).get(spec.name)
+    if plan is None or plan.method == "none":
         return InstallStatus(installed=False)
-    return adapter().check_installed()
+    directory = bin_dir()
+    copy = installed_copy(plan, directory)
+    if copy is None:
+        return InstallStatus(installed=False)
+    version = installed_version(plan, directory)
+    if version is None:
+        return InstallStatus(installed=False, path=copy)
+    return InstallStatus(installed=True, version=version, path=copy)
 
 
 def installed_packages(path: Path | None = None) -> frozenset[str]:
@@ -212,8 +230,15 @@ def collect_report(
     specs = load_tools(tools_path)
     order = list(Stage)
     ordered = sorted(specs.values(), key=lambda spec: (order.index(spec.stage), spec.name))
-    checker = status_of if status_of is not None else default_status
-    tools = tuple(_tool_check(spec, checker) for spec in ordered)
+    if status_of is not None:
+        tools = tuple(_tool_check(spec, status_of) for spec in ordered)
+    else:
+        plans = load_plans(tools_path)
+
+        def plan_status(spec: ToolSpec) -> InstallStatus:
+            return default_status(spec, plans)
+
+        tools = tuple(_tool_check(spec, plan_status) for spec in ordered)
 
     coverage: list[StageCoverage] = []
     for stage in order:

@@ -597,6 +597,8 @@ def render_doctor(
 
 
 def _install_result(outcome: InstallOutcome, *, dry_run: bool) -> str:
+    if outcome.method == "none" and outcome.ok:
+        return "nothing to install"
     if dry_run and outcome.ok:
         return "would install"
     if outcome.skipped:

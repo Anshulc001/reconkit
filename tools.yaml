@@ -103,7 +103,7 @@ tools:
         url: "https://www.virustotal.com/gui/join-us"
         adds: "Free VirusTotal Public API key: adds the virustotal source (4 requests/minute, 500/day)."
   amass:        {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: amass, version_cmd: [amass, -version], install: {method: apt, package: amass}, notes: "Always run in passive mode (-passive). Slow."}
-  findomain:    {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: findomain, version_cmd: [findomain, --version], install: {method: github_release, repo: Findomain/Findomain, asset_pattern: "findomain-linux.zip"}}
+  findomain:    {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: findomain, version_cmd: [findomain, --version], install: {method: github_release, repo: Findomain/Findomain, asset_pattern: "findomain-linux.zip", verify_checksums: false}, notes: "No checksums asset is published (verified 2026-11-13); download only over HTTPS from the registry repo."}
   chaos:
     stage: subs
     kind: binary
@@ -112,7 +112,7 @@ tools:
     phase: 3
     binary: chaos
     version_cmd: [chaos, -version]
-    install: {<<: *pd_release, name: chaos-client, repo: projectdiscovery/chaos-client}
+    install: {<<: *pd_release, name: chaos-client, repo: projectdiscovery/chaos-client, member: chaos-client}
     keys:
       - env: PDCP_API_KEY
         url: "https://cloud.projectdiscovery.io"
@@ -133,7 +133,7 @@ tools:
   # ---------------- dns ----------------
   dnspython:    {stage: dns, kind: python, tier: core, mode: passive, phase: 2, install: {method: none}, notes: "A/AAAA/CNAME/NS/MX/TXT, wildcard probe, dangling CNAME check."}
   dnsx:         {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dnsx, version_cmd: [dnsx, -version], rate_flag: "-rl", install: {<<: *pd_release, name: dnsx, repo: projectdiscovery/dnsx}}
-  puredns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: puredns, version_cmd: [puredns, version], requires: [massdns], install: {method: go_install, package: "github.com/d3mondev/puredns/v2@latest"}}
+  puredns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: puredns, version_cmd: [puredns, --version], requires: [massdns], install: {method: go_install, package: "github.com/d3mondev/puredns/v2@latest"}}
   massdns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: massdns, install: {method: apt, package: massdns}}
   dig:          {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dig, version_cmd: [dig, -v], install: {method: apt, package: dnsutils}}
 
@@ -171,7 +171,7 @@ tools:
   # ---------------- vulns (takeover, exposure) ----------------
   nuclei:       {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: nuclei, version_cmd: [nuclei, -version], rate_flag: "-rl", install: {<<: *pd_release, name: nuclei, repo: projectdiscovery/nuclei}, notes: "Run safe tags only (takeover, exposure, misconfig). Update templates with 'reconkit update'."}
   subzy:        {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: subzy, install: {method: go_install, package: "github.com/PentestPad/subzy@latest"}}
-  dnsreaper:    {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: dnsreaper, install: {method: pipx, package: "git+https://github.com/punk-security/dnsReaper"}, notes: "Phase 3, verify install method and package source at implementation."}
+  dnsreaper:    {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: dnsreaper, install: {method: none}, notes: "No supported distribution: the repo has no setup.py/pyproject.toml (pipx refuses it) and no PyPI package (verified 2026-11-13). Install by hand from the repo before the phase-3 adapter lands."}
   nikto:        {stage: vulns, kind: binary, tier: opt_in, mode: active, phase: 3, binary: nikto, version_cmd: [nikto, -Version], install: {method: apt, package: nikto}, notes: "Opt-in only. Very noisy."}
   ffuf:         {stage: vulns, kind: binary, tier: opt_in, mode: active, phase: 3, binary: ffuf, version_cmd: [ffuf, -V], rate_flag: "-rate", install: {method: go_install, package: "github.com/ffuf/ffuf/v2@latest"}, notes: "Opt-in only. Content discovery needs explicit --tools ffuf."}
 

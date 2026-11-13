@@ -397,3 +397,24 @@ def test_ctrl_c_during_install_exits_130(tmp_path: Path, monkeypatch) -> None:
     result = CliRunner().invoke(app, ["install", "nmap"])
     assert result.exit_code == 130
     assert "interrupted" in result.output
+
+
+def test_a_none_plan_reports_nothing_to_install_and_exits_zero() -> None:
+    result = CliRunner().invoke(app, ["install", "dnsreaper", "--no-color"])
+    assert result.exit_code == 0, result.output
+    assert "nothing to install" in result.output
+
+
+def test_sudo_prompt_without_a_tty_refuses_instead_of_aborting(monkeypatch) -> None:
+    """Regression: a piped stdin made typer.confirm abort the whole run."""
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
+    assert cli._install_confirm("nmap: sudo apt-get install -y nmap") is False
+
+
+def test_a_piped_install_skips_the_sudo_tool_instead_of_aborting(monkeypatch) -> None:
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(github_release, "installed_version", lambda plan, directory, **kw: None)
+    result = CliRunner().invoke(app, ["install", "nmap", "--no-color"])
+    assert "Aborted" not in result.output
+    assert "skipped" in result.output
+    assert result.exit_code == 6

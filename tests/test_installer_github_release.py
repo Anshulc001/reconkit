@@ -179,6 +179,28 @@ def test_verify_checksums_without_a_checksums_asset_is_an_error(tmp_path: Path) 
             install_release(plan, client=http, bin_dir=tmp_path / "bin", arch="amd64")
 
 
+def test_plan_checksum_opt_out_allows_a_release_without_checksums(tmp_path: Path) -> None:
+    plan = replace(subfinder_plan(), checksums_pattern=None, verify_checksums=False)
+    run, calls = fake_runner()
+    with client() as http:
+        outcome = install_release(
+            plan, client=http, bin_dir=tmp_path / "bin", arch="amd64", runner=run
+        )
+    assert outcome.ok
+    assert (tmp_path / "bin" / "subfinder").exists()
+    assert len(calls) == 1
+
+
+def test_member_override_extracts_a_renamed_binary(tmp_path: Path) -> None:
+    plan = replace(subfinder_plan(), member="subfinder-linux")
+    run, _calls = fake_runner()
+    with client(archive=archive_bytes("subfinder-linux")) as http:
+        install_release(plan, client=http, bin_dir=tmp_path / "bin", arch="amd64", runner=run)
+    installed = tmp_path / "bin" / "subfinder"
+    assert installed.exists()
+    assert installed.read_bytes() == b"#!/bin/sh\n"
+
+
 def test_checksums_fetch_is_size_capped() -> None:
     with (
         client(checksums="a" * 200) as http,

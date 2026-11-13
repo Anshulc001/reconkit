@@ -116,6 +116,41 @@ def test_unparsable_version_is_reported_as_unknown(tmp_path: Path) -> None:
     assert row["beta"].version == "unknown"
 
 
+def test_a_tool_without_an_adapter_is_probed_through_its_install_plan(
+    monkeypatch, tmp_path: Path
+) -> None:
+    resolved = tmp_path / "bin" / "beta"
+    monkeypatch.setattr(doctor, "installed_copy", lambda plan, directory: resolved)
+    monkeypatch.setattr(doctor, "installed_version", lambda plan, directory: "beta 1.2")
+    report = collect_report(
+        config=CONFIG,
+        tools_path=write_tools(tmp_path),
+        env={},
+        scope_path=tmp_path / "scope.yaml",
+        dpkg_status=tmp_path / "dpkg-status",
+    )
+    beta = next(check for check in report.tools if check.name == "beta")
+    assert beta.installed == "yes"
+    assert beta.version == "beta 1.2"
+    assert beta.path == str(resolved)
+
+
+def test_a_failed_plan_probe_is_a_wrong_program_warning(monkeypatch, tmp_path: Path) -> None:
+    resolved = tmp_path / "bin" / "beta"
+    monkeypatch.setattr(doctor, "installed_copy", lambda plan, directory: resolved)
+    monkeypatch.setattr(doctor, "installed_version", lambda plan, directory: None)
+    report = collect_report(
+        config=CONFIG,
+        tools_path=write_tools(tmp_path),
+        env={},
+        scope_path=tmp_path / "scope.yaml",
+        dpkg_status=tmp_path / "dpkg-status",
+    )
+    beta = next(check for check in report.tools if check.name == "beta")
+    assert beta.installed == WRONG_PROGRAM
+    assert any("not the expected program" in warning for warning in report.warnings)
+
+
 def test_system_packages_come_from_the_registry_and_dpkg(tmp_path: Path) -> None:
     dpkg = tmp_path / "dpkg-status"
     dpkg.write_text(

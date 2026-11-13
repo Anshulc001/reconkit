@@ -28,6 +28,8 @@ class InstallPlan:
     asset_pattern: str | None = None
     checksums_pattern: str | None = None
     asset_name: str | None = None
+    member: str | None = None
+    verify_checksums: bool | None = None
     version: str = "latest"
     version_args: tuple[str, ...] = ()
     fallback: InstallPlan | None = None
@@ -43,6 +45,15 @@ def _text(value: Any, field: str, name: str, *, required: bool = False) -> str |
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"tool {name!r} in tools.yaml has an invalid install {field!r}")
     return value.strip()
+
+
+def _flag(value: Any, field: str, name: str) -> bool | None:
+    """An optional install flag: absent means "use the config default"."""
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise ConfigError(f"tool {name!r} in tools.yaml has an invalid install {field!r}")
+    return value
 
 
 def _names(value: Any, field: str, name: str) -> tuple[str, ...]:
@@ -121,6 +132,8 @@ def _plan(name: str, entry: Mapping[str, Any], version: str) -> InstallPlan:
         asset_pattern=_text(install.get("asset_pattern"), "asset_pattern", name),
         checksums_pattern=_text(install.get("checksums_pattern"), "checksums_pattern", name),
         asset_name=_text(install.get("name"), "name", name) or name,
+        member=_text(install.get("member"), "member", name),
+        verify_checksums=_flag(install.get("verify_checksums"), "verify_checksums", name),
         version=version,
         version_args=version_args,
         fallback=fallback,
@@ -168,6 +181,8 @@ def load_plans(
             asset_pattern=plan.asset_pattern,
             checksums_pattern=plan.checksums_pattern,
             asset_name=plan.asset_name,
+            member=plan.member,
+            verify_checksums=plan.verify_checksums,
             version=plan.version,
             version_args=plan.version_args,
             fallback=plan.fallback,

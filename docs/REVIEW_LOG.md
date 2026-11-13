@@ -779,3 +779,64 @@ Per-stage counts: subs 11, dns 5, live 4, ports 6, tech 5, urls 8, vulns 8, shot
   - Failure isolation: `except InstallError` in `install_selected` -> `except ZeroDivisionError` -> `test_exit_code_is_aggregated_over_every_selected_tool` FAILED with the uncaught `InstallError`; restored, byte-identical, PASSED.
 - `KeyboardInterrupt` is now wired for install/update, matching the scan path (`cli.py:222` already caught it and exited 130): `_run_install` catches it around `install_selected`, prints "interrupted; tools already installed are kept" and exits 130, with `test_ctrl_c_during_install_exits_130`.
 - The three live-run fixes did not need a new registry field: `checksums_pattern` already existed (added in 10c); the fix populated it per tool. `git show 0b8e1f7 -- src/reconkit/installer/registry.py` is empty.
+
+### Part 10f - second pass: mutation proofs re-run, real non-dry run, non-TTY abort
+
+Repo state: `104d23e` plus the uncommitted registry/doctor/`tools.yaml` work; gate before this pass `558 passed`.
+Every restore below was checked with `sha256sum`; the digests before and after each cycle are identical
+(`src/reconkit/cli.py c1f9206ec7e83368d64e76cfc508284d6c5f791b0c2ab1963aae2007db07e928`,
+`src/reconkit/installer/github_release.py 91b73b6664a38dd26684f8e2d09a86bc5b7b6ee8cc4c5366a2aebe4f7f19ffad`).
+
+- Mutation 1, Windows refusal (`cli.py:575`): `if sys.platform != "linux":` -> `if False:`. Both
+  `test_cli_install_refuses_non_linux` (`assert 'Use WSL2 Kali' in ''`) and `test_cli_update_refuses_non_linux`
+  (`assert 5 == 1`) FAILED, mutant exit 1; restored, both PASSED, exit 0.
+- Mutation 2, `.env` no-overwrite (`cli.py:553`): the keep branch -> `if False: pass`. The committed test has
+  `.env` but no `.env.example`, so on its own it can only show the lost message, not a clobber: an inline driver
+  with **both** files present printed `ENV AFTER: 'EXAMPLE=1\n'` under the mutation and `ENV AFTER: 'KEEP=1\n'`
+  restored. `test_existing_env_is_kept_and_the_table_still_prints` FAILED
+  (`assert 'keeping existing' in '.env.example not found; nothing copied\n'`), PASSED after restore.
+  A first attempt at this mutation replaced the branch with `if False:` alone and left `elif` without a body, so
+  the suite failed to import (`IndentationError`); that proves nothing and was redone with a valid body.
+- Mutation 3, failure isolation on the CLI path: `install_selected` `except InstallError` -> `except ZeroDivisionError`.
+  `test_exit_code_is_aggregated_over_every_selected_tool` FAILED with the uncaught
+  `InstallError: broken: go install finished but .../broken was not created`; restored, PASSED. The same mutation on
+  `install_plans` FAILED `test_plans_are_isolated_and_exit_codes_follow_the_table` with
+  `InstallError: subfinder: release v2.6.0 has no asset 'subfinder_missing.zip'`. Two identical
+  `except InstallError as exc:` blocks exist; a naive first attempt matched both sites and aborted without writing
+  anything (the test still passed), so the applied mutations target the enclosing function by line index.
+
+- Ctrl-C: already wired before this pass by `104d23e`.
+  `grep -n "KeyboardInterrupt\|130" src/reconkit/cli.py src/reconkit/engine.py` -> `cli.py:222` (scan),
+  `cli.py:606` (`_run_install`), `engine.py:79` (`INTERRUPTED = 130`). `test_ctrl_c_during_install_exits_130` passes;
+  the stale Open-risk bullet is removed. No further change.
+- Real non-dry run, first attempt: `reconkit install --all --no-color < /dev/null` printed
+  `massdns: sudo apt-get install -y massdns (sudo required) [y/N]: Aborted.` and exited 1 **before installing
+  anything**. That is a real defect: without a TTY, `typer.confirm` aborts the whole run, while docs/10 section 3d
+  says a declined prompt skips only that tool. Fix: `_install_confirm` returns `False` when
+  `sys.stdin.isatty()` is false; docs/10 section 3d updated first; new tests
+  `test_sudo_prompt_without_a_tty_refuses_instead_of_aborting` and
+  `test_a_piped_install_skips_the_sudo_tool_instead_of_aborting`.
+- Real non-dry run after the fix: 30 tools `already installed`, `massdns` `skipped` (sudo needs a password),
+  `rustscan` `failed` (`release lookup failed with HTTP 403`), exit 5. Nothing was downloaded or compiled: the
+  managed bin dir was already populated by an earlier real run (files dated 15:31-16:15 on this box).
+- The sudo half is still unrun: `sudo -n true` -> `sudo: a password is required`; `sudo -v < /dev/null` ->
+  `sudo: a terminal is required to read the password`. No NOPASSWD rule exists for `kali`. `massdns`, `amass`,
+  `dig`, `nmap`, `whatweb` and `libpcap-dev` have only ever been exercised as `skipped`.
+- GitHub rate limit, captured rather than retried: `GET /rate_limit` at 21:25 UTC returned core
+  `limit 60, remaining 0, used 60, reset 1794607056 (21:57:36 UTC)`. A direct
+  `GET /repos/projectdiscovery/nuclei/releases/latest` returned `HTTP/2 403` with
+  `{"message":"API rate limit exceeded for 152.59.43.217. ..."}` and `x-ratelimit-remaining: 0`.
+  `update --all` therefore reported all 13 `github_release` tools as `failed` with HTTP 403 and continued (exit 5).
+  docs/10 promised "Suggest setting `GITHUB_TOKEN`; skip remaining" and claimed an optional `GITHUB_TOKEN` raises
+  the limit, but `release_for` sends no token at all; both statements are corrected, and the gap is listed as an
+  Open risk for a decision before Part 11.
+- `update --all` idempotency: **not achieved**. 13 `github_release` tools failed (403), 6 sudo/pipx tools were
+  `skipped`, and all 14 `go_install` tools re-ran `go install` and reported `installed`. Measured that the re-run
+  is not a corrupting reinstall: `sha256sum` of `assetfinder`, `subjs` and `gau` were identical before and after
+  `reconkit update assetfinder` (`d5173bdac4eb2054438adaea2c4c1b7173923224516976bf6df7e40fc6def4e7`).
+  docs/10 section 6 now states the `@latest` behaviour; the reporting gap is an Open risk.
+- `doctor` (exit 0): 8 tools missing (`massdns`, `rustscan`, `httpx_tech`, `dnsreaper`, `crlfuzz`, `dalfox`,
+  `gowitness`), `masscan` warned as "not the expected program", `libpcap-dev missing`, coverage
+  `dns 4/5, ports 4/6, tech 4/5, vulns 5/8, shots 0/1`. The plan-probe fallback added in this pass is what makes
+  the adapter-less tools (`assetfinder`, `findomain`, `chaos`, `gau`, ...) report `yes` instead of `missing`.
+- Gate after the fix: `560 passed`; `ruff check .`, `ruff format --check .`, `mypy src/reconkit` clean.
