@@ -15,7 +15,13 @@ DEFAULT_CONFIG_PATH = Path("config.yaml")
 _SPEED_NAMES = ("slow", "normal", "fast")
 
 
-class PassiveSpeed(BaseModel):
+class _StrictModel(BaseModel):
+    """Reject unknown keys so a typo in config.yaml is an error, not a silent no-op."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PassiveSpeed(_StrictModel):
     max_parallel_tools: int = Field(ge=1)
     tool_delay: tuple[float, float]
     requests_per_second: float = Field(gt=0)
@@ -26,7 +32,7 @@ class PassiveSpeed(BaseModel):
         return self
 
 
-class ActiveSpeed(BaseModel):
+class ActiveSpeed(_StrictModel):
     max_parallel_tools: int = Field(ge=1)
     tool_delay: tuple[float, float]
     host_delay: tuple[float, float]
@@ -43,18 +49,18 @@ class ActiveSpeed(BaseModel):
         return self
 
 
-class SpeedSettings(BaseModel):
+class SpeedSettings(_StrictModel):
     passive: PassiveSpeed
     active: ActiveSpeed
 
 
-class Speeds(BaseModel):
+class Speeds(_StrictModel):
     slow: SpeedSettings
     normal: SpeedSettings
     fast: SpeedSettings
 
 
-class Timeouts(BaseModel):
+class Timeouts(_StrictModel):
     default_phase: int = Field(gt=0)
     per_tool_default: int = Field(gt=0)
     subs: int = Field(gt=0)
@@ -66,24 +72,29 @@ class Timeouts(BaseModel):
     vulns: int = Field(gt=0)
 
 
-class ConfidenceConfig(BaseModel):
+class ConfidenceConfig(_StrictModel):
     high_min_sources: int = Field(ge=1)
     medium_min_sources: int = Field(ge=1)
 
 
-class WildcardCheck(BaseModel):
+class WildcardCheck(_StrictModel):
     enabled: bool
     probes: int = Field(ge=1)
 
 
-class InstallConfig(BaseModel):
+class InstallConfig(_StrictModel):
     dir: str
     verify_checksums: bool
 
 
-class AppConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+class Webhook(_StrictModel):
+    """Phase 3 notification settings; the URL itself comes from the environment."""
 
+    enabled: bool
+    only_on_new: bool
+
+
+class AppConfig(_StrictModel):
     workspace_dir: str
     db_path: str
     default_speed: SpeedName
@@ -94,9 +105,10 @@ class AppConfig(BaseModel):
     wildcard_check: WildcardCheck
     tool_versions: dict[str, str] = Field(default_factory=dict)
     install: InstallConfig
+    webhook: Webhook | None = None
 
 
-class SpeedPreset(BaseModel):
+class SpeedPreset(_StrictModel):
     """Flattened preset handed to the Pacer for one run."""
 
     name: SpeedName

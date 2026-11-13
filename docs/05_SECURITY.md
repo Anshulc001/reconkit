@@ -35,7 +35,7 @@ Implemented in `core/scope.py`. Rules:
 - Targets are validated before use: domain regex (RFC-1123 labels), no leading `-` (prevents option injection), no whitespace or shell metacharacters. When passing a target to a tool, use the tool's explicit flag form (example `-d value`) or `--` separator when supported.
 - Tool names and binary paths come only from `tools.yaml`. Binary lookup order: `~/.reconkit/bin`, then `PATH`.
 - Timeouts on every process; on timeout kill the whole process group.
-- Child environment is minimal: pass only variables a tool needs (its API key names from the registry).
+- Child environment is minimal: pass only variables a tool needs (its API key names from the registry). Adapters must also pass `HOME` explicitly for tools that read config or credentials from it (`subfinder`, `httpx`, `nuclei`); verify each tool's own `--help` output before relying on a variable, never guess.
 - Output size limits per tool to avoid memory exhaustion.
 
 ## 5. Installer Safety (details in docs/10_TOOL_INSTALLER.md)

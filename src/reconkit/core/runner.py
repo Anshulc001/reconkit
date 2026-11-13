@@ -17,6 +17,8 @@ from pydantic import BaseModel
 REDACTED = "***"
 _READ_CHUNK = 8192
 _LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+# Discovered hosts may contain underscores (real subdomains like dev_api do).
+_HOST_LABEL_RE = re.compile(r"^[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?$")
 _FORBIDDEN_CHARS = frozenset(" \t\r\n;|&`$<>(){}[]*?!~'\"\\")
 
 
@@ -51,6 +53,30 @@ def validate_target(target: str) -> str:
     return host
 
 
+def validate_host(host: str) -> str:
+    """Return a normalized discovered host or raise ValueError (docs/05 section 4).
+
+    Looser than validate_target: underscores are allowed and a leading `*.`
+    (added by sources such as crt.sh) is stripped. Option injection, whitespace,
+    shell metacharacters and label/length limits still apply.
+    """
+    if not isinstance(host, str):
+        raise TypeError("host must be a string")
+    name = host.strip().lower().rstrip(".")
+    if name.startswith("*."):
+        name = name[2:]
+    if not name:
+        raise ValueError("host is empty")
+    if len(name) > 253:
+        raise ValueError("host is longer than 253 characters")
+    if any(char.isspace() for char in name) or any(char in _FORBIDDEN_CHARS for char in name):
+        raise ValueError("host contains whitespace or shell metacharacters")
+    for label in name.split("."):
+        if not label or not _HOST_LABEL_RE.match(label):
+            raise ValueError(f"invalid host label: {label!r}")
+    return name
+
+
 def run_exec(
     argv: list[str],
     *,
@@ -61,8 +87,9 @@ def run_exec(
 ) -> ExecResult:
     """Run one program without a shell and return its captured output.
 
-    The child receives only the environment keys passed in `env`. On timeout
-    the whole process group is killed; whatever was already read is kept.
+    The child receives only the environment keys passed in `env`; callers must
+    add `HOME` for tools that read their config from it. On timeout the whole
+    process group is killed; whatever was already read is kept.
     """
     _validate_argv(argv)
     if timeout <= 0:

@@ -117,7 +117,7 @@ class BaseToolAdapter(ABC):
     def parse_output(self, raw: str) -> list[Record]: ...        # pure function, fully unit-testable
 ```
 
-- `RunContext` (above) carries: `target`, `hosts` (already scope-checked), `speed`, `pacer`, `timeout`, `workspace`, `mock` flag, `env` (allowed keys only).
+- `RunContext` (above) carries: `target`, `hosts` (already scope-checked), `speed`, `pacer`, `timeout`, `workspace`, `mock` flag, `env` (allowed keys only). `env` is the entire child environment: the runner passes only these keys, so adapters must add `HOME` explicitly for tools that read config or provider keys from it (confirm per tool from its own `--help`, do not guess).
 - `check_installed()` returns `InstallStatus` (above).
 - Adapter failures use the exceptions in `reconkit/errors.py` defined by `docs/06_CODE_STYLE.md` §6 (`ScopeError`, `ToolNotInstalled`, `ToolFailed`, `ToolTimeout`, `ParseError`, `ConfigError`, `InstallError`); no other exception names. They are converted into `ToolResult(status=...)`, never raised out of a stage.
 - Binary adapters usually implement only `build_command` and `parse_output`; the base `run` handles execution, timeout, output saving and error mapping.

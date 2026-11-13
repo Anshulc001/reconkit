@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from reconkit.core.runner import ExecResult, run_exec, validate_target
+from reconkit.core.runner import ExecResult, run_exec, validate_host, validate_target
 
 FAKEBIN = Path(__file__).parent / "fakebin"
 
@@ -130,3 +130,34 @@ def test_validate_target_accepts(raw: str, expected: str) -> None:
 def test_validate_target_rejects(raw: str) -> None:
     with pytest.raises(ValueError):
         validate_target(raw)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("dev_api.example.com", "dev_api.example.com"),
+        ("*.example.com", "example.com"),
+        ("API.Example.COM.", "api.example.com"),
+        ("_dmarc.example.com", "_dmarc.example.com"),
+    ],
+)
+def test_validate_host_accepts(raw: str, expected: str) -> None:
+    assert validate_host(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "",
+        "-x.example.com",
+        "a b.example.com",
+        "bad-.example.com",
+        "example.com;id",
+        "a.*.example.com",
+        "exa|mple.com",
+        f"{'a' * 64}.example.com",
+    ],
+)
+def test_validate_host_rejects(raw: str) -> None:
+    with pytest.raises(ValueError):
+        validate_host(raw)
