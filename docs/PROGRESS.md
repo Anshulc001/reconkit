@@ -1,5 +1,16 @@
 # PROGRESS
 
+## RESUME HERE
+
+- Status: Part 0: IN PROGRESS (Step 1 committed; baseline not recorded yet)
+- Last code commit: 75eb261 (run `git log --oneline -1`; never trust this line alone)
+- Baseline: 238 passed, 1 skipped (last green at 75eb261)
+- Next action: run Part 0 (baseline evidence, f1 retro entry), then Part 4 in docs/MASTER_PLAN.md
+- Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
+- Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
+- Known open bugs: none
+- Read first: AGENTS.md, this block, last 3 REVIEW_LOG entries, current part in docs/MASTER_PLAN.md
+
 Read this after `AGENTS.md`, before touching code. Update it in every commit.
 
 ## Environment
@@ -49,9 +60,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `adapters/registry.py`: `load_tools(path=)` -> `ToolSpec`, `get_spec`, `get_adapter`, `rate_flags()`; unknown/incomplete tools raise `ConfigError`.
 - `adapters/__init__.py`: `ADAPTERS` maps `crtsh`, `certspotter`, `otx`, `hackertarget` to classes.
 - `adapters/crtsh.py`, `certspotter.py`, `otx.py`, `hackertarget.py`: async parsers and request metadata; keys only from `ctx.env`.
-- `adapters/dnspython.py`: `DnsResult` with a structured `DnsOutcome` (`resolved`, `nxdomain`, `noanswer`, `servfail`, `timeout`, `error`); only NXDOMAIN becomes `DEAD`; JSON fixture parser for `--mock`.
-- `adapters/pyprobe.py`: async HTTP/HTTPS probe, no redirects, `Location` recorded, title capped at `TITLE_LIMIT`, TLS/connect failure -> `UNKNOWN`.
-- `adapters/pyscan.py`: async TCP connect scan, semaphore from `pacer.parallel_limit`, invalid ports/hosts skipped and counted, socket closed before `wait_closed`.
+- `adapters/dnspython.py` / `pyprobe.py` / `pyscan.py`: structured `DnsOutcome` (only NXDOMAIN -> DEAD), no-redirect probe that records `Location`, bounded TCP connect scan. All three validate hosts and count invalid ones.
 - `core/pacing.py`: `Pacer(preset, rate_flags=, rng=, sleep=)` with `before_tool(mode)` (first tool free, `reset()` per stage), `before_host`, `order(items, kind=)`, `parallel_limit`, `tool_rate_args(tool, mode)`, `next_pause_range`; `RateLimiter(rate, clock=, sleep=)` for HTTP adapters. No I/O, no printing, injected clock.
 
 ## Notes for task g
@@ -63,7 +72,6 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `Store` is used only from the event-loop thread (no `asyncio.to_thread`).
 - Per-call commits are slow for thousands of hosts. Add a `transaction()` context manager or a batch insert method when the engine needs it.
 - A discovered host with no probe result keeps the schema default `UNKNOWN`; only the live/DNS stages append `host_status_history` rows.
-- The engine builds one `RateLimiter` per stage (passive requests/second from the preset) and passes it into `RunContext`; adapters never build their own.
 - The engine passes each tool only the env names listed in that tool's `keys` in `tools.yaml`, never the whole environment.
 - When a tool fails with "rate limited" and its keys are unset, the UI should hint at the free key (env name and sign-up URL from `tools.yaml`).
 - `registry.load_tools()` reloads `tools.yaml` on every call, so the engine should load the specs once and reuse them.
@@ -89,7 +97,6 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 
 ## Deviations and assumptions
 
-- `core/pacing.py` holds a temporary `Pacer` stub so `RunContext` type-checks; task d replaces it.
 - `types-PyYAML` added as a dev dependency for strict mypy.
 - Enums use `StrEnum` (ruff UP042) instead of the docs' `(str, Enum)`; same values.
 - `--delay` applies to both passive and active `tool_delay` (not `host_delay`).
@@ -99,10 +106,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Exit codes: Scope 3, ToolNotInstalled 4, ToolFailed/Timeout/Install 5, Parse 1, Config 2.
 - `scope.yaml` defaults: missing `expires` = never expires; missing `max_speed` = `slow`.
 - `check_target` reports `out_of_scope` before expiry (out always wins) and raises `ValueError` on an invalid target.
-- `AGENTS.md` environment corrected from Kali to Ubuntu to match the actual machine.
-- Single Windows-native checkout; the WSL copy was deleted after its commits were pushed and is no longer used.
-- Pushed `0a3010b` without being asked, which breaks AGENTS 0c. Do not push again unless explicitly told.
-- The project moved from Kali to Ubuntu, so any apt package that exists only on Kali must be checked on Ubuntu before install steps are coded.
+- Single Windows-native checkout. Installer work must verify apt package names for both Kali and Ubuntu before coding.
 - `_kill_tree` guard changed from `os.name` to `sys.platform` for Windows mypy; the kill test is skipped on Windows, so that path is unverified until it runs on Linux.
 - `.gitattributes` forces LF for `*.sh`, `.githooks/*`, `*.py`, `*.md`, `*.yaml`, `*.toml`; existing files were not renormalized.
 - `Pacer.order()` takes an optional `kind="host"|"port"` because config has separate shuffle flags. Scoped S311 ignores in `pyproject.toml` cover the pacer's jitter RNG and the seeded test RNG.
@@ -119,9 +123,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `urls` is created in task e per the review list even though docs/04 labels it Phase 3; `findings` and `monitor_changes` stay deferred.
 - The v1 migration was edited in place to add `idx_subdomain_sources_run`, `idx_port_sources_run` and `idx_hsh_run`; no real `recon.db` exists yet, so no v2 is needed. docs/04 section 3 lists the indexes.
 - docs/04 section 6 now states that diffs only compare runs of the same kind (discovery with discovery, ports with ports).
-- `RunContext` gained `limiter: RateLimiter`; docs/09 was changed first because the contract referred to "the pacer's rate limiter" that no object exposed. The engine must build one limiter per stage and pass it in.
-- `RunContext.ports` was added in docs/09 before code: docs already defined `hosts`, but port scanners had no input list. `pyscan` orders it with `pacer.order(..., kind="port")`, per docs/03 section 7.
-- `HostStatusRecord.location` and the `host_status_history.location` column were added in docs/09/docs/04 first so `pyprobe` can record a redirect target without following it; the v1 migration was edited in place (no real DB).
+- `RunContext` now carries `limiter` and `ports`, and `HostStatusRecord` carries `location`; all were documented in docs/09 before their code landed. The engine builds one limiter per stage.
 - `dnspython` resolves A/AAAA/CNAME only: the record models have no NS/MX/TXT fields, and adding them would change the database schema. `pyscan` sends no payload and reads no banner (the banner read is optional).
 - `HttpAdapter` is documented in docs/09 section 3. Domain filtering happens in `run()` because the contract's `parse_output(raw)` receives no target; `parse_output` normalizes and validates only.
 - Three fixtures are synthetic, not captured from the wire: `tests/fixtures/dnspython/example.com.synthetic.json`, `tests/fixtures/pyprobe/example.com.synthetic.json`, `tests/fixtures/pyscan/example.com.synthetic.json`. They were written to the documented shapes; no adapter test touches the network.

@@ -1,3 +1,11 @@
+## Session start (do this every time, no questions needed)
+
+1. Read the RESUME block at the top of docs/PROGRESS.md, the last 3 entries of docs/REVIEW_LOG.md, and the part you are on in docs/MASTER_PLAN.md.
+2. Run `git status --short`, `git log --oneline -10`, and scripts/check.ps1. Record the result in REVIEW_LOG.
+3. If the tree is dirty, identify which part the changes belong to and finish or complete that part; never discard work.
+4. If RESUME and git disagree, trust git, fix RESUME, log the discrepancy, and continue.
+5. Continue from the RESUME 'Next action' following docs/MASTER_PLAN.md. Never push. Never redo finished parts. When all parts are done, print the final report and stop.
+
 # AGENTS.md - Instructions for AI coding agents
 
 Read this file first, every session. It points to the documents in `docs/`.
@@ -50,6 +58,8 @@ Before any significant change, read the relevant documents:
 | `docs/08_UX_FLOWS.md` | user journeys and expected terminal output |
 | `docs/09_TOOL_CONTRACTS.md` | adapters, schemas, stage registry, confidence rules |
 | `docs/10_TOOL_INSTALLER.md` | install, update, doctor |
+| `docs/MASTER_PLAN.md` | the part order, autonomy rules and self-review loop |
+| `docs/REVIEW_LOG.md` | evidence for every part: decisions, tests, mutations, check output |
 | `tools.yaml` | the registry of every tool (the only list of allowed tools) |
 | `config.yaml` | speeds, timeouts, thresholds |
 

@@ -1,5 +1,37 @@
 # Review log
 
+Per-part evidence log for this repository. Each entry follows the template in
+`docs/MASTER_PLAN.md`. Hashes are filled by the next commit, because a commit
+cannot contain its own hash.
+
+## Commit map
+
+- Step 1 (`docs: add master plan, review log, check script, resume block`): hash filled by the Part 0 commit
+- Part 3-AUDIT (`fix: close the phase-2 review gaps in store, keys and adapters`): `75eb261`
+- Entries A, B and C below are the Part 3-AUDIT evidence. That audit was
+  committed before Step 1 and Part 0 because the audit instruction arrived
+  first; the ordering inversion is logged in the Step 1 entry and in Part 0.
+
+## Step 1: save the plan, check script, resume block
+
+- Docs read / goal: `AGENTS.md`, `docs/PROGRESS.md`, the pasted master plan. Make the plan permanent and give every session one read-only gate and one resume block.
+- Decisions and assumptions: `docs/REVIEW_LOG.md` already existed from the Part 3-AUDIT; it was kept and extended rather than recreated. `scripts/check.ps1` is new because `scripts/` had only `bootstrap.sh`, not a check script. The script uses `.venv\Scripts\python.exe` and falls back to `python` only when the venv is absent.
+- Decisions for user review (things the user may want to overrule): the fallback to bare `python` will run the checks on 3.10 and fail; that is deliberate so a missing venv is visible rather than silently skipped.
+- Docs changed first: created `docs/MASTER_PLAN.md` (verbatim from AUTONOMY RULES through Part 11), prepended the session-start block to `AGENTS.md`, added both new docs to the AGENTS docs map, added the RESUME block to `docs/PROGRESS.md`, and trimmed PROGRESS history to stay under the 150-line cap.
+- Deviations: Part 3-AUDIT was completed and committed as `75eb261` before Step 1/Part 0, contrary to the requested order. No work was discarded; Part 0 records the baseline normally.
+- Files touched: `docs/MASTER_PLAN.md` (new), `docs/REVIEW_LOG.md`, `docs/PROGRESS.md`, `AGENTS.md`, `scripts/check.ps1` (new).
+- Requirement -> test table: no product behavior in Step 1. Gate evidence: the failure path was proved with a temporary `tests/test_zz_gate_probe.py` containing `assert False`; `scripts/check.ps1` printed `pytest=FAIL`, `ruff-check=FAIL`, `CHECKS FAILED` and exited 1. The file was deleted and the same script then printed `ALL CHECKS PASS` and exited 0.
+- Self-review findings (S2 lists, S3 raw output): no `src/` changes, so the S2 lists are empty. `check.ps1` runs only the four checks, writes nothing, and sets `$ErrorActionPreference = "Stop"`. Raw failing gate (tail): `pytest=FAIL`, `ruff-check=FAIL`, `ruff-format=PASS`, `mypy=PASS`, `CHECKS FAILED`, script exit 1.
+- Bugs found: none.
+- Mutation proofs: not applicable (no behavior under test); the gate's FAIL branch was exercised as above.
+- Raw check output (last lines of scripts/check.ps1): `238 passed, 1 skipped`, `pytest=PASS`, `ruff-check=PASS`, `ruff-format=PASS`, `mypy=PASS`, `ALL CHECKS PASS`, exit 0.
+- Not verified: `check.ps1` on a machine without PowerShell or without the venv.
+- Next part must know: Part 0 records the baseline and the f1 retro entry; the audit commit already exists, so do not redo it.
+
+---
+
+## Part 3-AUDIT: phase-2 commit review
+
 One entry per phase-2 commit reviewed in the Part 3 audit. The loop used for each
 entry is S1 diff integrity, S2 contract/correctness, S3 tests and edge cases,
 S4 docs, S5 security and hard rules, S6 mutation proof, S7 gate.
