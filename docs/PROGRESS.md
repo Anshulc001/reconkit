@@ -2,10 +2,10 @@
 
 ## RESUME HERE
 
-- Status: Part 6b done; Part 7 (`ui.py`) next
-- Last code commit: run `git log --oneline -1`; Part 6b is the newest `feat:` commit
-- Baseline: 374 passed, 2 skipped; all four checks PASS (twice)
-- Next action: implement Part 7 in `docs/MASTER_PLAN.md`: Rich tables/progress on stderr, one JSON document on stdout, silent/no-color modes, markup escaping and the key hint
+- Status: Part 7 done; Part 8 (`cli.py`) next
+- Last code commit: run `git log --oneline -1`; Part 7 is the newest `feat:` commit
+- Baseline: 395 passed, 2 skipped; all four checks PASS (twice)
+- Next action: implement Part 8 in `docs/MASTER_PLAN.md`: CLI commands/flags, exit-code mapping, and `ui.render` wiring
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: none
@@ -42,7 +42,7 @@ mypy src/reconkit
 | f2 | done | 80ddd93 | pure-Python adapters: `dnspython`, `pyprobe`, `pyscan` |
 | f3 | done | ee06075 | remaining phase-2 tools: binary adapters `subfinder`, `assetfinder`, `httpx`, `naabu` |
 | g | done | 36cd3a4, 6b hash in Part 7 | wildcard, workspace, engine, confidence, host states, resume, exit codes done |
-| h | pending | - | `ui.py` + `cli.py`: all commands, `--mock`, `--json` |
+| h | pending | Part 7 hash in Part 8 | `ui.py` done; `cli.py` remains |
 | i | pending | - | `installer/` + `doctor.py` |
 | j | pending | - | docs sync, README, final check |
 
@@ -122,6 +122,8 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Part 5 uses an injected, limiter-bound DNS probe and a required injected `rng` (no S311 default); `Workspace` rejects Windows-reserved target labels and chmods only its own dirs; `Workspace.write` is synchronous (`fsync` + `os.replace`), so the engine must offload large outputs.
 - `src/reconkit/adapters/dns_python.py` is dead code: a 59-byte tracked stub created by `f4d81e2` from the docs/03 name; the real adapter is `dnspython.py` (`80ddd93`, updated in `75eb261`). Nothing imports it, but `docs/03_ARCHITECTURE.md:70` still names it. Kept pending the docs/03 fix (Part 11); do not use it.
 - Part 6b adds `--resume` (docs/02); resume is stage-level and reruns an interrupted stage because asset writes are batched at stage end. State timestamps use the injected `now` source (default `store.utc_now()`); `Store.scan_runs()`/`subdomains()` are the resume reads. CNAME warnings stay in `ScanSummary.warnings` because the schema has no CNAME column. Double-confirmation is intentional: an established `ALIVE`/`DNS_ONLY` host has prior evidence, so one NXDOMAIN only means `SHUT_DOWN`; a second consecutive NXDOMAIN is required for `DEAD`. A never-probed host has no prior service to confirm, so its first NXDOMAIN is `DEAD`. This avoids one transient resolver failure erasing an established host while still recording genuine new non-existence.
+- Part 7: docs/09 said `--json` was JSONL, but the Part 7 requirement/master plan says ONE JSON document; docs/02 now defines that shape, docs/09 was aligned, and `ui.write_json` emits `type:summary` with `hosts`/`stages`/`summary`. `HostRow` is a UI input type populated by the CLI; `ui.py` does not compute confidence/state.
+- Part 7: `ScanSummary` does not carry skipped tools, so the Tools table renders executed `ToolResult`s (ok/failed/timeout) only; skipped adapter rows remain in `tool_runs` and are a Part 8 wiring concern. The zero-tool empty state uses the explicit "skipped or excluded" line instead of docs/02's 3-tool example.
 
 ## Open risks
 
@@ -139,11 +141,8 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Part 6a: one `scan_runs` row per executed stage; `ScanOptions.speed` is `SpeedName`; `Store.transaction()` uses SQLite's implicit transaction (explicit `BEGIN` failed inside one); `check_installed()` runs via `asyncio.to_thread`; workspace/scope reads stay synchronous and short; `FindingRecord` is not persisted because the findings table is deferred.
 - Wildcard detection is still not wired into the engine: `is_wildcard` stays 0 and no wildcard-unknown warning is emitted.
 - Resume is stage-level; tools completed inside a crashed stage are rerun. CNAME dangling warnings are not persisted, and real NXDOMAIN/CNAME behavior has not been exercised.
+- Part 7 rendering is tested with `StringIO`/fake TTY only; real terminal widths and the CLI's `HostRow` source are unverified until Part 8.
 
 ## Fix backlog
 
 1. **Persist dangling-CNAME evidence.** `host_status_history` has no CNAME/dangling column, so a takeover-relevant `SHUT_DOWN` warning exists only in `ScanSummary.warnings` and is lost on the next run. Add persistence when the schema is next migrated (Part 9).
-
-## Next task
-
-**Part 7: `ui.py`.** Follow docs/02: tables/progress on stderr, one valid JSON document on stdout, silent/no-color modes, Rich markup escaping, and the rate-limited-without-key hint. Do not import store/scope/adapters into UI functions.

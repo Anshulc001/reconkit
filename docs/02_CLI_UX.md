@@ -65,7 +65,7 @@
 | `--mock` | Use fixtures instead of real tools/network |
 | `--resume` | Continue the latest unfinished run for the target; completed stages are not repeated |
 | `--no-keys` | Force free mode: ignore API keys from `.env` (task h; policy in docs/05 §6.1) |
-| `--json` | JSON (JSONL for streams) on stdout, no colors or progress |
+| `--json` | One JSON document on stdout, no colors or progress |
 | `--no-color`, `-v/--verbose`, `-q/--quiet` | Output control |
 | `--config PATH`, `--scope PATH`, `--db PATH` | Override file locations |
 
@@ -99,6 +99,16 @@ new.example.com      [NEW]      -         certspotter, hackertarget         MEDI
 
 - A final summary line: counts per state, new items, tools skipped or failed.
 - A "Tools" panel lists each adapter: `ok`, `skipped (not installed)`, `failed (reason)`, `timeout`.
+
+### JSON (`--json`)
+
+One JSON document is written to stdout; tables and progress stay on stderr. The fixed shape is:
+
+```json
+{"type":"summary","target":"example.com","exit_code":0,"resumed":false,"scope_denied":false,"warnings":[],"hosts":[{"fqdn":"api.example.com","state":"ALIVE","confidence":"HIGH","sources":["crtsh","subfinder","otx"],"status_code":200,"ports":[80,443]}],"stages":[{"stage":"subs","run_id":1,"resumed":false,"dropped_hosts":[],"results":[]}],"summary":{"hosts":1,"alive":1,"dns_only":0,"shut_down":0,"dead":0,"unknown":0,"tools_ok":1,"tools_failed":0,"tools_skipped":0,"tools_timeout":0}}
+```
+
+The `hosts` objects always carry `state`, `confidence` and `sources`; the top-level `summary` object carries the counts. `ToolResult` objects under `stages[].results` use the schemas in docs/09.
 
 ### Colors (Rich theme)
 

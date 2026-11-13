@@ -145,6 +145,12 @@ workspaces/<domain>/
 - **Wildcard API:** `WildcardDetector(probe=..., rng=..., probes=...)` is built per run. `probe` is the DNS adapter's `resolve_host` bound to the run context, so probes reuse that resolver and limiter; `rng` is injected; `probes` comes from `wildcard_check.probes`. `await detect(target)` returns `WildcardResult`, and `result.matches(ips=..., cnames=...)` decides `is_wildcard`.
 - Exact rules: docs/09_TOOL_CONTRACTS.md.
 
+## 8b. UI API (`ui.py`)
+
+- `ui.render(summary, hosts, *, json_output=False, silent=False, no_color=False, stdout=None, stderr=None, console=None) -> int` writes the human tables/progress to stderr or the single JSON document to stdout, then returns `int(summary.exit_code)`.
+- `HostRow` is the plain input for the host table/JSON: `fqdn`, `state`, `confidence`, `sources`, `status_code`, `ports`. The engine or CLI supplies these precomputed values; `ui.py` never computes confidence or state.
+- `ui.py` imports only Rich, the standard library and shared output types; it never imports `core.store`, `core.scope`, adapters or `cli.py`.
+
 ## 9. Dependency Rules
 
 - CLI -> Engine -> (Adapters, Core). Never the reverse.

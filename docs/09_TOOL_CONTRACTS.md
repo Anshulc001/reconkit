@@ -180,7 +180,7 @@ Stored with source `smap` and confidence LOW until an active scan confirms; neve
 
 ## 6. JSON Output
 
-`--json` prints JSONL, one object per record, fixed keys from the schemas above plus `confidence`, `sources`, `state`. The final line is a summary object `{"type":"summary", ...}` with counts and tool statuses.
+`--json` writes ONE JSON document to stdout (shape in docs/02 section 5), not JSONL. Each host object carries `confidence`, `sources` and `state`; the top-level `summary` object carries counts and tool statuses. Human tables and progress stay on stderr.
 
 ## 7. Adding a New Tool (checklist)
 

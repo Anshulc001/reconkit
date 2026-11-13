@@ -53,6 +53,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 - Part 5 review (`docs: record the Part 5 review`): `7eb6b3f`
 - Part 6a (`feat: add the staged engine and safety gates`): `36cd3a4`
 - Part 6b (`feat: add confidence, host states, resume and exit codes`): hash filled by the Part 7 commit
+- Part 7 (`feat: add UI rendering, JSON and color safety`): hash filled by the Part 8 commit
 - Entries A, B and C below are the Part 3-AUDIT evidence. That audit was
   committed before Step 1 and Part 0 because the audit instruction arrived
   first; the ordering inversion is logged in the Step 1 entry and in Part 0.
@@ -546,3 +547,46 @@ Per-stage counts: subs 11, dns 5, live 4, ports 6, tech 5, urls 8, vulns 8, shot
 - Raw targeted run: 4 selected tests passed (`scope_denied_with_passive_success`, `scope_violation`, `regression_dns_servfail`, `regression_dns_timeout`).
 - Raw gate twice after the tests: `376 passed, 2 skipped`; `pytest=PASS`, `ruff-check=PASS`, `ruff-format=PASS`, `mypy=PASS`, `ALL CHECKS PASS`, exit 0 (both runs). PROGRESS is 149 lines.
 - Pitfalls added this follow-up: none.
+
+## Part 7: UI tables, JSON and color safety
+
+- Docs read / goal: `docs/02_CLI_UX.md` output, colors, progress and exit codes; `docs/03_ARCHITECTURE.md` dependency rules and Engine API; `docs/09_TOOL_CONTRACTS.md` JSON section; `docs/MASTER_PLAN.md` Part 7. Implement `ui.py`: Rich tables/progress on stderr, one valid JSON document on stdout, silent/no-color modes, markup escaping, and the free-key rate-limit hint. Render precomputed output only; no store/scope/adapters imports and no confidence/state logic.
+- Decisions and assumptions: `HostRow` is the plain UI input (`fqdn`, `state`, `confidence`, `sources`, `status_code`, `ports`); the CLI will populate it. `ui.render(...)` returns `int(summary.exit_code)` and writes JSON to stdout or tables to stderr. `write_json` is separate so tests can parse the document directly. Tables use `Text` plus `Console(markup=False)` so hostnames such as `[red]x[/]` stay literal. `NO_COLOR` and non-TTY streams force `color_system=None`. Empty results use the docs/02 doctor hint; zero tools get a clear skipped/excluded variant.
+- Decisions for user review (things the user may want to overrule): docs/09 previously specified JSONL while the Part 7 requirement/master plan specified ONE JSON document; I chose the one-document contract and updated both docs. `ScanSummary` has no skipped-tool list, so skipped adapters are not in the Tools table yet; this needs Part 8 wiring or an engine summary change. `HostRow` lives in `ui.py` rather than `engine.py`; the CLI must map stored rows to it.
+- Docs changed first: `docs/02` now states one JSON document and includes the fixed shape; `docs/09` section 6 was aligned to that shape; `docs/03` gained section 8b (`ui.render`, `HostRow`, layering).
+- Deviations: the JSON contract change above; skipped tools are absent from `ScanSummary`; `HostRow` is a UI-local input type; the empty zero-tool message is a wording choice not in docs/02.
+- Files touched: `src/reconkit/ui.py`, `tests/test_ui.py`, `docs/02_CLI_UX.md`, `docs/03_ARCHITECTURE.md`, `docs/09_TOOL_CONTRACTS.md`, `docs/PROGRESS.md`, `docs/REVIEW_LOG.md`.
+- Requirement -> test table:
+  - one valid JSON document and documented keys -> `test_json_output_is_one_valid_document_with_documented_schema`
+  - confidence/state/sources per host -> `test_json_hosts_carry_confidence_state_and_sources`
+  - silent suppresses all stderr, returns exit code -> `test_silent_suppresses_tables_but_returns_the_exit_code`
+  - silent non-TTY does not crash/hang -> `test_silent_mode_in_a_non_tty_context_does_not_crash_or_hang`
+  - silent plus JSON still usable -> `test_silent_json_still_writes_one_usable_document`
+  - non-TTY has no ANSI -> `test_non_tty_output_has_no_ansi_codes`
+  - `NO_COLOR` has no ANSI -> `test_no_color_env_suppresses_ansi_on_a_tty`
+  - redaction survives rendering -> `test_redacted_engine_values_stay_redacted_through_rendering`
+  - every state label distinct -> `test_every_state_has_a_distinct_label`
+  - every confidence label distinct -> `test_every_confidence_has_a_distinct_label`
+  - labels visible in tables -> `test_all_state_and_confidence_labels_render_in_tables`
+  - zero hosts -> `test_zero_hosts_renders_the_documented_empty_state`
+  - zero tools -> `test_stage_with_zero_tools_renders_a_clear_empty_state`
+  - one and many warnings -> `test_one_and_many_warnings_are_all_rendered`
+  - Rich markup injection -> `test_rich_markup_in_host_data_is_printed_literally`
+  - unicode/wide hostname -> `test_unicode_and_wide_hostnames_stay_intact_in_json`
+  - hint only without key -> `test_rate_limit_hint_is_shown_only_when_the_key_is_unset`
+  - progress disabled by silent/JSON -> `test_progress_is_suppressed_for_silent_and_json_modes`
+  - no forbidden imports -> `test_ui_does_not_import_store_scope_adapters_or_cli`
+- Self-review findings (S2 lists, S3 raw output):
+  - Broad except: none added; `ui.py` converts no exceptions and does not catch rendering/serialization errors.
+  - External input: `HostRow` fields and `ScanSummary`/`ToolResult` are Pydantic or typed; JSON serialization uses `model_dump(mode="json")`; `HostRow` supplies no raw objects. No filesystem paths or environment values are rendered except `NO_COLOR` presence.
+  - Secrets: UI trusts the engine's redaction; the test feeds already-redacted `***` values and confirms no raw secret or object repr is re-expanded. `summary.warnings` and `ToolResult.error` are rendered as `Text`, never `str(raw)` of an adapter object.
+  - Blocking call in async: none; all UI functions are synchronous and only write to streams.
+  - Escaping exceptions: `json.dumps`/`model_dump` would raise on an unserializable type, but engine results are typed and serializable; no fallback `default=str` (which could bypass redaction) was added.
+  - Unfinished path: CLI wiring, skipped-tool presentation, real terminal rendering and export formats remain for Part 8/11.
+  - S3 raw: `Select-String` shows `ui.py` imports only stdlib, Rich, `reconkit.engine.ScanSummary` and `reconkit.models` (no store/scope/adapters/cli); `console.print` is the only terminal output, no `print(` or `subprocess`/`sqlite3`.
+- Bugs found: no product bug. Two test expectations were corrected: the label test used a hard-coded source count that did not match the row (`HIGH (2)` vs `HIGH (3)`), and the 120-character unicode host is wrapped by Rich at 80 columns, so only its prefix is contiguous. The renderer was already correct; no PIT row was added.
+- Mutation proofs: JSON prefix `noise` -> `test_json_output_is_one_valid_document_with_documented_schema` failed with `JSONDecodeError: Expecting value`; removing `Text(...)` and enabling markup -> `test_rich_markup_in_host_data_is_printed_literally` failed because `[red]x[/]` was consumed; disabling the silent early return -> `test_silent_suppresses_tables_but_returns_the_exit_code` failed because stderr contained the tables. All files restored; targeted tests passed after each restore.
+- Raw check output (twice): `395 passed, 2 skipped`; `pytest=PASS`, `ruff-check=PASS`, `ruff-format=PASS`, `mypy=PASS` (both runs after the final docs edits).
+- Not verified: real terminal width/color behavior, CLI population of `HostRow`, skipped-tool display, `--json` in an actual Typer invocation (Part 8), and Windows console Unicode rendering.
+- Pitfalls added this part: none.
+- Next part must know: call `ui.render(summary, host_rows, json_output=..., silent=..., no_color=...)` and use its return value as the CLI exit code; `HostRow` is precomputed; JSON is one document, not JSONL; `render_rate_limit_hint` takes `key_set` and suppresses the hint when true.
