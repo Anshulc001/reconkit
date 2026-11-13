@@ -23,6 +23,7 @@ TIMEOUT_S = 30.0
 BIN_DIR_MODE = 0o700
 BINARY_MODE = 0o755
 VERSION_TIMEOUT_S = 10.0
+CHECKSUMS_LIMIT = 64 * 1024
 ALLOWED_HOSTS = frozenset(
     {
         "api.github.com",
@@ -178,14 +179,31 @@ def download(
     return dest
 
 
-def _fetch_text(url: str, *, client: httpx.Client, timeout: float = TIMEOUT_S) -> str:
+def _fetch_text(
+    url: str,
+    *,
+    client: httpx.Client,
+    max_bytes: int = CHECKSUMS_LIMIT,
+    timeout: float = TIMEOUT_S,
+) -> str:
+    """Fetch a small text file (checksums), refusing anything over the cap."""
     checked_https(url, what="checksums")
-    response = client.get(
-        url, headers={"User-Agent": USER_AGENT}, timeout=timeout, follow_redirects=True
-    )
-    if response.status_code != 200:
-        raise InstallError(f"checksums download failed with HTTP {response.status_code}: {url}")
-    return response.text
+    with client.stream(
+        "GET", url, headers={"User-Agent": USER_AGENT}, timeout=timeout, follow_redirects=True
+    ) as response:
+        if response.status_code != 200:
+            raise InstallError(f"checksums download failed with HTTP {response.status_code}: {url}")
+        chunks: list[bytes] = []
+        total = 0
+        for chunk in response.iter_bytes():
+            total += len(chunk)
+            if total > max_bytes:
+                raise InstallError(f"checksums file exceeds {max_bytes} bytes: {url}")
+            chunks.append(chunk)
+    try:
+        return b"".join(chunks).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise InstallError(f"checksums file is not UTF-8: {url}") from exc
 
 
 def _verify_version(destination: Path, plan: InstallPlan, runner: Runner, timeout: float) -> None:

@@ -16,6 +16,7 @@ from reconkit.core.runner import ExecResult
 from reconkit.errors import InstallError
 from reconkit.installer.github_release import (
     InstallOutcome,
+    _fetch_text,
     download,
     exit_code,
     host_arch,
@@ -176,6 +177,14 @@ def test_verify_checksums_without_a_checksums_asset_is_an_error(tmp_path: Path) 
     with client() as http:
         with pytest.raises(InstallError, match="no checksums asset is published"):
             install_release(plan, client=http, bin_dir=tmp_path / "bin", arch="amd64")
+
+
+def test_checksums_fetch_is_size_capped() -> None:
+    with (
+        client(checksums="a" * 200) as http,
+        pytest.raises(InstallError, match="checksums file exceeds"),
+    ):
+        _fetch_text(CHECKSUMS_URL, client=http, max_bytes=64)
 
 
 def test_http_url_is_refused() -> None:

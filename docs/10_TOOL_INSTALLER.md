@@ -65,8 +65,8 @@ For `github_release`:
 4. After install run `version_cmd`; if it fails, remove the binary and report `failed`.
 
 Other rules:
-- HTTPS only. `github_release` downloads come from `api.github.com`, `github.com` and the GitHub release asset hosts. `go_install` uses the Go module proxy and `pipx` uses PyPI; no other host is contacted.
-- Download to a temp dir with a size limit: `ARCHIVE_LIMIT` is 200 MiB for the archive and `MEMBER_LIMIT` is 100 MiB for one extracted member. Extract only the expected binary name (`<binary>` or `<binary>.exe`); refuse archive paths that are absolute or contain `..` (zip-slip). A zip or tar.gz containing no such member is a failed install, never a silent success.
+- HTTPS only. `github_release` contacts exactly four hosts: `api.github.com` (release lookup), `github.com` (release download URLs), `objects.githubusercontent.com` and `release-assets.githubusercontent.com` (the hosts GitHub redirects release assets to). Any other host, or plain HTTP, is a failed install; the allowlist is `ALLOWED_HOSTS` in `installer/github_release.py`. `go_install` uses the Go module proxy and `pipx` uses PyPI; no other host is contacted.
+- Download to a temp dir with a size limit: `ARCHIVE_LIMIT` is 200 MiB for the archive and `MEMBER_LIMIT` is 100 MiB for one extracted member, and `CHECKSUMS_LIMIT` is 64 KiB for the checksums file. Extract only the expected binary name (`<binary>` or `<binary>.exe`); refuse archive paths that are absolute or contain `..` (zip-slip). A zip or tar.gz containing no such member is a failed install, never a silent success.
 - Files get mode `0755`. The directory `~/.reconkit/bin` is `0700`.
 - No `curl | bash`, no running scripts from downloads.
 - Optional `GITHUB_TOKEN` is used only to raise API rate limits and is never logged.
