@@ -1,6 +1,6 @@
 ## Session start (do this every time, no questions needed)
 
-1. Read the RESUME block at the top of docs/PROGRESS.md, the last 3 entries of docs/REVIEW_LOG.md, and the part you are on in docs/MASTER_PLAN.md.
+1. Read the RESUME block at the top of docs/PROGRESS.md, the last 3 entries of docs/REVIEW_LOG.md, and the part you are on in docs/MASTER_PLAN.md. Read the Known pitfalls table at the top of docs/REVIEW_LOG.md before writing code, and check any new code against it.
 2. Run `git status --short`, `git log --oneline -10`, and scripts/check.ps1. Record the result in REVIEW_LOG.
 3. If the tree is dirty, identify which part the changes belong to and finish or complete that part; never discard work.
 4. If RESUME and git disagree, trust git, fix RESUME, log the discrepancy, and continue.

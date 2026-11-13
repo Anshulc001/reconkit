@@ -115,6 +115,7 @@ def test_next_pause_range() -> None:
 
 
 def test_tool_rate_args_slow_passive_vs_active() -> None:
+    """Regression: PIT-02 passive tools use the passive rate; active tools use the active rate."""
     pacer, _ = make_pacer("slow", rate_flags={"subfinder": "-rl"})
     assert pacer.tool_rate_args("subfinder", "passive") == ["-rl", "1"]
     assert pacer.tool_rate_args("subfinder", "active") == ["-rl", "10"]

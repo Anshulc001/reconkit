@@ -78,6 +78,7 @@ async def test_wildcard_none_when_every_probe_is_nxdomain() -> None:
     [DnsOutcome.TIMEOUT, DnsOutcome.SERVFAIL, DnsOutcome.NOANSWER, DnsOutcome.ERROR],
 )
 async def test_wildcard_unknown_is_not_none(outcome: DnsOutcome) -> None:
+    """Regression: PIT-21 timeout/SERVFAIL/NOANSWER/ERROR are UNKNOWN, never NONE."""
     probe = FakeProbe(*(DnsResult(outcome) for _ in range(3)))
     result = await make_detector(probe).detect("example.com")
     assert result.status is WildcardStatus.UNKNOWN
@@ -113,6 +114,7 @@ async def test_wildcard_unexpected_probe_exception_is_unknown() -> None:
 
 
 async def test_wildcard_labels_are_unique_valid_and_under_the_target() -> None:
+    """Regression: PIT-13 the RNG is injected; labels are deterministic and valid."""
     probe = FakeProbe(nxdomain(), nxdomain(), nxdomain())
     result = await make_detector(probe).detect("Example.COM.")
     assert result.status is WildcardStatus.NONE
@@ -184,6 +186,7 @@ def test_workspace_permissions_are_private(tmp_path: Path) -> None:
     ],
 )
 def test_workspace_rejects_unsafe_filenames(tmp_path: Path, filename: str) -> None:
+    """Regression: PIT-11 traversal, absolute/UNC paths and device names are rejected."""
     workspace = Workspace.create(tmp_path / "workspaces", "example.com")
     with pytest.raises(ValueError):
         workspace.write("subs", filename, "data")
@@ -202,11 +205,13 @@ def test_workspace_rejects_unknown_stages(tmp_path: Path, stage: str) -> None:
     ["example", "../evil.example.com", "http://example.com", "con.example.com", ""],
 )
 def test_workspace_rejects_invalid_targets(tmp_path: Path, target: str) -> None:
+    """Regression: PIT-24 Windows-reserved target labels are rejected."""
     with pytest.raises(ValueError):
         Workspace.create(tmp_path / "workspaces", target)
 
 
 def test_workspace_redacts_two_secrets_and_a_bearer_token(tmp_path: Path) -> None:
+    """Regression: PIT-22 output is redacted before the atomic write."""
     secrets = ("sk-live-abc123", "ghp_secretvalue")
     workspace = Workspace.create(tmp_path / "workspaces", "example.com", secrets=secrets)
     path = workspace.write(

@@ -309,6 +309,8 @@ async def test_chunked_body_without_content_length_is_capped() -> None:
 
 
 async def test_lying_small_content_length_is_still_capped() -> None:
+    """Regression: PIT-20 a lying small Content-Length cannot bypass the byte cap."""
+
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,

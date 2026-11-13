@@ -2,8 +2,8 @@
 
 ## RESUME HERE
 
-- Status: Part 5 code done (uncommitted review); regression/pitfalls addendum in progress
-- Last code commit: `ee06075`; run `git log --oneline -1` because docs commits may be newer
+- Status: Part 5 code in `d9cf6c7` (wip); regression/pitfalls addendum done; Part 5 review/commit next
+- Last code commit: `d9cf6c7`; run `git log --oneline -1` because docs commits may be newer
 - Baseline: 342 passed, 2 skipped; all four checks PASS (twice)
 - Next action: apply the REGRESSION AND PITFALLS addendum, then finish the Part 5 REVIEW_LOG entry
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
@@ -118,6 +118,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `pyscan` closes the connection before awaiting `wait_closed()`, so cancelling a stage cannot leak an open socket; the concurrency test pins the semaphore to the pacer limit.
 - `subfinder` now carries four `keys` and the adapter writes them to a temporary `provider-config.yaml` (0600) passed with `-pc`, deleted in `finally`. This replaces the audit's earlier "no env bridge" decision because Part 4 requires the bridge.
 - `chmod 0600` on the subfinder temp file is best-effort on Windows; the file is still deleted, and the open risk is recorded in REVIEW_LOG Part 4.
+- Known pitfalls table + regression rules added by user addendum; `scripts/check.ps1` now warns on a `fix:` commit without a test change, and existing guards carry `Regression:` docstrings (no behavior change).
 - Review entries for the phase-2 commits live in `docs/REVIEW_LOG.md`.
 
 ## Open risks

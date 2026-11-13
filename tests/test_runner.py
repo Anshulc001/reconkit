@@ -46,6 +46,7 @@ def test_non_zero_exit() -> None:
 
 
 def test_timeout_keeps_partial_output() -> None:
+    """Regression: PIT-05 assert a lower bound only; no tight upper bound on Windows."""
     result = run_script("timeout.py", timeout=0.3)
     assert result.timed_out is True
     assert result.returncode is not None
@@ -87,6 +88,7 @@ def test_rejects_non_positive_limits() -> None:
 
 @pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-only")
 def test_timeout_kills_child(tmp_path: Path) -> None:
+    """Regression: PIT-06 POSIX-only killpg path; skipped and UNTESTED on Windows."""
     pid_file = tmp_path / "child.pid"
     result = run_script("spawn_child.py", str(pid_file), timeout=0.5)
     assert result.timed_out is True

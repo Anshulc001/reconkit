@@ -149,6 +149,7 @@ def test_projectdiscovery_httpx_identity_is_accepted(
 
 
 def test_python_httpx_cli_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: PIT-14 the Python httpx CLI is not ProjectDiscovery's httpx."""
     fake_exec(monkeypatch, outcome("0.28.1"))
     status = HttpxAdapter(finder=lambda _name: "C:/python/Scripts/httpx").check_installed()
     assert status.installed is False
@@ -385,6 +386,8 @@ async def test_run_truncated_output_is_reported(monkeypatch: pytest.MonkeyPatch)
 
 
 async def test_run_runner_error_is_a_failed_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: PIT-16 a runner error becomes a failed result, not a traceback."""
+
     def explode(*_args: object, **_kwargs: object) -> ExecResult:
         raise RuntimeError("pipes")
 
@@ -438,6 +441,7 @@ def _capture_provider(argv: list[str], seen: dict[str, object]) -> None:
 async def test_subfinder_writes_and_deletes_provider_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Regression: PIT-18 keys live only in the 0600 temp file, never argv or the result."""
     keys = {
         "VT_API_KEY": "vt-secret-value",
         "GITHUB_TOKEN": "gh-secret-value",
@@ -537,6 +541,7 @@ def test_binary_adapters_import_no_forbidden_modules(module: str) -> None:
 
 
 def test_httpx_parser_skips_lines_without_a_status() -> None:
+    """Regression: PIT-15 a line without an integer status_code is not ALIVE."""
     raw = (
         '{"input":"down.example.com","failed":true}\n'
         '{"input":"www.example.com","status_code":200}\n'

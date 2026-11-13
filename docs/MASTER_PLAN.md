@@ -13,13 +13,22 @@ A3. Context/limit safety: commit after every part. If you sense you are running 
 =====================================================
 GLOBAL PROTOCOL
 =====================================================
-G1. Start of every part: re-read AGENTS.md, the RESUME block, the last 3 REVIEW_LOG entries, the part's section of docs/MASTER_PLAN.md, and the docs it names. Set RESUME status "Part N: IN PROGRESS" before coding.
+G1. Start of every part: re-read AGENTS.md, the RESUME block, the last 3 REVIEW_LOG entries, the part's section of docs/MASTER_PLAN.md, and the docs it names. Read the Known pitfalls table at the top of docs/REVIEW_LOG.md before writing code, and check any new code against it. Set RESUME status "Part N: IN PROGRESS" before coding.
 G2. Docs change first, then code. Every deviation goes into the report, PROGRESS "Deviations", and REVIEW_LOG.
 G3. Not allowed unless a part explicitly says so: new dependencies; new modules/files/CLI commands not in docs/03 and docs/02 (apart from the 3 files authorized above); `assert` in src/; new lint or type suppressions (only scoped per-file ruff ignores with a reason in pyproject); shell=True; adapters importing store/scope/ui/cli; passing the whole environment to a child process; a scope-bypass flag (never add anything like --i-have-permission); consensus logic outside engine.py; a push.
 G4. External tool flags and JSON fields come from the real `--help` or a real sample. If the tool is not installed, fetch the official README/docs (network works), implement from that, name any non-real fixture `*.synthetic.*`, and list it under Open risks. Never guess a flag.
 G5. Test quality: assert concrete values and specific error status+message, never just "no exception"; no real network, no real subprocess, no real sleep over 0.1 s (inject resolver/transport/runner/clock/sleep/rng); use tmp_path only; tests independent of order; no test writes into the repo tree.
 G6. One commit per part (`feat:`/`fix:`/`docs:`). REVIEW_LOG and PROGRESS updates go in the SAME commit as the code. A commit cannot contain its own hash: fill the previous part's hash in the next commit; never write HEAD in the task table.
 G7. PROGRESS.md stays short (task table with real hashes, Deviations, Open risks, Notes for later tasks, RESUME block; under 150 lines). Detail goes to REVIEW_LOG.
+
+=====================================================
+REGRESSION AND PITFALLS RULES
+=====================================================
+R1. Every bug fix adds a guarding test named `test_regression_<short_slug>` or containing a docstring that starts `Regression: <PIT-ID>`. Show it FAILING before the fix (record the raw output in REVIEW_LOG), then passing after the fix.
+R2. Add the pitfall row to the table at the top of docs/REVIEW_LOG.md in the SAME commit as the fix. A fix without a test is not allowed. If a bug truly cannot be tested (for example it needs real Linux), say why, add it to "Not verified", and mark the row UNTESTED.
+R3. Non-code problems (environment, tooling, platform, flaky tests, external API behavior) also get a row; the Guarding test column may be `n/a` with the reason, so the next session does not rediscover it.
+R4. Session start (G1) reads the Known pitfalls table. `scripts/check.ps1` warns when the most recent commit subject starts `fix:` and the commit changes no file under `tests/`. The S7 report includes `Pitfalls added this part: <IDs or none>`.
+R5. Back-fill: every bug already fixed in d03a231, e40091d, 80ddd93, the Part 3-AUDIT or later must have a `test_regression_*`/`Regression:` guard. If missing, add it (mutation first) in the addendum or the next `fix:` commit and fill its row.
 
 =====================================================
 SELF-REVIEW LOOP (mandatory after EVERY part, before moving on)
@@ -41,7 +50,7 @@ S3. SCANS (PowerShell; record raw output in REVIEW_LOG):
 S4. REQUIREMENT -> TEST TABLE in REVIEW_LOG: every requirement bullet of the part with the exact test name proving it. A bullet without a test gets a test now.
 S5. ADVERSARIAL + MUTATION: (a) every case in the part's ADVERSARIAL list plus at least 3 you invent gets a test, or a written reason it cannot happen. (b) For each of the part's MUTATION targets: deliberately break the code, run only the related tests, record the FAILING output, restore with `git checkout -- <file>`, and record `git status --short` showing a clean tree. A test that does not fail on the broken code is worthless: rewrite it.
 S6. FIX LOOP for every bug: write a test that reproduces it and confirm it FAILS; fix; confirm it passes; re-run S1-S3; record in REVIEW_LOG "Bugs found" (symptom, root cause, fix, guarding test). Bugs found before the part commit go into that commit; later ones into a `fix:` commit. Max 3 iterations, then A2.
-S7. RECORD: append the REVIEW_LOG entry, update the PROGRESS table and RESUME block, then print a short REPORT in chat (part, hash, checks result, bugs found/fixed, decisions for user review, not verified).
+S7. RECORD: append the REVIEW_LOG entry, update the PROGRESS table and RESUME block, then print a short REPORT in chat (part, hash, checks result, bugs found/fixed, decisions for user review, not verified, and "Pitfalls added this part: <IDs or none>").
 GATE: move to the next part ONLY if: scripts/check.ps1 passes twice; scans clean or justified; every requirement has a test; mutation proofs recorded; no open bug. Otherwise fix (S6) or A2.
 
 REVIEW_LOG ENTRY TEMPLATE (one per part):

@@ -137,6 +137,7 @@ async def test_dnspython_empty() -> None:
 
 
 async def test_dnspython_nxdomain_timeout_servfail_are_distinct() -> None:
+    """Regression: PIT-01 only NXDOMAIN may become DEAD; timeout and SERVFAIL stay distinct."""
     resolver = FakeResolver(
         {
             ("nx.example.com", "A"): dns.resolver.NXDOMAIN(),

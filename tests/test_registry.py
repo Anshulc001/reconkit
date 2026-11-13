@@ -58,6 +58,7 @@ def test_keys_are_parsed() -> None:
 
 
 def test_tools_yaml_has_no_legacy_needs_key() -> None:
+    """Regression: PIT-19 needs_key stays removed; keys is the only source of truth."""
     data = yaml.safe_load(TOOLS.read_text(encoding="utf-8"))
     offenders = [name for name, entry in data["tools"].items() if "needs_key" in entry]
     assert offenders == [], f"needs_key is gone; move these env names to keys: {offenders}"

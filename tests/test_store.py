@@ -132,6 +132,7 @@ def test_upsert_subdomain_does_not_duplicate(store: Store) -> None:
 
 
 def test_upsert_subdomain_keeps_values_when_omitted(store: Store) -> None:
+    """Regression: PIT-03 an omitted value keeps the stored value, not a column default."""
     target_id, run_a = make_run(store)
     _, run_b = make_run(store)
     sub_id = store.upsert_subdomain(
@@ -181,6 +182,7 @@ def test_upsert_subdomain_fresh_insert_uses_defaults(store: Store) -> None:
 
 
 def test_upsert_port_keeps_service_when_omitted(store: Store) -> None:
+    """Regression: PIT-03 an omitted port service keeps the stored value."""
     target_id, run_a = make_run(store)
     _, run_b = make_run(store)
     sub_id = store.upsert_subdomain(target_id, "a.example.com", run_id=run_a)
@@ -230,6 +232,7 @@ def test_upsert_port_fresh_insert_uses_defaults(store: Store) -> None:
 
 
 def test_upsert_url_keeps_source_count_when_omitted(store: Store) -> None:
+    """Regression: PIT-03 an omitted URL source count keeps the stored value."""
     target_id, run_a = make_run(store)
     _, run_b = make_run(store)
     url_id = store.upsert_url(target_id, "https://a.example.com/x", run_id=run_a, source_count=4)
@@ -461,6 +464,7 @@ def test_hostile_fqdn_is_stored_literally(store: Store) -> None:
     ],
 )
 def test_redact_cases(raw: str, expected: str) -> None:
+    """Regression: PIT-04 flag values and Cookie/Set-Cookie headers are masked."""
     assert redact(raw) == expected
 
 
