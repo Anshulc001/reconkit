@@ -243,7 +243,7 @@ def _scan_command(
         float | None, typer.Option("--phase-timeout", help="Stage time limit in seconds.")
     ] = None,
     mock: Annotated[
-        bool, typer.Option("--mock", help="Use fixtures; no network or subprocesses.")
+        bool, typer.Option("--mock", help="Use fixtures; no network or external processes.")
     ] = False,
     speed: Annotated[
         str | None, typer.Option("--speed", help="slow, normal or fast (default: slow).")
@@ -329,7 +329,7 @@ def main(
         float | None, typer.Option("--phase-timeout", help="Stage time limit in seconds.")
     ] = None,
     mock: Annotated[
-        bool, typer.Option("--mock", help="Use fixtures; no network or subprocesses.")
+        bool, typer.Option("--mock", help="Use fixtures; no network or external processes.")
     ] = False,
     speed: Annotated[
         str | None, typer.Option("--speed", help="slow, normal or fast (default: slow).")

@@ -61,7 +61,7 @@
 | `--tools a,b` / `--exclude x,y` | Pick or skip adapters |
 | `--include-noisy` | Allow `opt_in` tier tools |
 | `--min-sources N` | Hide results confirmed by fewer than N tools |
-| `--phase-timeout SEC` / `--timeout-<stage> SEC` | Stage time limits |
+| `--phase-timeout SEC` | Stage time limit. `--timeout-<stage>` is deferred; `--phase-timeout` is the only stage-timeout control in this build. |
 | `--mock` | Use fixtures instead of real tools/network |
 | `--resume` | Continue the latest unfinished run for the target; completed stages are not repeated |
 | `--no-keys` | Force free mode: ignore API keys from `.env` (task h; policy in docs/05 §6.1) |
