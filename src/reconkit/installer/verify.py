@@ -6,13 +6,39 @@ import hashlib
 import os
 import tarfile
 import zipfile
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
+from reconkit.core.runner import ExecResult, run_exec
 from reconkit.errors import InstallError
 
 ARCHIVE_LIMIT = 200 * 1024 * 1024
 MEMBER_LIMIT = 100 * 1024 * 1024
 CHUNK = 1024 * 1024
+VERSION_TIMEOUT_S = 10.0
+Runner = Callable[..., ExecResult]
+
+
+def check_version(
+    command: Path | str,
+    version_args: Sequence[str],
+    *,
+    name: str,
+    runner: Runner = run_exec,
+    timeout: float = VERSION_TIMEOUT_S,
+    env: Mapping[str, str] | None = None,
+) -> None:
+    """Run `version_cmd` against an installed binary (docs/10 section 4).
+
+    No version_cmd means nothing to check. The child gets only `env` (or `HOME`
+    when the backend does not say otherwise), never the parent environment.
+    """
+    if not version_args:
+        return
+    child_env = dict(env) if env is not None else {"HOME": str(Path.home())}
+    outcome = runner([str(command), *version_args], timeout=timeout, env=child_env)
+    if outcome.timed_out or outcome.returncode != 0:
+        raise InstallError(f"{name}: version check failed after install")
 
 
 def sha256_file(path: Path) -> str:

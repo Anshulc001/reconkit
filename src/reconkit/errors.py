@@ -45,3 +45,7 @@ class InstallError(Exception):
     """An install or update step failed (exit code 5)."""
 
     exit_code: ClassVar[int] = 5
+
+
+class InstallSkipped(InstallError):
+    """The user or sudo declined; nothing ran and nothing changed."""

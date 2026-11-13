@@ -13,9 +13,16 @@ from urllib.parse import urlsplit
 import httpx
 
 from reconkit.core.runner import ExecResult, run_exec
-from reconkit.errors import InstallError
+from reconkit.errors import ConfigError, InstallError, InstallSkipped
+from reconkit.installer import apt, go_install, pipx
 from reconkit.installer.registry import InstallPlan
-from reconkit.installer.verify import ARCHIVE_LIMIT, checksum_for, extract_binary, verify_checksum
+from reconkit.installer.verify import (
+    ARCHIVE_LIMIT,
+    check_version,
+    checksum_for,
+    extract_binary,
+    verify_checksum,
+)
 
 API_URL = "https://api.github.com"
 USER_AGENT = "reconkit/0.1"
@@ -34,6 +41,7 @@ ALLOWED_HOSTS = frozenset(
 )
 ARCH_NAMES = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
 Runner = Callable[..., ExecResult]
+Confirm = Callable[[str], bool]
 
 
 @dataclass(frozen=True)
@@ -56,6 +64,7 @@ class InstallOutcome:
     destination: str | None = None
     steps: tuple[str, ...] = ()
     error: str | None = None
+    skipped: bool = False
 
 
 def host_arch(machine: str | None = None) -> str:
@@ -207,15 +216,7 @@ def _fetch_text(
 
 
 def _verify_version(destination: Path, plan: InstallPlan, runner: Runner, timeout: float) -> None:
-    if not plan.version_args:
-        return
-    outcome = runner(
-        [str(destination), *plan.version_args],
-        timeout=timeout,
-        env={"HOME": str(Path.home())},
-    )
-    if outcome.timed_out or outcome.returncode != 0:
-        raise InstallError(f"{plan.name}: version check failed after install")
+    check_version(destination, plan.version_args, name=plan.name, runner=runner, timeout=timeout)
 
 
 def install_release(
@@ -287,31 +288,95 @@ def exit_code(outcomes: Iterable[InstallOutcome]) -> int:
     return 5 if ok else 6
 
 
+def _require_confirm(confirm: Confirm | None, plan: InstallPlan) -> Confirm:
+    """A sudo-bearing plan must have a caller-owned confirmation handler."""
+    if confirm is None:
+        raise ConfigError(f"{plan.name}: {plan.method} install needs a confirmation handler")
+    return confirm
+
+
+def _install_one(
+    plan: InstallPlan,
+    *,
+    bin_dir: Path,
+    client: httpx.Client | None,
+    dry_run: bool,
+    arch: str | None,
+    verify_checksums: bool,
+    confirm: Confirm | None,
+    runner: Runner,
+    has_pipx: bool | None,
+) -> InstallOutcome:
+    """Dispatch one plan to its backend (docs/10 section 3)."""
+    if plan.method == "github_release":
+        if client is None:
+            raise InstallError(f"{plan.name}: a client is required for github_release plans")
+        return install_release(
+            plan,
+            client=client,
+            bin_dir=bin_dir,
+            dry_run=dry_run,
+            arch=arch,
+            verify_checksums=verify_checksums,
+            runner=runner,
+        )
+    if plan.method == "apt":
+        steps = apt.install_apt(
+            plan,
+            confirm=_require_confirm(confirm, plan),
+            runner=runner,
+            dry_run=dry_run,
+        )
+        return InstallOutcome(tool=plan.name, ok=True, steps=steps)
+    if plan.method == "go_install":
+        steps = go_install.install_go(plan, bin_dir=bin_dir, runner=runner, dry_run=dry_run)
+        return InstallOutcome(tool=plan.name, ok=True, steps=steps)
+    if plan.method == "pipx":
+        steps = pipx.install_pipx_tool(
+            plan,
+            bin_dir=bin_dir,
+            confirm=_require_confirm(confirm, plan),
+            runner=runner,
+            dry_run=dry_run,
+            has_pipx=has_pipx,
+        )
+        return InstallOutcome(tool=plan.name, ok=True, steps=steps)
+    if plan.method == "none":
+        return InstallOutcome(tool=plan.name, ok=True, steps=(f"{plan.name}: nothing to install",))
+    raise InstallError(f"{plan.name}: unknown install method {plan.method!r}")
+
+
 def install_plans(
     plans: Iterable[InstallPlan],
     *,
-    client: httpx.Client,
     bin_dir: Path,
+    client: httpx.Client | None = None,
     dry_run: bool = False,
     arch: str | None = None,
     verify_checksums: bool = True,
+    confirm: Confirm | None = None,
     runner: Runner = run_exec,
+    has_pipx: bool | None = None,
 ) -> tuple[list[InstallOutcome], int]:
     """Install each plan, isolating failures so one tool cannot stop the rest."""
     outcomes: list[InstallOutcome] = []
     for plan in plans:
         try:
             outcomes.append(
-                install_release(
+                _install_one(
                     plan,
-                    client=client,
                     bin_dir=bin_dir,
+                    client=client,
                     dry_run=dry_run,
                     arch=arch,
                     verify_checksums=verify_checksums,
+                    confirm=confirm,
                     runner=runner,
+                    has_pipx=has_pipx,
                 )
             )
+        except InstallSkipped as exc:
+            outcomes.append(InstallOutcome(tool=plan.name, ok=False, skipped=True, error=str(exc)))
         except InstallError as exc:
             outcomes.append(InstallOutcome(tool=plan.name, ok=False, error=str(exc)))
     return outcomes, exit_code(outcomes)
