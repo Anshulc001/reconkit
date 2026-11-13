@@ -26,7 +26,7 @@ mypy src/reconkit
 | b | done | `0e39f18`, `9423eaa` | `errors`, `models`, `config`, `core/runner` + tests |
 | c | done | `45b0ba8` | `core/scope` gate + tests |
 | d | done | `0a3010b` | `core/pacing.py`: delays, jitter, ordering, parallel limits, rate args, RateLimiter |
-| e | next | - | `core/store.py`: schema, migrations, `redact()` helper, diff queries (`docs/04_DATABASE.md`) |
+| e | done | `HEAD` | `core/store.py`: schema, migrations, `redact()` helper, diff queries (`docs/04_DATABASE.md`) |
 | f | pending | - | `adapters/base.py`, `adapters/registry.py` + 11 Phase 2 adapters with fixtures/tests |
 | g | pending | - | `core/wildcard.py` + `engine.py` + `core/workspace.py`: stage pipeline, consensus/confidence inside `engine.py`, host states, resume, exit codes |
 | h | pending | - | `ui.py` + `cli.py`: all commands, `--mock`, `--json` |
@@ -42,6 +42,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `config.py`: `load_config(path, speed=, delay=)`, `resolve_speed`, `parse_delay`, `SpeedPreset`; `_StrictModel` forbids unknown keys; `Webhook` model.
 - `core/runner.py`: `run_exec(argv, timeout=, env=, max_output_bytes=, cwd=)` (only `subprocess` user), `validate_target` (root, strict RFC-1123), `validate_host` (discovered: allows `_`, strips `*.`), `ExecResult`; timeout kills the process group, output capped, env values redacted.
 - `core/scope.py`: `load_scope`, `require_active` -> `ActiveCheck(scope, match, hosts, dropped)`, `check_target`, `ip_allowed`, `passive_warning`, `ScopeGate`; `out_of_scope` always wins.
+- `core/store.py`: `Store(path)` (context manager, `close()`), `redact(text, secrets)`; writes `create_target`, `create_scan_run`, `finish_scan_run`, `record_tool_run`, `upsert_subdomain`, `add_subdomain_source`, `append_host_status`, `upsert_port`, `add_port_source`, `upsert_url`; reads `previous_state`, `diff_new`, `diff_gone`, `diff_state_changed`, `diff_ports_opened`, `diff_ports_closed`; pragmas FK/WAL/5000 ms, parameterized SQL only.
 - `core/pacing.py`: `Pacer(preset, rate_flags=, rng=, sleep=)` with `before_tool(mode)` (first tool free, `reset()` per stage), `before_host`, `order(items, kind=)`, `parallel_limit`, `tool_rate_args(tool, mode)`, `next_pause_range`; `RateLimiter(rate, clock=, sleep=)` for HTTP adapters. No I/O, no printing, injected clock.
 
 ## Notes for task g
@@ -71,6 +72,8 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 
 ## Open risks
 
+- `urls` is created in task e per the review list even though docs/04 labels it Phase 3; `findings` and `monitor_changes` stay deferred.
+- `tests/test_store.py` imports `sqlite3` for `IntegrityError`; the "only store.py imports sqlite3" rule is enforced for `src/`.
 - Installer refuses to run on native Windows; decide how to handle that before task i.
 - `scope.yaml` cannot exclude IP ranges (no out-of-scope CIDRs).
 - CLI must catch `ValueError` from `check_target`/`validate_target` and exit 2.
@@ -80,4 +83,4 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 
 ## Next task
 
-**Task e: `core/store.py`.** SQLite schema, migrations, `redact()` helper and diff queries per `docs/04_DATABASE.md`; only this module imports `sqlite3`. Read `docs/04_DATABASE.md` and `docs/05_SECURITY.md` first.
+**Task f: adapters.** `adapters/base.py`, `adapters/registry.py` and the 11 Phase 2 adapters with sanitized fixtures and parser tests. Read `docs/09_TOOL_CONTRACTS.md`, `docs/03_ARCHITECTURE.md` (dependency rules) and `tools.yaml` first; confirm every tool flag from the real `--help`.
