@@ -219,12 +219,21 @@ class BinaryAdapter(BaseToolAdapter):
         return self._finder(self.binary)
 
     def check_installed(self) -> InstallStatus:
-        """Resolve the binary and prove it is the expected program, not a namesake."""
+        """Resolve the binary and prove it is the expected program, not a namesake.
+
+        The probe gets `HOME` because ProjectDiscovery tools write their config
+        under `$HOME/.config`; with no HOME they fall back to the current
+        directory and create or move `subfinder/` and `naabu/` into it.
+        """
         path = self.binary_path()
         if path is None:
             return InstallStatus(installed=False)
         try:
-            outcome = run_exec([path, *self.version_args], timeout=IDENTITY_TIMEOUT, env={})
+            outcome = run_exec(
+                [path, *self.version_args],
+                timeout=IDENTITY_TIMEOUT,
+                env={"HOME": str(Path.home())},
+            )
         except RuntimeError:
             return InstallStatus(installed=False, path=Path(path))
         text = f"{outcome.stdout}\n{outcome.stderr}"

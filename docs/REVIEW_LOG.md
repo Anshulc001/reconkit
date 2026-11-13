@@ -41,6 +41,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-26 | A `fix:` commit landed with no test | No gate step checked it | `scripts/check.ps1` prints a WARN | n/a (tooling; added with this addendum) |
 | PIT-27 | `store.transaction()` raised "cannot start a transaction within a transaction" | Explicit `BEGIN` on a connection already inside SQLite's implicit transaction | Use SQLite's implicit transaction; commit/rollback at block exit | `test_transaction_commits_once_and_rolls_back` |
 | PIT-28 | A resumed `live` stage saw only the target, not hosts persisted by completed stages | Resume skipped stages but the in-memory discovered/alive sets were not reseeded from SQLite | Seed both sets from `Store.subdomains()` on resume | `test_resume_skips_completed_stages_and_continues` |
+| PIT-30 | `doctor`/scans moved subfinder and naabu config dirs from `~/.config` into the current directory | `BinaryAdapter.check_installed()` ran the version probe with `env={}`, so the child had no `HOME` and the tools wrote their config beside the CWD | Pass `HOME` to the identity probe | `test_identity_probe_passes_home` |
 | PIT-29 | A dangling-CNAME warning disappeared after restart | `host_status_history` had no CNAME columns and DNS-only resolved hosts were not persisted | Store `cnames_json` plus `dangling_cname`; reuse `Store.latest_cnames()` on a later NXDOMAIN | `test_regression_dangling_cname_survives_restart`, `test_dns_resolved_then_two_nxdomain_is_shut_down_then_dead`; migration tests in `test_store.py` |
 
 ## Commit map
@@ -678,3 +679,10 @@ Per-stage counts: subs 11, dns 5, live 4, ports 6, tech 5, urls 8, vulns 8, shot
 - Real run on this Kali box: `reconkit doctor` reported subfinder 2.17.0 and naabu 2.7.0 as installed, and `httpx` as `wrong program` because the PATH copy is not ProjectDiscovery's - the case docs/10 section 5 names. Exit 0 with the missing-tools suggestion line.
 - Not verified: no real `--fix` (no installer yet); the dpkg parser was exercised against synthetic status files and the real Kali database, not against a package installed mid-run; no Windows run of doctor.
 - Known cosmetic: the `n/a (no binary required)` cells wrap in an 80-column terminal. The text matches docs/02; compacting it would need a docs change first.
+
+## Part 10a follow-up - identity probe destroyed tool configs (code)
+
+- Found while smoke-testing `reconkit doctor` on Kali: `git status` showed untracked `naabu/` and `subfinder/` in the repo root, born at the run time, containing files dated 2026-10-29. `~/.config/naabu` and `~/.config/subfinder` no longer existed: `BinaryAdapter.check_installed()` calls `run_exec(..., env={})`, so HOME was unset and the ProjectDiscovery tools wrote (moved) their config directories into the CWD. This was latent for scans too, because the engine calls the same method.
+- Fix: pass `env={"HOME": str(Path.home())}` to the version probe, with a docstring that says why. The configs were moved back to `~/.config` and the tree is clean again.
+- Test: `test_identity_probe_passes_home` in `tests/test_binary_adapters.py` asserts the child env is exactly `{"HOME": <home>}`.
+- Not verified: that every ProjectDiscovery version subcommand accepts an unset HOME was never true; this change removes the question rather than answering it per tool. Tools that need `XDG_CONFIG_HOME` instead are untested.

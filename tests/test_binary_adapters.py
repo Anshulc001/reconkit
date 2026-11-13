@@ -138,6 +138,14 @@ def test_missing_binary_is_not_installed() -> None:
     assert status.path is None
 
 
+def test_identity_probe_passes_home(monkeypatch: pytest.MonkeyPatch, isolated_home: Path) -> None:
+    """PIT-30: an empty child env made ProjectDiscovery tools write into the CWD."""
+    calls = fake_exec(monkeypatch, outcome("projectdiscovery.io\n[INF] Current Version: v2.17.0"))
+    status = SubfinderAdapter(finder=lambda _name: "/usr/bin/subfinder").check_installed()
+    assert status.installed is True
+    assert calls[0][1]["env"] == {"HOME": str(isolated_home)}
+
+
 def test_projectdiscovery_httpx_identity_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
