@@ -16,7 +16,7 @@ from reconkit.adapters.assetfinder import AssetfinderAdapter
 from reconkit.adapters.base import BinaryAdapter
 from reconkit.adapters.httpx_tool import HttpxAdapter
 from reconkit.adapters.naabu import NaabuAdapter
-from reconkit.adapters.registry import get_spec
+from reconkit.adapters.registry import get_spec, load_tools
 from reconkit.adapters.subfinder import PROVIDERS, SubfinderAdapter
 from reconkit.config import load_config, resolve_speed
 from reconkit.core.pacing import Pacer, RateLimiter
@@ -113,6 +113,38 @@ def test_binary_adapters_are_registered() -> None:
     assert ADAPTERS["assetfinder"] is AssetfinderAdapter
     assert ADAPTERS["httpx"] is HttpxAdapter
     assert ADAPTERS["naabu"] is NaabuAdapter
+
+
+# Binary tools whose invocation never touches $HOME, so neither the identity
+# probe nor a scan needs to pass HOME to them. Every entry needs a reason that
+# can be checked in this repo: an adapter that forgets `needs_home` writes its
+# config beside the working directory (PIT-30), so the list stays short on purpose.
+NO_HOME_NEEDED: dict[str, str] = {
+    "assetfinder": (
+        "build_command passes only --subs-only <domain>; no config path, and "
+        "tools.yaml lists no keys for it"
+    ),
+}
+
+
+def test_every_binary_adapter_declares_needs_home_or_is_allowlisted() -> None:
+    """Guard: a new binary adapter that forgets needs_home would pollute the CWD."""
+    binaries = {
+        name: spec
+        for name, spec in load_tools().items()
+        if spec.kind == "binary" and name in ADAPTERS
+    }
+    offenders = sorted(
+        name for name in binaries if not ADAPTERS[name].needs_home and name not in NO_HOME_NEEDED
+    )
+    assert offenders == [], (
+        "binary adapters must set needs_home = True or be listed in NO_HOME_NEEDED "
+        f"with a reason: {offenders}"
+    )
+    empty_reasons = sorted(name for name, reason in NO_HOME_NEEDED.items() if not reason.strip())
+    assert empty_reasons == [], f"NO_HOME_NEEDED entries need a reason: {empty_reasons}"
+    stale = sorted(set(NO_HOME_NEEDED) - set(binaries))
+    assert stale == [], f"NO_HOME_NEEDED lists tools without a binary adapter: {stale}"
 
 
 @pytest.mark.parametrize(
