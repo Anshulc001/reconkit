@@ -28,7 +28,8 @@ mypy src/reconkit
 | d | done | `0a3010b` | `core/pacing.py`: delays, jitter, ordering, parallel limits, rate args, RateLimiter |
 | e | done | `1ba2fd8` | `core/store.py`: schema, migrations, `redact()` helper, diff queries (`docs/04_DATABASE.md`) |
 | f1 | done | 89ba34f | `adapters/base.py`, `adapters/registry.py`, `crtsh`, `certspotter`, `otx`, `hackertarget` |
-| f2 | pending | - | `subfinder`, `assetfinder`, `dnspython`, `pyprobe`, `httpx`, `pyscan`, `naabu` |
+| f2 | done | `HEAD` | pure-Python adapters: `dnspython`, `pyprobe`, `pyscan` |
+| f3 | pending | - | binary adapters: `subfinder`, `assetfinder`, `httpx`, `naabu` |
 | g | pending | - | `core/wildcard.py` + `engine.py` + `core/workspace.py`: stage pipeline, consensus/confidence inside `engine.py`, host states, resume, exit codes |
 | h | pending | - | `ui.py` + `cli.py`: all commands, `--mock`, `--json` |
 | i | pending | - | `installer/` + `doctor.py` |
@@ -107,8 +108,12 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - The v1 migration was edited in place to add `idx_subdomain_sources_run`, `idx_port_sources_run` and `idx_hsh_run`; no real `recon.db` exists yet, so no v2 is needed. docs/04 section 3 lists the indexes.
 - docs/04 section 6 now states that diffs only compare runs of the same kind (discovery with discovery, ports with ports).
 - `RunContext` gained `limiter: RateLimiter`; docs/09 was changed first because the contract referred to "the pacer's rate limiter" that no object exposed. The engine must build one limiter per stage and pass it in.
+- `RunContext.ports` was added in docs/09 before code: docs already defined `hosts`, but port scanners had no input list. `pyscan` orders it with `pacer.order(..., kind="port")`, per docs/03 section 7.
+- `HostStatusRecord.location` and the `host_status_history.location` column were added in docs/09/docs/04 first so `pyprobe` can record a redirect target without following it; the v1 migration was edited in place (no real DB).
+- `dnspython` resolves A/AAAA/CNAME only: the record models have no NS/MX/TXT fields, and adding them would change the database schema. `pyscan` sends no payload and reads no banner (the banner read is optional).
 - `HttpAdapter` is documented in docs/09 section 3. Domain filtering happens in `run()` because the contract's `parse_output(raw)` receives no target; `parse_output` normalizes and validates only.
-- Fixtures are trimmed real responses except OTX (synthetic, see Fixtures); no adapter test touches the network.
+- Fixtures are trimmed real responses except OTX (synthetic, see Fixtures) and the `dnspython`/`pyprobe`/`pyscan` JSON fixtures, which are all `*.synthetic.*`; no adapter test touches the network.
+- ProjectDiscovery `httpx` can collide with the Python `httpx` CLI on PATH; f3's `check_installed` must verify the binary identity, not just the name.
 - `tests/test_store.py` imports `sqlite3` for `IntegrityError`; the "only store.py imports sqlite3" rule is enforced for `src/`.
 - Installer refuses to run on native Windows; decide how to handle that before task i.
 - `scope.yaml` cannot exclude IP ranges (no out-of-scope CIDRs).
@@ -122,4 +127,4 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 
 ## Next task
 
-**Task f2: adapters (part 2).** `subfinder`, `assetfinder`, `dnspython`, `pyprobe`, `httpx`, `pyscan`, `naabu` with fixtures and parser tests; binary adapters use `BaseToolAdapter.build_command`/`parse_output` and the registry `rate_flags()`. Read `docs/09_TOOL_CONTRACTS.md` and `tools.yaml` first; confirm every flag from the real `--help`.
+**Task f3: binary adapters.** `subfinder`, `assetfinder`, `httpx`, `naabu` with fixtures and parser tests; binary adapters implement `build_command`/`parse_output` and use the registry `rate_flags()`. Read `docs/09_TOOL_CONTRACTS.md` and `tools.yaml` first; take every flag from the installed tool's real `--help` or sample output, never from memory. `check_installed` for `httpx` must verify it is ProjectDiscovery's binary, not the Python `httpx` CLI that may sit on PATH.

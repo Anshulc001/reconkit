@@ -68,6 +68,7 @@ class HostStatusRecord(BaseModel):
     state: HostState
     status_code: int | None = None
     title: str | None = None
+    location: str | None = None
     ips: list[str] = []
     tech: list[str] = []
     waf: str | None = None
@@ -124,6 +125,7 @@ class RunContext(BaseModel):
 
     target: str
     hosts: list[str] = []
+    ports: list[int] = []
     speed: Literal["slow", "normal", "fast"] = "slow"
     pacer: Pacer
     limiter: RateLimiter

@@ -1,0 +1,4 @@
+[
+  {"fqdn": "www.example.com", "ip": "203.0.113.5", "port": 443, "state": "open"},
+  {"fqdn": "www.example.com", "ip": "203.0.113.5", "port": 80, "state": "closed"}
+]

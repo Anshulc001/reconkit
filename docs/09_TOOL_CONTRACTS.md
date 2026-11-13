@@ -45,6 +45,7 @@ class HostStatusRecord(BaseModel):
     state: HostState
     status_code: int | None = None
     title: str | None = None
+    location: str | None = None    # raw Location header (redirects are never followed)
     ips: list[str] = []
     tech: list[str] = []
     waf: str | None = None
@@ -96,6 +97,7 @@ class RunContext(BaseModel):
 
     target: str                     # validated root domain
     hosts: list[str] = []           # already scope-checked
+    ports: list[int] = []           # port-scan input; empty = adapter default list
     speed: Literal["slow", "normal", "fast"] = "slow"
     pacer: Pacer                    # reconkit.core.pacing.Pacer (import under TYPE_CHECKING)
     limiter: RateLimiter            # shared per stage; HTTP adapters await limiter.wait()
@@ -125,8 +127,11 @@ class BaseToolAdapter(ABC):
 - Binary adapters usually implement only `build_command` and `parse_output`; the base `run` handles execution, timeout, output saving and error mapping.
 - HTTP adapters subclass `HttpAdapter` from `adapters/base.py`. Its `run` awaits `ctx.limiter.wait()`, uses an `httpx.AsyncClient` with an explicit timeout and the honest User-Agent, retries a connection error once with an injected sleep, and maps HTTP 429, 5xx and timeouts to a failed `ToolResult` (never an exception).
 - HTTP bodies are read as a stream and capped at `MAX_BODY_BYTES` (10 MiB); exceeding the cap is a failed `ToolResult` (`response too large`), never an exception.
+- Per-host adapters (`python` kind) read their inputs from `ctx.hosts` (and `ctx.ports` for port scanners); both are already scope-checked by the engine. `pyscan` calls `ctx.pacer.order(ctx.ports, kind="port")` itself because it owns the scan loop; the engine only fills the lists.
+- `dnspython` turns A/AAAA answers into `SubdomainRecord.ips` and CNAME into `.cnames`. Only NXDOMAIN maps to `HostStatusRecord(state=DEAD)`; "no answer", SERVFAIL and timeout never do (they are reported as counts in `ToolResult.error`), because a false DEAD is worse than a gap.
+- `pyprobe` never follows redirects: it records the status code and the raw `Location` in `HostStatusRecord.location`. A TLS/connect failure becomes `state=UNKNOWN`, never a crash and never `DEAD`.
 - `parse_output` normalizes and validates subdomain names; only names equal to or under `ctx.target` are kept before records are returned.
-- In `--mock` mode `run` reads `tests/fixtures/<name>/<target>.<ext>` (or the only file in that directory) instead of making a request.
+- In `--mock` mode `run` reads `tests/fixtures/<name>/<target>.<ext>` (or the only file in that directory) instead of making a request. HTTP adapters use the raw response text; `python` adapters use JSON fixtures: `dnspython` maps host to `{ips, cnames}` or `{state: DEAD}`, `pyprobe` maps host to `{status_code, title, location}`, and `pyscan` is a list of `{fqdn, ip, port, state}`.
 - Rate: if the registry has `rate_flag`, the adapter appends it with the value from `pacer.tool_rate_args(name)`.
 
 ## 4. Stage Registry (who runs where)

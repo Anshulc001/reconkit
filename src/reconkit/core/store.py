@@ -77,6 +77,7 @@ CREATE TABLE host_status_history (
   run_id       INTEGER NOT NULL REFERENCES scan_runs(id),
   state        TEXT NOT NULL CHECK (state IN ('ALIVE','DNS_ONLY','SHUT_DOWN','DEAD','UNKNOWN')),
   status_code  INTEGER,
+  location     TEXT,
   title        TEXT,
   ips_json     TEXT NOT NULL DEFAULT '[]',
   tech_json    TEXT NOT NULL DEFAULT '[]',
@@ -350,6 +351,7 @@ class Store:
         *,
         status_code: int | None = None,
         title: str | None = None,
+        location: str | None = None,
         ips: Sequence[str] = (),
         tech: Sequence[str] = (),
         waf: str | None = None,
@@ -358,15 +360,16 @@ class Store:
     ) -> int:
         cursor = self._conn.execute(
             "INSERT INTO host_status_history"
-            " (subdomain_id, run_id, state, status_code, title, ips_json, tech_json, waf,"
-            "  tools_json, checked_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " (subdomain_id, run_id, state, status_code, title, location, ips_json, tech_json,"
+            "  waf, tools_json, checked_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 subdomain_id,
                 run_id,
                 state,
                 status_code,
                 title,
+                location,
                 json.dumps(list(ips)),
                 json.dumps(list(tech)),
                 waf,

@@ -1,0 +1,4 @@
+{
+  "www.example.com": {"status_code": 200, "title": "Example Domain", "location": null},
+  "old.example.com": {"status_code": 301, "title": null, "location": "https://example.com/"}
+}

@@ -1,1 +1,155 @@
-"""Adapter for pyprobe (docs/09_TOOL_CONTRACTS.md)."""
+"""pyprobe HTTP adapter (docs/09_TOOL_CONTRACTS.md).
+
+Never follows redirects: a redirect may point out of scope, so the status code
+and raw Location are recorded instead. The body read stops at TITLE_LIMIT.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import html
+import json
+import re
+from pathlib import Path
+
+import httpx
+
+from reconkit.adapters.base import USER_AGENT, BaseToolAdapter
+from reconkit.errors import ParseError
+from reconkit.models import (
+    HostState,
+    HostStatusRecord,
+    Record,
+    RunContext,
+    Stage,
+    ToolResult,
+    ToolStatus,
+)
+
+TITLE_LIMIT = 256 * 1024
+TITLE_MAX_CHARS = 200
+TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+SCHEMES = ("https", "http")
+
+
+def extract_title(body: bytes) -> str | None:
+    text = body.decode("utf-8", errors="replace")
+    match = TITLE_RE.search(text)
+    if match is None:
+        return None
+    title = " ".join(html.unescape(match.group(1)).split())
+    return title[:TITLE_MAX_CHARS] or None
+
+
+class PyprobeAdapter(BaseToolAdapter):
+    name = "pyprobe"
+    stage = Stage.LIVE
+
+    def __init__(
+        self,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        fixtures_dir: Path | None = None,
+    ) -> None:
+        super().__init__(fixtures_dir=fixtures_dir)
+        self._transport = transport
+
+    async def run(self, ctx: RunContext) -> ToolResult:
+        if ctx.mock:
+            try:
+                mock_records = self.parse_output(self._read_fixture(ctx))
+            except ParseError as exc:
+                return ToolResult(tool=self.name, status=ToolStatus.FAILED, error=str(exc))
+            return ToolResult(tool=self.name, status=ToolStatus.OK, records=mock_records)
+
+        semaphore = asyncio.Semaphore(ctx.pacer.parallel_limit("active"))
+        async with httpx.AsyncClient(
+            timeout=ctx.timeout,
+            headers={"User-Agent": USER_AGENT},
+            transport=self._transport,
+            follow_redirects=False,
+        ) as client:
+            outcomes = await asyncio.gather(
+                *(self._probe(ctx, client, host, semaphore) for host in ctx.hosts)
+            )
+        records: list[Record] = [record for record in outcomes if record is not None]
+        unreachable = len(outcomes) - len(records)
+        error = f"unreachable={unreachable}" if unreachable else None
+        return ToolResult(tool=self.name, status=ToolStatus.OK, records=records, error=error)
+
+    async def _probe(
+        self,
+        ctx: RunContext,
+        client: httpx.AsyncClient,
+        host: str,
+        semaphore: asyncio.Semaphore,
+    ) -> HostStatusRecord | None:
+        async with semaphore:
+            for scheme in SCHEMES:
+                await ctx.limiter.wait()
+                try:
+                    async with client.stream("GET", f"{scheme}://{host}/") as response:
+                        body = await self._read_prefix(response)
+                        return HostStatusRecord(
+                            fqdn=host,
+                            source=self.name,
+                            state=HostState.ALIVE,
+                            status_code=response.status_code,
+                            title=extract_title(body),
+                            location=response.headers.get("location"),
+                        )
+                except httpx.ConnectError as exc:
+                    if self._is_tls_error(exc):
+                        return HostStatusRecord(
+                            fqdn=host, source=self.name, state=HostState.UNKNOWN
+                        )
+                    continue
+                except (httpx.TimeoutException, httpx.HTTPError):
+                    continue
+        return None
+
+    @staticmethod
+    async def _read_prefix(response: httpx.Response) -> bytes:
+        body = b""
+        async for chunk in response.aiter_bytes():
+            body += chunk
+            if len(body) >= TITLE_LIMIT:
+                break
+        return body[:TITLE_LIMIT]
+
+    @staticmethod
+    def _is_tls_error(exc: httpx.ConnectError) -> bool:
+        message = str(exc).lower()
+        return "ssl" in message or "certificate" in message
+
+    def parse_output(self, raw: str) -> list[Record]:
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            raise ParseError("pyprobe: invalid fixture JSON") from None
+        if not isinstance(data, dict):
+            raise ParseError("pyprobe: fixture must map hostnames to results")
+        records: list[Record] = []
+        for fqdn, entry in data.items():
+            if not isinstance(entry, dict):
+                raise ParseError("pyprobe: unexpected fixture entry")
+            status = entry.get("status_code")
+            title = entry.get("title")
+            location = entry.get("location")
+            if status is not None and not isinstance(status, int):
+                raise ParseError("pyprobe: status_code must be an integer")
+            if title is not None and not isinstance(title, str):
+                raise ParseError("pyprobe: title must be a string")
+            if location is not None and not isinstance(location, str):
+                raise ParseError("pyprobe: location must be a string")
+            records.append(
+                HostStatusRecord(
+                    fqdn=fqdn,
+                    source=self.name,
+                    state=HostState.ALIVE if status is not None else HostState.UNKNOWN,
+                    status_code=status,
+                    title=title,
+                    location=location,
+                )
+            )
+        return records

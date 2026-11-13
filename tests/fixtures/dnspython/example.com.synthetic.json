@@ -1,0 +1,5 @@
+{
+  "www.example.com": {"ips": ["203.0.113.5"], "cnames": []},
+  "alias.example.com": {"ips": [], "cnames": ["www.example.com"]},
+  "gone.example.com": {"state": "DEAD"}
+}

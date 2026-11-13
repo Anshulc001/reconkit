@@ -78,6 +78,7 @@ CREATE TABLE host_status_history (
   run_id       INTEGER NOT NULL REFERENCES scan_runs(id),
   state        TEXT NOT NULL CHECK (state IN ('ALIVE','DNS_ONLY','SHUT_DOWN','DEAD','UNKNOWN')),
   status_code  INTEGER,
+  location     TEXT,
   title        TEXT,
   ips_json     TEXT NOT NULL DEFAULT '[]',
   tech_json    TEXT NOT NULL DEFAULT '[]',
