@@ -123,6 +123,7 @@ class BaseToolAdapter(ABC):
 - Adapter failures use the exceptions in `reconkit/errors.py` defined by `docs/06_CODE_STYLE.md` §6 (`ScopeError`, `ToolNotInstalled`, `ToolFailed`, `ToolTimeout`, `ParseError`, `ConfigError`, `InstallError`); no other exception names. They are converted into `ToolResult(status=...)`, never raised out of a stage.
 - Binary adapters usually implement only `build_command` and `parse_output`; the base `run` handles execution, timeout, output saving and error mapping.
 - HTTP adapters subclass `HttpAdapter` from `adapters/base.py`. Its `run` awaits `ctx.limiter.wait()`, uses an `httpx.AsyncClient` with an explicit timeout and the honest User-Agent, retries a connection error once with an injected sleep, and maps HTTP 429, 5xx and timeouts to a failed `ToolResult` (never an exception).
+- HTTP bodies are read as a stream and capped at `MAX_BODY_BYTES` (10 MiB); exceeding the cap is a failed `ToolResult` (`response too large`), never an exception.
 - `parse_output` normalizes and validates subdomain names; only names equal to or under `ctx.target` are kept before records are returned.
 - In `--mock` mode `run` reads `tests/fixtures/<name>/<target>.<ext>` (or the only file in that directory) instead of making a request.
 - Rate: if the registry has `rate_flag`, the adapter appends it with the value from `pacer.tool_rate_args(name)`.

@@ -197,6 +197,63 @@ def test_upsert_port_keeps_service_when_omitted(store: Store) -> None:
     assert row["service"] == "http/ssl"
 
 
+def test_upsert_port_keeps_confidence_when_omitted(store: Store) -> None:
+    target_id, run_a = make_run(store)
+    _, run_b = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "a.example.com", run_id=run_a)
+    port_id = store.upsert_port(
+        sub_id, "203.0.113.5", 443, run_id=run_a, state="open", confidence="MEDIUM"
+    )
+    store.upsert_port(sub_id, "203.0.113.5", 443, run_id=run_b, state="open")
+    row = store._conn.execute("SELECT confidence FROM ports WHERE id = ?", (port_id,)).fetchone()
+    assert row["confidence"] == "MEDIUM"
+
+
+def test_upsert_port_explicit_confidence_overwrites(store: Store) -> None:
+    target_id, run_a = make_run(store)
+    _, run_b = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "a.example.com", run_id=run_a)
+    port_id = store.upsert_port(
+        sub_id, "203.0.113.5", 443, run_id=run_a, state="open", confidence="MEDIUM"
+    )
+    store.upsert_port(sub_id, "203.0.113.5", 443, run_id=run_b, state="open", confidence="HIGH")
+    row = store._conn.execute("SELECT confidence FROM ports WHERE id = ?", (port_id,)).fetchone()
+    assert row["confidence"] == "HIGH"
+
+
+def test_upsert_port_fresh_insert_uses_defaults(store: Store) -> None:
+    target_id, run_id = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "a.example.com", run_id=run_id)
+    port_id = store.upsert_port(sub_id, "203.0.113.5", 443, run_id=run_id, state="open")
+    row = store._conn.execute("SELECT confidence FROM ports WHERE id = ?", (port_id,)).fetchone()
+    assert row["confidence"] == "LOW"
+
+
+def test_upsert_url_keeps_source_count_when_omitted(store: Store) -> None:
+    target_id, run_a = make_run(store)
+    _, run_b = make_run(store)
+    url_id = store.upsert_url(target_id, "https://a.example.com/x", run_id=run_a, source_count=4)
+    store.upsert_url(target_id, "https://a.example.com/x", run_id=run_b)
+    row = store._conn.execute("SELECT source_count FROM urls WHERE id = ?", (url_id,)).fetchone()
+    assert row["source_count"] == 4
+
+
+def test_upsert_url_explicit_source_count_overwrites(store: Store) -> None:
+    target_id, run_a = make_run(store)
+    _, run_b = make_run(store)
+    url_id = store.upsert_url(target_id, "https://a.example.com/x", run_id=run_a, source_count=4)
+    store.upsert_url(target_id, "https://a.example.com/x", run_id=run_b, source_count=7)
+    row = store._conn.execute("SELECT source_count FROM urls WHERE id = ?", (url_id,)).fetchone()
+    assert row["source_count"] == 7
+
+
+def test_upsert_url_fresh_insert_uses_defaults(store: Store) -> None:
+    target_id, run_id = make_run(store)
+    url_id = store.upsert_url(target_id, "https://a.example.com/x", run_id=run_id)
+    row = store._conn.execute("SELECT source_count FROM urls WHERE id = ?", (url_id,)).fetchone()
+    assert row["source_count"] == 0
+
+
 def test_upsert_url_keeps_category_when_omitted(store: Store) -> None:
     target_id, run_a = make_run(store)
     _, run_b = make_run(store)

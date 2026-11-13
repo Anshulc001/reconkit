@@ -23,6 +23,8 @@ class HackertargetAdapter(HttpAdapter):
         return headers
 
     def parse_output(self, raw: str) -> list[Record]:
+        if "api count exceeded" in raw.lower():
+            raise ParseError("hackertarget: free quota exceeded")
         names: list[str] = []
         for line in raw.splitlines():
             if not line.strip():

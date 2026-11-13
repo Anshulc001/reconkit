@@ -27,7 +27,7 @@ mypy src/reconkit
 | c | done | `45b0ba8` | `core/scope` gate + tests |
 | d | done | `0a3010b` | `core/pacing.py`: delays, jitter, ordering, parallel limits, rate args, RateLimiter |
 | e | done | `1ba2fd8` | `core/store.py`: schema, migrations, `redact()` helper, diff queries (`docs/04_DATABASE.md`) |
-| f1 | done | `HEAD` | `adapters/base.py`, `adapters/registry.py`, `crtsh`, `certspotter`, `otx`, `hackertarget` |
+| f1 | done | 89ba34f | `adapters/base.py`, `adapters/registry.py`, `crtsh`, `certspotter`, `otx`, `hackertarget` |
 | f2 | pending | - | `subfinder`, `assetfinder`, `dnspython`, `pyprobe`, `httpx`, `pyscan`, `naabu` |
 | g | pending | - | `core/wildcard.py` + `engine.py` + `core/workspace.py`: stage pipeline, consensus/confidence inside `engine.py`, host states, resume, exit codes |
 | h | pending | - | `ui.py` + `cli.py`: all commands, `--mock`, `--json` |
@@ -58,6 +58,11 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - The engine builds one `RateLimiter` per stage (passive requests/second from the preset) and puts it in `RunContext`; HTTP adapters never build their own.
 - `Store` is used only from the event-loop thread (no `asyncio.to_thread`).
 - Per-call commits are slow for thousands of hosts. Add a `transaction()` context manager or a batch insert method when the engine needs it.
+- A discovered host with no probe result keeps the schema default `UNKNOWN`; only the live/DNS stages append `host_status_history` rows.
+- The engine builds one `RateLimiter` per stage (passive requests/second from the preset) and passes it into `RunContext`; adapters never build their own.
+- The engine passes each tool only the env names listed in that tool's `keys` in `tools.yaml`, never the whole environment.
+- When a tool fails with "rate limited" and its keys are unset, the UI should hint at the free key (env name and sign-up URL from `tools.yaml`).
+- `registry.load_tools()` reloads `tools.yaml` on every call, so the engine should load the specs once and reuse them.
 - Read queries for the engine/CLI (list subdomains with sources, `tool_runs` of a run for resume, latest run for a target, ports, export) are added in tasks g/h with tests.
 
 ## Fixtures

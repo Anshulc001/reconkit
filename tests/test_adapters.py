@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from reconkit.adapters.base import RETRY_DELAY, BaseToolAdapter, HttpAdapter
+from reconkit.adapters.base import MAX_BODY_BYTES, RETRY_DELAY, BaseToolAdapter, HttpAdapter
 from reconkit.adapters.certspotter import CertspotterAdapter
 from reconkit.adapters.crtsh import CrtshAdapter
 from reconkit.adapters.hackertarget import HackertargetAdapter
@@ -262,6 +262,56 @@ async def test_connection_error_twice_fails_after_one_retry() -> None:
     assert result.status == ToolStatus.FAILED
     assert len(calls) == 2
     assert sleeps == [RETRY_DELAY]
+
+
+class _ChunkStream(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        for _ in range(2600):
+            yield b"x" * 4096
+
+
+async def test_oversized_body_is_failed() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=_ChunkStream())
+
+    adapter = CrtshAdapter(transport=httpx.MockTransport(handler))
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.FAILED
+    assert "response too large" in (result.error or "")
+
+
+async def test_declared_oversized_length_is_failed() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-length": str(MAX_BODY_BYTES + 1)},
+            content=b"",
+        )
+
+    adapter = CrtshAdapter(transport=httpx.MockTransport(handler))
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.FAILED
+    assert "response too large" in (result.error or "")
+
+
+async def test_hackertarget_free_quota_is_reported() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="API count Exceeded - Increase Quota with Membership")
+
+    adapter = HackertargetAdapter(transport=httpx.MockTransport(handler))
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.FAILED
+    assert "free quota exceeded" in (result.error or "")
+
+
+async def test_hackertarget_other_text_is_unexpected() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="error check your search parameter")
+
+    adapter = HackertargetAdapter(transport=httpx.MockTransport(handler))
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.FAILED
+    assert "unexpected response" in (result.error or "")
 
 
 async def test_rate_limiter_is_used_before_the_request() -> None:

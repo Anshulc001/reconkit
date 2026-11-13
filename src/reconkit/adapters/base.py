@@ -29,6 +29,7 @@ from reconkit.models import (
 
 USER_AGENT = "reconkit/0.1"
 RETRY_DELAY = 1.0
+MAX_BODY_BYTES = 10 * 1024 * 1024
 MAX_ERROR_CHARS = 200
 FIXTURES = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 
@@ -195,14 +196,27 @@ class HttpAdapter(BaseToolAdapter):
             transport=self._transport,
             follow_redirects=True,
         ) as client:
-            response = await client.get(self.url(ctx), params=dict(self.params(ctx)))
-        if response.status_code == 429:
-            raise FetchFailed(f"{self.name}: rate limited (HTTP 429)")
-        if response.status_code >= 500:
-            raise FetchFailed(f"{self.name}: server error (HTTP {response.status_code})")
-        if response.status_code >= 400:
-            raise FetchFailed(f"{self.name}: HTTP {response.status_code}")
-        return response.text
+            async with client.stream(
+                "GET", self.url(ctx), params=dict(self.params(ctx))
+            ) as response:
+                if response.status_code == 429:
+                    raise FetchFailed(f"{self.name}: rate limited (HTTP 429)")
+                if response.status_code >= 500:
+                    raise FetchFailed(f"{self.name}: server error (HTTP {response.status_code})")
+                if response.status_code >= 400:
+                    raise FetchFailed(f"{self.name}: HTTP {response.status_code}")
+                declared = response.headers.get("content-length")
+                if declared is not None and declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+                    raise FetchFailed(f"{self.name}: response too large")
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > MAX_BODY_BYTES:
+                        raise FetchFailed(f"{self.name}: response too large")
+                    chunks.append(chunk)
+                body = b"".join(chunks)
+                return body.decode(response.encoding or "utf-8", errors="replace")
 
     @staticmethod
     def _within_target(records: list[Record], target: str) -> list[Record]:

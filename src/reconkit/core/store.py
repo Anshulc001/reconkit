@@ -388,31 +388,31 @@ class Store:
         protocol: str = "tcp",
         service: str | None = None,
         version: str | None = None,
-        confidence: str = "LOW",
+        confidence: str | None = None,
     ) -> int:
         self._conn.execute(
             "INSERT INTO ports"
             " (subdomain_id, ip, port, protocol, state, service, version, confidence,"
             "  first_seen_run, last_seen_run)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'LOW'), ?, ?)"
+            " VALUES (:subdomain_id, :ip, :port, :protocol, :state, :service, :version,"
+            "  COALESCE(:confidence, 'LOW'), :run_id, :run_id)"
             " ON CONFLICT(subdomain_id, ip, port, protocol) DO UPDATE SET"
             "  last_seen_run = excluded.last_seen_run,"
             "  state = excluded.state,"
             "  service = COALESCE(excluded.service, ports.service),"
             "  version = COALESCE(excluded.version, ports.version),"
-            "  confidence = excluded.confidence",
-            (
-                subdomain_id,
-                ip,
-                port,
-                protocol,
-                state,
-                service,
-                version,
-                confidence,
-                run_id,
-                run_id,
-            ),
+            "  confidence = COALESCE(:confidence, ports.confidence)",
+            {
+                "subdomain_id": subdomain_id,
+                "ip": ip,
+                "port": port,
+                "protocol": protocol,
+                "state": state,
+                "service": service,
+                "version": version,
+                "confidence": confidence,
+                "run_id": run_id,
+            },
         )
         self._conn.commit()
         row = self._conn.execute(
@@ -436,19 +436,19 @@ class Store:
         run_id: int,
         category: str | None = None,
         patterns: Sequence[str] | None = None,
-        source_count: int = 0,
+        source_count: int | None = None,
     ) -> int:
         self._conn.execute(
             "INSERT INTO urls"
             " (target_id, url, category, patterns_json, source_count,"
             "  first_seen_run, last_seen_run)"
             " VALUES (:target_id, :url, :category, COALESCE(:patterns_json, '[]'),"
-            "  :source_count, :run_id, :run_id)"
+            "  COALESCE(:source_count, 0), :run_id, :run_id)"
             " ON CONFLICT(target_id, url) DO UPDATE SET"
             "  last_seen_run = excluded.last_seen_run,"
             "  category = COALESCE(:category, urls.category),"
             "  patterns_json = COALESCE(:patterns_json, urls.patterns_json),"
-            "  source_count = excluded.source_count",
+            "  source_count = COALESCE(:source_count, urls.source_count)",
             {
                 "target_id": target_id,
                 "url": url,
