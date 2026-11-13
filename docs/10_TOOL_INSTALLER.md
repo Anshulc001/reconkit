@@ -72,7 +72,7 @@ Other rules:
 
 `doctor` implements docs/01 Feature 2 and docs/08 Flow 1, and changes nothing:
 
-- tool table: installed, version, resolved path, identity verified, tier;
+- tool table: installed, version, resolved path, identity verified, tier (rendering rules in docs/02 section 5);
 - per-stage coverage (`subs 6/11 ready`);
 - system packages (`libpcap-dev`, `dnsutils`, `jq`), Python version, `scope.yaml` presence, DB writability and `config.yaml` presence;
 - the Keys table (tool, set/missing, what it adds, sign-up URL), names only, never values;

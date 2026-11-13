@@ -100,6 +100,10 @@ new.example.com      [NEW]      -         certspotter, hackertarget         MEDI
 - A final summary line: counts per state, new items, tools skipped or failed.
 - A "Tools" panel lists each adapter: `ok`, `skipped (not installed)`, `failed (reason)`, `timeout`.
 
+### Doctor output
+
+`doctor` prints one row per tool: `tool`, `stage`, `tier`, `installed`, `version`, `path`, `identity`. A `kind: http` or `kind: python` tool needs no binary, so `version` and `path` print `n/a (no binary required)` and `installed` is always `yes`; only `kind: binary` tools can be missing. A binary that exists but fails its identity check prints `wrong program` in `installed` (with its `path`) and counts as not ready. Below the table: per-stage coverage (`subs 6/11 ready`), system packages, the Keys table (names and sign-up URLs, never values), and `Missing tools: N. Run: reconkit install --all` when anything is missing. `--json` writes one document and keeps warnings at exit `0` (docs/10 section 5a).
+
 ### JSON (`--json`)
 
 One JSON document is written to stdout; tables and progress stay on stderr. The fixed shape is:
