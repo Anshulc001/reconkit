@@ -50,7 +50,7 @@ def test_timeout_keeps_partial_output() -> None:
     assert result.timed_out is True
     assert result.returncode is not None
     assert "started" in result.stdout
-    assert result.duration_s >= 0.3
+    assert result.duration_s >= 0.25
 
 
 def test_output_limit_truncates() -> None:

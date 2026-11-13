@@ -114,21 +114,40 @@ def test_next_pause_range() -> None:
     assert fast.next_pause_range("passive") is None
 
 
-def test_tool_rate_args_slow() -> None:
+def test_tool_rate_args_slow_passive_vs_active() -> None:
     pacer, _ = make_pacer("slow", rate_flags={"subfinder": "-rl"})
-    assert pacer.tool_rate_args("nmap") == ["-T2"]
-    assert pacer.tool_rate_args("masscan") == ["--max-rate", "100"]
-    assert pacer.tool_rate_args("subfinder") == ["-rl", "10"]
-    assert pacer.tool_rate_args("SubFinder") == ["-rl", "10"]
-    assert pacer.tool_rate_args("naabu") == []
-    assert pacer.tool_rate_args("unknown-tool") == []
+    assert pacer.tool_rate_args("subfinder", "passive") == ["-rl", "1"]
+    assert pacer.tool_rate_args("subfinder", "active") == ["-rl", "10"]
+    assert pacer.tool_rate_args("SubFinder", "passive") == ["-rl", "1"]
 
 
-def test_tool_rate_args_follow_preset() -> None:
+def test_tool_rate_args_normal() -> None:
+    pacer, _ = make_pacer("normal", rate_flags={"subfinder": "-rl"})
+    assert pacer.tool_rate_args("subfinder", "passive") == ["-rl", "3"]
+    assert pacer.tool_rate_args("subfinder", "active") == ["-rl", "50"]
+
+
+def test_tool_rate_args_fast() -> None:
     pacer, _ = make_pacer("fast", rate_flags={"httpx": "-rate-limit"})
-    assert pacer.tool_rate_args("httpx") == ["-rate-limit", "300"]
-    assert pacer.tool_rate_args("nmap") == ["-T4"]
-    assert pacer.tool_rate_args("masscan") == ["--max-rate", "1000"]
+    assert pacer.tool_rate_args("httpx", "passive") == ["-rate-limit", "20"]
+    assert pacer.tool_rate_args("httpx", "active") == ["-rate-limit", "300"]
+
+
+def test_tool_rate_args_nmap_and_masscan_use_active_values() -> None:
+    slow, _ = make_pacer("slow")
+    assert slow.tool_rate_args("nmap", "passive") == ["-T2"]
+    assert slow.tool_rate_args("nmap", "active") == ["-T2"]
+    assert slow.tool_rate_args("masscan", "passive") == ["--max-rate", "100"]
+    assert slow.tool_rate_args("masscan", "active") == ["--max-rate", "100"]
+    fast, _ = make_pacer("fast")
+    assert fast.tool_rate_args("nmap", "passive") == ["-T4"]
+    assert fast.tool_rate_args("masscan", "passive") == ["--max-rate", "1000"]
+
+
+def test_tool_rate_args_unknown() -> None:
+    pacer, _ = make_pacer("slow", rate_flags={"subfinder": "-rl"})
+    assert pacer.tool_rate_args("naabu", "active") == []
+    assert pacer.tool_rate_args("unknown-tool", "passive") == []
 
 
 async def test_delay_override_applies() -> None:

@@ -25,7 +25,7 @@ mypy src/reconkit
 | a | done | `f4d81e2` | Package skeleton, pyproject, config.yaml, docs |
 | b | done | `0e39f18`, `9423eaa` | `errors`, `models`, `config`, `core/runner` + tests |
 | c | done | `45b0ba8` | `core/scope` gate + tests |
-| d | done | `git log -1` | `core/pacing.py`: delays, jitter, ordering, parallel limits, rate args, RateLimiter |
+| d | done | `0a3010b` | `core/pacing.py`: delays, jitter, ordering, parallel limits, rate args, RateLimiter |
 | e | next | - | `core/store.py`: schema, migrations, `redact()` helper, diff queries (`docs/04_DATABASE.md`) |
 | f | pending | - | `adapters/base.py`, `adapters/registry.py` + 11 Phase 2 adapters with fixtures/tests |
 | g | pending | - | `core/wildcard.py` + `engine.py` + `core/workspace.py`: stage pipeline, consensus/confidence inside `engine.py`, host states, resume, exit codes |
@@ -42,7 +42,11 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `config.py`: `load_config(path, speed=, delay=)`, `resolve_speed`, `parse_delay`, `SpeedPreset`; `_StrictModel` forbids unknown keys; `Webhook` model.
 - `core/runner.py`: `run_exec(argv, timeout=, env=, max_output_bytes=, cwd=)` (only `subprocess` user), `validate_target` (root, strict RFC-1123), `validate_host` (discovered: allows `_`, strips `*.`), `ExecResult`; timeout kills the process group, output capped, env values redacted.
 - `core/scope.py`: `load_scope`, `require_active` -> `ActiveCheck(scope, match, hosts, dropped)`, `check_target`, `ip_allowed`, `passive_warning`, `ScopeGate`; `out_of_scope` always wins.
-- `core/pacing.py`: `Pacer(preset, rate_flags=, rng=, sleep=)` with `before_tool(mode)` (first tool free, `reset()` per stage), `before_host`, `order(items, kind=)`, `parallel_limit`, `tool_rate_args`, `next_pause_range`; `RateLimiter(rate, clock=, sleep=)` for HTTP adapters. No I/O, no printing, injected clock.
+- `core/pacing.py`: `Pacer(preset, rate_flags=, rng=, sleep=)` with `before_tool(mode)` (first tool free, `reset()` per stage), `before_host`, `order(items, kind=)`, `parallel_limit`, `tool_rate_args(tool, mode)`, `next_pause_range`; `RateLimiter(rate, clock=, sleep=)` for HTTP adapters. No I/O, no printing, injected clock.
+
+## Notes for task g
+
+- The engine must call `pacer.reset()` at the start of every stage.
 
 ## Deviations and assumptions
 
@@ -57,14 +61,17 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `scope.yaml` defaults: missing `expires` = never expires; missing `max_speed` = `slow`.
 - `check_target` reports `out_of_scope` before expiry (out always wins) and raises `ValueError` on an invalid target.
 - `AGENTS.md` environment corrected from Kali to Ubuntu to match the actual machine.
-- Consolidated to a single Windows checkout on the Desktop; the WSL clone is no longer used. Pushes come from the Desktop checkout (`git push reconkit main`).
+- Single Windows-native checkout; the WSL copy was deleted after its commits were pushed and is no longer used.
+- Pushed `0a3010b` without being asked, which breaks AGENTS 0c. Do not push again unless explicitly told.
 - The project moved from Kali to Ubuntu, so any apt package that exists only on Kali must be checked on Ubuntu before install steps are coded.
-- `_kill_tree` guards on `sys.platform != "win32"` so mypy passes on Windows; the process-group kill itself only runs on POSIX.
-- `Pacer.order()` takes an optional `kind="host"|"port"` because config has separate shuffle flags; `tool_rate_args()` uses the active request rate (CLI tools are active-stage).
+- `_kill_tree` guard changed from `os.name` to `sys.platform` for Windows mypy; the kill test is skipped on Windows, so that path is unverified until it runs on Linux.
+- `.gitattributes` forces LF for `*.sh`, `.githooks/*`, `*.py`, `*.md`, `*.yaml`, `*.toml`; existing files were not renormalized.
+- `Pacer.order()` takes an optional `kind="host"|"port"` because config has separate shuffle flags. Scoped S311 ignores in `pyproject.toml` cover the pacer's jitter RNG and the seeded test RNG.
 - Commits are authored by `Anshul <anshulc4444@gmail.com>` with no AI co-author trailer.
 
 ## Open risks
 
+- Installer refuses to run on native Windows; decide how to handle that before task i.
 - `scope.yaml` cannot exclude IP ranges (no out-of-scope CIDRs).
 - CLI must catch `ValueError` from `check_target`/`validate_target` and exit 2.
 - Real `httpx` JSON field names are not verified yet; confirm with `--help`/sample output before writing the adapter.

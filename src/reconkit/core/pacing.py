@@ -87,8 +87,12 @@ class Pacer:
             self._rng.shuffle(ordered)
         return ordered
 
-    def tool_rate_args(self, tool: str) -> list[str]:
-        """Rate-limit flags for a CLI tool; empty when the tool has none."""
+    def tool_rate_args(self, tool: str, mode: StageMode) -> list[str]:
+        """Rate-limit flags for a CLI tool; empty when the tool has none.
+
+        Passive tools use the passive request rate, active tools the active one;
+        nmap and masscan always take their active-preset timings.
+        """
         name = tool.lower()
         if name == "nmap":
             return [f"-T{self._preset.nmap_timing}"]
@@ -97,7 +101,12 @@ class Pacer:
         flag = self._rate_flags.get(name)
         if flag is None:
             return []
-        return [flag, _number(self._preset.active_requests_per_second)]
+        rate = (
+            self._preset.passive_requests_per_second
+            if mode == "passive"
+            else self._preset.active_requests_per_second
+        )
+        return [flag, _number(rate)]
 
     def _delay_range(self, mode: StageMode) -> tuple[float, float]:
         if mode == "passive":

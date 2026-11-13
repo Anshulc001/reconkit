@@ -103,7 +103,8 @@ workspaces/<domain>/
 ## 7. Pacing Engine (`core/pacing.py`)
 
 - Single `Pacer` object per run, built from the chosen speed preset plus `--delay` overrides.
-- API: `await pacer.before_tool(mode)`, `await pacer.before_host()`, `pacer.order(items, kind="host"|"port")`, `pacer.parallel_limit(mode)`, `pacer.tool_rate_args(tool)`, `pacer.next_pause_range(mode)` for the progress line, `pacer.reset()` per stage.
+- API: `await pacer.before_tool(mode)`, `await pacer.before_host()`, `pacer.order(items, kind="host"|"port")`, `pacer.parallel_limit(mode)`, `pacer.tool_rate_args(tool, mode)`, `pacer.next_pause_range(mode)` for the progress line, `pacer.reset()` per stage.
+- `tool_rate_args(tool, mode)` uses `passive.requests_per_second` for passive tools and `active.requests_per_second` for active ones; `nmap -T<n>` and `masscan --max-rate` always use the active preset values. Whole-number rates print without `.0`.
 - Randomness (`random.uniform`) and sleeping are **injected** (rng, sleep) so tests run instantly with a fake clock.
 - Passive stages also use the Pacer (third-party APIs ban bursts).
 - Per-source HTTP adapters share an async rate limiter (requests/second from the preset).
@@ -165,3 +166,4 @@ Single machine, thousands of hosts per target. Beyond that is out of scope (see 
 - Code in VS Code (Remote-WSL). Terminal, venv, tools all inside Kali.
 - Unit tests use fixtures and also pass on plain Windows (no tools needed).
 - Real tool runs and integration smoke tests happen in WSL2 Kali.
+- The current path, environment and check commands live in `docs/PROGRESS.md` section "Environment"; the Kali/WSL lines above are historical.
