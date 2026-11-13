@@ -63,6 +63,7 @@
 | `--min-sources N` | Hide results confirmed by fewer than N tools |
 | `--phase-timeout SEC` / `--timeout-<stage> SEC` | Stage time limits |
 | `--mock` | Use fixtures instead of real tools/network |
+| `--resume` | Continue the latest unfinished run for the target; completed stages are not repeated |
 | `--no-keys` | Force free mode: ignore API keys from `.env` (task h; policy in docs/05 §6.1) |
 | `--json` | JSON (JSONL for streams) on stdout, no colors or progress |
 | `--no-color`, `-v/--verbose`, `-q/--quiet` | Output control |

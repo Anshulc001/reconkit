@@ -1,9 +1,10 @@
-"""Stage orchestration, gating and the mock pipeline (docs/09 section 4).
+"""Stage orchestration, confidence, host states and resume (docs/03, docs/09).
 
 The engine selects adapters from `tools.yaml`, applies tier/mode/scope gates,
-builds a per-tool `RunContext`, runs stages in the documented order and records
-one `tool_runs` row per tool. Consensus and host-state transitions are added in
-Part 6b; this module keeps the pipeline and the safety gates.
+runs stages in the documented order, merges results by host, computes confidence
+from distinct tools, applies the unconditional host-state rule, and records one
+`tool_runs` row per tool. All consensus logic lives here; there is no
+`core/consensus.py`.
 """
 
 from __future__ import annotations
@@ -12,8 +13,9 @@ import asyncio
 import json
 import secrets
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from enum import IntEnum, StrEnum
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -25,10 +27,11 @@ from reconkit.config import AppConfig, SpeedName, resolve_speed
 from reconkit.core.pacing import Clock, Pacer, RateLimiter
 from reconkit.core.runner import validate_host, validate_target
 from reconkit.core.scope import load_scope, require_active
-from reconkit.core.store import Store, redact
+from reconkit.core.store import Store, redact, utc_now
 from reconkit.core.workspace import Workspace
 from reconkit.errors import ConfigError, ScopeError
 from reconkit.models import (
+    Confidence,
     FindingRecord,
     HostState,
     HostStatusRecord,
@@ -58,6 +61,179 @@ Selected = list[tuple[ToolSpec, type[BaseToolAdapter]]]
 Skipped = list[tuple[ToolSpec, SkipReason]]
 Sleep = Callable[[float], Awaitable[None]]
 InstalledCheck = Callable[[type[BaseToolAdapter]], bool]
+Now = Callable[[], str]
+
+
+class ExitCode(IntEnum):
+    """docs/02 exit codes. The CLI maps this; the engine never calls sys.exit."""
+
+    SUCCESS = 0
+    ERROR = 1
+    USAGE = 2
+    SCOPE = 3
+    NO_TOOL = 4
+    PARTIAL = 5
+    INTERRUPTED = 130
+
+
+class DnsSignal(StrEnum):
+    """Per-host DNS evidence; only NXDOMAIN may produce DEAD."""
+
+    ABSENT = "absent"
+    RESOLVED = "resolved"
+    NXDOMAIN = "nxdomain"
+    UNCERTAIN = "uncertain"
+
+
+@dataclass(frozen=True)
+class HostEvidence:
+    """All evidence for one host in one live/DNS pass."""
+
+    web: tuple[tuple[str, HostState], ...] = ()
+    dns: DnsSignal = DnsSignal.ABSENT
+    dns_tools: tuple[str, ...] = ()
+    dns_disagree: bool = False
+    web_ok: bool = True
+    dns_ok: bool = True
+    cnames: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class HostTransition:
+    """The state rule's result; `persist` is false when nothing was observed."""
+
+    state: HostState
+    confidence: Confidence | None
+    sources: tuple[str, ...]
+    warnings: tuple[str, ...]
+    persist: bool
+
+
+def confidence_for(
+    sources: Iterable[str],
+    *,
+    high_min: int,
+    medium_min: int,
+    disagree: bool = False,
+) -> Confidence:
+    """Confidence from DISTINCT tools, never from repeated results of one tool."""
+    if disagree:
+        return Confidence.UNCONFIRMED
+    count = len(set(sources))
+    if count >= high_min:
+        return Confidence.HIGH
+    if count >= medium_min:
+        return Confidence.MEDIUM
+    return Confidence.LOW
+
+
+# Transition table (previous state x evidence). Only NXDOMAIN can yield DEAD.
+# previous            ALIVE   DNS_ONLY   NXDOMAIN   timeout/SERVFAIL   no evidence
+# None/UNKNOWN        ALIVE   DNS_ONLY   DEAD       UNKNOWN (warn)     UNKNOWN
+# ALIVE               ALIVE   DNS_ONLY   SHUT_DOWN  ALIVE kept         ALIVE kept
+# DNS_ONLY            ALIVE   DNS_ONLY   SHUT_DOWN  DNS_ONLY kept      DNS_ONLY kept
+# SHUT_DOWN           ALIVE   DNS_ONLY   DEAD       SHUT_DOWN kept     SHUT_DOWN kept
+# DEAD                ALIVE   DNS_ONLY   DEAD       DEAD kept          DEAD kept
+def decide_host_state(
+    previous: HostState | None,
+    evidence: HostEvidence,
+    *,
+    target: str,
+    high_min: int,
+    medium_min: int,
+) -> HostTransition:
+    """Apply docs/09's state rule. Agreeing tools affect confidence, not state."""
+    alive_tools = tuple(tool for tool, state in evidence.web if state is HostState.ALIVE)
+    if alive_tools:
+        sources = alive_tools
+        disagree = evidence.dns is DnsSignal.NXDOMAIN or any(
+            state is not HostState.ALIVE for _, state in evidence.web
+        )
+        return HostTransition(
+            HostState.ALIVE,
+            confidence_for(sources, high_min=high_min, medium_min=medium_min, disagree=disagree),
+            sources,
+            (),
+            True,
+        )
+
+    if evidence.dns is DnsSignal.NXDOMAIN:
+        state = (
+            HostState.SHUT_DOWN
+            if previous in (HostState.ALIVE, HostState.DNS_ONLY)
+            else HostState.DEAD
+        )
+        sources = evidence.dns_tools or tuple(tool for tool, _ in evidence.web)
+        warnings: list[str] = []
+        if state is HostState.SHUT_DOWN:
+            outside = sorted(
+                {
+                    cname
+                    for cname in evidence.cnames
+                    if cname != target and not cname.endswith(f".{target}")
+                }
+            )
+            if outside:
+                warnings.append(f"possible dangling CNAME: {outside[0]} (outside {target})")
+        return HostTransition(
+            state,
+            confidence_for(
+                sources,
+                high_min=high_min,
+                medium_min=medium_min,
+                disagree=evidence.dns_disagree,
+            ),
+            sources,
+            tuple(warnings),
+            True,
+        )
+
+    if evidence.dns is DnsSignal.RESOLVED:
+        sources = (*evidence.dns_tools, *(tool for tool, _ in evidence.web))
+        disagree = evidence.dns_disagree or any(
+            state is HostState.DEAD for _, state in evidence.web
+        )
+        return HostTransition(
+            HostState.DNS_ONLY,
+            confidence_for(sources, high_min=high_min, medium_min=medium_min, disagree=disagree),
+            sources,
+            (),
+            True,
+        )
+
+    if evidence.dns is DnsSignal.UNCERTAIN or not evidence.web_ok or not evidence.dns_ok:
+        state = previous or HostState.UNKNOWN
+        warning = (
+            "DNS/probe inconclusive; kept previous state"
+            if previous is not None
+            else "DNS/probe inconclusive; state UNKNOWN"
+        )
+        sources = tuple(tool for tool, _ in evidence.web)
+        return HostTransition(
+            state,
+            None if previous is not None else Confidence.LOW,
+            sources,
+            (warning,),
+            previous is not None,
+        )
+
+    if evidence.web:
+        state = previous or HostState.UNKNOWN
+        sources = tuple(tool for tool, _ in evidence.web)
+        warning = (
+            "no conclusive web response; kept previous state"
+            if previous is not None
+            else "no conclusive web response; state UNKNOWN"
+        )
+        return HostTransition(
+            state,
+            None if previous is not None else Confidence.LOW,
+            sources,
+            (warning,),
+            previous is not None,
+        )
+
+    return HostTransition(previous or HostState.UNKNOWN, None, (), (), False)
 
 
 @dataclass(frozen=True)
@@ -73,6 +249,8 @@ class ScanOptions:
     mock: bool = False
     speed: SpeedName = "slow"
     phase_timeout: float | None = None
+    min_sources: int = 1
+    resume: bool = False
 
 
 @dataclass
@@ -81,6 +259,7 @@ class StageOutcome:
     run_id: int
     results: list[ToolResult] = field(default_factory=list)
     dropped_hosts: list[str] = field(default_factory=list)
+    resumed: bool = False
 
 
 @dataclass
@@ -88,6 +267,10 @@ class ScanSummary:
     target: str
     target_id: int
     stages: list[StageOutcome] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    exit_code: ExitCode = ExitCode.SUCCESS
+    resumed: bool = False
+    scope_denied: bool = False
 
     @property
     def results(self) -> list[ToolResult]:
@@ -111,6 +294,7 @@ class Engine:
         sleep: Sleep | None = None,
         clock: Clock | None = None,
         installed: InstalledCheck | None = None,
+        now: Now | None = None,
     ) -> None:
         self.config = config
         self.store = store
@@ -125,7 +309,9 @@ class Engine:
         self._sleep = sleep if sleep is not None else asyncio.sleep
         self._clock = clock
         self._installed = installed
+        self._now = now if now is not None else utc_now
         self._secrets = tuple(value for value in self.env.values() if value)
+        self._warnings: list[str] = []
 
     async def run(self, target: str, options: ScanOptions | None = None) -> ScanSummary:
         opts = options or ScanOptions()
@@ -134,6 +320,8 @@ class Engine:
             raise ConfigError(f"invalid speed {opts.speed!r}; expected slow, normal or fast")
         if opts.phase_timeout is not None and opts.phase_timeout <= 0:
             raise ConfigError("phase timeout must be > 0")
+        if opts.min_sources < 1:
+            raise ConfigError("min_sources must be >= 1")
 
         preset = resolve_speed(self.config, opts.speed)
         rate_flags = {
@@ -141,13 +329,24 @@ class Engine:
         }
         pacer = Pacer(preset, rate_flags=rate_flags, rng=self._rng, sleep=self._sleep)
         workspace = Workspace.create(self.workspace_root, target, secrets=self._secrets)
-        target_id = self.store.create_target(target)
+        target_id = self.store.create_target(target, created_at=self._now())
+        self._warnings = []
 
-        summary = ScanSummary(target=target, target_id=target_id)
+        scan_key, completed, resumed = self._resume_plan(target_id, opts)
+        summary = ScanSummary(target=target, target_id=target_id, resumed=resumed)
         discovered: set[str] = set()
         alive: set[str] = set()
+        if resumed:
+            self._seed_from_store(target_id, target, discovered, alive)
+
+        dns_results: list[ToolResult] = []
+        selected_total = 0
+        failed_total = 0
         for stage in STAGE_ORDER:
             if stage not in opts.stages:
+                continue
+            if stage in completed:
+                summary.stages.append(StageOutcome(stage, completed[stage], resumed=True))
                 continue
             hosts = self._stage_hosts(stage, target, discovered, alive)
             selected, skipped = await self._select(stage, opts)
@@ -160,6 +359,7 @@ class Engine:
             if opts.active and any(spec.mode is Mode.ACTIVE for spec, _ in selected):
                 hosts, dropped, scope_error = self._active_hosts(target, hosts, opts.speed)
                 if scope_error is not None:
+                    summary.scope_denied = True
                     selected, skipped = self._skip_active(selected, skipped, scope_error)
 
             run_id = self.store.create_scan_run(
@@ -168,12 +368,15 @@ class Engine:
                 opts.speed,
                 params=json.dumps(
                     {
+                        "scan_key": scan_key,
                         "tools": [spec.name for spec, _ in selected],
                         "mock": opts.mock,
                         "active": opts.active,
                         "no_keys": opts.no_keys,
+                        "min_sources": opts.min_sources,
                     }
                 ),
+                started_at=self._now(),
                 secrets=self._secrets,
             )
             for spec, reason in skipped:
@@ -203,21 +406,117 @@ class Engine:
                     if spec.name not in done:
                         self._record(run_id, spec.name, ToolStatus.TIMEOUT, error="phase timeout")
                         done.add(spec.name)
+            except asyncio.CancelledError:
+                self.store.finish_scan_run(run_id, "interrupted", finished_at=self._now())
+                raise
 
-            if results:
+            try:
                 with self.store.transaction():
-                    for result in results:
-                        if result.status is ToolStatus.OK:
-                            self._persist(target_id, run_id, result)
-            all_ok = all(result.status is ToolStatus.OK for result in results)
-            self.store.finish_scan_run(run_id, "completed" if all_ok else "partial")
+                    self._persist_stage(
+                        target_id,
+                        run_id,
+                        stage,
+                        results,
+                        opts,
+                        dns_results,
+                        target,
+                        hosts,
+                        discovered,
+                        alive,
+                    )
+            except Exception:
+                self.store.finish_scan_run(run_id, "failed", finished_at=self._now())
+                raise
 
-            for result in results:
-                self._observe(result, discovered, alive, target)
+            selected_total += len(selected)
+            failed_total += sum(1 for result in results if result.status is not ToolStatus.OK)
+            failed_total += len(selected) - len(results)
+            all_ok = len(results) == len(selected) and all(
+                result.status is ToolStatus.OK for result in results
+            )
+            self.store.finish_scan_run(
+                run_id, "completed" if all_ok else "partial", finished_at=self._now()
+            )
+
+            if stage is Stage.DNS:
+                dns_results = list(results)
+            self._update_discovered(stage, results, target, discovered, alive)
             summary.stages.append(
                 StageOutcome(stage=stage, run_id=run_id, results=results, dropped_hosts=dropped)
             )
+
+        summary.exit_code = self._exit_code(
+            summary, selected_total=selected_total, failed_total=failed_total
+        )
+        summary.warnings = list(self._warnings)
         return summary
+
+    def _exit_code(
+        self, summary: ScanSummary, *, selected_total: int, failed_total: int
+    ) -> ExitCode:
+        if summary.scope_denied:
+            return ExitCode.SCOPE
+        new_stages = any(not stage.resumed for stage in summary.stages)
+        if selected_total == 0:
+            return ExitCode.NO_TOOL if new_stages else ExitCode.SUCCESS
+        if failed_total == selected_total:
+            return ExitCode.NO_TOOL
+        if failed_total:
+            return ExitCode.PARTIAL
+        return ExitCode.SUCCESS
+
+    def _resume_plan(self, target_id: int, opts: ScanOptions) -> tuple[str, dict[Stage, int], bool]:
+        """Find the latest scan_key and the stages it already completed."""
+        rows = self.store.scan_runs(target_id)
+        if not opts.resume:
+            return secrets.token_hex(8), {}, False
+        key: str | None = None
+        for row in reversed(rows):
+            candidate = self._scan_key(row.get("params_json"))
+            if candidate is not None:
+                key = candidate
+                break
+        if key is None:
+            return secrets.token_hex(8), {}, False
+        completed: dict[Stage, int] = {}
+        for row in rows:
+            if self._scan_key(row.get("params_json")) != key:
+                continue
+            try:
+                stage = Stage(str(row.get("stage")))
+            except ValueError:
+                continue
+            status = str(row.get("status"))
+            if status in ("completed", "partial"):
+                completed[stage] = int(str(row.get("id")))
+            elif status == "running":
+                self.store.finish_scan_run(
+                    int(str(row.get("id"))), "interrupted", finished_at=self._now()
+                )
+        return key, completed, True
+
+    @staticmethod
+    def _scan_key(params_json: object) -> str | None:
+        try:
+            data = json.loads(str(params_json))
+        except (TypeError, ValueError):
+            return None
+        if isinstance(data, dict):
+            key = data.get("scan_key")
+            if isinstance(key, str):
+                return key
+        return None
+
+    def _seed_from_store(
+        self, target_id: int, target: str, discovered: set[str], alive: set[str]
+    ) -> None:
+        for row in self.store.subdomains(target_id):
+            host = str(row.get("fqdn") or "")
+            if host not in discovered:
+                discovered.add(host)
+            if str(row.get("state")) == HostState.ALIVE.value:
+                alive.add(host)
+        discovered.discard(target)
 
     def _stage_hosts(
         self, stage: Stage, target: str, discovered: set[str], alive: set[str]
@@ -420,19 +719,29 @@ class Engine:
         value = getattr(self.config.timeouts, stage.value, None)
         return float(value or self.config.timeouts.default_phase)
 
-    def _observe(
-        self, result: ToolResult, discovered: set[str], alive: set[str], target: str
+    def _update_discovered(
+        self,
+        stage: Stage,
+        results: list[ToolResult],
+        target: str,
+        discovered: set[str],
+        alive: set[str],
     ) -> None:
-        if result.status is not ToolStatus.OK:
-            return
-        for record in result.records:
-            host = self._record_host(record)
-            if host is None:
+        for result in results:
+            if result.status is not ToolStatus.OK:
                 continue
-            for cleaned in self._clean_hosts([host], target):
-                discovered.add(cleaned)
-                if isinstance(record, HostStatusRecord) and record.state is HostState.ALIVE:
-                    alive.add(cleaned)
+            for record in result.records:
+                host = self._record_host(record)
+                if host is None:
+                    continue
+                for cleaned in self._clean_hosts([host], target):
+                    discovered.add(cleaned)
+                    if (
+                        stage is Stage.LIVE
+                        and isinstance(record, HostStatusRecord)
+                        and record.state is HostState.ALIVE
+                    ):
+                        alive.add(cleaned)
 
     def _record_host(self, record: Record) -> str | None:
         if isinstance(record, (SubdomainRecord, HostStatusRecord, PortRecord, FindingRecord)):
@@ -441,42 +750,279 @@ class Engine:
             return urlsplit(record.url).hostname
         return None
 
-    def _persist(self, target_id: int, run_id: int, result: ToolResult) -> None:
-        for record in result.records:
-            if isinstance(record, SubdomainRecord):
-                sub_id = self.store.upsert_subdomain(target_id, record.fqdn, run_id=run_id)
-                self.store.add_subdomain_source(sub_id, run_id, result.tool)
-            elif isinstance(record, HostStatusRecord):
-                sub_id = self.store.upsert_subdomain(
-                    target_id, record.fqdn, run_id=run_id, state=record.state.value
-                )
-                self.store.append_host_status(
-                    sub_id,
-                    run_id,
-                    record.state.value,
-                    status_code=record.status_code,
-                    title=record.title,
-                    location=record.location,
-                    ips=record.ips,
-                    tech=record.tech,
-                    waf=record.waf,
-                    tools=[result.tool],
-                )
-            elif isinstance(record, PortRecord):
-                sub_id = self.store.upsert_subdomain(target_id, record.fqdn, run_id=run_id)
-                port_id = self.store.upsert_port(
-                    sub_id,
-                    record.ip,
-                    record.port,
-                    run_id=run_id,
-                    state=record.state,
-                    protocol=record.protocol,
-                    service=record.service,
-                    version=record.version,
-                )
-                self.store.add_port_source(port_id, run_id, result.tool, "run")
-            elif isinstance(record, UrlRecord):
-                self.store.upsert_url(target_id, record.url, run_id=run_id, source_count=1)
-            elif isinstance(record, FindingRecord):
-                # The findings table is deferred (docs/04); the result is kept in memory.
+    def _persist_stage(
+        self,
+        target_id: int,
+        run_id: int,
+        stage: Stage,
+        results: list[ToolResult],
+        opts: ScanOptions,
+        dns_results: list[ToolResult],
+        target: str,
+        hosts: list[str],
+        discovered: set[str],
+        alive: set[str],
+    ) -> None:
+        if stage is Stage.SUBS:
+            self._persist_discovery(target_id, run_id, results, opts)
+        elif stage is Stage.DNS:
+            self._persist_dns(
+                target_id,
+                run_id,
+                results,
+                target,
+                defer=Stage.LIVE in opts.stages,
+            )
+        elif stage is Stage.LIVE:
+            self._persist_live(target_id, run_id, results, dns_results, target, hosts, opts, alive)
+        elif stage is Stage.PORTS:
+            self._persist_ports(target_id, run_id, results, opts)
+        elif stage is Stage.URLS:
+            self._persist_urls(target_id, run_id, results, opts)
+
+    def _persist_discovery(
+        self, target_id: int, run_id: int, results: list[ToolResult], opts: ScanOptions
+    ) -> None:
+        groups: dict[str, tuple[set[str], list[SubdomainRecord]]] = {}
+        for result in results:
+            if result.status is not ToolStatus.OK:
                 continue
+            for record in result.records:
+                if not isinstance(record, SubdomainRecord):
+                    continue
+                tools, records = groups.setdefault(record.fqdn, (set(), []))
+                tools.add(result.tool)
+                records.append(record)
+        for fqdn, (tools, _records) in groups.items():
+            if len(tools) < opts.min_sources:
+                continue
+            confidence = confidence_for(
+                tools,
+                high_min=self.config.confidence.high_min_sources,
+                medium_min=self.config.confidence.medium_min_sources,
+            )
+            sub_id = self.store.upsert_subdomain(
+                target_id,
+                fqdn,
+                run_id=run_id,
+                confidence=confidence.value,
+                source_count=len(tools),
+            )
+            for tool in sorted(tools):
+                self.store.add_subdomain_source(sub_id, run_id, tool)
+
+    def _persist_urls(
+        self, target_id: int, run_id: int, results: list[ToolResult], opts: ScanOptions
+    ) -> None:
+        groups: dict[str, set[str]] = {}
+        for result in results:
+            if result.status is not ToolStatus.OK:
+                continue
+            for record in result.records:
+                if isinstance(record, UrlRecord):
+                    groups.setdefault(record.url, set()).add(result.tool)
+        for url, tools in groups.items():
+            if len(tools) < opts.min_sources:
+                continue
+            self.store.upsert_url(target_id, url, run_id=run_id, source_count=len(tools))
+
+    def _dns_facts(
+        self, results: list[ToolResult], target: str
+    ) -> tuple[
+        dict[str, DnsSignal],
+        dict[str, set[str]],
+        dict[str, set[str]],
+        dict[str, set[str]],
+        set[str],
+    ]:
+        signals: dict[str, DnsSignal] = {}
+        tools: dict[str, set[str]] = {}
+        cnames: dict[str, set[str]] = {}
+        ips: dict[str, set[str]] = {}
+        disagree: set[str] = set()
+        for result in results:
+            if result.status is not ToolStatus.OK:
+                continue
+            for record in result.records:
+                host = self._record_host(record)
+                if host is None:
+                    continue
+                for cleaned in self._clean_hosts([host], target):
+                    tools.setdefault(cleaned, set()).add(result.tool)
+                    if isinstance(record, SubdomainRecord):
+                        if signals.get(cleaned) is DnsSignal.NXDOMAIN:
+                            disagree.add(cleaned)
+                        signals[cleaned] = DnsSignal.RESOLVED
+                        cnames.setdefault(cleaned, set()).update(record.cnames)
+                        ips.setdefault(cleaned, set()).update(record.ips)
+                    elif isinstance(record, HostStatusRecord) and record.state is HostState.DEAD:
+                        if signals.get(cleaned) is DnsSignal.RESOLVED:
+                            disagree.add(cleaned)
+                        elif cleaned not in signals:
+                            signals[cleaned] = DnsSignal.NXDOMAIN
+        return signals, tools, cnames, ips, disagree
+
+    def _persist_dns(
+        self,
+        target_id: int,
+        run_id: int,
+        results: list[ToolResult],
+        target: str,
+        *,
+        defer: bool,
+    ) -> None:
+        signals, tools, cnames, ips, disagree = self._dns_facts(results, target)
+        for host, signal in signals.items():
+            if signal is DnsSignal.RESOLVED:
+                self.store.upsert_subdomain(target_id, host, run_id=run_id)
+        if defer:
+            return
+        for host, signal in signals.items():
+            if signal is not DnsSignal.NXDOMAIN:
+                continue
+            previous = self._previous_state(target_id, host, run_id)
+            transition = decide_host_state(
+                previous,
+                HostEvidence(
+                    dns=signal,
+                    dns_tools=tuple(sorted(tools.get(host, set()))),
+                    dns_disagree=host in disagree,
+                    cnames=tuple(sorted(cnames.get(host, set()))),
+                ),
+                target=target,
+                high_min=self.config.confidence.high_min_sources,
+                medium_min=self.config.confidence.medium_min_sources,
+            )
+            self._write_host(target_id, run_id, host, transition, None, tuple(ips.get(host, ())))
+
+    def _persist_live(
+        self,
+        target_id: int,
+        run_id: int,
+        results: list[ToolResult],
+        dns_results: list[ToolResult],
+        target: str,
+        hosts: list[str],
+        opts: ScanOptions,
+        alive: set[str],
+    ) -> None:
+        web: dict[str, list[tuple[str, HostStatusRecord]]] = {}
+        for result in results:
+            if result.status is not ToolStatus.OK:
+                continue
+            for record in result.records:
+                if isinstance(record, HostStatusRecord):
+                    web.setdefault(record.fqdn, []).append((result.tool, record))
+        dns_signals, dns_tools, dns_cnames, dns_ips, dns_disagree = self._dns_facts(
+            dns_results, target
+        )
+        dns_ran = bool(dns_results)
+        dns_ok = any(result.status is ToolStatus.OK for result in dns_results) if dns_ran else True
+        live_ok = any(result.status is ToolStatus.OK for result in results)
+        for host in hosts:
+            records = web.get(host, [])
+            signal = dns_signals.get(host)
+            if signal is None:
+                signal = DnsSignal.UNCERTAIN if dns_ran else DnsSignal.ABSENT
+            evidence = HostEvidence(
+                web=tuple((tool, record.state) for tool, record in records),
+                dns=signal,
+                dns_tools=tuple(sorted(dns_tools.get(host, set()))),
+                dns_disagree=host in dns_disagree,
+                web_ok=live_ok,
+                dns_ok=dns_ok,
+                cnames=tuple(sorted(dns_cnames.get(host, set()))),
+            )
+            previous = self._previous_state(target_id, host, run_id)
+            transition = decide_host_state(
+                previous,
+                evidence,
+                target=target,
+                high_min=self.config.confidence.high_min_sources,
+                medium_min=self.config.confidence.medium_min_sources,
+            )
+            if not transition.persist:
+                continue
+            best = next(
+                (record for _, record in records if record.state is HostState.ALIVE),
+                records[0][1] if records else None,
+            )
+            ips = tuple(sorted(dns_ips.get(host, set())))
+            self._write_host(target_id, run_id, host, transition, best, ips)
+            if transition.state is HostState.ALIVE:
+                alive.add(host)
+            for warning in transition.warnings:
+                if warning not in self._warnings:
+                    self._warnings.append(warning)
+
+    def _previous_state(self, target_id: int, host: str, run_id: int) -> HostState | None:
+        sub_id = self.store.upsert_subdomain(target_id, host, run_id=run_id)
+        raw = self.store.previous_state(sub_id)
+        return HostState(raw) if raw is not None else None
+
+    def _write_host(
+        self,
+        target_id: int,
+        run_id: int,
+        host: str,
+        transition: HostTransition,
+        best: HostStatusRecord | None,
+        ips: tuple[str, ...],
+    ) -> None:
+        sub_id = self.store.upsert_subdomain(
+            target_id,
+            host,
+            run_id=run_id,
+            state=transition.state.value,
+            confidence=None if transition.confidence is None else transition.confidence.value,
+            source_count=len(transition.sources),
+        )
+        self.store.append_host_status(
+            sub_id,
+            run_id,
+            transition.state.value,
+            status_code=None if best is None else best.status_code,
+            title=None if best is None else best.title,
+            location=None if best is None else best.location,
+            ips=ips,
+            tech=() if best is None else best.tech,
+            waf=None if best is None else best.waf,
+            tools=transition.sources,
+            checked_at=self._now(),
+        )
+
+    def _persist_ports(
+        self, target_id: int, run_id: int, results: list[ToolResult], opts: ScanOptions
+    ) -> None:
+        groups: dict[tuple[str, str, int], dict[str, list[str]]] = {}
+        for result in results:
+            if result.status is not ToolStatus.OK:
+                continue
+            for record in result.records:
+                if not isinstance(record, PortRecord):
+                    continue
+                key = (record.fqdn, record.ip, record.port)
+                groups.setdefault(key, {}).setdefault(result.tool, []).append(record.state)
+        for (fqdn, ip, port), by_tool in groups.items():
+            tools = set(by_tool)
+            if len(tools) < opts.min_sources:
+                continue
+            seen = {state for states in by_tool.values() for state in states}
+            state = "unconfirmed" if {"open", "closed"} <= seen else next(iter(seen))
+            confidence = confidence_for(
+                tools,
+                high_min=self.config.confidence.high_min_sources,
+                medium_min=self.config.confidence.medium_min_sources,
+                disagree=state == "unconfirmed",
+            )
+            sub_id = self.store.upsert_subdomain(target_id, fqdn, run_id=run_id)
+            port_id = self.store.upsert_port(
+                sub_id,
+                ip,
+                port,
+                run_id=run_id,
+                state=state,
+                confidence=confidence.value,
+            )
+            for tool, states in by_tool.items():
+                self.store.add_port_source(port_id, run_id, tool, states[0])

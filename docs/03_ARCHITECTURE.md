@@ -97,7 +97,9 @@ workspaces/<domain>/
 
 ### Engine API (`engine.py`)
 
-- `Engine(config, store).run(target, ScanOptions(...))` runs the selected stages in the fixed order `subs, dns, live, ports, tech, urls, vulns`. `ScanOptions` carries `stages`, `tools`, `exclude`, `include_noisy`, `active`, `no_keys`, `mock`, `speed` and `phase_timeout`.
+- `Engine(config, store, now=...).run(target, ScanOptions(...))` runs the selected stages in the fixed order `subs, dns, live, ports, tech, urls, vulns`. `ScanOptions` carries `stages`, `tools`, `exclude`, `include_noisy`, `active`, `no_keys`, `mock`, `speed`, `phase_timeout`, `min_sources` and `resume`.
+- `now` is an injected timestamp source (default `store.utc_now`) used for `targets.created_at`, `scan_runs.started_at/finished_at` and `host_status_history.checked_at`; tests pass a fixed clock. The engine never calls `datetime.now()` or `time.time()` directly.
+- `ScanSummary.exit_code` is a typed `ExitCode` (`0` success, `1` unexpected, `2` usage, `3` scope, `4` no usable tool, `5` partial, `130` interrupted). The engine never calls `sys.exit()`; the CLI maps the value.
 - Tools are selected from `tools.yaml` once per run. A `--tools` name must exist; `intrusive` tools are refused, `opt_in` tools need `--include-noisy` or an explicit `--tools`, and `--exclude` always wins. Every selected or skipped tool gets a `tool_runs` row with its redacted error.
 - Active tools run only when `--active` is set **and** `require_active()` passes. Discovered hosts are revalidated and re-checked against scope before they reach an active `RunContext`; dropped hosts are reported, never probed. A missing/unsafe scope skips the active tools instead of raising out of the stage.
 - Each tool's `RunContext.env` contains only the env names in that tool's `keys` (none with `--no-keys`). One fresh `RateLimiter` is built per stage; `Pacer.reset()` runs at stage start; `slow` runs tools one at a time, other speeds use `pacer.parallel_limit()`.
@@ -129,6 +131,17 @@ workspaces/<domain>/
 - **Discovery stages (subs, urls):** union of all adapters; `sources` list per item; confidence from source count.
 - **Status stages (live, ports):** compare tools per host/port; agreement raises confidence; disagreement becomes `UNCONFIRMED`/`unconfirmed` and is stored.
 - **Wildcard filter:** before accepting resolved subdomains, probe `wildcard_check.probes` random non-existent names with the DNS adapter's resolver (through the run's limiter); if they resolve, mark hosts whose addresses or CNAMEs match the wildcard answer as wildcard noise. Detection returns `present`, `none` or `unknown`: `none` only when every probe is NXDOMAIN, `unknown` when no probe resolved and at least one timed out, SERVFAILed, returned no answer or errored. `unknown` is never treated as `none`; the engine warns and skips the filter.
+- **Host-state machine (implemented in `engine.py`):** `previous` is the last `host_status_history.state` row (or `None`). Evidence is the set of live-tool states plus the DNS signal (`resolved`, `nxdomain`, `uncertain`, `absent`).
+
+| previous | web ALIVE | DNS resolved, no web ALIVE | DNS NXDOMAIN | timeout/SERVFAIL/no answer | no evidence |
+|---|---|---|---|---|---|
+| `None` / `UNKNOWN` | `ALIVE` | `DNS_ONLY` | `DEAD` | `UNKNOWN` (warning) | `UNKNOWN` |
+| `ALIVE` | `ALIVE` | `DNS_ONLY` | `SHUT_DOWN` | `ALIVE` kept (warning) | `ALIVE` kept |
+| `DNS_ONLY` | `ALIVE` | `DNS_ONLY` | `SHUT_DOWN` | `DNS_ONLY` kept (warning) | `DNS_ONLY` kept |
+| `SHUT_DOWN` | `ALIVE` | `DNS_ONLY` | `DEAD` | `SHUT_DOWN` kept (warning) | `SHUT_DOWN` kept |
+| `DEAD` | `ALIVE` | `DNS_ONLY` | `DEAD` | `DEAD` kept (warning) | `DEAD` kept |
+
+- Only NXDOMAIN can produce `DEAD`; timeout, SERVFAIL, no answer and resolver/tool errors keep the previous state and add a warning. `SHUT_DOWN` is takeover-relevant: the engine warns when the host's known CNAME points outside the target. `host_status_history` is written only by the `dns` and `live` stages.
 - **Wildcard API:** `WildcardDetector(probe=..., rng=..., probes=...)` is built per run. `probe` is the DNS adapter's `resolve_host` bound to the run context, so probes reuse that resolver and limiter; `rng` is injected; `probes` comes from `wildcard_check.probes`. `await detect(target)` returns `WildcardResult`, and `result.matches(ips=..., cnames=...)` decides `is_wildcard`.
 - Exact rules: docs/09_TOOL_CONTRACTS.md.
 

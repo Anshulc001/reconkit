@@ -160,11 +160,15 @@ CREATE TABLE monitor_changes (            -- Phase 3
 
 ## 5. Rules and Constraints
 
+- Engine-created timestamps (`targets.created_at`, `scan_runs.started_at/finished_at`, `host_status_history.checked_at`) come from the injected `Engine(now=...)` source; `store.utc_now()` is the default and tests inject a fixed value.
+- Resume reads `scan_runs` for the target (newest first), groups rows by the `scan_key` stored in `params_json`, and skips stages whose row is `completed` or `partial`. A row left `running` by a crash is marked `interrupted`; a fresh row is created for that stage. Completed-stage rows are never duplicated.
+
 - A subdomain/port/url is **one row per target**; repeat scans update `last_seen_run` and add source rows. `first_seen_run` never changes.
 - `source_count` = distinct tools in `*_sources` for the latest run in which the item was seen.
 - Confidence from `source_count`: >=3 HIGH, 2 MEDIUM, 1 LOW (thresholds from `config.yaml`); `UNCONFIRMED` when tools disagree.
 - No DNS answer (NXDOMAIN) means `DEAD`, unless the previous known state was `ALIVE` or `DNS_ONLY`, which makes it `SHUT_DOWN`. This state rule is unconditional; agreeing checks affect `confidence` only.
 - `fqdn` stored lowercase, no trailing dot, validated before insert.
+- `Store.scan_runs(target_id)` and `Store.subdomains(target_id)` are read queries used by engine resume; both return plain dictionaries and never expose the connection.
 
 ## 6. Diff Queries (core of `diff`)
 

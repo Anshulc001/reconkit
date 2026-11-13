@@ -165,6 +165,11 @@ def _utc_now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def utc_now() -> str:
+    """Public default for the engine's injected timestamp source."""
+    return _utc_now()
+
+
 def _mask_secret_flag(match: re.Match[str]) -> str:
     flag = match.group(1).lower()
     if not any(word in flag for word in _SECRET_FLAG_WORDS) and flag not in ("--key", "-key"):
@@ -282,6 +287,22 @@ class Store:
     def get_target(self, domain: str) -> int | None:
         row = self._conn.execute("SELECT id FROM targets WHERE domain = ?", (domain,)).fetchone()
         return None if row is None else int(row["id"])
+
+    def scan_runs(self, target_id: int) -> list[dict[str, object]]:
+        """Every stage row for one target, oldest first (engine resume)."""
+        rows = self._conn.execute(
+            "SELECT id, stage, status, params_json FROM scan_runs WHERE target_id = ? ORDER BY id",
+            (target_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def subdomains(self, target_id: int) -> list[dict[str, object]]:
+        """Known hosts and states for one target (engine resume seeds)."""
+        rows = self._conn.execute(
+            "SELECT fqdn, state FROM subdomains WHERE target_id = ? ORDER BY fqdn",
+            (target_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     def create_scan_run(
         self,
