@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from reconkit.adapters.base import BaseToolAdapter
+from reconkit.core.runner import validate_host
 from reconkit.errors import ParseError
 from reconkit.models import PortRecord, Record, RunContext, Stage, ToolResult, ToolStatus
 
@@ -58,7 +59,12 @@ class PyscanAdapter(BaseToolAdapter):
         records: list[Record] = []
         timeouts = 0
         failures = 0
-        for host in ctx.hosts:
+        for raw_host in ctx.hosts:
+            try:
+                host = validate_host(raw_host)
+            except (TypeError, ValueError):
+                failures += 1
+                continue
             await ctx.limiter.wait()
             try:
                 addresses = await self._resolve(host)
@@ -113,6 +119,8 @@ class PyscanAdapter(BaseToolAdapter):
                 return "timeout"
             except OSError:
                 return "error"
+            # `close()` is synchronous and runs before the first await, so a
+            # cancellation while the socket drains can no longer leak it.
             writer.close()
             try:
                 await writer.wait_closed()

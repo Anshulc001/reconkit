@@ -1,8 +1,9 @@
 # reconkit tool registry. The ONLY list of tools the program may run or install.
 # Fields: stage, kind (http|python|binary), tier (core|opt_in|intrusive), mode (passive|active),
 #   phase (build phase: 2 = working adapter in Phase 2, 3 = later), binary, version_cmd,
-#   rate_flag (how the speed engine passes requests/second), install (method + source), needs_key (phase-3 env var names),
-#   keys (optional list of {env,url,adds} for keys that are free to obtain; policy in docs/05_SECURITY.md 6.1), notes.
+#   rate_flag (how the speed engine passes requests/second), install (method + source),
+#   keys (optional list of {env,url,adds} for keys that are free to obtain; policy in docs/05_SECURITY.md 6.1).
+# `keys` is the only per-tool key field; there is no `needs_key` (the loader rejects it).
 # Install methods: github_release | go_install | apt | pipx | none.
 # Release asset names must be verified against the real release when implementing the installer.
 # If an asset or checksum is missing, the installer must fail safely (docs/10_TOOL_INSTALLER.md).
@@ -38,8 +39,8 @@ tools:
     keys:
       - env: CERTSPOTTER_API_KEY
         url: "https://sslmate.com/ct_search_api"
-        adds: "Free Cert Spotter account: authenticated queries and 100 queries/hour; anonymous requests are rate limited."
-    notes: "Key optional (higher limits)."
+        adds: "Free Cert Spotter account: an API key authenticates queries as a Bearer token; unauthenticated queries are limited per hour and intended only for evaluation."
+    notes: "Key optional (authenticated access)."
   otx:
     stage: subs
     kind: http
@@ -53,8 +54,18 @@ tools:
         adds: "Free OTX account: authenticated passive DNS with higher limits; anonymous requests are rate limited."
     notes: "AlienVault OTX passive DNS. Key optional."
   hackertarget: {stage: subs, kind: http, tier: core, mode: passive, phase: 2, install: {method: none}, notes: "Free tier has a low daily limit; treat HTTP 429 as skipped."}
-  urlscan:      {stage: subs, kind: http, tier: core, mode: passive, phase: 3, install: {method: none}, needs_key: [URLSCAN_API_KEY]}
-  subfinder:    {stage: subs, kind: binary, tier: core, mode: passive, phase: 2, binary: subfinder, version_cmd: [subfinder, -version], rate_flag: "-rl", install: {<<: *pd_release, name: subfinder, repo: projectdiscovery/subfinder, fallback: {method: go_install, package: "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"}}}
+  urlscan:
+    stage: subs
+    kind: http
+    tier: core
+    mode: passive
+    phase: 3
+    install: {method: none}
+    keys:
+      - env: URLSCAN_API_KEY
+        url: "https://urlscan.io/user/signup"
+        adds: "Free urlscan.io account: creates the API key used for submissions; unauthenticated API access has only minor quotas."
+  subfinder:    {stage: subs, kind: binary, tier: core, mode: passive, phase: 2, binary: subfinder, version_cmd: [subfinder, -version], rate_flag: "-rl", install: {<<: *pd_release, name: subfinder, repo: projectdiscovery/subfinder, fallback: {method: go_install, package: "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"}}, notes: "Provider keys live only in $HOME/.config/subfinder/provider-config.yaml; there is no environment bridge, so it has no keys entry."}
   assetfinder:
     stage: subs
     kind: binary
@@ -70,8 +81,31 @@ tools:
         adds: "Free VirusTotal Public API key: adds the virustotal source (4 requests/minute, 500/day)."
   amass:        {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: amass, version_cmd: [amass, -version], install: {method: apt, package: amass}, notes: "Always run in passive mode (-passive). Slow."}
   findomain:    {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: findomain, version_cmd: [findomain, --version], install: {method: github_release, repo: Findomain/Findomain, asset_pattern: "findomain-linux.zip"}}
-  chaos:        {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: chaos, version_cmd: [chaos, -version], needs_key: [CHAOS_API_KEY], install: {<<: *pd_release, name: chaos-client, repo: projectdiscovery/chaos-client}}
-  github_subdomains: {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: github-subdomains, needs_key: [GITHUB_TOKEN], install: {method: go_install, package: "github.com/gwen001/github-subdomains@latest"}}
+  chaos:
+    stage: subs
+    kind: binary
+    tier: core
+    mode: passive
+    phase: 3
+    binary: chaos
+    version_cmd: [chaos, -version]
+    install: {<<: *pd_release, name: chaos-client, repo: projectdiscovery/chaos-client}
+    keys:
+      - env: PDCP_API_KEY
+        url: "https://cloud.projectdiscovery.io"
+        adds: "Free ProjectDiscovery Cloud account: API key for the Chaos dataset (60 requests/minute per IP)."
+  github_subdomains:
+    stage: subs
+    kind: binary
+    tier: core
+    mode: passive
+    phase: 3
+    binary: github-subdomains
+    install: {method: go_install, package: "github.com/gwen001/github-subdomains@latest"}
+    keys:
+      - env: GITHUB_TOKEN
+        url: "https://github.com/settings/tokens"
+        adds: "Free GitHub personal access token: raises the API limit from 60 to 5,000 requests/hour; the tool reads GITHUB_TOKEN."
 
   # ---------------- dns ----------------
   dnspython:    {stage: dns, kind: python, tier: core, mode: passive, phase: 2, install: {method: none}, notes: "A/AAAA/CNAME/NS/MX/TXT, wildcard probe, dangling CNAME check."}

@@ -15,6 +15,7 @@ from pathlib import Path
 import httpx
 
 from reconkit.adapters.base import USER_AGENT, BaseToolAdapter
+from reconkit.core.runner import validate_host
 from reconkit.errors import ParseError
 from reconkit.models import (
     HostState,
@@ -84,6 +85,10 @@ class PyprobeAdapter(BaseToolAdapter):
         host: str,
         semaphore: asyncio.Semaphore,
     ) -> HostStatusRecord | None:
+        try:
+            host = validate_host(host)
+        except (TypeError, ValueError):
+            return None
         async with semaphore:
             for scheme in SCHEMES:
                 await ctx.limiter.wait()

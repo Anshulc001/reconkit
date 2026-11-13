@@ -28,8 +28,8 @@ mypy src/reconkit
 | d | done | `0a3010b` | `core/pacing.py`: delays, jitter, ordering, parallel limits, rate args, RateLimiter |
 | e | done | `1ba2fd8` | `core/store.py`: schema, migrations, `redact()` helper, diff queries (`docs/04_DATABASE.md`) |
 | f1 | done | 89ba34f | `adapters/base.py`, `adapters/registry.py`, `crtsh`, `certspotter`, `otx`, `hackertarget` |
-| f2 | done | `HEAD` | pure-Python adapters: `dnspython`, `pyprobe`, `pyscan` |
-| f3 | pending | - | binary adapters: `subfinder`, `assetfinder`, `httpx`, `naabu` |
+| f2 | done | 80ddd93 | pure-Python adapters: `dnspython`, `pyprobe`, `pyscan` |
+| f3 | pending | - | remaining phase-2 tools: binary adapters `subfinder`, `assetfinder`, `httpx`, `naabu` |
 | g | pending | - | `core/wildcard.py` + `engine.py` + `core/workspace.py`: stage pipeline, consensus/confidence inside `engine.py`, host states, resume, exit codes |
 | h | pending | - | `ui.py` + `cli.py`: all commands, `--mock`, `--json` |
 | i | pending | - | `installer/` + `doctor.py` |
@@ -49,6 +49,9 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `adapters/registry.py`: `load_tools(path=)` -> `ToolSpec`, `get_spec`, `get_adapter`, `rate_flags()`; unknown/incomplete tools raise `ConfigError`.
 - `adapters/__init__.py`: `ADAPTERS` maps `crtsh`, `certspotter`, `otx`, `hackertarget` to classes.
 - `adapters/crtsh.py`, `certspotter.py`, `otx.py`, `hackertarget.py`: async parsers and request metadata; keys only from `ctx.env`.
+- `adapters/dnspython.py`: `DnsResult` with a structured `DnsOutcome` (`resolved`, `nxdomain`, `noanswer`, `servfail`, `timeout`, `error`); only NXDOMAIN becomes `DEAD`; JSON fixture parser for `--mock`.
+- `adapters/pyprobe.py`: async HTTP/HTTPS probe, no redirects, `Location` recorded, title capped at `TITLE_LIMIT`, TLS/connect failure -> `UNKNOWN`.
+- `adapters/pyscan.py`: async TCP connect scan, semaphore from `pacer.parallel_limit`, invalid ports/hosts skipped and counted, socket closed before `wait_closed`.
 - `core/pacing.py`: `Pacer(preset, rate_flags=, rng=, sleep=)` with `before_tool(mode)` (first tool free, `reset()` per stage), `before_host`, `order(items, kind=)`, `parallel_limit`, `tool_rate_args(tool, mode)`, `next_pause_range`; `RateLimiter(rate, clock=, sleep=)` for HTTP adapters. No I/O, no printing, injected clock.
 
 ## Notes for task g
@@ -76,10 +79,13 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 ## Key sources
 
 - All fetched 2026-11-13.
-- Cert Spotter: `https://sslmate.com/help/reference/ct_search_api_v1` (Bearer API key; a free account allows 100 queries/hour, anonymous requests are limited). Sign-up: `https://sslmate.com/ct_search_api`.
+- Cert Spotter API reference: `https://sslmate.com/help/reference/ct_search_api_v1`. An API key is a Bearer token (or Basic username); only unauthenticated per-hour limits are documented, and the docs give no number, so the old "100 queries/hour" claim was removed. Sign-up: `https://sslmate.com/ct_search_api`.
 - OTX: `https://otx.alienvault.com/api` (`X-OTX-API-KEY`; a free account provides the key).
 - assetfinder: `https://github.com/tomnomnom/assetfinder` (`VT_API_KEY`); VirusTotal Public API is free at 4 requests/minute and 500/day: `https://docs.virustotal.com/reference/public-vs-premium-api`.
-- subfinder: `https://docs.projectdiscovery.io/opensource/subfinder/install` stores provider keys only in `$HOME/.config/subfinder/provider-config.yaml`; no per-provider env var names are documented, so it has no `keys` entry.
+- subfinder provider config: `https://docs.projectdiscovery.io/opensource/subfinder/install` (fetched 2026-11-13). Provider keys are stored only in `$HOME/.config/subfinder/provider-config.yaml`; no per-provider environment variable is documented. Providers the page says need a key: BeVigil, BinaryEdge, BufferOver, C99, Censys, CertSpotter, Chaos, Chinaz, DNSDB, Fofa, FullHunt, GitHub, Intelx, PassiveTotal, Profundis, quake, Robtex, SecurityTrails, Shodan, ThreatBook, VirusTotal, WhoisXML API, ZoomEye, dnsrepo, Hunter, Facebook, BuiltWith.
+- urlscan API intro: `https://docs.urlscan.io/pages/api-intro` (account + API key; unauthenticated access has "minor quotas"). Sign-up: `https://urlscan.io/user/signup`.
+- Chaos client README: `https://github.com/projectdiscovery/chaos-client`; the environment variable is `PDCP_API_KEY`, and the API allows 60 requests/minute/IP. Sign-up: `https://cloud.projectdiscovery.io`.
+- github-subdomains README: `https://github.com/gwen001/github-subdomains`; it reads `GITHUB_TOKEN` when `-t` is absent. Token page: `https://github.com/settings/tokens`. GitHub REST limits: 60 requests/hour unauthenticated, 5,000/hour authenticated (`https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api`).
 
 ## Deviations and assumptions
 
@@ -101,6 +107,12 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `.gitattributes` forces LF for `*.sh`, `.githooks/*`, `*.py`, `*.md`, `*.yaml`, `*.toml`; existing files were not renormalized.
 - `Pacer.order()` takes an optional `kind="host"|"port"` because config has separate shuffle flags. Scoped S311 ignores in `pyproject.toml` cover the pacer's jitter RNG and the seeded test RNG.
 - Commits are authored by `Anshul <anshulc4444@gmail.com>` with no AI co-author trailer.
+- `needs_key` was removed from `tools.yaml`; the loader now raises `ConfigError` for it so `keys` stays the single source of truth (docs/05 §6.1 updated first).
+- Cert Spotter's `adds` text was corrected: the API docs do not promise 100 queries/hour to a key; that figure was the unauthenticated limit.
+- Chaos's key env name was corrected from `CHAOS_API_KEY` to `PDCP_API_KEY` (chaos-client README). `urlscan` and `github_subdomains` migrated from `needs_key` to `keys` with verified URLs.
+- Per-host adapters now normalize every input with `validate_host()`; an invalid or IDN host is skipped/counted instead of being used in a request. `dnspython` maps an unexpected resolver exception to the structured `error` outcome instead of aborting the stage.
+- `pyscan` closes the connection before awaiting `wait_closed()`, so cancelling a stage cannot leak an open socket; the concurrency test pins the semaphore to the pacer limit.
+- Review entries for the phase-2 commits live in `docs/REVIEW_LOG.md`.
 
 ## Open risks
 
@@ -112,18 +124,20 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `HostStatusRecord.location` and the `host_status_history.location` column were added in docs/09/docs/04 first so `pyprobe` can record a redirect target without following it; the v1 migration was edited in place (no real DB).
 - `dnspython` resolves A/AAAA/CNAME only: the record models have no NS/MX/TXT fields, and adding them would change the database schema. `pyscan` sends no payload and reads no banner (the banner read is optional).
 - `HttpAdapter` is documented in docs/09 section 3. Domain filtering happens in `run()` because the contract's `parse_output(raw)` receives no target; `parse_output` normalizes and validates only.
-- Fixtures are trimmed real responses except OTX (synthetic, see Fixtures) and the `dnspython`/`pyprobe`/`pyscan` JSON fixtures, which are all `*.synthetic.*`; no adapter test touches the network.
+- Three fixtures are synthetic, not captured from the wire: `tests/fixtures/dnspython/example.com.synthetic.json`, `tests/fixtures/pyprobe/example.com.synthetic.json`, `tests/fixtures/pyscan/example.com.synthetic.json`. They were written to the documented shapes; no adapter test touches the network.
 - ProjectDiscovery `httpx` can collide with the Python `httpx` CLI on PATH; f3's `check_installed` must verify the binary identity, not just the name.
 - `tests/test_store.py` imports `sqlite3` for `IntegrityError`; the "only store.py imports sqlite3" rule is enforced for `src/`.
 - Installer refuses to run on native Windows; decide how to handle that before task i.
 - `scope.yaml` cannot exclude IP ranges (no out-of-scope CIDRs).
 - CLI must catch `ValueError` from `check_target`/`validate_target` and exit 2.
 - OTX refuses anonymous requests (429), so `otx/example.com.synthetic.json` is synthetic and the adapter has not parsed a real OTX response yet.
-- subfinder takes provider keys from `provider-config.yaml`, not env vars; its free-tier provider list and any env-var bridge are unverified, so `tools.yaml` gives it no `keys` entry until task f3.
+- subfinder takes provider keys only from `$HOME/.config/subfinder/provider-config.yaml`; no environment bridge exists, so `tools.yaml` gives it no `keys` entry. Which of the 27 keyed providers have a free tier, and their sign-up URLs, are not verified provider-by-provider; the agent must not guess them. Doctor cannot hint at these keys until a provider-config bridge is designed.
 - assetfinder's `FB_APP_ID`/`FB_APP_SECRET` (Facebook developer app) and `SPYSE_API_TOKEN` were omitted: the Facebook source is no longer a documented free subdomain API, and the Spyse service status is unverified.
-- Phase-3 tools (`urlscan`, `chaos`, `github_subdomains`) still use the old `needs_key` field; migrate them to `keys` when their adapters land in Phase 3.
+- `urlscan`, `chaos` and `github_subdomains` now carry `keys`; their adapters are still Phase 3. `URLSCAN_API_KEY` is reconkit's own name, `PDCP_API_KEY` and `GITHUB_TOKEN` are the tools' real names.
 - HackerTarget's free tier returned one row for example.com; multi-row parsing is only covered by MockTransport tests.
 - Scope behavior is only unit-tested; engine tests must prove an out-of-scope host is never probed.
+- Cert Spotter's authenticated quota is undocumented, so no rate number is shown for a key; only the unauthenticated limit is described.
+- `keys` is now the only per-tool key field. `.env.example` dropped `VIRUSTOTAL_API_KEY`, `SECURITYTRAILS_API_KEY` and `SHODAN_API_KEY` because no `tools.yaml` entry lists them (subfinder keys are file-based), and `CHAOS_API_KEY` was replaced by the real `PDCP_API_KEY`.
 
 ## Next task
 

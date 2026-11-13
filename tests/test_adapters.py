@@ -264,15 +264,57 @@ async def test_connection_error_twice_fails_after_one_retry() -> None:
     assert sleeps == [RETRY_DELAY]
 
 
-class _ChunkStream(httpx.AsyncByteStream):
+class _BodyStream(httpx.AsyncByteStream):
+    """A chunked body of exactly `total` bytes, with no Content-Length header."""
+
+    def __init__(self, total: int, chunk: int = 4096) -> None:
+        self.total = total
+        self.chunk = chunk
+
     async def __aiter__(self):
-        for _ in range(2600):
-            yield b"x" * 4096
+        remaining = self.total
+        while remaining:
+            size = min(self.chunk, remaining)
+            yield b"x" * size
+            remaining -= size
 
 
-async def test_oversized_body_is_failed() -> None:
+async def test_body_exactly_at_the_cap_passes() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, stream=_ChunkStream())
+        return httpx.Response(200, content=b"x" * MAX_BODY_BYTES)
+
+    adapter = CrtshAdapter(transport=httpx.MockTransport(handler))
+    result = await adapter.run(make_ctx())
+    assert "response too large" not in (result.error or "")
+
+
+async def test_body_one_byte_over_the_cap_is_failed() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=_BodyStream(MAX_BODY_BYTES + 1))
+
+    adapter = CrtshAdapter(transport=httpx.MockTransport(handler))
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.FAILED
+    assert "response too large" in (result.error or "")
+
+
+async def test_chunked_body_without_content_length_is_capped() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=_BodyStream(MAX_BODY_BYTES + 4096))
+
+    adapter = CrtshAdapter(transport=httpx.MockTransport(handler))
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.FAILED
+    assert "response too large" in (result.error or "")
+
+
+async def test_lying_small_content_length_is_still_capped() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-length": "16"},
+            stream=_BodyStream(MAX_BODY_BYTES + 4096),
+        )
 
     adapter = CrtshAdapter(transport=httpx.MockTransport(handler))
     result = await adapter.run(make_ctx())

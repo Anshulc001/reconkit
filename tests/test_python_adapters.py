@@ -168,6 +168,65 @@ async def test_dnspython_no_answer_is_not_dead() -> None:
     assert result.error is None
 
 
+async def test_dnspython_outcomes_are_all_distinct() -> None:
+    assert [outcome.value for outcome in DnsOutcome] == [
+        "resolved",
+        "nxdomain",
+        "noanswer",
+        "servfail",
+        "timeout",
+        "error",
+    ]
+    assert len(set(DnsOutcome)) == len(DnsOutcome)
+
+
+async def test_dnspython_cname_loop_is_error_not_dead() -> None:
+    resolver = FakeResolver(
+        {("loop.example.com", "A"): dns.exception.DNSException("CNAME loop detected")}
+    )
+    adapter = DnsPythonAdapter(resolver=resolver)
+    ctx = make_ctx(hosts=["loop.example.com"])
+    assert (await adapter.resolve_host(ctx, "loop.example.com")).outcome is DnsOutcome.ERROR
+    result = await adapter.run(ctx)
+    assert result.status == ToolStatus.OK
+    assert result.records == []
+    assert "error=1" in (result.error or "")
+
+
+async def test_dnspython_unexpected_exception_is_error_not_crash() -> None:
+    resolver = FakeResolver({("boom.example.com", "A"): RuntimeError("resolver bug")})
+    adapter = DnsPythonAdapter(resolver=resolver)
+    ctx = make_ctx(hosts=["boom.example.com"])
+    assert (await adapter.resolve_host(ctx, "boom.example.com")).outcome is DnsOutcome.ERROR
+    result = await adapter.run(ctx)
+    assert result.status == ToolStatus.OK
+    assert result.records == []
+    assert "error=1" in (result.error or "")
+
+
+async def test_dnspython_uppercase_host_is_normalized() -> None:
+    resolver = FakeResolver({("www.example.com", "A"): ["203.0.113.5"]})
+    adapter = DnsPythonAdapter(resolver=resolver)
+    result = await adapter.run(make_ctx(hosts=["WWW.Example.COM."]))
+    assert resolver.queries == [
+        ("www.example.com", "A"),
+        ("www.example.com", "AAAA"),
+        ("www.example.com", "CNAME"),
+    ]
+    assert [r.fqdn for r in result.records] == ["www.example.com"]
+
+
+async def test_dnspython_idn_host_is_counted_not_resolved() -> None:
+    resolver = FakeResolver({})
+    adapter = DnsPythonAdapter(resolver=resolver)
+    ctx = make_ctx(hosts=["bücher.example.com"])
+    assert (await adapter.resolve_host(ctx, "bücher.example.com")).outcome is DnsOutcome.ERROR
+    result = await adapter.run(ctx)
+    assert resolver.queries == []
+    assert result.records == []
+    assert "invalid=1" in (result.error or "")
+
+
 async def test_dnspython_awaits_limiter_per_query() -> None:
     limiter = CountingLimiter()
     resolver = FakeResolver({("www.example.com", "A"): ["203.0.113.5"]})
@@ -270,6 +329,42 @@ async def test_pyprobe_connection_refused_has_no_record() -> None:
     assert "unreachable=1" in (result.error or "")
 
 
+async def test_pyprobe_empty_hosts() -> None:
+    adapter = PyprobeAdapter(
+        transport=httpx.MockTransport(lambda _r: httpx.Response(200, text="ok"))
+    )
+    result = await adapter.run(make_ctx(hosts=[]))
+    assert result.records == []
+    assert result.error is None
+
+
+async def test_pyprobe_uppercase_host_is_normalized() -> None:
+    urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        urls.append(str(request.url))
+        return httpx.Response(200, text="<title>ok</title>")
+
+    adapter = PyprobeAdapter(transport=httpx.MockTransport(handler))
+    result = await adapter.run(make_ctx(hosts=["WWW.Example.COM."]))
+    assert urls == ["https://www.example.com/"]
+    assert result.records[0].fqdn == "www.example.com"
+
+
+async def test_pyprobe_idn_host_is_skipped_without_a_request() -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, text="ok")
+
+    adapter = PyprobeAdapter(transport=httpx.MockTransport(handler))
+    result = await adapter.run(make_ctx(hosts=["bücher.example.com"]))
+    assert calls == []
+    assert result.records == []
+    assert "unreachable=1" in (result.error or "")
+
+
 async def test_pyprobe_awaits_limiter() -> None:
     limiter = CountingLimiter()
     adapter = PyprobeAdapter(
@@ -353,6 +448,94 @@ async def test_pyscan_uses_pacer_order_for_ports() -> None:
     )
     await adapter.run(ctx)
     assert kinds == ["port"]
+
+
+async def test_pyscan_ignores_out_of_range_ports() -> None:
+    seen: list[int] = []
+
+    async def connect(_ip: str, port: int) -> tuple[None, FakeWriter]:
+        seen.append(port)
+        raise ConnectionRefusedError(port)
+
+    adapter = PyscanAdapter(
+        connect=connect,
+        resolve=lambda _host: asyncio.sleep(0, result=["203.0.113.5"]),
+    )
+    result = await adapter.run(
+        make_ctx(hosts=["www.example.com"], ports=[0, -1, 65536, 70000, 443])
+    )
+    assert seen == [443]
+    assert [(r.port, r.state) for r in result.records] == [(443, "closed")]
+
+
+async def test_pyscan_respects_the_pacer_parallel_limit() -> None:
+    ctx = make_ctx(hosts=["www.example.com"], ports=list(range(1000, 1010)))
+    ctx.pacer.parallel_limit = lambda _mode: 2  # type: ignore[method-assign]
+    active = 0
+    peak = 0
+
+    async def connect(_ip: str, port: int) -> tuple[None, FakeWriter]:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0.01)
+            raise ConnectionRefusedError(port)
+        finally:
+            active -= 1
+
+    adapter = PyscanAdapter(
+        connect=connect,
+        resolve=lambda _host: asyncio.sleep(0, result=["203.0.113.5"]),
+    )
+    await adapter.run(ctx)
+    assert peak == 2
+
+
+class BannerReader:
+    def read(self, *_args) -> bytes:
+        raise AssertionError("pyscan must not read a service banner")
+
+
+async def test_pyscan_never_reads_binary_banner_bytes() -> None:
+    async def connect(_ip: str, port: int) -> tuple[BannerReader, FakeWriter]:
+        return BannerReader(), FakeWriter()
+
+    adapter = PyscanAdapter(
+        connect=connect,
+        resolve=lambda _host: asyncio.sleep(0, result=["203.0.113.5"]),
+    )
+    result = await adapter.run(make_ctx(hosts=["www.example.com"], ports=[443]))
+    assert [(r.port, r.state) for r in result.records] == [(443, "open")]
+    assert "banner" not in result.model_dump_json()
+
+
+class DrainingWriter(FakeWriter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.waiting = asyncio.Event()
+
+    async def wait_closed(self) -> None:
+        self.waiting.set()
+        await asyncio.Event().wait()
+
+
+async def test_pyscan_cancellation_closes_the_connection() -> None:
+    writer = DrainingWriter()
+
+    async def connect(_ip: str, port: int) -> tuple[None, DrainingWriter]:
+        return None, writer
+
+    adapter = PyscanAdapter(
+        connect=connect,
+        resolve=lambda _host: asyncio.sleep(0, result=["203.0.113.5"]),
+    )
+    task = asyncio.create_task(adapter.run(make_ctx(hosts=["www.example.com"], ports=[443])))
+    await asyncio.wait_for(writer.waiting.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert writer.closed is True
 
 
 async def test_pyscan_awaits_limiter_per_query_and_connection() -> None:

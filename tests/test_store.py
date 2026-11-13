@@ -275,6 +275,66 @@ def test_upsert_url_keeps_category_when_omitted(store: Store) -> None:
     assert row["category"] == "json"
 
 
+# `None` means "not supplied, keep the stored value"; 0 and "" are real values
+# and must overwrite, otherwise a scan could never clear a previous value.
+
+
+def test_upsert_subdomain_explicit_zero_overwrites(store: Store) -> None:
+    target_id, run_a = make_run(store)
+    _, run_b = make_run(store)
+    sub_id = store.upsert_subdomain(
+        target_id, "api.example.com", run_id=run_a, source_count=3, is_wildcard=True
+    )
+    store.upsert_subdomain(
+        target_id, "api.example.com", run_id=run_b, source_count=0, is_wildcard=False
+    )
+    row = store._conn.execute(
+        "SELECT source_count, is_wildcard FROM subdomains WHERE id = ?", (sub_id,)
+    ).fetchone()
+    assert (row["source_count"], row["is_wildcard"]) == (0, 0)
+
+
+def test_upsert_port_explicit_empty_service_overwrites(store: Store) -> None:
+    target_id, run_a = make_run(store)
+    _, run_b = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "a.example.com", run_id=run_a)
+    port_id = store.upsert_port(
+        sub_id, "203.0.113.5", 443, run_id=run_a, state="open", service="https", version="1.1"
+    )
+    store.upsert_port(
+        sub_id, "203.0.113.5", 443, run_id=run_b, state="open", service="", version=""
+    )
+    row = store._conn.execute(
+        "SELECT service, version FROM ports WHERE id = ?", (port_id,)
+    ).fetchone()
+    assert (row["service"], row["version"]) == ("", "")
+
+
+def test_upsert_url_explicit_zero_and_empty_overwrite(store: Store) -> None:
+    target_id, run_a = make_run(store)
+    _, run_b = make_run(store)
+    url_id = store.upsert_url(
+        target_id,
+        "https://a.example.com/x",
+        run_id=run_a,
+        category="html",
+        patterns=["xss"],
+        source_count=4,
+    )
+    store.upsert_url(
+        target_id,
+        "https://a.example.com/x",
+        run_id=run_b,
+        category="",
+        patterns=[],
+        source_count=0,
+    )
+    row = store._conn.execute(
+        "SELECT category, patterns_json, source_count FROM urls WHERE id = ?", (url_id,)
+    ).fetchone()
+    assert (row["category"], row["patterns_json"], row["source_count"]) == ("", "[]", 0)
+
+
 def test_subdomain_sources_are_unique(store: Store) -> None:
     target_id, run_id = make_run(store)
     sub_id = store.upsert_subdomain(target_id, "api.example.com", run_id=run_id)

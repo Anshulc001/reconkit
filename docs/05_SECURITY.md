@@ -59,11 +59,11 @@ This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 fla
 2. **Keys come only from `.env`** (loaded at startup). Never from CLI flags, never logged, never in URLs or query strings; `redact()` covers them in errors, logs and `tool_runs.error`.
 3. **Only keys that are free to obtain are supported.** A tool whose only key is paid gets no key support at all (it runs free or is skipped).
 4. **`doctor` always shows a Keys table** (tool, set/missing, what it adds, sign-up URL). `--no-keys` forces free mode and ignores `.env` (flag list in `docs/02_CLI_UX.md`, implemented in task h). `install` on an interactive TTY asks once: "Free only, or add keys?". Choosing keys copies `.env.example` to `.env` (never overwrites) and prints the path plus the table. Non-TTY, `--silent` and `--json` never prompt and default to free (implemented in task i).
-5. **`tools.yaml` schema:** an optional `keys:` list per tool, each entry `{env, url, adds}`. A tool without keys has no `keys` entry. `registry.ToolSpec` exposes `keys` and validates them: `env` must match `^[A-Z][A-Z0-9_]*$`, `url` must be `https`, and any malformed entry raises `ConfigError`.
+5. **`tools.yaml` schema:** an optional `keys:` list per tool, each entry `{env, url, adds}`. A tool without keys has no `keys` entry. `keys` is the single source of truth for a tool's key environment variables: there is no separate `needs_key` field, and `registry` rejects an entry that still carries one. Tools that read keys from their own config file (`subfinder` reads `$HOME/.config/subfinder/provider-config.yaml`) have no `keys` entry, because reconkit cannot pass those keys through the child environment.
 
 ## 7. Environment Variables
 
-- **Optional keys:** `CERTSPOTTER_API_KEY`, `OTX_API_KEY`, `URLSCAN_API_KEY`, `CHAOS_API_KEY`, `GITHUB_TOKEN`, `VIRUSTOTAL_API_KEY`, `SECURITYTRAILS_API_KEY`, `SHODAN_API_KEY`
+- **Optional keys:** `CERTSPOTTER_API_KEY`, `OTX_API_KEY`, `VT_API_KEY`, `URLSCAN_API_KEY`, `PDCP_API_KEY` (Chaos), `GITHUB_TOKEN`. Names that no `tools.yaml` entry lists are not supported.
 - **Other:** `MONITOR_WEBHOOK_URL` (Phase 3)
 - All optional. Missing key means that source runs without it or is skipped.
 

@@ -92,6 +92,10 @@ def rate_flags(*, path: str | Path | None = None) -> dict[str, str]:
 
 
 def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
+    if "needs_key" in entry:
+        raise ConfigError(
+            f"tool {name!r} in tools.yaml uses 'needs_key'; list the same env names under 'keys'"
+        )
     try:
         stage = Stage(str(entry["stage"]))
         tier = Tier(str(entry["tier"]))

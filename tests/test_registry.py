@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from reconkit.adapters.certspotter import CertspotterAdapter
 from reconkit.adapters.crtsh import CrtshAdapter
@@ -47,9 +48,30 @@ def test_keys_are_parsed() -> None:
     certspotter = get_spec("certspotter").keys
     assert [key.env for key in certspotter] == ["CERTSPOTTER_API_KEY"]
     assert certspotter[0].url == "https://sslmate.com/ct_search_api"
-    assert "100 queries/hour" in certspotter[0].adds
+    assert "authenticates" in certspotter[0].adds
+    assert "100 queries/hour" not in certspotter[0].adds
     assert [key.env for key in get_spec("otx").keys] == ["OTX_API_KEY"]
     assert [key.env for key in get_spec("assetfinder").keys] == ["VT_API_KEY"]
+    assert [key.env for key in get_spec("chaos").keys] == ["PDCP_API_KEY"]
+    assert [key.env for key in get_spec("github_subdomains").keys] == ["GITHUB_TOKEN"]
+    assert [key.env for key in get_spec("urlscan").keys] == ["URLSCAN_API_KEY"]
+
+
+def test_tools_yaml_has_no_legacy_needs_key() -> None:
+    data = yaml.safe_load(TOOLS.read_text(encoding="utf-8"))
+    offenders = [name for name, entry in data["tools"].items() if "needs_key" in entry]
+    assert offenders == [], f"needs_key is gone; move these env names to keys: {offenders}"
+
+
+def test_legacy_needs_key_is_a_config_error(tmp_path: Path) -> None:
+    bad = tmp_path / "tools.yaml"
+    bad.write_text(
+        "tools:\n  weird: {stage: subs, kind: http, tier: core, mode: passive,"
+        " needs_key: [SOME_KEY]}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="needs_key"):
+        load_tools(bad)
 
 
 def test_tool_without_keys_has_no_entries() -> None:

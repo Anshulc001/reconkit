@@ -18,6 +18,7 @@ import dns.exception
 import dns.resolver
 
 from reconkit.adapters.base import BaseToolAdapter
+from reconkit.core.runner import validate_host
 from reconkit.errors import ParseError
 from reconkit.models import (
     HostState,
@@ -71,7 +72,13 @@ class DnsPythonAdapter(BaseToolAdapter):
             return ToolResult(tool=self.name, status=ToolStatus.OK, records=mock_records)
 
         semaphore = asyncio.Semaphore(ctx.pacer.parallel_limit("passive"))
-        hosts = list(ctx.hosts)
+        hosts: list[str] = []
+        invalid = 0
+        for host in ctx.hosts:
+            try:
+                hosts.append(validate_host(host))
+            except (TypeError, ValueError):
+                invalid += 1
         results = await asyncio.gather(*(self._guarded(ctx, host, semaphore) for host in hosts))
         records: list[Record] = []
         counts: dict[DnsOutcome, int] = {}
@@ -93,6 +100,8 @@ class DnsPythonAdapter(BaseToolAdapter):
             for outcome, count in counts.items()
             if outcome in (DnsOutcome.SERVFAIL, DnsOutcome.TIMEOUT, DnsOutcome.ERROR)
         }
+        if invalid:
+            problems["invalid"] = invalid
         error = None
         if problems:
             error = ", ".join(f"{name}={count}" for name, count in sorted(problems.items()))
@@ -100,6 +109,10 @@ class DnsPythonAdapter(BaseToolAdapter):
 
     async def resolve_host(self, ctx: RunContext, host: str) -> DnsResult:
         """Resolve one host; every failure mode stays distinct."""
+        try:
+            host = validate_host(host)
+        except (TypeError, ValueError):
+            return DnsResult(DnsOutcome.ERROR)
         ips: list[str] = []
         cnames: list[str] = []
         try:
@@ -113,6 +126,10 @@ class DnsPythonAdapter(BaseToolAdapter):
         except (dns.resolver.LifetimeTimeout, dns.exception.Timeout):
             return DnsResult(DnsOutcome.TIMEOUT)
         except dns.exception.DNSException:
+            return DnsResult(DnsOutcome.ERROR)
+        except Exception:
+            # A resolver bug or an unexpected transport error must not kill the
+            # whole DNS stage; it stays a per-host, structured failure.
             return DnsResult(DnsOutcome.ERROR)
         if not ips and not cnames:
             return DnsResult(DnsOutcome.NOANSWER)
