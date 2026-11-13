@@ -2,13 +2,36 @@
 
 Read this file first, every session. It points to the documents in `docs/`.
 
+## 0. Session start (do this first, every session)
+
+1. Read this file, then `docs/PROGRESS.md`, then the `docs/*.md` files for the area you will touch.
+2. Run: `git status; git log --oneline -5`; then `pytest -q`, `ruff check .`, `ruff format --check .`, `mypy src/reconkit`. Report the baseline. If anything fails, fix that first.
+3. Do only the task under "Next task" in `docs/PROGRESS.md` (or the one I give you). One task per turn, then stop.
+
+## 0b. Task loop
+
+plan (5-10 lines, assumptions) -> implement -> tests (normal, empty, malformed, failure) -> run checks -> update touched docs -> update `docs/PROGRESS.md` -> commit -> report -> stop.
+
+## 0c. Rules learned from reviews
+
+- Never say a check passed unless you ran it and pasted the output.
+- Test results with `if cmd; then echo PASS; else echo FAIL; fi`, never `echo $?`.
+- Work only in `~/reconkit` inside WSL. Never push unless asked.
+- Root domains use `validate_target()`; discovered hosts use `validate_host()`.
+- Tool flags and JSON field names come from the real tool's `--help` or real sample output, never from memory.
+- Child processes get only the env keys passed in; pass `HOME` explicitly for tools that read config from it.
+- No `assert` in `src/`. No new lint suppressions except scoped per-file ignores with a reason in `pyproject.toml`.
+- No new dependencies without asking me.
+- Every deviation from the docs goes in the report AND in `docs/PROGRESS.md` "Deviations". Docs change first, then code.
+- Adapters never import `store`, `scope`, `ui`, `cli`.
+
 ## 1. Project context
 
 - **Project:** reconkit
 - **Purpose:** A command-line reconnaissance orchestrator for **authorized** security testing. It runs several recon tools per stage, merges and deduplicates their output, scores confidence by how many tools agree, and tracks changes between scans in SQLite.
 - **Users:** Penetration testers and bug bounty hunters working inside a written scope.
 - **Stack:** Python 3.11+, Typer (CLI), Rich (terminal UI), Pydantic v2 (schemas), asyncio, httpx (HTTP), dnspython, PyYAML, SQLite (stdlib `sqlite3`), pytest, ruff, mypy.
-- **Environment:** VS Code on Windows connected with the WSL extension to **WSL2 Kali Linux**. The repo lives at `~/reconkit` inside Kali. **Never** at `/mnt/c/...` (slow, SQLite locking problems, CRLF line endings).
+- **Environment:** VS Code on Windows connected with the WSL extension to **WSL2 Ubuntu**. The repo lives at `~/reconkit` inside Ubuntu. **Never** at `/mnt/c/...` (slow, SQLite locking problems, CRLF line endings).
 
 ## 2. Source of truth
 

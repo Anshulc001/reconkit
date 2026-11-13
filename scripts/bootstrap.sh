@@ -36,6 +36,9 @@ else
     python -m pip install -e ".[dev]"
 fi
 
+# Use the repo's git hooks: pre-commit requires docs/PROGRESS.md and runs the checks.
+git config core.hooksPath .githooks
+
 BIN_DIR="$HOME/.reconkit/bin"
 mkdir -p "$BIN_DIR"
 chmod 700 "$HOME/.reconkit" "$BIN_DIR" 2>/dev/null || true

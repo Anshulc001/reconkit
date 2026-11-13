@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Block commits that skip docs/PROGRESS.md or fail the four checks.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+STAGED="$(git diff --cached --name-only)"
+if grep -Eq '^(src|tests)/' <<<"$STAGED"; then
+    if ! grep -qx 'docs/PROGRESS.md' <<<"$STAGED"; then
+        echo "pre-commit: src/ or tests/ changed but docs/PROGRESS.md is not staged." >&2
+        echo "pre-commit: update docs/PROGRESS.md (status, deviations, next task), stage it, and retry." >&2
+        exit 1
+    fi
+fi
+
+if [ ! -x .venv/bin/python ]; then
+    echo "pre-commit: .venv missing; run ./scripts/bootstrap.sh" >&2
+    exit 1
+fi
+# shellcheck disable=SC1091
+. .venv/bin/activate
+
+echo "pre-commit: pytest"
+pytest -q
+echo "pre-commit: ruff check"
+ruff check .
+echo "pre-commit: ruff format --check"
+ruff format --check .
+echo "pre-commit: mypy"
+mypy src/reconkit
