@@ -845,3 +845,9 @@ Every restore below was checked with `sha256sum`; the digests before and after e
   removed) FAILED with the `.env.example` contents in the actual value, restored (`git hash-object` equals
   `HEAD:src/reconkit/cli.py`), PASS.
 - Gate after the fix: `560 passed`; `ruff check .`, `ruff format --check .`, `mypy src/reconkit` clean.
+
+- Review ruling after this pass: 10f **code** is accepted. The Part 10 gate stays open on one item only - the
+  sudo-authenticated apt install, which needs a human terminal (agent has no sudo password on this box). The
+  `@latest` go_install reporting gap is deferred to a future part (`docs/10` section 6 says so explicitly; it is
+  non-destructive and needs its own docs-first design), and authenticated GitHub release lookups are deferred to
+  Part 11 planning. Neither is a Part 10 blocker. Do not start Part 11 until the apt run's output is recorded.
