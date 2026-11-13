@@ -386,3 +386,14 @@ def test_cli_update_refuses_non_linux(monkeypatch) -> None:
     result = CliRunner().invoke(app, ["update", "--all", "--dry-run"])
     assert result.exit_code == 1
     assert "Linux is required" in result.output
+
+
+def test_ctrl_c_during_install_exits_130(tmp_path: Path, monkeypatch) -> None:
+    def interrupt(plans, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "install_selected", interrupt)
+    monkeypatch.setattr(cli, "bin_dir", lambda: tmp_path / "bin")
+    result = CliRunner().invoke(app, ["install", "nmap"])
+    assert result.exit_code == 130
+    assert "interrupted" in result.output

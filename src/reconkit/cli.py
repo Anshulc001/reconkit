@@ -593,15 +593,22 @@ def _run_install(
         _maybe_ask_keys(no_color=no_color)
     client = httpx.Client() if any(plan.method == "github_release" for plan in selected) else None
     try:
-        with client if client is not None else nullcontext():
-            outcomes, code = install_selected(
-                selected,
-                bin_dir=bin_dir(),
-                update=update,
-                dry_run=dry_run,
-                client=client,
-                confirm=_install_confirm,
+        try:
+            with client if client is not None else nullcontext():
+                outcomes, code = install_selected(
+                    selected,
+                    bin_dir=bin_dir(),
+                    update=update,
+                    dry_run=dry_run,
+                    client=client,
+                    confirm=_install_confirm,
+                )
+        except KeyboardInterrupt:
+            render_message(
+                "interrupted; tools already installed are kept",
+                no_color=no_color,
             )
+            raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
     finally:
         if client is not None:
             client.close()

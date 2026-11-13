@@ -4,7 +4,7 @@
 
 - Status: 10a-10e closed; 10f (close-out: apt binary presence check, adversarial cases, docs 5a/6 sync, real dry-run) implemented and committed. Part 10's gate still needs a real `install --all` on Kali (sudo password required here) before it can be called closed.
 - Last code commit: run `git log --oneline -1`
-- Baseline: 550 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean
+- Baseline: 551 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean
 - Next action: run the real `install --all` / `update --all` on Kali with sudo available, then Part 11. Do not start Part 11 before that run is recorded.
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
@@ -136,7 +136,6 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 
 - `_fetch_text`'s default 64 KiB cap has no dedicated test; the cap is only exercised through an explicit `max_bytes=64` argument in the test, so a regression in the default would pass the suite.
 - Non-UTF-8 checksums-file rejection (`InstallError: checksums file is not UTF-8`) has no test.
-- `Ctrl-C` during `install`/`update` is untested: a `KeyboardInterrupt` mid-download or mid-apt is not mapped to exit 130 by the command body (MASTER_PLAN lists it as an adversarial case).
 - Accepted exception: `go_install` and `pipx` pass the parent process's `PATH` to their child (named in docs/10 section 3d with the reason). Every other child env is a fixed, explicit dict. Tests never exercise a custom parent `PATH`, so a change in that behaviour would not be caught by the suite.
 
 - `doctor --fix` is accepted but refuses until the `install` CLI exists (10e); it never pretends to have fixed anything.
