@@ -470,7 +470,7 @@ async def test_pyscan_ignores_out_of_range_ports() -> None:
 
 async def test_pyscan_respects_the_pacer_parallel_limit() -> None:
     ctx = make_ctx(hosts=["www.example.com"], ports=list(range(1000, 1010)))
-    ctx.pacer.parallel_limit = lambda _mode: 2  # type: ignore[method-assign]
+    ctx.pacer.parallel_limit = lambda _mode: 2
     active = 0
     peak = 0
 

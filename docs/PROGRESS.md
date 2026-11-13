@@ -2,10 +2,10 @@
 
 ## RESUME HERE
 
-- Status: Part 0: IN PROGRESS (Step 1 committed; baseline not recorded yet)
-- Last code commit: 75eb261 (run `git log --oneline -1`; never trust this line alone)
-- Baseline: 238 passed, 1 skipped (last green at 75eb261)
-- Next action: run Part 0 (baseline evidence, f1 retro entry), then Part 4 in docs/MASTER_PLAN.md
+- Status: Part 0 done; Part 4 (f3 binary adapters) next
+- Last commit: 09a5bce (docs); last code commit 75eb261 (`git log --oneline -1`; never trust this line alone)
+- Baseline: 238 passed, 1 skipped; all four checks PASS (twice)
+- Next action: implement Part 4 in docs/MASTER_PLAN.md: subfinder, assetfinder, httpx, naabu adapters
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: none
