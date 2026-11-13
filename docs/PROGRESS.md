@@ -125,7 +125,6 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 
 ## Open risks
 
-- `urls` is created in task e per the review list even though docs/04 labels it Phase 3; `findings` and `monitor_changes` stay deferred.
 - `RunContext` now carries `limiter` and `ports`, and `HostStatusRecord` carries `location`; all were documented in docs/09 before their code landed. The engine builds one limiter per stage.
 - `dnspython` resolves A/AAAA/CNAME only: the record models have no NS/MX/TXT fields, and adding them would change the database schema. `pyscan` sends no payload and reads no banner (the banner read is optional).
 - `HttpAdapter` is documented in docs/09 section 3. Domain filtering happens in `run()` because the contract's `parse_output(raw)` receives no target; `parse_output` normalizes and validates only.
@@ -137,7 +136,6 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - CLI must catch `ValueError` from `check_target`/`validate_target` and exit 2.
 - OTX anonymous requests return 429 (synthetic fixture); HackerTarget's free tier returned one row for example.com, so multi-row parsing is only covered by MockTransport tests.
 - subfinder keys are bridged by its adapter into a temporary 0600 `provider-config.yaml`; only certspotter, chaos, github and virustotal are configured. The other keyed providers' free tiers and sign-up URLs remain unverified, and no real subfinder has accepted the generated file yet.
-- `urlscan`, `chaos` and `github_subdomains` now carry `keys`; their adapters are still Phase 3. `URLSCAN_API_KEY` is reconkit's own name, `PDCP_API_KEY` and `GITHUB_TOKEN` are the tools' real names.
 - Part 6a: one `scan_runs` row per executed stage; `ScanOptions.speed` is `SpeedName`; `Store.transaction()` uses SQLite's implicit transaction (explicit `BEGIN` failed inside one); `check_installed()` runs via `asyncio.to_thread`; workspace/scope reads stay synchronous and short; `FindingRecord` is not persisted because the findings table is deferred.
 - Wildcard detection is still not wired into the engine: `is_wildcard` stays 0 and no wildcard-unknown warning is emitted.
 - Resume is stage-level; tools completed inside a crashed stage are rerun. CNAME dangling warnings are not persisted, and real NXDOMAIN/CNAME behavior has not been exercised.

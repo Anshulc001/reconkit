@@ -489,6 +489,16 @@ def transition(previous: HostState | None, evidence: HostEvidence):
     )
 
 
+def test_regression_dns_servfail_not_dead() -> None:
+    """Regression: PIT-01 SERVFAIL maps to UNCERTAIN, never DEAD."""
+    result = transition(
+        None,
+        HostEvidence(dns=DnsSignal.UNCERTAIN, dns_tools=("dnspython",)),
+    )
+    assert result.state is HostState.UNKNOWN
+    assert result.state is not HostState.DEAD
+
+
 def test_regression_dns_timeout_not_dead() -> None:
     """Regression: PIT-01 timeout/SERVFAIL must never produce DEAD."""
     kept = transition(
@@ -708,6 +718,28 @@ async def test_exit_code_scope_violation(tmp_path: Path) -> None:
     summary = await make_engine(tmp_path, specs, adapters, scope_text=scope).run(
         "example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True)
     )
+    assert summary.scope_denied is True
+    assert summary.exit_code is ExitCode.SCOPE
+
+
+async def test_exit_code_scope_denied_with_passive_success(tmp_path: Path) -> None:
+    rec = Recorder()
+    specs = {
+        "subs": tool("subs", Stage.SUBS),
+        "live": tool("live", Stage.LIVE, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "subs": adapter("subs", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "live": adapter("live", Stage.LIVE, rec, records=[alive("www.example.com")]),
+    }
+    scope = SCOPE.replace("allow_active: true", "allow_active: false")
+    summary = await make_engine(tmp_path, specs, adapters, scope_text=scope).run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE), active=True, mock=True),
+    )
+    passive = next(stage for stage in summary.stages if stage.stage is Stage.SUBS)
+    assert any(result.status is ToolStatus.OK for result in passive.results)
+    assert "live" not in rec.names
     assert summary.scope_denied is True
     assert summary.exit_code is ExitCode.SCOPE
 
