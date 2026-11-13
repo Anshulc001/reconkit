@@ -55,7 +55,9 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 - Part 6a (`feat: add the staged engine and safety gates`): `36cd3a4`
 - Part 6b (`feat: add confidence, host states, resume and exit codes`): `fffd5ea`
 - Part 7 (`feat: add UI rendering, JSON and color safety`): `17d0412`
-- Part 8 (`feat: add the Typer CLI, flags and mock wiring`): hash filled by the Part 9 commit
+- Part 8 (`feat: add the Typer CLI, flags and mock wiring`): `c69aac5`
+- Part 8 fix (`fix: align CLI timeout docs and mock help`): `83edd03`
+- Part 9 (`fix: persist dangling CNAME evidence across restarts`): `83f3b85`
 - Entries A, B and C below are the Part 3-AUDIT evidence. That audit was
   committed before Step 1 and Part 0 because the audit instruction arrived
   first; the ordering inversion is logged in the Step 1 entry and in Part 0.
@@ -627,3 +629,22 @@ Per-stage counts: subs 11, dns 5, live 4, ports 6, tech 5, urls 8, vulns 8, shot
 - Not verified: real installed tools/network, real terminal width/color, `db`/`export` output, `scope import`, multi-target JSON, shell-exported keys, and the fast-active prompt outside mock.
 - Pitfalls added this part: none.
 - Next part must know: `Engine.open` is the only CLI store creation path; `cli.py` must keep `raise typer.Exit(code=...)` as the final step; `HostRow` is mapped from `Engine.host_rows`; `--timeout-<stage>` and `db`/`export` remain open for Part 9/11.
+
+## Part 9: fix backlog - dangling CNAME persistence
+
+- Docs read / goal: `docs/PROGRESS.md` Fix backlog and Open risks first; then `docs/04_DATABASE.md` schema/migrations, `docs/03_ARCHITECTURE.md` host-state/engine rules, `docs/09_TOOL_CONTRACTS.md` records, and the Known pitfalls table. Fix only the Fix backlog item: persist dangling-CNAME evidence. No CLI, UI, commands, flags or tools were changed.
+- Decisions and assumptions: schema version 2 adds `host_status_history.cnames_json TEXT NOT NULL DEFAULT '[]'` and `dangling_cname TEXT`; `Store.latest_cnames()` is the read query. DNS-only resolved hosts now get a `DNS_ONLY` status row so their CNAME survives a restart. A later NXDOMAIN with no current CNAME reuses the latest stored CNAME before `decide_host_state`. `dangling_cname` is persisted only for a `SHUT_DOWN` row with an outside-target CNAME. Wildcard wiring and stage-level resume were triaged in Open risks, not fixed, because this part was limited to the Fix backlog.
+- Docs changed first: docs/04 schema, read-query rules and migration version; docs/03 host-state persistence/reuse behavior; docs/REVIEW_LOG PIT-29.
+- Files touched: `src/reconkit/core/store.py`, `src/reconkit/engine.py`, `tests/test_store.py`, `tests/test_engine.py`, `docs/03`, `docs/04`, `docs/PROGRESS.md`, `docs/REVIEW_LOG.md`.
+- Requirement -> test table:
+  - old v1 DB opens and gets both columns -> `test_v1_database_migrates_and_defaults_cname_columns`
+  - existing rows default to `[]`/NULL -> same test
+  - new CNAME evidence round-trips and `latest_cnames` reads it -> `test_host_status_persists_cnames_and_latest_cnames`
+  - CNAME survives close/reopen and the later NXDOMAIN warns/persists `SHUT_DOWN` -> `test_regression_dangling_cname_survives_restart`
+  - migration remains idempotent and history order is unchanged -> `test_migration_is_idempotent`, `test_host_status_history_order`
+- Failing-first evidence: `test_regression_dangling_cname_survives_restart` failed before the fix with `assert False` on `summary.warnings`; the stored CNAME and SHUT_DOWN row did not exist. Post-fix targeted run: `5 passed in 0.84s`.
+- Migration safety: v1 database with an existing ALIVE row migrated to version 2; the row read `cnames_json='[]'` and `dangling_cname=None` (no NULL list, no crash). `SCHEMA_VERSION == 2`.
+- Raw check output (twice): `440 passed, 2 skipped`; `pytest=PASS`, `ruff-check=PASS`, `ruff-format=PASS`, `mypy=PASS`.
+- Not verified: real DNS NXDOMAIN/CNAME behavior; the fix reuses a CNAME recorded by an earlier resolved pass, and `dnspython`'s NXDOMAIN path does not return one in the failing pass. This is recorded in Open risks.
+- Pitfalls added this part: PIT-29.
+- Next part must know: do not treat `host_status_history` as only live-stage data; DNS-only resolved hosts now write status rows. Use `Store.latest_cnames()` before deciding an NXDOMAIN warning. The wildcard and stage-level-resume gaps remain open.
