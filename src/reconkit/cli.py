@@ -12,10 +12,19 @@ import typer
 from reconkit.config import AppConfig, load_config
 from reconkit.core.runner import validate_target
 from reconkit.core.scope import check_target
+from reconkit.doctor import collect_report
 from reconkit.engine import Engine, ExitCode, ScanOptions
 from reconkit.errors import ConfigError, ScopeError
 from reconkit.models import Stage
-from reconkit.ui import HostRow, render, render_diff, render_error, render_message, render_status
+from reconkit.ui import (
+    HostRow,
+    render,
+    render_diff,
+    render_doctor,
+    render_error,
+    render_message,
+    render_status,
+)
 
 app = typer.Typer(
     name="reconkit",
@@ -473,10 +482,33 @@ def status_command(
 @app.command("doctor")
 def doctor_command(
     fix: Annotated[bool, typer.Option("--fix", help="Offer to install missing tools.")] = False,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Write one JSON document to stdout.")
+    ] = False,
+    no_color: Annotated[bool, typer.Option("--no-color", help="Disable colors.")] = False,
+    config_path: Annotated[Path | None, typer.Option("--config", help="Config file path.")] = None,
 ) -> None:
-    del fix
-    render_error("doctor is implemented in Part 9; run `reconkit --help` for available commands.")
-    raise typer.Exit(code=int(ExitCode.ERROR))
+    try:
+        config = load_config(config_path)
+        report = collect_report(config=config, config_path=config_path)
+    except (ConfigError, ValueError) as exc:
+        render_error(str(exc), no_color=no_color)
+        raise typer.Exit(code=int(ExitCode.ERROR)) from None
+    code = render_doctor(report, json_output=json_output, no_color=no_color)
+    if not report.python_ok:
+        render_error(
+            f"python {report.python_version} is too old; reconkit needs 3.11 or newer",
+            no_color=no_color,
+        )
+        raise typer.Exit(code=int(ExitCode.ERROR))
+    if fix:
+        render_error(
+            "--fix is not available yet: installing tools lands with 'reconkit install'; "
+            "nothing was changed.",
+            no_color=no_color,
+        )
+        raise typer.Exit(code=int(ExitCode.ERROR))
+    raise typer.Exit(code=code)
 
 
 @app.command("install")

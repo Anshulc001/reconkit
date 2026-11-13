@@ -2,10 +2,10 @@
 
 ## RESUME HERE
 
-- Status: Part 10 docs pre-fix and the three scope decisions committed; 10a (doctor) approved, no 10a code yet
+- Status: Part 10a (doctor) implemented and committed; 10b (installer registry/verify) next after review
 - Last code commit: run `git log --oneline -1`; Part 9 is the newest code commit
 - Baseline: 443 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean. `.venv` was rebuilt from scratch with `python3` 3.14.8 (the old one was a Windows venv); see Deviations
-- Next action: implement 10a only - doctor's real checks, `--json` and its exit rules - then report diff and tests; do not start 10b
+- Next action: wait for the 10a review, then implement 10b only (`installer/registry.py` + `verify.py`, local files only); do not start 10c
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: none
@@ -17,6 +17,7 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit.
 
 - Windows, one canonical checkout: `C:\Users\anshu\Desktop\recon\reconkit` (Git Bash paths: `/c/Users/anshu/Desktop/recon/reconkit`). Do not create a second copy.
 - venv `.venv` (Python 3.11 via `uv`); activate with `. .venv/Scripts/activate` in Git Bash. System `python` is 3.10, so always use the venv or `uv`.
+- Part 10 runs on Kali Linux, checkout `/home/kali/Desktop/reconkit`, venv built with `python3 -m venv` (Python 3.14.8). The paths above describe the Windows machine; neither copy is generated from the other, and nothing is synced between them.
 - Checks (run all four, report PASS/FAIL with `if cmd; then ...`):
 
 ```bash
@@ -43,7 +44,7 @@ mypy src/reconkit
 | f3 | done | ee06075 | remaining phase-2 tools: binary adapters `subfinder`, `assetfinder`, `httpx`, `naabu` |
 | g | done | 36cd3a4, 6b hash in Part 7 | wildcard, workspace, engine, confidence, host states, resume, exit codes done |
 | h | done | Part 8 hash in Part 9 | `ui.py` + `cli.py`; installer/doctor stubs remain for i |
-| i | pending | - | `installer/` + `doctor.py` |
+| i | partial | Part 10a commit | `doctor.py` done; `installer/` pending 10b+ |
 | j | pending | - | docs sync, README, final check |
 
 Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTURE.md` section 5. There is no `core/consensus.py`: consensus lives in `engine.py`.
@@ -56,6 +57,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `core/runner.py`: `run_exec(argv, timeout=, env=, max_output_bytes=, cwd=)` (only `subprocess` user), `validate_target` (root, strict RFC-1123), `validate_host` (discovered: allows `_`, strips `*.`), `ExecResult`; timeout kills the process group, output capped, env values redacted.
 - `core/scope.py`: `load_scope`, `require_active` -> `ActiveCheck(scope, match, hosts, dropped)`, `check_target`, `ip_allowed`, `passive_warning`, `ScopeGate`; `out_of_scope` always wins.
 - `core/store.py`: `Store(path)` (context manager, `close()`), `redact(text, secrets)`; writes `create_target`, `create_scan_run`, `finish_scan_run`, `record_tool_run`, `upsert_subdomain`, `add_subdomain_source`, `append_host_status`, `upsert_port`, `add_port_source`, `upsert_url`; reads `previous_state`, `diff_new`, `diff_gone`, `diff_state_changed`, `diff_ports_opened`, `diff_ports_closed`; pragmas FK/WAL/5000 ms, parameterized SQL only.
+- `doctor.py`: `collect_report(config, config_path=, env=, tools_path=, scope_path=, dpkg_status=, status_of=, python_version=)` -> `DoctorReport` of `ToolCheck`/`StageCoverage`/`PackageCheck`/`KeyCheck`; `default_status`, `installed_packages`, `db_writable`; reads files and version commands only, never installs.
 - `adapters/base.py`: `BaseToolAdapter` (contract from docs/09), `HttpAdapter` (rate limit via `ctx.limiter`, timeout, User-Agent, one retry on connection errors, 429/5xx/timeout -> failed result), `normalize_subdomains`; `FetchFailed`.
 - `adapters/registry.py`: `load_tools(path=)` -> `ToolSpec`, `load_system_packages(path=)`, `get_spec`, `get_adapter`, `rate_flags()`; unknown/incomplete tools raise `ConfigError`.
 - `adapters/__init__.py`: `ADAPTERS` maps `crtsh`, `certspotter`, `otx`, `hackertarget` to classes.
@@ -116,9 +118,12 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 
 - Part 10 docs pre-fix (docs only): docs/10 now matches docs/02's install surface (`--stage`/`--yes` removed from the grammar), states that `doctor` runs on Windows while `install`/`update` exit 1 there, adds 3b prerequisites (jq, dnsutils via `dig`, Go/GOBIN, pipx-via-apt), 5a doctor output/exit rules, Go/PyPI download hosts, and defers the fixture-version doctor warning to Phase 3 pending per-tool metadata. Open for review: `--all` phase scope, the installer exit code when every tool fails, and where wordlists live.
 - Part 10 scope decisions (docs only): `--all` stays "core tier, no phase filter" and MASTER_PLAN Part 4 now names only `masscan` as opt-in (`rustscan`/`nmap` are core-but-phase-3, and `phase` is build tracking, not a security gate). Exit code 6 was added to docs/02 section 6 for "every requested tool failed to install or update"; 4 and 5 keep their scan meanings. The doctor wordlists check was removed from docs/01 and docs/02 and logged under Open risks. No `src/`, `tests/`, `tools.yaml` or `config.yaml` change.
+- Part 10a (doctor): `collect_report` reads tools.yaml once through `load_tools`/`load_system_packages`, asks each binary adapter's `check_installed()` and reads `/var/lib/dpkg/status` directly instead of running `dpkg-query`, so doctor executes only the adapters' version commands and never apt. `--fix` exits 1 with "not available yet" because `install` does not exist until 10b; docs/10 section 5a still promises `--fix`, so that line is true only after the installer lands. System packages are `system_packages` plus `requires_apt`; `dnsutils` (only in the `dig` install block) is not checked and docs/10 now says why. The `n/a (no binary required)` cells wrap in an 80-column table; the text matches docs/02 exactly.
 
 ## Open risks
 
+- `doctor --fix` is accepted but refuses until `install` exists (10b+); it never pretends to have fixed anything. Revisit in 10e when `install` is wired.
+- `doctor` checks apt packages by reading `/var/lib/dpkg/status`; on a non-Debian system every package reports `unknown` instead of guessing. `dnsutils` is not covered because it appears only in the `dig` entry's `install` block.
 - `doctor` does not check wordlists: no Phase-2 adapter consumes one, and no wordlist path exists in `tools.yaml` or `config.yaml`. Only the phase-3 DNS-bruteforce tools (`puredns`, `massdns`, `amass`, `findomain`, `dnsx`) would need one. Revisit when any of those gets an adapter.
 - `RunContext` now carries `limiter` and `ports`, and `HostStatusRecord` carries `location`; all were documented in docs/09 before their code landed. The engine builds one limiter per stage.
 - `dnspython` resolves A/AAAA/CNAME only: the record models have no NS/MX/TXT fields, and adding them would change the database schema. `pyscan` sends no payload and reads no banner (the banner read is optional).

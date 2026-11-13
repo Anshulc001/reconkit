@@ -11,7 +11,13 @@ from reconkit.adapters.certspotter import CertspotterAdapter
 from reconkit.adapters.crtsh import CrtshAdapter
 from reconkit.adapters.hackertarget import HackertargetAdapter
 from reconkit.adapters.otx import OtxAdapter
-from reconkit.adapters.registry import get_adapter, get_spec, load_tools, rate_flags
+from reconkit.adapters.registry import (
+    get_adapter,
+    get_spec,
+    load_system_packages,
+    load_tools,
+    rate_flags,
+)
 from reconkit.errors import ConfigError
 from reconkit.models import Mode, Stage, Tier
 
@@ -153,3 +159,34 @@ def test_bad_kind_is_a_config_error(tmp_path: Path) -> None:
     )
     with pytest.raises(ConfigError, match="invalid kind"):
         load_tools(bad)
+
+
+def test_requires_apt_comes_from_tools_yaml() -> None:
+    assert get_spec("naabu").requires_apt == ("libpcap-dev",)
+    assert get_spec("crtsh").requires_apt == ()
+    assert get_spec("nmap").requires_apt == ()
+
+
+def test_load_system_packages_returns_the_top_level_list() -> None:
+    data = yaml.safe_load(TOOLS.read_text(encoding="utf-8"))
+    assert load_system_packages() == tuple(data["system_packages"])
+    assert "jq" in load_system_packages()
+    assert "dnsutils" not in load_system_packages()
+
+
+def test_invalid_requires_apt_is_a_config_error(tmp_path: Path) -> None:
+    bad = tmp_path / "tools.yaml"
+    bad.write_text(
+        "tools:\n  weird: {stage: subs, kind: binary, tier: core, mode: passive,"
+        " requires_apt: libpcap-dev}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError):
+        load_tools(bad)
+
+
+def test_invalid_system_packages_is_a_config_error(tmp_path: Path) -> None:
+    bad = tmp_path / "tools.yaml"
+    bad.write_text("system_packages: jq\ntools: {}\n", encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_system_packages(bad)

@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
+from reconkit.doctor import DoctorReport
 from reconkit.engine import DiffSnapshot, RunSnapshot, ScanSummary
 from reconkit.models import Confidence, HostState, ToolResult, ToolStatus
 
@@ -460,3 +461,135 @@ def render(
     for warning in summary.warnings:
         target.print(Text(f"warning: {warning}", style="yellow"))
     return int(summary.exit_code)
+
+
+def doctor_document(report: DoctorReport) -> dict[str, object]:
+    """Build the one-document doctor shape documented in docs/02 section 5."""
+
+    return {
+        "type": "doctor",
+        "python": report.python_version,
+        "python_ok": report.python_ok,
+        "config": {"path": report.config_path, "ok": report.config_ok},
+        "scope": {"path": report.scope_path, "found": report.scope_found},
+        "db": {"path": report.db_path, "writable": report.db_writable},
+        "tools": [
+            {
+                "tool": check.name,
+                "stage": check.stage.value,
+                "tier": check.tier.value,
+                "kind": check.kind,
+                "installed": check.installed,
+                "version": check.version,
+                "path": check.path,
+                "identity": check.identity,
+            }
+            for check in report.tools
+        ],
+        "stages": [
+            {"stage": coverage.stage.value, "ready": coverage.ready, "total": coverage.total}
+            for coverage in report.stages
+        ],
+        "system_packages": [
+            {"package": package.package, "state": package.state} for package in report.packages
+        ],
+        "keys": [
+            {
+                "tool": key.tool,
+                "env": key.env,
+                "set": key.set,
+                "url": key.url,
+                "adds": key.adds,
+            }
+            for key in report.keys
+        ],
+        "missing": report.missing,
+        "warnings": list(report.warnings),
+        "exit_code": 0,
+    }
+
+
+def render_doctor(
+    report: DoctorReport,
+    *,
+    json_output: bool = False,
+    no_color: bool = False,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+    console: Console | None = None,
+) -> int:
+    """Render the doctor report; warnings never change the exit code."""
+
+    if json_output:
+        target = stdout if stdout is not None else sys.stdout
+        target.write(
+            json.dumps(doctor_document(report), ensure_ascii=False, separators=(",", ":")) + "\n"
+        )
+        target.flush()
+        return 0
+    out = console if console is not None else make_console(stderr, no_color=no_color)
+    table = Table(title="Tools", header_style="bold")
+    table.add_column("Tool")
+    table.add_column("Stage", no_wrap=True)
+    table.add_column("Tier", no_wrap=True)
+    table.add_column("Installed", no_wrap=True)
+    table.add_column("Version")
+    table.add_column("Path")
+    table.add_column("Identity", no_wrap=True)
+    for check in report.tools:
+        style = {"yes": "green", "missing": "red"}.get(check.installed, "yellow")
+        table.add_row(
+            Text(check.name),
+            Text(check.stage.value),
+            Text(check.tier.value),
+            Text(check.installed, style=style),
+            Text(check.version),
+            Text(check.path),
+            Text(check.identity),
+        )
+    out.print(table)
+    out.print(
+        Text(
+            "coverage: "
+            + ", ".join(
+                f"{coverage.stage.value} {coverage.ready}/{coverage.total} ready"
+                for coverage in report.stages
+            )
+        )
+    )
+    out.print(
+        Text(
+            "system packages: "
+            + ", ".join(f"{package.package} {package.state}" for package in report.packages)
+        ),
+        soft_wrap=True,
+    )
+    environment = (
+        f"python {report.python_version}{'' if report.python_ok else ' (too old; need 3.11+)'}"
+        + f" | {report.scope_path} {'found' if report.scope_found else 'not found'}"
+        + f" | db {report.db_path} {'writable' if report.db_writable else 'not writable'}"
+    )
+    out.print(Text(environment), soft_wrap=True)
+    if report.keys:
+        keys = Table(title="Keys", header_style="bold")
+        keys.add_column("Tool")
+        keys.add_column("Key")
+        keys.add_column("Set", no_wrap=True)
+        keys.add_column("Adds")
+        keys.add_column("URL")
+        for key in report.keys:
+            keys.add_row(
+                Text(key.tool),
+                Text(key.env),
+                Text("yes" if key.set else "no", style="green" if key.set else "yellow"),
+                Text(key.adds),
+                Text(key.url),
+            )
+        out.print(keys)
+    if report.missing:
+        out.print(
+            Text(f"Missing tools: {report.missing}. Run: reconkit install --all", style="yellow")
+        )
+    for warning in report.warnings:
+        out.print(Text(f"warning: {warning}", style="yellow"))
+    return 0

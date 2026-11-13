@@ -74,7 +74,7 @@ Other rules:
 
 - tool table: installed, version, resolved path, identity verified, tier (rendering rules in docs/02 section 5);
 - per-stage coverage (`subs 6/11 ready`);
-- system packages (`libpcap-dev`, `dnsutils`, `jq`), Python version, `scope.yaml` presence, DB writability and `config.yaml` presence;
+- system packages (`system_packages` plus every tool's `requires_apt`, for example `libpcap-dev`; `dnsutils` lives in the `dig` entry's `install` block, which `ToolSpec` does not expose), Python version, `scope.yaml` presence, DB writability and `config.yaml` presence;
 - the Keys table (tool, set/missing, what it adds, sign-up URL), names only, never values;
 - `Missing tools: N. Run: reconkit install --all` when anything is missing;
 - `--json` writes one document; warnings keep exit code `0`. Python < 3.11 or an unreadable `config.yaml` exits `1`.

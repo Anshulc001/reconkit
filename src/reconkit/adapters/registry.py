@@ -42,18 +42,36 @@ class ToolSpec:
     phase: int
     rate_flag: str | None = None
     keys: tuple[ToolKey, ...] = ()
+    requires_apt: tuple[str, ...] = ()
 
 
-def load_tools(path: str | Path | None = None) -> dict[str, ToolSpec]:
-    """Read tools.yaml into ToolSpec objects, ignoring `x-` anchor holders."""
-    file = Path(path) if path is not None else TOOLS_PATH
+def _document(file: Path) -> dict[str, Any]:
+    """Read one YAML document, mapping every failure to ConfigError."""
     try:
         data: Any = yaml.safe_load(file.read_text(encoding="utf-8"))
     except OSError as exc:
         raise ConfigError(f"cannot read {file}: {exc}") from None
     except yaml.YAMLError:
         raise ConfigError(f"{file} is not valid YAML") from None
-    if not isinstance(data, dict) or not isinstance(data.get("tools"), dict):
+    if not isinstance(data, dict):
+        raise ConfigError(f"{file} has no tools mapping")
+    return data
+
+
+def load_system_packages(path: str | Path | None = None) -> tuple[str, ...]:
+    """Return the top-level `system_packages` list (docs/10 section 3b)."""
+    file = Path(path) if path is not None else TOOLS_PATH
+    raw = _document(file).get("system_packages", [])
+    if not isinstance(raw, list) or not all(isinstance(item, str) and item for item in raw):
+        raise ConfigError(f"{file} has an invalid system_packages list")
+    return tuple(raw)
+
+
+def load_tools(path: str | Path | None = None) -> dict[str, ToolSpec]:
+    """Read tools.yaml into ToolSpec objects, ignoring `x-` anchor holders."""
+    file = Path(path) if path is not None else TOOLS_PATH
+    data = _document(file)
+    if not isinstance(data.get("tools"), dict):
         raise ConfigError(f"{file} has no tools mapping")
     specs: dict[str, ToolSpec] = {}
     for name, entry in data["tools"].items():
@@ -113,6 +131,11 @@ def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
     rate_flag = entry.get("rate_flag")
     if rate_flag is not None and not isinstance(rate_flag, str):
         raise ConfigError(f"tool {name!r} in tools.yaml has a non-string rate_flag")
+    requires_apt = entry.get("requires_apt", [])
+    if not isinstance(requires_apt, list) or not all(
+        isinstance(item, str) and item for item in requires_apt
+    ):
+        raise ConfigError(f"tool {name!r} in tools.yaml has an invalid requires_apt list")
     return ToolSpec(
         name=name,
         stage=stage,
@@ -122,6 +145,7 @@ def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
         phase=phase,
         rate_flag=rate_flag,
         keys=_keys(name, entry),
+        requires_apt=tuple(requires_apt),
     )
 
 
