@@ -881,3 +881,11 @@ Every restore below was checked with `sha256sum`; the digests before and after e
 - Consequence for the gate run: on this box `naabu` is already installed, so `install --all` will install only
   `massdns` through apt. A live `libpcap-dev` proof needs `update naabu` (when the release comparison says "not
   current") or a machine without naabu.
+
+- Evidence weight agreed in review for the `requires_apt` fix: the prerequisite **orchestration** (loop over
+  `requires_apt`, a distinct prompt per package, install before the backend dispatch, skip the whole tool on a
+  decline, the step listed under `--dry-run`) is verified by the four unit tests and the two mutation proofs above.
+  The prerequisite **apt mechanism** is the same `apt.apt_install_package` call site (same `sudo -n apt-get`, same
+  `InstallSkipped` mapping) that `massdns` exercises live, so a separate live `libpcap-dev` run is not required to
+  close the Part 10 gate: `massdns` alone is the accepted live proof. Forcing it would need either a destructive
+  `apt-get remove naabu` or waiting for a natural not-current state.
