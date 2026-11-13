@@ -1,0 +1,25 @@
+# Copy to scope.yaml and edit. scope.yaml is git-ignored.
+# This file is a safety guard, NOT a grant of permission.
+# Only list targets you own or have written authorization to test.
+
+program: "Example Bug Bounty Program"
+authorization: "https://example.com/security/policy"   # link or note proving permission (required)
+expires: 2027-01-31                                    # active scans refuse to run after this date
+
+in_scope:
+  - "example.com"            # exact host
+  - "*.example.com"          # wildcard: any subdomain depth
+  - "re:^api-[0-9]+\\.example\\.org$"   # regex entries start with re:
+
+out_of_scope:               # always wins over in_scope
+  - "admin.example.com"
+  - "*.internal.example.com"
+  - "re:^(staging|dev)\\..*\\.example\\.com$"
+
+in_scope_cidrs:             # IPs found by DNS are only probed if inside these ranges
+  - "203.0.113.0/24"
+
+allow_active: true          # false = passive only
+allow_intrusive: false      # Phase 3 intrusive tier stays disabled unless true
+max_speed: normal           # slow | normal | fast. Caps --speed for this scope
+notes: "Rate limit from program rules: max 10 req/s"

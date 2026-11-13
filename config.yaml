@@ -1,0 +1,88 @@
+# reconkit operational config. Scope and authorization live in scope.yaml, not here.
+# Every value can be overridden by a CLI flag (see docs/02_CLI_UX.md).
+
+workspace_dir: workspaces        # raw outputs: workspaces/<target>/...
+db_path: recon.db                # SQLite state (see docs/04_DATABASE.md)
+default_speed: slow              # slow | normal | fast
+user_agent: "reconkit/{version}" # honest UA, no rotation
+
+# Speed presets. Delays are random uniform [min, max] seconds.
+# requests_per_second is passed to each tool's own rate flag (see tools.yaml rate_flag).
+speeds:
+  slow:
+    passive:
+      max_parallel_tools: 1
+      tool_delay: [5, 30]
+      requests_per_second: 1
+    active:
+      max_parallel_tools: 1
+      tool_delay: [10, 60]
+      host_delay: [1, 5]
+      requests_per_second: 10
+      shuffle_hosts: true
+      shuffle_ports: true
+      nmap_timing: 2
+      masscan_max_rate: 100
+  normal:
+    passive:
+      max_parallel_tools: 3
+      tool_delay: [1, 5]
+      requests_per_second: 3
+    active:
+      max_parallel_tools: 2
+      tool_delay: [2, 10]
+      host_delay: [0, 2]
+      requests_per_second: 50
+      shuffle_hosts: true
+      shuffle_ports: true
+      nmap_timing: 3
+      masscan_max_rate: 300
+  fast:
+    passive:
+      max_parallel_tools: 99
+      tool_delay: [0, 0]
+      requests_per_second: 20
+    active:
+      max_parallel_tools: 99
+      tool_delay: [0, 0]
+      host_delay: [0, 0]
+      requests_per_second: 300
+      shuffle_hosts: false
+      shuffle_ports: false
+      nmap_timing: 4
+      masscan_max_rate: 1000
+
+# Active stages with --speed fast need a typed confirmation (docs/05_SECURITY.md).
+
+# Seconds. A stage is cut off at its timeout; finished tools keep their results.
+timeouts:
+  default_phase: 1800
+  per_tool_default: 600
+  subs: 900
+  dns: 600
+  live: 1200
+  ports: 3600
+  tech: 900
+  urls: 1800
+  vulns: 7200
+
+confidence:
+  high_min_sources: 3
+  medium_min_sources: 2
+
+wildcard_check:
+  enabled: true
+  probes: 3
+
+# Pin tool versions to avoid parser breakage after upstream changes. Empty = latest.
+# Example: tool_versions: { nuclei: "3.3.0" }
+tool_versions: {}
+
+install:
+  dir: "~/.reconkit/bin"
+  verify_checksums: true
+
+# Phase 3
+webhook:
+  enabled: false     # URL comes from env MONITOR_WEBHOOK_URL, never from this file
+  only_on_new: true

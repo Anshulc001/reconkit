@@ -1,0 +1,95 @@
+# reconkit tool registry. The ONLY list of tools the program may run or install.
+# Fields: stage, kind (http|python|binary), tier (core|opt_in|intrusive), mode (passive|active),
+#   phase (build phase: 2 = working adapter in Phase 2, 3 = later), binary, version_cmd,
+#   rate_flag (how the speed engine passes requests/second), install (method + source), needs_key (env var names), notes.
+# Install methods: github_release | go_install | apt | pipx | none.
+# Release asset names must be verified against the real release when implementing the installer.
+# If an asset or checksum is missing, the installer must fail safely (docs/10_TOOL_INSTALLER.md).
+# Loader rules: ignore top-level keys beginning with "x-" (x-pd-release is only a YAML
+# anchor holder) and resolve YAML merge keys ("<<") when reading each tool entry.
+version: 1
+
+stages:
+  subs:  {mode: passive, desc: "Subdomain discovery (union of sources)"}
+  dns:   {mode: passive, desc: "DNS resolution, wildcard filtering, CNAME/NS hygiene"}
+  live:  {mode: active,  desc: "ALIVE / DNS_ONLY / SHUT_DOWN / DEAD classification"}
+  ports: {mode: active,  desc: "Open ports and service fingerprints (plus passive port data)"}
+  tech:  {mode: active,  desc: "Technology, WAF and CDN detection"}
+  urls:  {mode: active,  desc: "Historical and crawled URLs, parameters, JS files"}
+  vulns: {mode: active,  desc: "Takeover and exposure/misconfiguration checks"}
+  shots: {mode: active,  desc: "Screenshots (opt-in)"}
+
+x-pd-release: &pd_release
+  method: github_release
+  asset_pattern: "{name}_{version}_linux_{arch}.zip"
+  checksums_pattern: "{name}_{version}_checksums.txt"
+
+tools:
+  # ---------------- subs (passive) ----------------
+  crtsh:        {stage: subs, kind: http, tier: core, mode: passive, phase: 2, install: {method: none}, notes: "Certificate Transparency via crt.sh JSON. Rate-limit friendly in slow mode."}
+  certspotter:  {stage: subs, kind: http, tier: core, mode: passive, phase: 2, install: {method: none}, needs_key: [CERTSPOTTER_API_KEY], notes: "Key optional (higher limits)."}
+  otx:          {stage: subs, kind: http, tier: core, mode: passive, phase: 2, install: {method: none}, needs_key: [OTX_API_KEY], notes: "AlienVault OTX passive DNS. Key optional."}
+  hackertarget: {stage: subs, kind: http, tier: core, mode: passive, phase: 2, install: {method: none}, notes: "Free tier has a low daily limit; treat HTTP 429 as skipped."}
+  urlscan:      {stage: subs, kind: http, tier: core, mode: passive, phase: 3, install: {method: none}, needs_key: [URLSCAN_API_KEY]}
+  subfinder:    {stage: subs, kind: binary, tier: core, mode: passive, phase: 2, binary: subfinder, version_cmd: [subfinder, -version], rate_flag: "-rl", install: {<<: *pd_release, name: subfinder, repo: projectdiscovery/subfinder, fallback: {method: go_install, package: "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"}}}
+  assetfinder:  {stage: subs, kind: binary, tier: core, mode: passive, phase: 2, binary: assetfinder, version_cmd: [assetfinder, -h], install: {method: go_install, package: "github.com/tomnomnom/assetfinder@latest"}}
+  amass:        {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: amass, version_cmd: [amass, -version], install: {method: apt, package: amass}, notes: "Always run in passive mode (-passive). Slow."}
+  findomain:    {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: findomain, version_cmd: [findomain, --version], install: {method: github_release, repo: Findomain/Findomain, asset_pattern: "findomain-linux.zip"}}
+  chaos:        {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: chaos, version_cmd: [chaos, -version], needs_key: [CHAOS_API_KEY], install: {<<: *pd_release, name: chaos-client, repo: projectdiscovery/chaos-client}}
+  github_subdomains: {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: github-subdomains, needs_key: [GITHUB_TOKEN], install: {method: go_install, package: "github.com/gwen001/github-subdomains@latest"}}
+
+  # ---------------- dns ----------------
+  dnspython:    {stage: dns, kind: python, tier: core, mode: passive, phase: 2, install: {method: none}, notes: "A/AAAA/CNAME/NS/MX/TXT, wildcard probe, dangling CNAME check."}
+  dnsx:         {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dnsx, version_cmd: [dnsx, -version], rate_flag: "-rl", install: {<<: *pd_release, name: dnsx, repo: projectdiscovery/dnsx}}
+  puredns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: puredns, version_cmd: [puredns, version], requires: [massdns], install: {method: go_install, package: "github.com/d3mondev/puredns/v2@latest"}}
+  massdns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: massdns, install: {method: apt, package: massdns}}
+  dig:          {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dig, version_cmd: [dig, -v], install: {method: apt, package: dnsutils}}
+
+  # ---------------- live (active) ----------------
+  pyprobe:      {stage: live, kind: python, tier: core, mode: active, phase: 2, install: {method: none}, notes: "Async HTTP/HTTPS probe, status, title, redirects. Fallback when no binary is installed."}
+  httpx:        {stage: live, kind: binary, tier: core, mode: active, phase: 2, binary: httpx, version_cmd: [httpx, -version], rate_flag: "-rl", install: {<<: *pd_release, name: httpx, repo: projectdiscovery/httpx}, notes: "ProjectDiscovery httpx. Kali's apt package is httpx-toolkit; the python 'httpx' CLI is a different program. Always use ~/.reconkit/bin first."}
+  httprobe:     {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: httprobe, version_cmd: [httprobe, -h], install: {method: go_install, package: "github.com/tomnomnom/httprobe@latest"}}
+  tlsx:         {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: tlsx, version_cmd: [tlsx, -version], rate_flag: "-rl", install: {<<: *pd_release, name: tlsx, repo: projectdiscovery/tlsx}, notes: "Certificate SANs can reveal more subdomains."}
+
+  # ---------------- ports ----------------
+  smap:         {stage: ports, kind: binary, tier: core, mode: passive, phase: 3, binary: smap, install: {method: go_install, package: "github.com/s0md3v/smap/cmd/smap@latest"}, notes: "Passive ports from Shodan data. No packets to the target."}
+  pyscan:       {stage: ports, kind: python, tier: core, mode: active, phase: 2, install: {method: none}, notes: "Async TCP connect scan (no root). Fallback and verifier."}
+  naabu:        {stage: ports, kind: binary, tier: core, mode: active, phase: 2, binary: naabu, version_cmd: [naabu, -version], rate_flag: "-rate", requires_apt: [libpcap-dev], install: {<<: *pd_release, name: naabu, repo: projectdiscovery/naabu}, notes: "Needs libpcap. Use connect scan (-scan-type c) when not root."}
+  nmap:         {stage: ports, kind: binary, tier: core, mode: active, phase: 3, binary: nmap, version_cmd: [nmap, --version], rate_flag: "-T", install: {method: apt, package: nmap}, notes: "Service/version verification (-sV). Timing from nmap_timing in config."}
+  rustscan:     {stage: ports, kind: binary, tier: core, mode: active, phase: 3, binary: rustscan, version_cmd: [rustscan, --version], install: {method: github_release, repo: RustScan/RustScan, asset_pattern: "verify-at-implementation"}, notes: "Phase 3, verify asset and checksum names at implementation."}
+  masscan:      {stage: ports, kind: binary, tier: opt_in, mode: active, phase: 3, binary: masscan, version_cmd: [masscan, --version], rate_flag: "--max-rate", needs_root: true, install: {method: apt, package: masscan}, notes: "Opt-in only. Rate hard-capped by speed (masscan_max_rate)."}
+
+  # ---------------- tech ----------------
+  httpx_tech:   {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: httpx, notes: "httpx -td technology detection (reuses httpx)."}
+  whatweb:      {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: whatweb, version_cmd: [whatweb, --version], install: {method: apt, package: whatweb}}
+  wafw00f:      {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: wafw00f, version_cmd: [wafw00f, --version], install: {method: pipx, package: wafw00f}}
+  cdncheck:     {stage: tech, kind: binary, tier: core, mode: passive, phase: 3, binary: cdncheck, version_cmd: [cdncheck, -version], install: {<<: *pd_release, name: cdncheck, repo: projectdiscovery/cdncheck}, notes: "Detects CDN/WAF by IP range so a CDN block is not mistaken for a dead host."}
+  webanalyze:   {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: webanalyze, install: {method: go_install, package: "github.com/rverton/webanalyze/cmd/webanalyze@latest"}}
+
+  # ---------------- urls ----------------
+  gau:          {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: gau, version_cmd: [gau, --version], install: {method: go_install, package: "github.com/lc/gau/v2/cmd/gau@latest"}}
+  waybackurls:  {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: waybackurls, install: {method: go_install, package: "github.com/tomnomnom/waybackurls@latest"}}
+  katana:       {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: katana, version_cmd: [katana, -version], rate_flag: "-rl", install: {<<: *pd_release, name: katana, repo: projectdiscovery/katana}}
+  hakrawler:    {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: hakrawler, install: {method: go_install, package: "github.com/hakluke/hakrawler@latest"}}
+  gospider:     {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: gospider, install: {method: go_install, package: "github.com/jaeles-project/gospider@latest"}}
+  subjs:        {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: subjs, install: {method: go_install, package: "github.com/lc/subjs@latest"}, notes: "JS file discovery."}
+  unfurl:       {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: unfurl, install: {method: go_install, package: "github.com/tomnomnom/unfurl@latest"}, notes: "Parameter/path extraction. Pattern sorting (xss/sqli/ssrf/lfi/redirect candidates) is done in Python, no traffic."}
+  urlfinder:    {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: urlfinder, install: {<<: *pd_release, name: urlfinder, repo: projectdiscovery/urlfinder}}
+
+  # ---------------- vulns (takeover, exposure) ----------------
+  nuclei:       {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: nuclei, version_cmd: [nuclei, -version], rate_flag: "-rl", install: {<<: *pd_release, name: nuclei, repo: projectdiscovery/nuclei}, notes: "Run safe tags only (takeover, exposure, misconfig). Update templates with 'reconkit update'."}
+  subzy:        {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: subzy, install: {method: go_install, package: "github.com/PentestPad/subzy@latest"}}
+  dnsreaper:    {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: dnsreaper, install: {method: pipx, package: "git+https://github.com/punk-security/dnsReaper"}, notes: "Phase 3, verify install method and package source at implementation."}
+  nikto:        {stage: vulns, kind: binary, tier: opt_in, mode: active, phase: 3, binary: nikto, version_cmd: [nikto, -Version], install: {method: apt, package: nikto}, notes: "Opt-in only. Very noisy."}
+  ffuf:         {stage: vulns, kind: binary, tier: opt_in, mode: active, phase: 3, binary: ffuf, version_cmd: [ffuf, -V], rate_flag: "-rate", install: {method: go_install, package: "github.com/ffuf/ffuf/v2@latest"}, notes: "Opt-in only. Content discovery needs explicit --tools ffuf."}
+
+  # ---------------- shots ----------------
+  gowitness:    {stage: shots, kind: binary, tier: opt_in, mode: active, phase: 3, binary: gowitness, install: {method: go_install, package: "github.com/sensepost/gowitness@latest"}}
+
+  # ---------------- intrusive tier (Phase 3, disabled until built) ----------------
+  # Needs: --intrusive AND scope.yaml allow_intrusive: true AND typed confirmation.
+  dalfox:       {stage: vulns, kind: binary, tier: intrusive, mode: active, phase: 3, binary: dalfox, install: {method: go_install, package: "github.com/hahwul/dalfox/v2@latest"}}
+  crlfuzz:      {stage: vulns, kind: binary, tier: intrusive, mode: active, phase: 3, binary: crlfuzz, install: {method: go_install, package: "github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest"}}
+  sqlmap:       {stage: vulns, kind: binary, tier: intrusive, mode: active, phase: 3, binary: sqlmap, install: {method: apt, package: sqlmap}}
+
+system_packages: [python3, python3-venv, python3-pip, git, golang-go, libpcap-dev, jq, curl]
