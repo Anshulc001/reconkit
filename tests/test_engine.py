@@ -584,6 +584,58 @@ async def test_regression_dangling_cname_survives_restart(tmp_path: Path) -> Non
     second_store.close()
 
 
+async def test_dns_resolved_then_two_nxdomain_is_shut_down_then_dead(tmp_path: Path) -> None:
+    """Regression: PIT-29's extra DNS_ONLY row must not break the DEAD rule."""
+    rec = Recorder()
+    specs = {"dns-fake": tool("dns-fake", Stage.DNS)}
+    db_path = tmp_path / "recon.db"
+    resolved = SubdomainRecord(
+        fqdn="old.example.com",
+        source="fake",
+        ips=["203.0.113.9"],
+        cnames=["old.appspot.com"],
+    )
+    nxdomain = host("old.example.com", HostState.DEAD)
+    states: list[str] = []
+    warnings: list[str] = []
+    for records in ([resolved], [nxdomain], [nxdomain]):
+        store = Store(db_path)
+        adapters = {"dns-fake": adapter("dns-fake", Stage.DNS, rec, records=records)}
+        engine = make_engine(tmp_path, specs, adapters, store=store)
+        summary = await engine.run(
+            "example.com", ScanOptions(stages=(Stage.DNS,), mock=True, speed="slow")
+        )
+        row = store._conn.execute(
+            "SELECT h.state, h.cnames_json, h.dangling_cname"
+            " FROM host_status_history h JOIN subdomains s ON s.id = h.subdomain_id"
+            " WHERE s.fqdn = ? ORDER BY h.id DESC LIMIT 1",
+            ("old.example.com",),
+        ).fetchone()
+        states.append(str(row["state"]))
+        warnings.extend(summary.warnings)
+        store.close()
+
+    assert states == ["DNS_ONLY", "SHUT_DOWN", "DEAD"]
+    assert any("dangling CNAME" in warning for warning in warnings)
+    store = Store(db_path)
+    try:
+        history = store._conn.execute(
+            "SELECT h.state, h.cnames_json, h.dangling_cname"
+            " FROM host_status_history h JOIN subdomains s ON s.id = h.subdomain_id"
+            " WHERE s.fqdn = ? ORDER BY h.id",
+            ("old.example.com",),
+        ).fetchall()
+        assert [str(row["state"]) for row in history] == states
+        assert [row["cnames_json"] for row in history] == ['["old.appspot.com"]'] * 3
+        assert [row["dangling_cname"] for row in history] == [
+            None,
+            "old.appspot.com",
+            None,
+        ]
+    finally:
+        store.close()
+
+
 def test_dead_only_on_nxdomain() -> None:
     assert (
         transition(None, HostEvidence(dns=DnsSignal.NXDOMAIN, dns_tools=("dns",))).state

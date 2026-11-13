@@ -173,6 +173,7 @@ CREATE TABLE monitor_changes (            -- Phase 3
 - `Store.scan_runs(target_id)` and `Store.subdomains(target_id)` are read queries used by engine resume; both return plain dictionaries and never expose the connection.
 - `Store.host_rows(target_id)` returns the latest host state/confidence, latest status code, distinct source tools and open ports for the UI. `Store.recent_scan_runs(limit)` returns recent stage runs joined to target domains for `status`. `Store.completed_run_ids(target_id, stage)` returns completed/partial run ids newest-first for `diff`; `Store.latest_cnames(subdomain_id)` returns the CNAMEs from the latest status row; all four are read-only and never expose the connection.
 - `host_status_history.cnames_json` is written for every persisted status row and is never NULL. `dangling_cname` is NULL unless the row is `SHUT_DOWN` and the stored CNAME points outside the target. When a later NXDOMAIN pass has no CNAME of its own, the engine reuses `Store.latest_cnames()` so the takeover-relevant warning survives the process restart.
+- `host_status_history` gains one row per host per status pass, not one row per NXDOMAIN. From the `dns` stage, `RESOLVED` writes `DNS_ONLY` and `NXDOMAIN` writes `SHUT_DOWN`/`DEAD`; SERVFAIL, timeout, no answer and error write no `dns` row. `previous_state()` therefore always reads the outcome of the immediately preceding pass, including a `DNS_ONLY` pass, which is what keeps the two-consecutive-NXDOMAIN rule intact.
 
 ## 6. Diff Queries (core of `diff`)
 
