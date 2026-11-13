@@ -4,7 +4,7 @@
 
 - Status: 10a-10d closed; 10e (install/update CLI, --all, idempotency, exit code 6, tool_versions, bin_dir, doctor --fix) implemented and committed; wait for the 10e review before Part 11
 - Last code commit: run `git log --oneline -1`
-- Baseline: 537 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean
+- Baseline: 540 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean
 - Next action: wait for the 10e review; after approval run the Part 11 audit. Do not start 10f (none exists) or Phase 3.
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
@@ -57,6 +57,8 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `core/runner.py`: `run_exec(argv, timeout=, env=, max_output_bytes=, cwd=)` (only `subprocess` user), `validate_target` (root, strict RFC-1123), `validate_host` (discovered: allows `_`, strips `*.`), `ExecResult`; timeout kills the process group, output capped, env values redacted.
 - `core/scope.py`: `load_scope`, `require_active` -> `ActiveCheck(scope, match, hosts, dropped)`, `check_target`, `ip_allowed`, `passive_warning`, `ScopeGate`; `out_of_scope` always wins.
 - `core/store.py`: `Store(path)` (context manager, `close()`), `redact(text, secrets)`; writes `create_target`, `create_scan_run`, `finish_scan_run`, `record_tool_run`, `upsert_subdomain`, `add_subdomain_source`, `append_host_status`, `upsert_port`, `add_port_source`, `upsert_url`; reads `previous_state`, `diff_new`, `diff_gone`, `diff_state_changed`, `diff_ports_opened`, `diff_ports_closed`; pragmas FK/WAL/5000 ms, parameterized SQL only.
+- `adapters/base.py`: `managed_bin_dir()` (lazy import of `installer.registry.bin_dir`, one definition of the path)
+- `doctor.py`: `key_checks()` (names only, used by the install keys prompt)
 - `installer/registry.py`: `bin_dir(home=)` (`~/.reconkit/bin`), `tier` on `InstallPlan`, `load_plans(path=, versions=)` -> `InstallPlan` (`name`, `method`, `binary`, `package`, `repo`, `asset_pattern`, `checksums_pattern`, `asset_name`, `version`, `fallback`, `requires_apt`, `requires`), `plan_for`, `resolve_plan`; unknown method or missing package/repo raises `ConfigError`.
 - `installer/apt.py`: `apt_env` (PATH/DEBIAN_FRONTEND/LC_ALL), `apt_argv` (`sudo -n apt-get install -y`), `apt_steps`, `apt_install_package`, `install_apt`; package names validated; a password-requiring sudo becomes `InstallSkipped`.
 - `installer/go_install.py`: `go_env` (HOME/GOBIN/PATH), `go_spec`, `install_go`; builds into the managed bin dir and runs `version_cmd`.
@@ -131,8 +133,6 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 ## Open risks
 
 - `SUDO_DENIAL_MARKERS` contains two substrings (`"no tty present"`, `"askpass"`) that were never reproduced against a live sudo; only `"a password is required"` was confirmed here. A different sudo/PAM wording would surface as `InstallError` instead of the friendlier `InstallSkipped` (low severity, but it will look like a failure rather than a skip).
-- `install` asked-about-keys flow prints the path only; docs/05 section 6.1 also promises the Keys table there. The table is still shown by `doctor`.
-- `adapters/base.py` still hardcodes `Path.home() / ".reconkit" / "bin"` instead of `installer.registry.bin_dir()`, because adapters may not import the installer. Two literals can drift.
 
 - `_fetch_text`'s default 64 KiB cap has no dedicated test; the cap is only exercised through an explicit `max_bytes=64` argument in the test, so a regression in the default would pass the suite.
 - Non-UTF-8 checksums-file rejection (`InstallError: checksums file is not UTF-8`) has no test.

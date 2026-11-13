@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import shutil
 from dataclasses import replace
 from pathlib import Path
@@ -12,9 +13,11 @@ from typer.testing import CliRunner
 from reconkit import cli
 from reconkit.cli import app
 from reconkit.core.runner import ExecResult
+from reconkit.doctor import key_checks
 from reconkit.installer import github_release
 from reconkit.installer.github_release import install_selected
 from reconkit.installer.registry import bin_dir, load_plans, plan_for
+from reconkit.ui import make_console, render_keys
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -221,3 +224,32 @@ def test_plans_carry_the_tier_from_tools_yaml() -> None:
     plans = load_plans()
     assert plans["nmap"].tier == "core"
     assert plans["nikto"].tier == "opt_in"
+
+
+def test_managed_bin_dir_has_one_source_of_truth() -> None:
+    from reconkit.adapters.base import managed_bin_dir
+    from reconkit.installer.registry import bin_dir as installer_bin_dir
+
+    assert managed_bin_dir() == installer_bin_dir()
+    assert managed_bin_dir() == Path.home() / ".reconkit" / "bin"
+
+
+def test_choosing_keys_writes_a_private_env_file(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    shutil.copy2(REPO / ".env.example", tmp_path / ".env.example")
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli.typer, "confirm", lambda *a, **k: True)
+    cli._maybe_ask_keys(no_color=True)
+    env = tmp_path / ".env"
+    assert env.exists()
+    assert env.stat().st_mode & 0o777 == 0o600
+    assert env.read_text(encoding="utf-8") == (REPO / ".env.example").read_text(encoding="utf-8")
+
+
+def test_keys_table_lists_names_and_states() -> None:
+    buffer = io.StringIO()
+    render_keys(key_checks(), console=make_console(stream=buffer, no_color=True))
+    out = buffer.getvalue()
+    assert "CERTSPOTTER_API" in out
+    assert "missing" in out
+    assert "tool" in out

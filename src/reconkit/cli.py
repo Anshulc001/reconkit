@@ -16,7 +16,7 @@ import typer
 from reconkit.config import AppConfig, load_config
 from reconkit.core.runner import validate_target
 from reconkit.core.scope import check_target
-from reconkit.doctor import collect_report
+from reconkit.doctor import collect_report, key_checks
 from reconkit.engine import Engine, ExitCode, ScanOptions
 from reconkit.errors import ConfigError, ScopeError
 from reconkit.installer.github_release import install_selected
@@ -30,6 +30,7 @@ from reconkit.ui import (
     render_doctor,
     render_error,
     render_install,
+    render_keys,
     render_message,
     render_status,
 )
@@ -551,13 +552,14 @@ def _maybe_ask_keys(*, no_color: bool) -> None:
     example = Path.cwd() / ".env.example"
     if env_path.exists():
         render_message(f"keeping existing {env_path}", console=console)
-        return
-    if not example.exists():
+    elif not example.exists():
         render_message(".env.example not found; nothing copied", console=console)
         return
-    shutil.copy2(example, env_path)
-    env_path.chmod(0o600)
-    render_message(f"wrote {env_path}; add your keys there", console=console)
+    else:
+        shutil.copy2(example, env_path)
+        env_path.chmod(0o600)
+        render_message(f"wrote {env_path}; add your keys there", console=console)
+    render_keys(key_checks(), console=console)
 
 
 def _run_install(

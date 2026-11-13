@@ -14,7 +14,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from reconkit.doctor import DoctorReport
+from reconkit.doctor import DoctorReport, KeyCheck
 from reconkit.engine import DiffSnapshot, RunSnapshot, ScanSummary
 from reconkit.installer.github_release import InstallOutcome
 from reconkit.models import Confidence, HostState, ToolResult, ToolStatus
@@ -634,5 +634,25 @@ def render_install(
             outcome.method or "-",
             _install_result(outcome, dry_run=dry_run),
             _install_detail(outcome),
+        )
+    target.print(table)
+
+
+def render_keys(checks: Iterable[KeyCheck], *, console: Console | None = None) -> None:
+    """The Keys table: tool, env name, set/missing, what it adds, sign-up URL."""
+    target = console or make_console()
+    table = Table(box=None, show_header=True, header_style="bold", pad_edge=False)
+    table.add_column("tool")
+    table.add_column("key")
+    table.add_column("state")
+    table.add_column("adds")
+    table.add_column("sign up")
+    for check in checks:
+        table.add_row(
+            check.tool,
+            check.env,
+            "set" if check.set else "missing",
+            check.adds,
+            check.url,
         )
     target.print(table)

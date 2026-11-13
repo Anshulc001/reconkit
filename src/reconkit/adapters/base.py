@@ -190,6 +190,18 @@ class BaseToolAdapter(ABC):
         raise FetchFailed(f"{self.name}: no fixture for {ctx.target}")
 
 
+def managed_bin_dir() -> Path:
+    """`~/.reconkit/bin` from the installer; imported lazily to avoid a cycle.
+
+    adapters -> installer.registry -> adapters.registry -> adapters.base would
+    import in a loop, so the import happens at call time. There is exactly one
+    definition of the path (installer.registry.bin_dir) and a test pins the two.
+    """
+    from reconkit.installer.registry import bin_dir
+
+    return bin_dir()
+
+
 class BinaryAdapter(BaseToolAdapter):
     """Binary tool with an identity check and an optional HOME for config."""
 
@@ -211,7 +223,7 @@ class BinaryAdapter(BaseToolAdapter):
         return env
 
     def binary_path(self) -> str | None:
-        own = Path.home() / ".reconkit" / "bin" / self.binary
+        own = managed_bin_dir() / self.binary
         own_paths = [own, own.with_name(f"{own.name}.exe")] if os.name == "nt" else [own]
         for candidate in own_paths:
             if candidate.is_file():

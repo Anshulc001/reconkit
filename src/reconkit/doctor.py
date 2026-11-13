@@ -119,6 +119,15 @@ def installed_packages(path: Path | None = None) -> frozenset[str]:
     return frozenset(found)
 
 
+def key_checks() -> tuple[KeyCheck, ...]:
+    """Every documented key by name only, all reported missing (docs/05 6.1)."""
+    return tuple(
+        KeyCheck(tool=name, env=key.env, url=key.url, adds=key.adds, set=False)
+        for name, spec in load_tools().items()
+        for key in spec.keys
+    )
+
+
 def db_writable(path: Path) -> bool:
     """Report whether the store could be created or written where it lives."""
     parent = path.parent if str(path.parent) else Path(".")

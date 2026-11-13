@@ -740,3 +740,11 @@ Per-stage counts: subs 11, dns 5, live 4, ports 6, tech 5, urls 8, vulns 8, shot
 - Keys prompt: implemented per docs/05 section 6.1 - only on a TTY, never under `--dry-run`, copies `.env.example` to `.env` (never overwrites) with mode 0600. Deviation: it does not re-print the Keys table there; logged in PROGRESS Open risks.
 - Tests added: `tests/test_install_cli.py` (14) - bin_dir default, installed-version probing, install skip, update skip on equal pin, update when older, exit 5/6 aggregation, nuclei `-ut` step, the three CLI usage/platform errors, tool_versions + core selection wiring, update flag plumbing, `doctor --fix`, and no `.env` write without a TTY. `tests/test_doctor.py`'s refusal test was rewritten.
 - Not verified: no real install was performed by the tests; `--all` selection is exercised with a stubbed `install_selected`, so the end-to-end download/apt path is still covered only by 10c/10d unit tests. The `nuclei -ut` flag was confirmed from real `--help` but the refresh itself was not run.
+
+### Part 10e - review follow-ups (same part, before close)
+
+- Keys table implemented instead of deferred: `doctor.key_checks()` returns every documented key by name (`set=False`, values never read) and `ui.render_keys` prints tool/key/state/adds/sign-up. `_maybe_ask_keys` now prints it after writing `.env`, matching docs/05 section 6.1. The helper lives in `doctor.py` because `tests/test_cli.py::test_cli_imports_only_the_allowed_layers` forbids `cli` importing `reconkit.adapters` - the first attempt imported `load_tools` in cli and that test caught it.
+- One definition of the managed bin dir: `adapters/base.py` gained `managed_bin_dir()`, which imports `installer.registry.bin_dir` lazily (adapters -> installer.registry -> adapters.registry -> adapters.base would import in a loop) and `BinaryAdapter.binary_path` uses it. `test_managed_bin_dir_has_one_source_of_truth` asserts `adapters.base.managed_bin_dir() == installer.registry.bin_dir()`.
+- docs/10 section 1 now states the UX cost: because apt/pipx have no version comparison, `update --all` re-asks the sudo confirmation for every apt/pipx tool on every run.
+- Exit codes unchanged: `ERROR=1`, `USAGE=2`, `SCOPE=3`, `NO_TOOL=4`, `PARTIAL=5`, `ALL_FAILED=6`, `INTERRUPTED=130` (code 6 added in 10e, no renumbering).
+- Tests: 18 in `tests/test_install_cli.py`, 540 in the suite.
