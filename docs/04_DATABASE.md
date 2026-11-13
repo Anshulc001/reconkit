@@ -192,6 +192,7 @@ No soft delete. `db delete -d X` removes a target and its rows after confirmatio
 
 - Never stored: API keys, tokens, passwords, cookies.
 - `tool_runs.error` must be redacted (strip tokens and URLs with secrets) before saving.
+- Bulk writes use `with store.transaction():`, which commits once at the end and rolls back the whole block on any exception. Per-row methods join the outer transaction instead of committing individually; nested `transaction()` blocks join the outermost one.
 - DB and workspace may contain target info: both are git-ignored.
 
 ## 11. Migrations

@@ -95,6 +95,14 @@ workspaces/<domain>/
 - `workspace.write(stage, filename, text)` passes `text` through `store.redact()` with the run's secrets before any bytes reach disk, then writes a temporary file in the same directory and `os.replace()`s it (mode `0600`). A failure leaves the destination untouched and no temporary file behind. Writing the same filename again replaces it atomically.
 - Raw tool output uses `subs`, `live`, `ports`, `urls` or `tech`; run metadata and `reconkit.log` use `meta`. No other directory is created.
 
+### Engine API (`engine.py`)
+
+- `Engine(config, store).run(target, ScanOptions(...))` runs the selected stages in the fixed order `subs, dns, live, ports, tech, urls, vulns`. `ScanOptions` carries `stages`, `tools`, `exclude`, `include_noisy`, `active`, `no_keys`, `mock`, `speed` and `phase_timeout`.
+- Tools are selected from `tools.yaml` once per run. A `--tools` name must exist; `intrusive` tools are refused, `opt_in` tools need `--include-noisy` or an explicit `--tools`, and `--exclude` always wins. Every selected or skipped tool gets a `tool_runs` row with its redacted error.
+- Active tools run only when `--active` is set **and** `require_active()` passes. Discovered hosts are revalidated and re-checked against scope before they reach an active `RunContext`; dropped hosts are reported, never probed. A missing/unsafe scope skips the active tools instead of raising out of the stage.
+- Each tool's `RunContext.env` contains only the env names in that tool's `keys` (none with `--no-keys`). One fresh `RateLimiter` is built per stage; `Pacer.reset()` runs at stage start; `slow` runs tools one at a time, other speeds use `pacer.parallel_limit()`.
+- `--mock` reads only the fixtures, never calls `check_installed()`, the network or a subprocess. Stage asset writes are batched with `store.transaction()`; tool runs are recorded individually.
+
 ## 6. Data Flow (example: `reconkit live -d example.com --active`)
 
 1. CLI parses flags (`--speed slow` default) and loads `config.yaml`.

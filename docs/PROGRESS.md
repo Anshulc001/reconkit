@@ -2,10 +2,10 @@
 
 ## RESUME HERE
 
-- Status: Part 5 done; Part 6a (engine skeleton, gating, mock pipeline) next
-- Last code commit: `d9cf6c7` (Part 5); run `git log --oneline -1` because docs commits may be newer
-- Baseline: 342 passed, 2 skipped; all four checks PASS (twice)
-- Next action: implement Part 6a in docs/MASTER_PLAN.md; bind the DNS probe to the run context for wildcard detection and use `Workspace.create` for raw output
+- Status: Part 6a done; Part 6b (consensus, host states, resume, exit codes) next
+- Last code commit: run `git log --oneline -1`; Part 6a is the newest `feat:` commit
+- Baseline: 352 passed, 2 skipped; all four checks PASS (twice)
+- Next action: implement Part 6b in docs/MASTER_PLAN.md on top of `Engine.run`: confidence, host-state transitions, resume and exit codes
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: none
@@ -41,7 +41,7 @@ mypy src/reconkit
 | f1 | done | 89ba34f | `adapters/base.py`, `adapters/registry.py`, `crtsh`, `certspotter`, `otx`, `hackertarget` |
 | f2 | done | 80ddd93 | pure-Python adapters: `dnspython`, `pyprobe`, `pyscan` |
 | f3 | done | ee06075 | remaining phase-2 tools: binary adapters `subfinder`, `assetfinder`, `httpx`, `naabu` |
-| g | in progress | d9cf6c7 (Part 5) | wildcard + workspace done; `engine.py` pipeline, host states, resume, exit codes pending (Part 6) |
+| g | in progress | d9cf6c7 (Part 5); 6a hash filled in 6b | wildcard + workspace + engine skeleton done; consensus, host states, resume, exit codes pending (6b) |
 | h | pending | - | `ui.py` + `cli.py`: all commands, `--mock`, `--json` |
 | i | pending | - | `installer/` + `doctor.py` |
 | j | pending | - | docs sync, README, final check |
@@ -140,10 +140,10 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - assetfinder's `FB_APP_ID`/`FB_APP_SECRET` (Facebook developer app) and `SPYSE_API_TOKEN` were omitted: the Facebook source is no longer a documented free subdomain API, and the Spyse service status is unverified.
 - `urlscan`, `chaos` and `github_subdomains` now carry `keys`; their adapters are still Phase 3. `URLSCAN_API_KEY` is reconkit's own name, `PDCP_API_KEY` and `GITHUB_TOKEN` are the tools' real names.
 - HackerTarget's free tier returned one row for example.com; multi-row parsing is only covered by MockTransport tests.
-- Scope behavior is only unit-tested; engine tests must prove an out-of-scope host is never probed.
+- Part 6a: one `scan_runs` row per executed stage; `ScanOptions.speed` is `SpeedName`; `Store.transaction()` uses SQLite's implicit transaction (explicit `BEGIN` failed inside one); `check_installed()` runs via `asyncio.to_thread`; workspace/scope reads stay synchronous and short; `FindingRecord` is not persisted because the findings table is deferred.
 - Cert Spotter's authenticated quota is undocumented, so no rate number is shown for a key; only the unauthenticated limit is described.
 - `keys` is the only per-tool key field; `.env.example` lists only env names used by `tools.yaml` (Chaos's real name is `PDCP_API_KEY`).
 
 ## Next task
 
-**Part 6a: engine skeleton, gating, mock pipeline.** Re-read docs/09 stage pipeline/confidence and docs/02 exit codes; wire `WildcardDetector(probe=partial(dns.resolve_host, ctx), rng=random.Random(), probes=...)` and `Workspace.create(...)`, and record out-of-scope hosts without probing them.
+**Part 6b: consensus, host states, resume, exit codes.** Keep consensus in `engine.py`; compute confidence from distinct tools, never turn timeout/SERVFAIL into DEAD, and grade the wildcard result `unknown` as a warning rather than `none`.

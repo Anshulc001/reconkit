@@ -9,7 +9,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -197,6 +198,7 @@ class Store:
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=5000")
+        self._batch_depth = 0
         try:
             self._migrate()
         except Exception:
@@ -211,6 +213,36 @@ class Store:
 
     def close(self) -> None:
         self._conn.close()
+
+    def _commit(self) -> None:
+        """Commit unless an outer `transaction()` owns the commit."""
+        if self._batch_depth == 0:
+            self._conn.commit()
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Batch writes into one commit; roll back the whole block on error.
+
+        Nested blocks join the outermost transaction so an inner helper cannot
+        commit half of a stage.
+        """
+        if self._batch_depth:
+            self._batch_depth += 1
+            try:
+                yield
+            finally:
+                self._batch_depth -= 1
+            return
+        self._batch_depth = 1
+        try:
+            yield
+        except BaseException:
+            self._conn.rollback()
+            raise
+        else:
+            self._commit()
+        finally:
+            self._batch_depth = 0
 
     @property
     def schema_version(self) -> int:
@@ -236,14 +268,14 @@ class Store:
             else:
                 self._conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
                 has_row = True
-            self._conn.commit()
+            self._commit()
 
     def create_target(self, domain: str, *, created_at: str | None = None) -> int:
         self._conn.execute(
             "INSERT INTO targets (domain, created_at) VALUES (?, ?) ON CONFLICT(domain) DO NOTHING",
             (domain, created_at or _utc_now()),
         )
-        self._conn.commit()
+        self._commit()
         row = self._conn.execute("SELECT id FROM targets WHERE domain = ?", (domain,)).fetchone()
         return int(row["id"])
 
@@ -266,7 +298,7 @@ class Store:
             " VALUES (?, ?, ?, 'running', ?, ?)",
             (target_id, stage, speed, started_at or _utc_now(), redact(params, secrets)),
         )
-        self._conn.commit()
+        self._commit()
         return int(cursor.lastrowid or 0)
 
     def finish_scan_run(self, run_id: int, status: str, *, finished_at: str | None = None) -> None:
@@ -274,7 +306,7 @@ class Store:
             "UPDATE scan_runs SET status = ?, finished_at = ? WHERE id = ?",
             (status, finished_at or _utc_now(), run_id),
         )
-        self._conn.commit()
+        self._commit()
 
     def record_tool_run(
         self,
@@ -293,7 +325,7 @@ class Store:
             " VALUES (?, ?, ?, ?, ?, ?)",
             (run_id, tool, status, item_count, duration_s, clean_error),
         )
-        self._conn.commit()
+        self._commit()
         return int(cursor.lastrowid or 0)
 
     def upsert_subdomain(
@@ -330,7 +362,7 @@ class Store:
                 "run_id": run_id,
             },
         )
-        self._conn.commit()
+        self._commit()
         row = self._conn.execute(
             "SELECT id FROM subdomains WHERE target_id = ? AND fqdn = ?", (target_id, fqdn)
         ).fetchone()
@@ -341,7 +373,7 @@ class Store:
             "INSERT OR IGNORE INTO subdomain_sources (subdomain_id, run_id, tool) VALUES (?, ?, ?)",
             (subdomain_id, run_id, tool),
         )
-        self._conn.commit()
+        self._commit()
 
     def append_host_status(
         self,
@@ -377,7 +409,7 @@ class Store:
                 checked_at or _utc_now(),
             ),
         )
-        self._conn.commit()
+        self._commit()
         return int(cursor.lastrowid or 0)
 
     def upsert_port(
@@ -417,7 +449,7 @@ class Store:
                 "run_id": run_id,
             },
         )
-        self._conn.commit()
+        self._commit()
         row = self._conn.execute(
             "SELECT id FROM ports WHERE subdomain_id = ? AND ip = ? AND port = ? AND protocol = ?",
             (subdomain_id, ip, port, protocol),
@@ -429,7 +461,7 @@ class Store:
             "INSERT OR IGNORE INTO port_sources (port_id, run_id, tool, seen) VALUES (?, ?, ?, ?)",
             (port_id, run_id, tool, seen),
         )
-        self._conn.commit()
+        self._commit()
 
     def upsert_url(
         self,
@@ -461,7 +493,7 @@ class Store:
                 "run_id": run_id,
             },
         )
-        self._conn.commit()
+        self._commit()
         row = self._conn.execute(
             "SELECT id FROM urls WHERE target_id = ? AND url = ?", (target_id, url)
         ).fetchone()

@@ -472,6 +472,19 @@ def test_redact_env_secret() -> None:
     assert redact("failed with sk-live-123", ["sk-live-123"]) == "failed with ***"
 
 
+def test_transaction_commits_once_and_rolls_back(store: Store) -> None:
+    """Regression: PIT-03-adjacent batch writes must not leave half a stage."""
+    with store.transaction():
+        store.create_target("commit.example.com")
+    assert store.get_target("commit.example.com") is not None
+
+    with pytest.raises(RuntimeError):
+        with store.transaction():
+            store.create_target("rollback.example.com")
+            raise RuntimeError("stage failed")
+    assert store.get_target("rollback.example.com") is None
+
+
 def test_only_store_imports_sqlite3() -> None:
     importers = [
         path.name
