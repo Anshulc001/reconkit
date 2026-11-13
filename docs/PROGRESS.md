@@ -27,7 +27,7 @@ mypy src/reconkit
 | c | done | `45b0ba8` | `core/scope` gate + tests |
 | d | done | `0a3010b` | `core/pacing.py`: delays, jitter, ordering, parallel limits, rate args, RateLimiter |
 | e | done | `1ba2fd8` | `core/store.py`: schema, migrations, `redact()` helper, diff queries (`docs/04_DATABASE.md`) |
-| f1 | pending | - | `adapters/base.py`, `adapters/registry.py`, `crtsh`, `certspotter`, `otx`, `hackertarget` |
+| f1 | done | `HEAD` | `adapters/base.py`, `adapters/registry.py`, `crtsh`, `certspotter`, `otx`, `hackertarget` |
 | f2 | pending | - | `subfinder`, `assetfinder`, `dnspython`, `pyprobe`, `httpx`, `pyscan`, `naabu` |
 | g | pending | - | `core/wildcard.py` + `engine.py` + `core/workspace.py`: stage pipeline, consensus/confidence inside `engine.py`, host states, resume, exit codes |
 | h | pending | - | `ui.py` + `cli.py`: all commands, `--mock`, `--json` |
@@ -44,6 +44,10 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `core/runner.py`: `run_exec(argv, timeout=, env=, max_output_bytes=, cwd=)` (only `subprocess` user), `validate_target` (root, strict RFC-1123), `validate_host` (discovered: allows `_`, strips `*.`), `ExecResult`; timeout kills the process group, output capped, env values redacted.
 - `core/scope.py`: `load_scope`, `require_active` -> `ActiveCheck(scope, match, hosts, dropped)`, `check_target`, `ip_allowed`, `passive_warning`, `ScopeGate`; `out_of_scope` always wins.
 - `core/store.py`: `Store(path)` (context manager, `close()`), `redact(text, secrets)`; writes `create_target`, `create_scan_run`, `finish_scan_run`, `record_tool_run`, `upsert_subdomain`, `add_subdomain_source`, `append_host_status`, `upsert_port`, `add_port_source`, `upsert_url`; reads `previous_state`, `diff_new`, `diff_gone`, `diff_state_changed`, `diff_ports_opened`, `diff_ports_closed`; pragmas FK/WAL/5000 ms, parameterized SQL only.
+- `adapters/base.py`: `BaseToolAdapter` (contract from docs/09), `HttpAdapter` (rate limit via `ctx.limiter`, timeout, User-Agent, one retry on connection errors, 429/5xx/timeout -> failed result), `normalize_subdomains`; `FetchFailed`.
+- `adapters/registry.py`: `load_tools(path=)` -> `ToolSpec`, `get_spec`, `get_adapter`, `rate_flags()`; unknown/incomplete tools raise `ConfigError`.
+- `adapters/__init__.py`: `ADAPTERS` maps `crtsh`, `certspotter`, `otx`, `hackertarget` to classes.
+- `adapters/crtsh.py`, `certspotter.py`, `otx.py`, `hackertarget.py`: async parsers and request metadata; keys only from `ctx.env`.
 - `core/pacing.py`: `Pacer(preset, rate_flags=, rng=, sleep=)` with `before_tool(mode)` (first tool free, `reset()` per stage), `before_host`, `order(items, kind=)`, `parallel_limit`, `tool_rate_args(tool, mode)`, `next_pause_range`; `RateLimiter(rate, clock=, sleep=)` for HTTP adapters. No I/O, no printing, injected clock.
 
 ## Notes for task g
@@ -51,9 +55,17 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - The engine must call `pacer.reset()` at the start of every stage.
 - `diff_new`/`diff_gone` rely on per-run `*_sources` rows, so a stage-only run would make every host look GONE. Diffs must compare runs of the same kind; docs/04 section 6 says which.
 - Raw stderr/output files written by `workspace.py` must go through `redact()` before they hit disk.
+- The engine builds one `RateLimiter` per stage (passive requests/second from the preset) and puts it in `RunContext`; HTTP adapters never build their own.
 - `Store` is used only from the event-loop thread (no `asyncio.to_thread`).
 - Per-call commits are slow for thousands of hosts. Add a `transaction()` context manager or a batch insert method when the engine needs it.
 - Read queries for the engine/CLI (list subdomains with sources, `tool_runs` of a run for resume, latest run for a target, ports, export) are added in tasks g/h with tests.
+
+## Fixtures
+
+- `crtsh/example.com.json` - trimmed real response, fetched 2026-11-13 from `https://crt.sh/?q=%25.example.com&output=json` (5 of 85 entries).
+- `certspotter/example.com.json` - trimmed real response, fetched 2026-11-13 from `https://api.certspotter.com/v1/issuances?domain=example.com&include_subdomains=true&expand=dns_names` (2 of 17 entries).
+- `otx/example.com.synthetic.json` - synthetic, documented `passive_dns` shape; the real endpoint returned HTTP 429 for anonymous access on 2026-11-13 (`https://otx.alienvault.com/api/v1/indicators/domain/example.com/passive_dns`).
+- `hackertarget/example.com.txt` - real response, fetched 2026-11-13 from `https://api.hackertarget.com/hostsearch/?q=example.com` (the free quota returned a single row).
 
 ## Deviations and assumptions
 
@@ -81,13 +93,17 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `urls` is created in task e per the review list even though docs/04 labels it Phase 3; `findings` and `monitor_changes` stay deferred.
 - The v1 migration was edited in place to add `idx_subdomain_sources_run`, `idx_port_sources_run` and `idx_hsh_run`; no real `recon.db` exists yet, so no v2 is needed. docs/04 section 3 lists the indexes.
 - docs/04 section 6 now states that diffs only compare runs of the same kind (discovery with discovery, ports with ports).
+- `RunContext` gained `limiter: RateLimiter`; docs/09 was changed first because the contract referred to "the pacer's rate limiter" that no object exposed. The engine must build one limiter per stage and pass it in.
+- `HttpAdapter` is documented in docs/09 section 3. Domain filtering happens in `run()` because the contract's `parse_output(raw)` receives no target; `parse_output` normalizes and validates only.
+- Fixtures are trimmed real responses except OTX (synthetic, see Fixtures); no adapter test touches the network.
 - `tests/test_store.py` imports `sqlite3` for `IntegrityError`; the "only store.py imports sqlite3" rule is enforced for `src/`.
 - Installer refuses to run on native Windows; decide how to handle that before task i.
 - `scope.yaml` cannot exclude IP ranges (no out-of-scope CIDRs).
 - CLI must catch `ValueError` from `check_target`/`validate_target` and exit 2.
-- Real `httpx` JSON field names are not verified yet; confirm with `--help`/sample output before writing the adapter.
+- OTX refuses anonymous requests (429), so `otx/example.com.synthetic.json` is synthetic and the adapter has not parsed a real OTX response yet.
+- HackerTarget's free tier returned one row for example.com; multi-row parsing is only covered by MockTransport tests.
 - Scope behavior is only unit-tested; engine tests must prove an out-of-scope host is never probed.
 
 ## Next task
 
-**Task f1: adapters (part 1).** `adapters/base.py`, `adapters/registry.py`, `crtsh`, `certspotter`, `otx`, `hackertarget` with fixtures and parser tests. Read `docs/09_TOOL_CONTRACTS.md`, `docs/03_ARCHITECTURE.md` (dependency rules), `tools.yaml` and `.env.example` first.
+**Task f2: adapters (part 2).** `subfinder`, `assetfinder`, `dnspython`, `pyprobe`, `httpx`, `pyscan`, `naabu` with fixtures and parser tests; binary adapters use `BaseToolAdapter.build_command`/`parse_output` and the registry `rate_flags()`. Read `docs/09_TOOL_CONTRACTS.md` and `tools.yaml` first; confirm every flag from the real `--help`.

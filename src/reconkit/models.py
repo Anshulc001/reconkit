@@ -8,7 +8,7 @@ from typing import Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from reconkit.core.pacing import Pacer
+from reconkit.core.pacing import Pacer, RateLimiter
 
 
 class Stage(StrEnum):
@@ -126,6 +126,7 @@ class RunContext(BaseModel):
     hosts: list[str] = []
     speed: Literal["slow", "normal", "fast"] = "slow"
     pacer: Pacer
+    limiter: RateLimiter
     timeout: float
     workspace: Path
     mock: bool = False

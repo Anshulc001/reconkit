@@ -1,0 +1,47 @@
+[
+  {
+    "issuer_ca_id": 409703,
+    "issuer_name": "C=NL, O=eMudhra BV, CN=EM DV TLS CA - G3B",
+    "common_name": "emudhra-lab.example.com",
+    "name_value": "emudhra-lab.example.com",
+    "id": 30003111654,
+    "not_before": "2026-10-20T21:19:03",
+    "not_after": "2027-08-01T21:19:03"
+  },
+  {
+    "issuer_ca_id": 413868,
+    "issuer_name": "C=US, O=SSL Corporation, CN=Cloudflare TLS Issuing ECC CA 3",
+    "common_name": "example.com",
+    "name_value": "*.example.com\nexample.com",
+    "id": 29581277802,
+    "not_before": "2026-09-26T22:49:11",
+    "not_after": "2026-12-25T22:56:35"
+  },
+  {
+    "issuer_ca_id": -1,
+    "issuer_name": "Issuer Not Found",
+    "common_name": "example.com",
+    "name_value": "example.com\nuser@example.com",
+    "id": 8506962125,
+    "not_before": "2023-01-27T01:21:18",
+    "not_after": "2033-01-24T01:21:18"
+  },
+  {
+    "issuer_ca_id": 1449,
+    "issuer_name": "C=US, O=Symantec Corporation, OU=Symantec Trust Network, CN=Symantec Class 3 Secure Server CA - G4",
+    "common_name": "www.example.com",
+    "name_value": "dev.example.com\nexample.com\nproducts.example.com\nsupport.example.com\nwww.example.com",
+    "id": 24558997,
+    "not_before": "2016-07-14T00:00:00",
+    "not_after": "2018-07-14T23:59:59"
+  },
+  {
+    "issuer_ca_id": 1465,
+    "issuer_name": "C=US, O=\"thawte, Inc.\", CN=thawte SSL CA - G2",
+    "common_name": "www.example.com",
+    "name_value": "example.com\nm.testexample.com\nwww.example.com",
+    "id": 24564717,
+    "not_before": "2016-07-14T00:00:00",
+    "not_after": "2017-07-14T23:59:59"
+  }
+]

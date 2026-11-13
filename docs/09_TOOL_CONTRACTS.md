@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
-    from reconkit.core.pacing import Pacer
+    from reconkit.core.pacing import Pacer, RateLimiter
 
 
 class Stage(str, Enum):  SUBS="subs"; DNS="dns"; LIVE="live"; PORTS="ports"; TECH="tech"; URLS="urls"; VULNS="vulns"; SHOTS="shots"
@@ -97,6 +97,7 @@ class RunContext(BaseModel):
     hosts: list[str] = []           # already scope-checked
     speed: Literal["slow", "normal", "fast"] = "slow"
     pacer: Pacer                    # reconkit.core.pacing.Pacer (import under TYPE_CHECKING)
+    limiter: RateLimiter            # shared per stage; HTTP adapters await limiter.wait()
     timeout: float                  # per-tool timeout in seconds
     workspace: Path                 # workspaces/<target>
     mock: bool = False              # load tests/fixtures/<tool>/ instead of running
@@ -121,8 +122,9 @@ class BaseToolAdapter(ABC):
 - `check_installed()` returns `InstallStatus` (above).
 - Adapter failures use the exceptions in `reconkit/errors.py` defined by `docs/06_CODE_STYLE.md` §6 (`ScopeError`, `ToolNotInstalled`, `ToolFailed`, `ToolTimeout`, `ParseError`, `ConfigError`, `InstallError`); no other exception names. They are converted into `ToolResult(status=...)`, never raised out of a stage.
 - Binary adapters usually implement only `build_command` and `parse_output`; the base `run` handles execution, timeout, output saving and error mapping.
-- HTTP adapters override `run` and use the shared async client with the pacer's rate limiter and the honest User-Agent.
-- In `--mock` mode `run` loads `tests/fixtures/<name>/` instead of executing anything.
+- HTTP adapters subclass `HttpAdapter` from `adapters/base.py`. Its `run` awaits `ctx.limiter.wait()`, uses an `httpx.AsyncClient` with an explicit timeout and the honest User-Agent, retries a connection error once with an injected sleep, and maps HTTP 429, 5xx and timeouts to a failed `ToolResult` (never an exception).
+- `parse_output` normalizes and validates subdomain names; only names equal to or under `ctx.target` are kept before records are returned.
+- In `--mock` mode `run` reads `tests/fixtures/<name>/<target>.<ext>` (or the only file in that directory) instead of making a request.
 - Rate: if the registry has `rate_flag`, the adapter appends it with the value from `pacer.tool_rate_args(name)`.
 
 ## 4. Stage Registry (who runs where)

@@ -1,0 +1,26 @@
+{
+  "count": 3,
+  "passive_dns": [
+    {
+      "hostname": "www.example.com",
+      "address": "203.0.113.10",
+      "record_type": "A",
+      "first": "2024-01-02T03:04:05",
+      "last": "2026-11-01T00:00:00"
+    },
+    {
+      "hostname": "API.Example.COM.",
+      "address": "203.0.113.11",
+      "record_type": "A",
+      "first": "2024-02-03T04:05:06",
+      "last": "2026-11-02T00:00:00"
+    },
+    {
+      "hostname": "mail.example.net",
+      "address": "203.0.113.12",
+      "record_type": "A",
+      "first": "2024-03-04T05:06:07",
+      "last": "2026-11-03T00:00:00"
+    }
+  ]
+}

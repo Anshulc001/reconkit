@@ -1,0 +1,30 @@
+[
+  {
+    "id": "12809115180",
+    "dns_names": [
+      "example.com",
+      "example.edu",
+      "example.net",
+      "example.org"
+    ],
+    "not_before": "2025-11-20T00:00:00Z",
+    "not_after": "2026-11-20T23:59:59Z",
+    "revoked": true
+  },
+  {
+    "id": "12822827438",
+    "dns_names": [
+      "example.com",
+      "example.edu",
+      "example.net",
+      "example.org",
+      "www.example.com",
+      "www.example.edu",
+      "www.example.net",
+      "www.example.org"
+    ],
+    "not_before": "2025-11-21T00:00:00Z",
+    "not_after": "2026-11-21T23:59:59Z",
+    "revoked": false
+  }
+]

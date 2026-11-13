@@ -1,1 +1,18 @@
-"""Adapter registry and Phase 2 adapters (docs/09_TOOL_CONTRACTS.md)."""
+"""Adapter classes by tool name (docs/09_TOOL_CONTRACTS.md section 7)."""
+
+from __future__ import annotations
+
+from reconkit.adapters.base import BaseToolAdapter, HttpAdapter
+from reconkit.adapters.certspotter import CertspotterAdapter
+from reconkit.adapters.crtsh import CrtshAdapter
+from reconkit.adapters.hackertarget import HackertargetAdapter
+from reconkit.adapters.otx import OtxAdapter
+
+ADAPTERS: dict[str, type[BaseToolAdapter]] = {
+    "crtsh": CrtshAdapter,
+    "certspotter": CertspotterAdapter,
+    "otx": OtxAdapter,
+    "hackertarget": HackertargetAdapter,
+}
+
+__all__ = ["ADAPTERS", "BaseToolAdapter", "HttpAdapter"]
