@@ -366,6 +366,23 @@ def test_existing_env_is_kept_and_the_table_still_prints(tmp_path: Path, monkeyp
     assert "CERTSPOTTER_API" in out
 
 
+def test_existing_env_is_not_overwritten_when_env_example_exists(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("KEEP=1\n", encoding="utf-8")
+    shutil.copy2(REPO / ".env.example", tmp_path / ".env.example")
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli.typer, "confirm", lambda *a, **k: True)
+    buffer = io.StringIO()
+    monkeypatch.setattr(
+        cli, "make_console", lambda no_color=False: make_console(stream=buffer, no_color=no_color)
+    )
+    cli._maybe_ask_keys(no_color=True)
+    assert (tmp_path / ".env").read_text(encoding="utf-8") == "KEEP=1\n"
+    assert "keeping existing" in buffer.getvalue()
+
+
 def test_missing_env_example_prints_no_table(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)

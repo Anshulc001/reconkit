@@ -839,4 +839,9 @@ Every restore below was checked with `sha256sum`; the digests before and after e
   `gowitness`), `masscan` warned as "not the expected program", `libpcap-dev missing`, coverage
   `dns 4/5, ports 4/6, tech 4/5, vulns 5/8, shots 0/1`. The plan-probe fallback added in this pass is what makes
   the adapter-less tools (`assetfinder`, `findomain`, `chaos`, `gau`, ...) report `yes` instead of `missing`.
+- Follow-up from mutation 2: the pre-existing `.env` test could not fail on a real clobber, so
+  `test_existing_env_is_not_overwritten_when_env_example_exists` now copies the real `.env.example` beside a
+  `.env` and asserts the bytes are unchanged. Proved it guards the property: clean PASS, mutated (keep branch
+  removed) FAILED with the `.env.example` contents in the actual value, restored (`git hash-object` equals
+  `HEAD:src/reconkit/cli.py`), PASS.
 - Gate after the fix: `560 passed`; `ruff check .`, `ruff format --check .`, `mypy src/reconkit` clean.
