@@ -1,0 +1,2 @@
+{"input":"www.example.com","url":"https://www.example.com","status_code":200,"title":"Example Domain","tech":["Nginx"],"cdn_name":"cloudflare"}
+{"input":"api.example.com","url":"https://api.example.com","status_code":401,"title":"Unauthorized","location":null}

@@ -8,6 +8,8 @@ cannot contain its own hash.
 
 - Step 1 (`docs: add master plan, review log, check script, resume block`): `09a5bce`
 - Part 3-AUDIT (`fix: close the phase-2 review gaps in store, keys and adapters`): `75eb261`
+- Part 0 (`docs: record the Part 0 baseline and f1 review`): `e675079`
+- Part 4 (`feat: add the phase-2 binary adapters`): hash filled by the Part 5 commit
 - Entries A, B and C below are the Part 3-AUDIT evidence. That audit was
   committed before Step 1 and Part 0 because the audit instruction arrived
   first; the ordering inversion is logged in the Step 1 entry and in Part 0.
@@ -266,3 +268,95 @@ mypy src/reconkit            Success: no issues found in 37 source files
 ```
 
 The 1 skipped test is the existing Windows-only process-group kill test.
+
+## Part 4: binary adapters f3
+
+- Docs read / goal: `docs/09_TOOL_CONTRACTS.md`, `docs/03_ARCHITECTURE.md` (adapter file names), `docs/05_SECURITY.md` 4-6, `tools.yaml`, and the official pages for subfinder, assetfinder, ProjectDiscovery httpx and naabu. Implement every remaining phase-2 binary adapter: subfinder, assetfinder, httpx, naabu.
+- Decisions and assumptions: a shared `BinaryAdapter` in `adapters/base.py` resolves `~/.reconkit/bin` before `PATH` and verifies identity from the registry `version_cmd` output. subfinder provider keys are bridged to a temporary `provider-config.yaml` because Part 4 requires it and subfinder has no env-var reader. httpx JSON lines without `status_code` are failed probes and are skipped, not marked ALIVE. Empty host lists are a failed command, not an empty argv. naabu always uses `-scan-type c`.
+- Decisions for user review (things the user may want to overrule): subfinder now lists four keys (certspotter, chaos, github, virustotal) and the adapter writes them to a temp file; this reverses the audit's "no env bridge" open risk. A wrong binary and a missing binary both return `installed=False`, but a wrong binary also sets `path` so doctor can show it. `chmod 0600` on the temp config is best-effort on Windows.
+- Docs changed first: `docs/09` section 3 (BinaryAdapter, identity, missing/exit/timeout, subfinder bridge, httpx/naabu flags), `docs/05` 6.1 (subfinder exception replaced by the bridge), `tools.yaml` (`keys` for subfinder, note updated).
+- Deviations: the provider config is written synchronously in the event-loop thread (bounded, under 1 KiB, local disk). Fixtures are synthetic because none of the four binaries is installed. The rate-cap mutation target does not apply to f3: all four tools are `core`, and no opt-in tool is in this part.
+- Files touched: `src/reconkit/adapters/{base,subfinder,assetfinder,httpx_tool,naabu,__init__}.py`, `tests/test_binary_adapters.py`, four synthetic fixtures, `tools.yaml`, `docs/05`, `docs/09`, `docs/PROGRESS.md`.
+- Requirement -> test table:
+  - adapter for every remaining phase-2 tool -> `test_binary_adapters_are_registered`
+  - identity check, not name only -> `test_projectdiscovery_httpx_identity_is_accepted`, `test_python_httpx_cli_is_rejected`, `test_assetfinder_usage_identity`, `test_identity_timeout_is_not_installed`
+  - argv list, no shell, validated hosts, leading `-` rejected -> `test_subfinder_command_and_rate_flag`, `test_assetfinder_command`, `test_httpx_command_dedupes_and_lowercases_hosts`, `test_naabu_command_and_ports`, `test_flag_like_host_is_rejected_before_argv`, `test_flag_like_target_is_rejected`, `test_empty_host_list_is_a_failed_command`
+  - key never in argv; temp file deleted on success/failure/timeout -> `test_subfinder_writes_and_deletes_provider_config`, `test_subfinder_deletes_provider_config_on_parse_failure`, `test_subfinder_deletes_provider_config_on_timeout`, `test_subfinder_without_keys_has_no_provider_flag`, `test_subfinder_provider_envs_are_registry_keys`
+  - parse normal/empty/malformed -> `test_subfinder_and_assetfinder_parse_fixtures`, `test_httpx_parse_fixture`, `test_naabu_parse_fixture`, `test_empty_output_is_ok`, `test_malformed_output_fails_without_raising`
+  - missing binary / non-zero / timeout distinct -> `test_run_missing_binary_is_distinct`, `test_run_nonzero_exit_is_distinct`, `test_run_timeout_is_distinct`, `test_run_runner_error_is_a_failed_result`
+  - no secret in result -> `test_subfinder_writes_and_deletes_provider_config`
+  - AST import rule -> `test_binary_adapters_import_no_forbidden_modules`
+  - mock mode -> `test_mock_mode_reads_fixture`
+  - adversarial: ANSI, duplicates, stderr noise, truncation, empty vs partial, uppercase, IPv6 -> `test_ansi_and_log_noise_are_ignored`, `test_duplicate_httpx_and_naabu_lines_are_merged`, `test_run_truncated_output_is_reported`, `test_httpx_parser_skips_lines_without_a_status`, `test_httpx_parser_handles_url_input`, `test_naabu_parser_accepts_ipv6`
+- Self-review findings (S2 lists, S3 raw output):
+  - Broad except: none added. Specific handlers only: `(TypeError, ValueError)` for validation, `OSError`/`yaml.YAMLError` for the temp file, `RuntimeError` for runner pipe failure.
+  - External input: `ctx.target` -> `validate_target`; `ctx.hosts` -> `validate_host`; `ctx.ports` -> `1..65535`; tool stdout -> strict per-line parser; version output -> identity markers; fixture files -> the same parser.
+  - Secrets: key values only enter the 0600 temp file and the child env; argv holds only the temp path; `runner` redacts env values in stdout/stderr before the adapter sees them; tests assert no secret in argv/result.
+  - Blocking call in async: one synchronous YAML write in `SubfinderAdapter.prepare` (bounded, local, no network); recorded above.
+  - Escaping exceptions: parsers raise `ParseError`, `prepare` raises `ToolFailed`, `run_exec` `RuntimeError` is mapped; `asyncio.CancelledError` still propagates, and `prepare`'s `finally` deletes the temp file.
+  - Unfinished path: engine wiring (`ctx.env` from `keys`, tool selection) is Part 6; real binaries are not installed, so identity markers are based on official docs, not a live run.
+  - S3 raw: `assert` none; `shell=True` none; `TODO|FIXME|XXX|HACK` none; `print(` none; `subprocess` only `core/runner.py` plus the `base.py` docstring; `sqlite3` only `core/store.py`; `os.environ` none; broad except only the two justified earlier (`dnspython.py:130`, `store.py:202`); suppressions = 3, all pre-existing; adapter imports of store/scope/ui/cli none.
+- Bugs found:
+  1. httpx identity: name-only resolution would accept the Python `httpx` CLI. Root cause: no identity check in the base. Fix: `BinaryAdapter.check_installed` matches the tool's own banner/version text. Guard: `test_python_httpx_cli_is_rejected`.
+  2. httpx JSON without `status_code` would have been stored as `ALIVE`. Root cause: no distinction between a response and a failed probe. Fix: skip status-less lines. Guard: `test_httpx_parser_skips_lines_without_a_status`.
+  3. `run_exec` `RuntimeError` could escape an adapter. Root cause: only parse/fetch errors were mapped. Fix: map it to a failed result. Guard: `test_run_runner_error_is_a_failed_result`.
+  4. `yaml.safe_dump` failure could leave the provider file behind. Root cause: only `OSError` was caught. Fix: catch `yaml.YAMLError` and unlink. Not separately testable without monkeypatching PyYAML; covered by inspection.
+- Mutation proofs: key-in-argv -> `test_subfinder_writes_and_deletes_provider_config` failed on `assert all("secret" not in arg ...)`; identity check -> `test_python_httpx_cli_is_rejected` failed with `installed=True`; rate-cap refusal -> not applicable (no opt-in tool in f3, recorded above). `git status --short` after restore showed only the intended Part 4 changes.
+- Raw check output (twice): `295 passed, 1 skipped`; `pytest=PASS`, `ruff-check=PASS`, `ruff-format=PASS`, `mypy=PASS`, `ALL CHECKS PASS`, exit 0 (both runs).
+- Not verified: real subfinder/assetfinder/httpx/naabu binaries and their exact version banners; whether real subfinder accepts the generated provider-config on all versions; chmod on Windows; JSON fields beyond the official docs; rate flags against live binaries; installer-provided binary paths.
+- Next part must know: `ADAPTERS` now covers every phase-2 tool. Engine work must pass only the tool's `keys` env, and subfinder's temp file is handled inside the adapter. Adapter file names follow docs/03: `httpx_tool.py`, not `httpx.py`.
+
+### Tool table (from tools.yaml)
+
+| Tool | Stage | Tier | Adapter |
+|---|---|---|---|
+| crtsh | subs | core | yes |
+| certspotter | subs | core | yes |
+| otx | subs | core | yes |
+| hackertarget | subs | core | yes |
+| urlscan | subs | core | no |
+| subfinder | subs | core | yes |
+| assetfinder | subs | core | yes |
+| amass | subs | core | no |
+| findomain | subs | core | no |
+| chaos | subs | core | no |
+| github_subdomains | subs | core | no |
+| dnspython | dns | core | yes |
+| dnsx | dns | core | no |
+| puredns | dns | core | no |
+| massdns | dns | core | no |
+| dig | dns | core | no |
+| pyprobe | live | core | yes |
+| httpx | live | core | yes |
+| httprobe | live | core | no |
+| tlsx | live | core | no |
+| smap | ports | core | no |
+| pyscan | ports | core | yes |
+| naabu | ports | core | yes |
+| nmap | ports | core | no |
+| rustscan | ports | core | no |
+| masscan | ports | opt_in | no |
+| httpx_tech | tech | core | no |
+| whatweb | tech | core | no |
+| wafw00f | tech | core | no |
+| cdncheck | tech | core | no |
+| webanalyze | tech | core | no |
+| gau | urls | core | no |
+| waybackurls | urls | core | no |
+| katana | urls | core | no |
+| hakrawler | urls | core | no |
+| gospider | urls | core | no |
+| subjs | urls | core | no |
+| unfurl | urls | core | no |
+| urlfinder | urls | core | no |
+| nuclei | vulns | core | no |
+| subzy | vulns | core | no |
+| dnsreaper | vulns | core | no |
+| nikto | vulns | opt_in | no |
+| ffuf | vulns | opt_in | no |
+| gowitness | shots | opt_in | no |
+| dalfox | vulns | intrusive | no |
+| crlfuzz | vulns | intrusive | no |
+| sqlmap | vulns | intrusive | no |
+
+Per-stage counts: subs 11, dns 5, live 4, ports 6, tech 5, urls 8, vulns 8, shots 1. `subs` is above the 3-8 guide (11) and `shots` below it (1, Phase-3 opt-in); no tool was invented or removed.

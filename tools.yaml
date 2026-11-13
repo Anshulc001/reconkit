@@ -65,7 +65,30 @@ tools:
       - env: URLSCAN_API_KEY
         url: "https://urlscan.io/user/signup"
         adds: "Free urlscan.io account: creates the API key used for submissions; unauthenticated API access has only minor quotas."
-  subfinder:    {stage: subs, kind: binary, tier: core, mode: passive, phase: 2, binary: subfinder, version_cmd: [subfinder, -version], rate_flag: "-rl", install: {<<: *pd_release, name: subfinder, repo: projectdiscovery/subfinder, fallback: {method: go_install, package: "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"}}, notes: "Provider keys live only in $HOME/.config/subfinder/provider-config.yaml; there is no environment bridge, so it has no keys entry."}
+  subfinder:
+    stage: subs
+    kind: binary
+    tier: core
+    mode: passive
+    phase: 2
+    binary: subfinder
+    version_cmd: [subfinder, -version]
+    rate_flag: "-rl"
+    install: {<<: *pd_release, name: subfinder, repo: projectdiscovery/subfinder, fallback: {method: go_install, package: "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"}}
+    keys:
+      - env: CERTSPOTTER_API_KEY
+        url: "https://sslmate.com/ct_search_api"
+        adds: "Adds the certspotter provider to subfinder (also used by the certspotter adapter)."
+      - env: PDCP_API_KEY
+        url: "https://cloud.projectdiscovery.io"
+        adds: "Adds the chaos provider to subfinder (free ProjectDiscovery Cloud key)."
+      - env: GITHUB_TOKEN
+        url: "https://github.com/settings/tokens"
+        adds: "Adds the github provider to subfinder."
+      - env: VT_API_KEY
+        url: "https://www.virustotal.com/gui/join-us"
+        adds: "Adds the virustotal provider to subfinder (4 requests/minute, 500/day)."
+    notes: "Provider keys are written to a temporary provider-config.yaml by the adapter; never on the command line."
   assetfinder:
     stage: subs
     kind: binary

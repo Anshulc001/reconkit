@@ -2,10 +2,10 @@
 
 ## RESUME HERE
 
-- Status: Part 0 done; Part 4 (f3 binary adapters) next
-- Last commit: 09a5bce (docs); last code commit 75eb261 (`git log --oneline -1`; never trust this line alone)
-- Baseline: 238 passed, 1 skipped; all four checks PASS (twice)
-- Next action: implement Part 4 in docs/MASTER_PLAN.md: subfinder, assetfinder, httpx, naabu adapters
+- Status: Part 4 done; Part 5 (wildcard + workspace) next
+- Last commit: e675079 (docs); Part 4's hash is filled by the Part 5 commit (`git log --oneline -1`)
+- Baseline: 295 passed, 1 skipped; all four checks PASS (twice)
+- Next action: implement Part 5 in docs/MASTER_PLAN.md: `core/wildcard.py` + `core/workspace.py`
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: none
@@ -40,7 +40,7 @@ mypy src/reconkit
 | e | done | `1ba2fd8` | `core/store.py`: schema, migrations, `redact()` helper, diff queries (`docs/04_DATABASE.md`) |
 | f1 | done | 89ba34f | `adapters/base.py`, `adapters/registry.py`, `crtsh`, `certspotter`, `otx`, `hackertarget` |
 | f2 | done | 80ddd93 | pure-Python adapters: `dnspython`, `pyprobe`, `pyscan` |
-| f3 | pending | - | remaining phase-2 tools: binary adapters `subfinder`, `assetfinder`, `httpx`, `naabu` |
+| f3 | done | filled in Part 5 | remaining phase-2 tools: binary adapters `subfinder`, `assetfinder`, `httpx`, `naabu` |
 | g | pending | - | `core/wildcard.py` + `engine.py` + `core/workspace.py`: stage pipeline, consensus/confidence inside `engine.py`, host states, resume, exit codes |
 | h | pending | - | `ui.py` + `cli.py`: all commands, `--mock`, `--json` |
 | i | pending | - | `installer/` + `doctor.py` |
@@ -116,6 +116,8 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Chaos's key env name was corrected from `CHAOS_API_KEY` to `PDCP_API_KEY` (chaos-client README). `urlscan` and `github_subdomains` migrated from `needs_key` to `keys` with verified URLs.
 - Per-host adapters now normalize every input with `validate_host()`; an invalid or IDN host is skipped/counted instead of being used in a request. `dnspython` maps an unexpected resolver exception to the structured `error` outcome instead of aborting the stage.
 - `pyscan` closes the connection before awaiting `wait_closed()`, so cancelling a stage cannot leak an open socket; the concurrency test pins the semaphore to the pacer limit.
+- `subfinder` now carries four `keys` and the adapter writes them to a temporary `provider-config.yaml` (0600) passed with `-pc`, deleted in `finally`. This replaces the audit's earlier "no env bridge" decision because Part 4 requires the bridge.
+- `chmod 0600` on the subfinder temp file is best-effort on Windows; the file is still deleted, and the open risk is recorded in REVIEW_LOG Part 4.
 - Review entries for the phase-2 commits live in `docs/REVIEW_LOG.md`.
 
 ## Open risks
@@ -126,21 +128,21 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `RunContext` now carries `limiter` and `ports`, and `HostStatusRecord` carries `location`; all were documented in docs/09 before their code landed. The engine builds one limiter per stage.
 - `dnspython` resolves A/AAAA/CNAME only: the record models have no NS/MX/TXT fields, and adding them would change the database schema. `pyscan` sends no payload and reads no banner (the banner read is optional).
 - `HttpAdapter` is documented in docs/09 section 3. Domain filtering happens in `run()` because the contract's `parse_output(raw)` receives no target; `parse_output` normalizes and validates only.
-- Three fixtures are synthetic, not captured from the wire: `tests/fixtures/dnspython/example.com.synthetic.json`, `tests/fixtures/pyprobe/example.com.synthetic.json`, `tests/fixtures/pyscan/example.com.synthetic.json`. They were written to the documented shapes; no adapter test touches the network.
-- ProjectDiscovery `httpx` can collide with the Python `httpx` CLI on PATH; f3's `check_installed` must verify the binary identity, not just the name.
+- Seven fixtures are synthetic, written to the documented shapes: `dnspython`, `pyprobe`, `pyscan` (`.json`) and `subfinder`, `assetfinder` (`.txt`), `httpx`, `naabu` (`.jsonl`) under `tests/fixtures/`. No adapter test touches the network or a real binary.
+- Binary-adapter identity is based on the official banner/version text, not a live run: no real binary is installed here. `httpx` distinguishes ProjectDiscovery's tool from the Python CLI by requiring `projectdiscovery`/`current version`.
 - `tests/test_store.py` imports `sqlite3` for `IntegrityError`; the "only store.py imports sqlite3" rule is enforced for `src/`.
 - Installer refuses to run on native Windows; decide how to handle that before task i.
 - `scope.yaml` cannot exclude IP ranges (no out-of-scope CIDRs).
 - CLI must catch `ValueError` from `check_target`/`validate_target` and exit 2.
 - OTX refuses anonymous requests (429), so `otx/example.com.synthetic.json` is synthetic and the adapter has not parsed a real OTX response yet.
-- subfinder takes provider keys only from `$HOME/.config/subfinder/provider-config.yaml`; no environment bridge exists, so `tools.yaml` gives it no `keys` entry. Which of the 27 keyed providers have a free tier, and their sign-up URLs, are not verified provider-by-provider; the agent must not guess them. Doctor cannot hint at these keys until a provider-config bridge is designed.
+- subfinder keys are bridged by its adapter into a temporary 0600 `provider-config.yaml`; only certspotter, chaos, github and virustotal are configured. The other keyed providers' free tiers and sign-up URLs remain unverified, and no real subfinder has accepted the generated file yet.
 - assetfinder's `FB_APP_ID`/`FB_APP_SECRET` (Facebook developer app) and `SPYSE_API_TOKEN` were omitted: the Facebook source is no longer a documented free subdomain API, and the Spyse service status is unverified.
 - `urlscan`, `chaos` and `github_subdomains` now carry `keys`; their adapters are still Phase 3. `URLSCAN_API_KEY` is reconkit's own name, `PDCP_API_KEY` and `GITHUB_TOKEN` are the tools' real names.
 - HackerTarget's free tier returned one row for example.com; multi-row parsing is only covered by MockTransport tests.
 - Scope behavior is only unit-tested; engine tests must prove an out-of-scope host is never probed.
 - Cert Spotter's authenticated quota is undocumented, so no rate number is shown for a key; only the unauthenticated limit is described.
-- `keys` is now the only per-tool key field. `.env.example` dropped `VIRUSTOTAL_API_KEY`, `SECURITYTRAILS_API_KEY` and `SHODAN_API_KEY` because no `tools.yaml` entry lists them (subfinder keys are file-based), and `CHAOS_API_KEY` was replaced by the real `PDCP_API_KEY`.
+- `keys` is the only per-tool key field; `.env.example` lists only env names used by `tools.yaml` (Chaos's real name is `PDCP_API_KEY`).
 
 ## Next task
 
-**Task f3: binary adapters.** `subfinder`, `assetfinder`, `httpx`, `naabu` with fixtures and parser tests; binary adapters implement `build_command`/`parse_output` and use the registry `rate_flags()`. Read `docs/09_TOOL_CONTRACTS.md` and `tools.yaml` first; take every flag from the installed tool's real `--help` or sample output, never from memory. `check_installed` for `httpx` must verify it is ProjectDiscovery's binary, not the Python `httpx` CLI that may sit on PATH.
+**Part 5: `core/wildcard.py` + `core/workspace.py`.** Quote docs/03 and docs/04 first; wildcard detection returns an explicit unknown state on resolver timeout; workspace writes are traversal-safe, atomic and redacted.
