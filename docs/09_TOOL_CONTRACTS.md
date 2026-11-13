@@ -162,7 +162,7 @@ Speed controls how many run at once: slow = 1, normal = 2-3 (passive) / 2 (activ
 - `source_count` = number of distinct tools that reported the item in this run.
 - Confidence: `>=3` HIGH, `2` MEDIUM, `1` LOW (thresholds in `config.yaml`).
 - `--min-sources N` hides items below N.
-- Wildcard: if a random non-existent name resolves, mark matches of the wildcard answer `is_wildcard=1` and exclude them from counts by default.
+- Wildcard: if a random non-existent name resolves, mark matches of the wildcard answer `is_wildcard=1` and exclude them from counts by default. A host matches when its CNAME is in the wildcard CNAME set or when all of its IPs are in the wildcard IP set. Detection is `unknown` (not `none`) when no probe resolved and any probe timed out, SERVFAILed, had no answer or errored; the engine warns and does not mark anything.
 
 ### Status stages (live, ports): cross-check
 - **Host state decision**, using results from all live tools plus DNS:

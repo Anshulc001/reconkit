@@ -2,10 +2,10 @@
 
 ## RESUME HERE
 
-- Status: Part 4 done; Part 5 (wildcard + workspace) next
+- Status: Part 5 code done (uncommitted review); regression/pitfalls addendum in progress
 - Last code commit: `ee06075`; run `git log --oneline -1` because docs commits may be newer
-- Baseline: 295 passed, 1 skipped; all four checks PASS (twice)
-- Next action: implement Part 5 in docs/MASTER_PLAN.md: `core/wildcard.py` + `core/workspace.py`
+- Baseline: 342 passed, 2 skipped; all four checks PASS (twice)
+- Next action: apply the REGRESSION AND PITFALLS addendum, then finish the Part 5 REVIEW_LOG entry
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: none

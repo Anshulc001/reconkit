@@ -88,6 +88,13 @@ workspaces/<domain>/
   meta/    run metadata, summaries, reconkit.log
 ```
 
+### Workspace API (`core/workspace.py`)
+
+- `Workspace.create(root, target, secrets=...)` validates `target` with `validate_target()`, creates `workspaces/<domain>/` and exactly the six stage directories above (mode `0700`), and is idempotent.
+- `workspace.path(stage, filename)` accepts only a documented stage and one plain filename. Traversal, absolute/UNC paths, `..`, trailing dot/space, hidden names and Windows device names (`CON`, `NUL`, `COM1`, ...) are rejected with `ValueError`. A target whose first label is a device name is rejected too, because Windows cannot create that directory.
+- `workspace.write(stage, filename, text)` passes `text` through `store.redact()` with the run's secrets before any bytes reach disk, then writes a temporary file in the same directory and `os.replace()`s it (mode `0600`). A failure leaves the destination untouched and no temporary file behind. Writing the same filename again replaces it atomically.
+- Raw tool output uses `subs`, `live`, `ports`, `urls` or `tech`; run metadata and `reconkit.log` use `meta`. No other directory is created.
+
 ## 6. Data Flow (example: `reconkit live -d example.com --active`)
 
 1. CLI parses flags (`--speed slow` default) and loads `config.yaml`.
@@ -113,7 +120,8 @@ workspaces/<domain>/
 
 - **Discovery stages (subs, urls):** union of all adapters; `sources` list per item; confidence from source count.
 - **Status stages (live, ports):** compare tools per host/port; agreement raises confidence; disagreement becomes `UNCONFIRMED`/`unconfirmed` and is stored.
-- **Wildcard filter:** before accepting resolved subdomains, probe random non-existent names; if they resolve, mark results that match the wildcard answer as wildcard noise.
+- **Wildcard filter:** before accepting resolved subdomains, probe `wildcard_check.probes` random non-existent names with the DNS adapter's resolver (through the run's limiter); if they resolve, mark hosts whose addresses or CNAMEs match the wildcard answer as wildcard noise. Detection returns `present`, `none` or `unknown`: `none` only when every probe is NXDOMAIN, `unknown` when no probe resolved and at least one timed out, SERVFAILed, returned no answer or errored. `unknown` is never treated as `none`; the engine warns and skips the filter.
+- **Wildcard API:** `WildcardDetector(probe=..., rng=..., probes=...)` is built per run. `probe` is the DNS adapter's `resolve_host` bound to the run context, so probes reuse that resolver and limiter; `rng` is injected; `probes` comes from `wildcard_check.probes`. `await detect(target)` returns `WildcardResult`, and `result.matches(ips=..., cnames=...)` decides `is_wildcard`.
 - Exact rules: docs/09_TOOL_CONTRACTS.md.
 
 ## 9. Dependency Rules

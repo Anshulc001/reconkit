@@ -49,7 +49,7 @@ Implemented in `core/scope.py`. Rules:
 - Never hard-code credentials. Never commit `.env`, `scope.yaml`, `recon.db`, `workspaces/`.
 - Keys come from environment or `.env` (loaded at startup). `.env.example` lists names only.
 - `doctor` shows key **names** and set/unset, never values (not even partial).
-- Redact secrets in logs, errors and stored `tool_runs.error`.
+- Redact secrets in logs, errors, stored `tool_runs.error` and every workspace file (`store.redact()` runs before the write).
 
 ### 6.1 API Keys: Free Mode by Default
 
