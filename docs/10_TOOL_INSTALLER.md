@@ -46,6 +46,16 @@ Tools may declare `requires_apt` (example: naabu needs `libpcap-dev`) and `requi
 - Go tools use `GOBIN=~/.reconkit/bin`; that directory comes first in the run-time lookup order (§5), so no PATH edit is needed to run a Go tool. `scripts/bootstrap.sh` also prepends it to the venv `activate` script.
 - `pipx` is installed with `apt` when a `pipx` tool is chosen, using the same sudo confirmation as every other apt action.
 
+## 3c. Install plans
+
+`installer/registry.py` turns each `tools.yaml` entry into one `InstallPlan`:
+
+- `name`, `binary` (defaults to the tool name), `method` (`github_release`, `go_install`, `apt`, `pipx` or `none`), `package` (Go package, apt package or pipx spec), `repo`, `asset_pattern`, `checksums_pattern`, `asset_name`, `version` (default `latest`), `fallback` (one nested plan), `requires_apt` and `requires`.
+- A `tool_versions` pin in `config.yaml` sets `version` and rewrites a `go_install` package's trailing `@latest` to `@<pin>`. Without a pin the version is `latest`.
+- An entry with no `install` block (for example `httpx_tech`, which reuses the `httpx` binary) becomes a `none` plan.
+- `resolve_plan()` returns the primary plan followed by its fallback, so the caller tries them in order.
+- An unknown method, a missing `package`/`repo`, or a malformed field raises `ConfigError` before anything is downloaded.
+
 ## 4. Verification (fail closed)
 
 For `github_release`:
@@ -56,7 +66,7 @@ For `github_release`:
 
 Other rules:
 - HTTPS only. `github_release` downloads come from `api.github.com`, `github.com` and the GitHub release asset hosts. `go_install` uses the Go module proxy and `pipx` uses PyPI; no other host is contacted.
-- Download to a temp dir with a size limit; extract only the expected binary name; refuse archive paths that escape the temp dir (zip-slip).
+- Download to a temp dir with a size limit: `ARCHIVE_LIMIT` is 200 MiB for the archive and `MEMBER_LIMIT` is 100 MiB for one extracted member. Extract only the expected binary name (`<binary>` or `<binary>.exe`); refuse archive paths that are absolute or contain `..` (zip-slip). A zip or tar.gz containing no such member is a failed install, never a silent success.
 - Files get mode `0755`. The directory `~/.reconkit/bin` is `0700`.
 - No `curl | bash`, no running scripts from downloads.
 - Optional `GITHUB_TOKEN` is used only to raise API rate limits and is never logged.

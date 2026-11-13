@@ -2,7 +2,7 @@
 
 ## RESUME HERE
 
-- Status: Part 10a (doctor) implemented and committed; 10b (installer registry/verify) next after review
+- Status: Part 10a (doctor) closed; 10b (installer registry + verify primitives) implemented and committed; 10c (github_release download) next after review
 - Last code commit: run `git log --oneline -1`; Part 9 is the newest code commit
 - Baseline: 443 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean. `.venv` was rebuilt from scratch with `python3` 3.14.8 (the old one was a Windows venv); see Deviations
 - Next action: wait for the 10a review, then implement 10b only (`installer/registry.py` + `verify.py`, local files only); do not start 10c
@@ -57,6 +57,8 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `core/runner.py`: `run_exec(argv, timeout=, env=, max_output_bytes=, cwd=)` (only `subprocess` user), `validate_target` (root, strict RFC-1123), `validate_host` (discovered: allows `_`, strips `*.`), `ExecResult`; timeout kills the process group, output capped, env values redacted.
 - `core/scope.py`: `load_scope`, `require_active` -> `ActiveCheck(scope, match, hosts, dropped)`, `check_target`, `ip_allowed`, `passive_warning`, `ScopeGate`; `out_of_scope` always wins.
 - `core/store.py`: `Store(path)` (context manager, `close()`), `redact(text, secrets)`; writes `create_target`, `create_scan_run`, `finish_scan_run`, `record_tool_run`, `upsert_subdomain`, `add_subdomain_source`, `append_host_status`, `upsert_port`, `add_port_source`, `upsert_url`; reads `previous_state`, `diff_new`, `diff_gone`, `diff_state_changed`, `diff_ports_opened`, `diff_ports_closed`; pragmas FK/WAL/5000 ms, parameterized SQL only.
+- `installer/registry.py`: `load_plans(path=, versions=)` -> `InstallPlan` (`name`, `method`, `binary`, `package`, `repo`, `asset_pattern`, `checksums_pattern`, `asset_name`, `version`, `fallback`, `requires_apt`, `requires`), `plan_for`, `resolve_plan`; unknown method or missing package/repo raises `ConfigError`.
+- `installer/verify.py`: `sha256_file`, `checksum_for`, `verify_checksum`, `extract_binary(archive, binary, dest_dir, archive_limit=, member_limit=)`; zip-slip refused, only the expected binary extracted, mode 0755; `ARCHIVE_LIMIT` 200 MiB, `MEMBER_LIMIT` 100 MiB.
 - `doctor.py`: `collect_report(config, config_path=, env=, tools_path=, scope_path=, dpkg_status=, status_of=, python_version=)` -> `DoctorReport` of `ToolCheck`/`StageCoverage`/`PackageCheck`/`KeyCheck`; `default_status`, `installed_packages`, `db_writable`; reads files and version commands only, never installs.
 - `adapters/base.py`: `BaseToolAdapter` (contract from docs/09), `HttpAdapter` (rate limit via `ctx.limiter`, timeout, User-Agent, one retry on connection errors, 429/5xx/timeout -> failed result), `normalize_subdomains`; `FetchFailed`.
 - `adapters/registry.py`: `load_tools(path=)` -> `ToolSpec`, `load_system_packages(path=)`, `get_spec`, `get_adapter`, `rate_flags()`; unknown/incomplete tools raise `ConfigError`.
