@@ -181,11 +181,19 @@ def test_python_too_old_exits_one(monkeypatch, tmp_path: Path) -> None:
     assert "too old" in result.output
 
 
-def test_fix_refuses_until_install_exists(monkeypatch) -> None:
+def test_fix_runs_the_installer(monkeypatch) -> None:
+    calls: list[object] = []
+
+    def fake_install_selected(plans, **kwargs):
+        calls.append((list(plans), kwargs))
+        return [], 0
+
     monkeypatch.setattr(doctor, "ADAPTERS", {})
+    monkeypatch.setattr("reconkit.cli.install_selected", fake_install_selected)
     result = CliRunner().invoke(app, ["doctor", "--fix", "--config", str(REPO / "config.yaml")])
-    assert result.exit_code == 1
-    assert "--fix is not available yet" in result.output
+    assert result.exit_code == 0
+    assert "--fix is not available yet" not in result.output
+    assert calls, "--fix did not call the installer"
 
 
 def test_unreadable_config_exits_one(tmp_path: Path) -> None:

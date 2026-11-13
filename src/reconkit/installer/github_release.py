@@ -6,7 +6,7 @@ import platform
 import shutil
 import tempfile
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -65,6 +65,8 @@ class InstallOutcome:
     steps: tuple[str, ...] = ()
     error: str | None = None
     skipped: bool = False
+    up_to_date: bool = False
+    method: str = ""
 
 
 def host_arch(machine: str | None = None) -> str:
@@ -239,7 +241,7 @@ def install_release(
         f"{plan.name}: install to {destination}",
     )
     if dry_run:
-        return InstallOutcome(tool=plan.name, ok=True, steps=steps)
+        return InstallOutcome(tool=plan.name, ok=True, steps=steps, method=plan.method)
     if verify_checksums and release.checksums_url is None:
         raise InstallError(
             f"{plan.name}: verify_checksums is on but no checksums asset is published"
@@ -274,7 +276,9 @@ def install_release(
                 destination.chmod(BINARY_MODE)
             raise
         previous.unlink(missing_ok=True)
-    return InstallOutcome(tool=plan.name, ok=True, destination=str(destination), steps=steps)
+    return InstallOutcome(
+        tool=plan.name, ok=True, destination=str(destination), steps=steps, method=plan.method
+    )
 
 
 def exit_code(outcomes: Iterable[InstallOutcome]) -> int:
@@ -327,10 +331,10 @@ def _install_one(
             runner=runner,
             dry_run=dry_run,
         )
-        return InstallOutcome(tool=plan.name, ok=True, steps=steps)
+        return InstallOutcome(tool=plan.name, ok=True, steps=steps, method=plan.method)
     if plan.method == "go_install":
         steps = go_install.install_go(plan, bin_dir=bin_dir, runner=runner, dry_run=dry_run)
-        return InstallOutcome(tool=plan.name, ok=True, steps=steps)
+        return InstallOutcome(tool=plan.name, ok=True, steps=steps, method=plan.method)
     if plan.method == "pipx":
         steps = pipx.install_pipx_tool(
             plan,
@@ -340,9 +344,14 @@ def _install_one(
             dry_run=dry_run,
             has_pipx=has_pipx,
         )
-        return InstallOutcome(tool=plan.name, ok=True, steps=steps)
+        return InstallOutcome(tool=plan.name, ok=True, steps=steps, method=plan.method)
     if plan.method == "none":
-        return InstallOutcome(tool=plan.name, ok=True, steps=(f"{plan.name}: nothing to install",))
+        return InstallOutcome(
+            tool=plan.name,
+            ok=True,
+            steps=(f"{plan.name}: nothing to install",),
+            method=plan.method,
+        )
     raise InstallError(f"{plan.name}: unknown install method {plan.method!r}")
 
 
@@ -376,7 +385,147 @@ def install_plans(
                 )
             )
         except InstallSkipped as exc:
-            outcomes.append(InstallOutcome(tool=plan.name, ok=False, skipped=True, error=str(exc)))
+            outcomes.append(
+                InstallOutcome(
+                    tool=plan.name, ok=False, skipped=True, error=str(exc), method=plan.method
+                )
+            )
         except InstallError as exc:
-            outcomes.append(InstallOutcome(tool=plan.name, ok=False, error=str(exc)))
+            outcomes.append(
+                InstallOutcome(tool=plan.name, ok=False, error=str(exc), method=plan.method)
+            )
+    return outcomes, exit_code(outcomes)
+
+
+def installed_copy(plan: InstallPlan, bin_dir: Path) -> Path | None:
+    """The managed copy, else a copy on PATH, else None (docs/10 section 5)."""
+    candidate = bin_dir / plan.binary
+    if candidate.exists():
+        return candidate
+    found = shutil.which(plan.binary)
+    return Path(found) if found else None
+
+
+def installed_version(
+    plan: InstallPlan,
+    bin_dir: Path,
+    *,
+    runner: Runner = run_exec,
+    timeout: float = VERSION_TIMEOUT_S,
+) -> str | None:
+    """Return the installed version line, or None when the tool is not usable."""
+    copy = installed_copy(plan, bin_dir)
+    if copy is None:
+        return None
+    if not plan.version_args:
+        return str(copy)
+    outcome = runner(
+        [str(copy), *plan.version_args],
+        timeout=timeout,
+        env={"HOME": str(Path.home())},
+    )
+    if outcome.timed_out or outcome.returncode != 0:
+        return None
+    text = (outcome.stdout or outcome.stderr).strip()
+    return text.splitlines()[0] if text else str(copy)
+
+
+def _same_version(desired: str, installed: str) -> bool:
+    """Loose compare: the release tag appears in the version output."""
+    clean = desired[1:] if desired.startswith("v") else desired
+    return bool(clean) and clean.lower() in installed.lower()
+
+
+def desired_version(
+    plan: InstallPlan, *, client: httpx.Client | None, arch: str | None = None
+) -> str | None:
+    """The version we would install, when it can be known without installing."""
+    if plan.method == "github_release" and client is not None:
+        try:
+            return release_for(plan, client=client, arch=arch).tag
+        except InstallError:
+            return None
+    if plan.method == "go_install" and plan.package and "@" in plan.package:
+        version = plan.package.rsplit("@", 1)[1]
+        return None if version in {"", "latest"} else version
+    return None
+
+
+def _refresh_templates(plan: InstallPlan, *, runner: Runner) -> str | None:
+    """`nuclei -ut` after a nuclei change; the flag is in its real --help."""
+    if plan.name != "nuclei":
+        return None
+    outcome = runner(["nuclei", "-ut"], timeout=120.0, env={"HOME": str(Path.home())})
+    if outcome.timed_out or outcome.returncode != 0:
+        return "templates not refreshed"
+    return "templates refreshed"
+
+
+def install_selected(
+    plans: Iterable[InstallPlan],
+    *,
+    bin_dir: Path,
+    update: bool = False,
+    dry_run: bool = False,
+    client: httpx.Client | None = None,
+    arch: str | None = None,
+    verify_checksums: bool = True,
+    confirm: Confirm | None = None,
+    runner: Runner = run_exec,
+    has_pipx: bool | None = None,
+) -> tuple[list[InstallOutcome], int]:
+    """Install or update a selection, skipping what is already current."""
+    outcomes: list[InstallOutcome] = []
+    for plan in plans:
+        state = None if dry_run else installed_version(plan, bin_dir, runner=runner)
+        if not dry_run and update:
+            desired = desired_version(plan, client=client, arch=arch)
+            if state is not None and desired is not None and _same_version(desired, state):
+                outcomes.append(
+                    InstallOutcome(
+                        tool=plan.name,
+                        ok=True,
+                        up_to_date=True,
+                        method=plan.method,
+                        steps=(f"{plan.name}: {state} is current",),
+                    )
+                )
+                continue
+        elif not dry_run and state is not None:
+            outcomes.append(
+                InstallOutcome(
+                    tool=plan.name,
+                    ok=True,
+                    up_to_date=True,
+                    method=plan.method,
+                    steps=(f"{plan.name}: already installed ({state})",),
+                )
+            )
+            continue
+        try:
+            outcome = _install_one(
+                plan,
+                bin_dir=bin_dir,
+                client=client,
+                dry_run=dry_run,
+                arch=arch,
+                verify_checksums=verify_checksums,
+                confirm=confirm,
+                runner=runner,
+                has_pipx=has_pipx,
+            )
+            note = None if dry_run else _refresh_templates(plan, runner=runner)
+            if note is not None:
+                outcome = replace(outcome, steps=(*outcome.steps, f"{plan.name}: {note}"))
+            outcomes.append(outcome)
+        except InstallSkipped as exc:
+            outcomes.append(
+                InstallOutcome(
+                    tool=plan.name, ok=False, skipped=True, error=str(exc), method=plan.method
+                )
+            )
+        except InstallError as exc:
+            outcomes.append(
+                InstallOutcome(tool=plan.name, ok=False, error=str(exc), method=plan.method)
+            )
     return outcomes, exit_code(outcomes)

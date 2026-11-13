@@ -13,6 +13,13 @@ reconkit doctor [--fix]            # --fix = offer to install what is missing
 - `--all` installs `core` tier tools only. `opt_in` tools install only when named.
 - `--dry-run` prints every action (download URL, checksum source, target path, apt packages) and makes no filesystem changes. Resolving the latest release is a read-only GitHub API request (mocked in tests), so nothing remote is changed either.
 - `apt` always asks before `sudo`; no flag skips that confirmation (docs/05 §5). `--stage` and `--yes` are not part of this build; docs/02 §2 is the command surface.
+- `install` is idempotent: a tool whose binary is already usable (the managed copy in `~/.reconkit/bin`, else `PATH`, and its `version_cmd` exits 0) is reported `already installed` and nothing runs for it. There is no `--force` flag in docs/02, so a reinstall is requested by naming the tool under `update`.
+- `update` only replaces what is out of date where a version source exists: the GitHub release tag for `github_release`, the pin or `@version` for `go_install`. `apt` and `pipx` have no comparable local version query here, so they re-run their package-manager install (which is itself a no-op when the package is current); that is a named limitation, not a claim of comparison.
+- Exit codes are aggregated once over every selected tool: `0` all installed or already current, `5` some failed or were declined, `6` every selected tool failed (docs/02 section 6). A declined sudo step counts as a failure for `5`/`6` but starts no process.
+- The summary is one row per tool: `tool`, `method`, `result` (`installed`, `already installed`, `up to date`, `skipped`, `failed`, `would install` under `--dry-run`), and `detail` (version, path or reason).
+- `config.yaml` `tool_versions` is passed to `load_plans(versions=...)`, so a pin applies to both `install` and `update`; without a pin the latest release is used.
+- The managed directory is `installer.registry.bin_dir()` -> `~/.reconkit/bin`, created `0700` on first install.
+- After a successful `nuclei` install or update, `nuclei -ut` runs to refresh templates (flag confirmed against `nuclei --help`: `-ut, -update-templates`). A failed template refresh is reported in the summary but does not mark the tool failed.
 - On an interactive TTY, `install` asks once: "Free only, or add keys?". Choosing keys copies `.env.example` to `.env` (never overwrites) and prints the path plus the Keys table. With no TTY on stdin it never prompts and defaults to free mode; `install` has no `--silent`/`--json` flags in this build (policy in `docs/05_SECURITY.md` §6.1, implemented in Part 10).
 
 ## 2. Platform
@@ -50,7 +57,7 @@ Tools may declare `requires_apt` (example: naabu needs `libpcap-dev`) and `requi
 
 `installer/registry.py` turns each `tools.yaml` entry into one `InstallPlan`:
 
-- `name`, `binary` (defaults to the tool name), `method` (`github_release`, `go_install`, `apt`, `pipx` or `none`), `package` (Go package, apt package or pipx spec), `repo`, `asset_pattern`, `checksums_pattern`, `asset_name`, `version` (default `latest`), `version_args` (from `version_cmd`, the post-install check), `fallback` (one nested plan), `requires_apt` and `requires`.
+- `name`, `binary` (defaults to the tool name), `tier` (from `tools.yaml`, used by `--all` to select `core` only), `method` (`github_release`, `go_install`, `apt`, `pipx` or `none`), `package` (Go package, apt package or pipx spec), `repo`, `asset_pattern`, `checksums_pattern`, `asset_name`, `version` (default `latest`), `version_args` (from `version_cmd`, the post-install check), `fallback` (one nested plan), `requires_apt` and `requires`.
 - A `tool_versions` pin in `config.yaml` sets `version` and rewrites a `go_install` package's trailing `@latest` to `@<pin>`. Without a pin the version is `latest`.
 - An entry with no `install` block (for example `httpx_tech`, which reuses the `httpx` binary) becomes a `none` plan.
 - `resolve_plan()` returns the primary plan followed by its fallback, so the caller tries them in order.

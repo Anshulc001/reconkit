@@ -22,6 +22,7 @@ class InstallPlan:
     name: str
     method: str
     binary: str
+    tier: str = "core"
     package: str | None = None
     repo: str | None = None
     asset_pattern: str | None = None
@@ -64,6 +65,7 @@ def _package_with_version(package: str, version: str) -> str:
 
 def _plan(name: str, entry: Mapping[str, Any], version: str) -> InstallPlan:
     binary = _text(entry.get("binary"), "binary", name) or name
+    tier = _text(entry.get("tier"), "tier", name) or "core"
     install = entry.get("install")
     requires_apt = _names(entry.get("requires_apt"), "requires_apt", name)
     requires = _names(entry.get("requires"), "requires", name)
@@ -80,6 +82,7 @@ def _plan(name: str, entry: Mapping[str, Any], version: str) -> InstallPlan:
             name=name,
             method="none",
             binary=binary,
+            tier=tier,
             version_args=version_args,
             requires_apt=requires_apt,
             requires=requires,
@@ -102,7 +105,7 @@ def _plan(name: str, entry: Mapping[str, Any], version: str) -> InstallPlan:
     if fallback_entry is not None and not isinstance(fallback_entry, Mapping):
         raise ConfigError(f"tool {name!r} in tools.yaml has an invalid install fallback")
     fallback = (
-        _plan(name, {"binary": binary, "install": dict(fallback_entry)}, version)
+        _plan(name, {"binary": binary, "tier": tier, "install": dict(fallback_entry)}, version)
         if fallback_entry is not None
         else None
     )
@@ -110,6 +113,7 @@ def _plan(name: str, entry: Mapping[str, Any], version: str) -> InstallPlan:
         name=name,
         method=str(method),
         binary=binary,
+        tier=tier,
         package=_package_with_version(package, version)
         if method == "go_install" and package
         else package,
@@ -158,6 +162,7 @@ def load_plans(
             name=plan.name,
             method=plan.method,
             binary=plan.binary,
+            tier=plan.tier,
             package=plan.package,
             repo=plan.repo,
             asset_pattern=plan.asset_pattern,
@@ -183,6 +188,12 @@ def plan_for(
     if plan is None:
         raise ConfigError(f"unknown tool {name!r}: it is not listed in tools.yaml")
     return plan
+
+
+def bin_dir(home: Path | None = None) -> Path:
+    """The managed binary directory: `~/.reconkit/bin` (docs/10 section 5)."""
+    base = Path.home() if home is None else home
+    return base / ".reconkit" / "bin"
 
 
 def resolve_plan(plan: InstallPlan) -> tuple[InstallPlan, ...]:

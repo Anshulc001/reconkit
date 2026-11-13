@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
+import sys
 import traceback
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
 
 from reconkit.config import AppConfig, load_config
@@ -15,13 +19,17 @@ from reconkit.core.scope import check_target
 from reconkit.doctor import collect_report
 from reconkit.engine import Engine, ExitCode, ScanOptions
 from reconkit.errors import ConfigError, ScopeError
+from reconkit.installer.github_release import install_selected
+from reconkit.installer.registry import InstallPlan, bin_dir, load_plans
 from reconkit.models import Stage
 from reconkit.ui import (
     HostRow,
+    make_console,
     render,
     render_diff,
     render_doctor,
     render_error,
+    render_install,
     render_message,
     render_status,
 )
@@ -502,12 +510,106 @@ def doctor_command(
         )
         raise typer.Exit(code=int(ExitCode.ERROR))
     if fix:
-        render_error(
-            "--fix is not available yet: installing tools lands with 'reconkit install'; "
-            "nothing was changed.",
+        _run_install(
+            None,
+            True,
+            dry_run=False,
+            update=False,
+            config_path=config_path,
             no_color=no_color,
         )
+    raise typer.Exit(code=code)
+
+
+def _install_confirm(message: str) -> bool:
+    """The only confirmation prompt for sudo; the installer never prompts."""
+    return typer.confirm(message, default=False)
+
+
+def _install_selection(
+    tools: list[str] | None, all_tools: bool, *, config: AppConfig
+) -> list[InstallPlan]:
+    """`--all` means every core tool with something to install; else the names."""
+    plans = load_plans(versions=config.tool_versions)
+    if all_tools:
+        return [plan for plan in plans.values() if plan.tier == "core" and plan.method != "none"]
+    selected = []
+    for name in tools or []:
+        plan = plans.get(name)
+        if plan is None:
+            raise ConfigError(f"unknown tool {name!r}; see tools.yaml")
+        selected.append(plan)
+    return selected
+
+
+def _maybe_ask_keys(*, no_color: bool) -> None:
+    """docs/05 section 6.1: ask once on a TTY, never with no TTY or --dry-run."""
+    console = make_console(no_color=no_color)
+    if not sys.stdin.isatty() or not typer.confirm("Free only, or add keys?", default=False):
+        return
+    env_path = Path.cwd() / ".env"
+    example = Path.cwd() / ".env.example"
+    if env_path.exists():
+        render_message(f"keeping existing {env_path}", console=console)
+        return
+    if not example.exists():
+        render_message(".env.example not found; nothing copied", console=console)
+        return
+    shutil.copy2(example, env_path)
+    env_path.chmod(0o600)
+    render_message(f"wrote {env_path}; add your keys there", console=console)
+
+
+def _run_install(
+    tools: list[str] | None,
+    all_tools: bool,
+    *,
+    dry_run: bool,
+    update: bool,
+    config_path: Path | None,
+    no_color: bool,
+) -> None:
+    """Shared body of `install` and `update` (docs/10 section 1)."""
+    if sys.platform != "linux":
+        message = (
+            "Use WSL2 Kali (see SETUP.md)"
+            if sys.platform == "win32"
+            else "Linux is required (see SETUP.md)"
+        )
+        render_error(message, no_color=no_color)
         raise typer.Exit(code=int(ExitCode.ERROR))
+    if not tools and not all_tools:
+        render_error("name at least one tool or pass --all", no_color=no_color)
+        raise typer.Exit(code=int(ExitCode.USAGE))
+    try:
+        config = load_config(config_path)
+        selected = _install_selection(tools, all_tools, config=config)
+    except (ConfigError, ValueError) as exc:
+        render_error(str(exc), no_color=no_color)
+        raise typer.Exit(code=int(ExitCode.USAGE)) from None
+    if selected and not update and not dry_run:
+        _maybe_ask_keys(no_color=no_color)
+    client = httpx.Client() if any(plan.method == "github_release" for plan in selected) else None
+    try:
+        with client if client is not None else nullcontext():
+            outcomes, code = install_selected(
+                selected,
+                bin_dir=bin_dir(),
+                update=update,
+                dry_run=dry_run,
+                client=client,
+                confirm=_install_confirm,
+            )
+    finally:
+        if client is not None:
+            client.close()
+    if outcomes:
+        render_install(outcomes, dry_run=dry_run, console=make_console(no_color=no_color))
+    for outcome in outcomes:
+        if not outcome.ok and outcome.error:
+            render_message(
+                f"{outcome.tool}: {outcome.error}", console=make_console(no_color=no_color)
+            )
     raise typer.Exit(code=code)
 
 
@@ -518,10 +620,17 @@ def install_command(
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Show actions without changing anything.")
     ] = False,
+    config_path: Annotated[Path | None, typer.Option("--config", help="Config file path.")] = None,
+    no_color: Annotated[bool, typer.Option("--no-color", help="Disable colors.")] = False,
 ) -> None:
-    del tools, all_tools, dry_run
-    render_error("install is implemented in Part 9; no changes were made.")
-    raise typer.Exit(code=int(ExitCode.ERROR))
+    _run_install(
+        tools,
+        all_tools,
+        dry_run=dry_run,
+        update=False,
+        config_path=config_path,
+        no_color=no_color,
+    )
 
 
 @app.command("update")
@@ -531,10 +640,17 @@ def update_command(
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Show actions without changing anything.")
     ] = False,
+    config_path: Annotated[Path | None, typer.Option("--config", help="Config file path.")] = None,
+    no_color: Annotated[bool, typer.Option("--no-color", help="Disable colors.")] = False,
 ) -> None:
-    del tools, all_tools, dry_run
-    render_error("update is implemented in Part 9; no changes were made.")
-    raise typer.Exit(code=int(ExitCode.ERROR))
+    _run_install(
+        tools,
+        all_tools,
+        dry_run=dry_run,
+        update=True,
+        config_path=config_path,
+        no_color=no_color,
+    )
 
 
 @db_app.command("list")

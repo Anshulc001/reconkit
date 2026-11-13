@@ -75,6 +75,7 @@ class ExitCode(IntEnum):
     SCOPE = 3
     NO_TOOL = 4
     PARTIAL = 5
+    ALL_FAILED = 6
     INTERRUPTED = 130
 
 

@@ -2,10 +2,10 @@
 
 ## RESUME HERE
 
-- Status: 10a-10c closed; 10d (apt/go_install/pipx backends + per-method dispatch) implemented and committed; 10e (install/update CLI, --all, doctor --fix wiring) next after review
+- Status: 10a-10d closed; 10e (install/update CLI, --all, idempotency, exit code 6, tool_versions, bin_dir, doctor --fix) implemented and committed; wait for the 10e review before Part 11
 - Last code commit: run `git log --oneline -1`
-- Baseline: 522 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean
-- Next action: wait for the 10d review, then implement 10e only (`install`/`update` CLI commands, `--all`, `doctor --fix` wiring, `bin_dir` from the workspace); do not start Part 11
+- Baseline: 537 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean
+- Next action: wait for the 10e review; after approval run the Part 11 audit. Do not start 10f (none exists) or Phase 3.
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: none
@@ -57,11 +57,11 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `core/runner.py`: `run_exec(argv, timeout=, env=, max_output_bytes=, cwd=)` (only `subprocess` user), `validate_target` (root, strict RFC-1123), `validate_host` (discovered: allows `_`, strips `*.`), `ExecResult`; timeout kills the process group, output capped, env values redacted.
 - `core/scope.py`: `load_scope`, `require_active` -> `ActiveCheck(scope, match, hosts, dropped)`, `check_target`, `ip_allowed`, `passive_warning`, `ScopeGate`; `out_of_scope` always wins.
 - `core/store.py`: `Store(path)` (context manager, `close()`), `redact(text, secrets)`; writes `create_target`, `create_scan_run`, `finish_scan_run`, `record_tool_run`, `upsert_subdomain`, `add_subdomain_source`, `append_host_status`, `upsert_port`, `add_port_source`, `upsert_url`; reads `previous_state`, `diff_new`, `diff_gone`, `diff_state_changed`, `diff_ports_opened`, `diff_ports_closed`; pragmas FK/WAL/5000 ms, parameterized SQL only.
-- `installer/registry.py`: `load_plans(path=, versions=)` -> `InstallPlan` (`name`, `method`, `binary`, `package`, `repo`, `asset_pattern`, `checksums_pattern`, `asset_name`, `version`, `fallback`, `requires_apt`, `requires`), `plan_for`, `resolve_plan`; unknown method or missing package/repo raises `ConfigError`.
+- `installer/registry.py`: `bin_dir(home=)` (`~/.reconkit/bin`), `tier` on `InstallPlan`, `load_plans(path=, versions=)` -> `InstallPlan` (`name`, `method`, `binary`, `package`, `repo`, `asset_pattern`, `checksums_pattern`, `asset_name`, `version`, `fallback`, `requires_apt`, `requires`), `plan_for`, `resolve_plan`; unknown method or missing package/repo raises `ConfigError`.
 - `installer/apt.py`: `apt_env` (PATH/DEBIAN_FRONTEND/LC_ALL), `apt_argv` (`sudo -n apt-get install -y`), `apt_steps`, `apt_install_package`, `install_apt`; package names validated; a password-requiring sudo becomes `InstallSkipped`.
 - `installer/go_install.py`: `go_env` (HOME/GOBIN/PATH), `go_spec`, `install_go`; builds into the managed bin dir and runs `version_cmd`.
 - `installer/pipx.py`: `pipx_env` (HOME/PATH/PIPX_BIN_DIR/PIPX_HOME), `pipx_spec` (packages, pins and `git+https://` specs), `install_pipx_tool`; a missing pipx is a separate, separately confirmed apt step.
-- `installer/github_release.py`: `CHECKSUMS_LIMIT` (64 KiB cap on the checksums fetch), `release_for(plan, client=, arch=)`, `download`, `install_release(plan, client=, bin_dir, dry_run=, verify_checksums=, runner=)`, `install_plans` (per-tool isolation), `exit_code` (0/5/6), `host_arch`, `render_pattern`, `checked_https`; HTTPS GitHub hosts only, MockTransport in tests.
+- `installer/github_release.py`: `install_selected` (idempotent install/update over a selection), `installed_copy`/`installed_version`, `desired_version`, `_refresh_templates` (`nuclei -ut`), `CHECKSUMS_LIMIT` (64 KiB cap on the checksums fetch), `release_for(plan, client=, arch=)`, `download`, `install_release(plan, client=, bin_dir, dry_run=, verify_checksums=, runner=)`, `install_plans` (per-tool isolation), `exit_code` (0/5/6), `host_arch`, `render_pattern`, `checked_https`; HTTPS GitHub hosts only, MockTransport in tests.
 - `installer/verify.py`: `sha256_file`, `checksum_for`, `verify_checksum`, `extract_binary(archive, binary, dest_dir, archive_limit=, member_limit=)`; zip-slip refused, only the expected binary extracted, mode 0755; `ARCHIVE_LIMIT` 200 MiB, `MEMBER_LIMIT` 100 MiB.
 - `doctor.py`: `collect_report(config, config_path=, env=, tools_path=, scope_path=, dpkg_status=, status_of=, python_version=)` -> `DoctorReport` of `ToolCheck`/`StageCoverage`/`PackageCheck`/`KeyCheck`; `default_status`, `installed_packages`, `db_writable`; reads files and version commands only, never installs.
 - `adapters/base.py`: `BaseToolAdapter` (contract from docs/09), `HttpAdapter` (rate limit via `ctx.limiter`, timeout, User-Agent, one retry on connection errors, 429/5xx/timeout -> failed result), `normalize_subdomains`; `FetchFailed`.
@@ -129,6 +129,10 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Part 10b: install plans parse the `install` block from tools.yaml directly because `ToolSpec` does not expose it; the tool set still comes from `load_tools()`, so the two loaders cannot disagree on which tools exist. `tool_versions` pin wiring is deferred to 10e (see Open risks).
 
 ## Open risks
+
+- `SUDO_DENIAL_MARKERS` contains two substrings (`"no tty present"`, `"askpass"`) that were never reproduced against a live sudo; only `"a password is required"` was confirmed here. A different sudo/PAM wording would surface as `InstallError` instead of the friendlier `InstallSkipped` (low severity, but it will look like a failure rather than a skip).
+- `install` asked-about-keys flow prints the path only; docs/05 section 6.1 also promises the Keys table there. The table is still shown by `doctor`.
+- `adapters/base.py` still hardcodes `Path.home() / ".reconkit" / "bin"` instead of `installer.registry.bin_dir()`, because adapters may not import the installer. Two literals can drift.
 
 - `_fetch_text`'s default 64 KiB cap has no dedicated test; the cap is only exercised through an explicit `max_bytes=64` argument in the test, so a regression in the default would pass the suite.
 - Non-UTF-8 checksums-file rejection (`InstallError: checksums file is not UTF-8`) has no test.
