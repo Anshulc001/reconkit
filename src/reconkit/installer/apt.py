@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from collections.abc import Callable
 
 from reconkit.core.runner import ExecResult, run_exec
@@ -93,6 +94,8 @@ def install_apt(
         runner=runner,
         timeout=timeout,
     )
+    if shutil.which(plan.binary) is None:
+        raise InstallError(f"{plan.name}: apt-get finished but {plan.binary} is not on PATH")
     check_version(
         plan.binary,
         plan.version_args,

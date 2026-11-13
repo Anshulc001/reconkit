@@ -146,7 +146,7 @@ tools:
   # ---------------- ports ----------------
   smap:         {stage: ports, kind: binary, tier: core, mode: passive, phase: 3, binary: smap, install: {method: go_install, package: "github.com/s0md3v/smap/cmd/smap@latest"}, notes: "Passive ports from Shodan data. No packets to the target."}
   pyscan:       {stage: ports, kind: python, tier: core, mode: active, phase: 2, install: {method: none}, notes: "Async TCP connect scan (no root). Fallback and verifier."}
-  naabu:        {stage: ports, kind: binary, tier: core, mode: active, phase: 2, binary: naabu, version_cmd: [naabu, -version], rate_flag: "-rate", requires_apt: [libpcap-dev], install: {<<: *pd_release, name: naabu, repo: projectdiscovery/naabu}, notes: "Needs libpcap. Use connect scan (-scan-type c) when not root."}
+  naabu:        {stage: ports, kind: binary, tier: core, mode: active, phase: 2, binary: naabu, version_cmd: [naabu, -version], rate_flag: "-rate", requires_apt: [libpcap-dev], install: {<<: *pd_release, name: naabu, repo: projectdiscovery/naabu, checksums_pattern: "naabu-checksums.txt"}, notes: "Needs libpcap. Use connect scan (-scan-type c) when not root."}
   nmap:         {stage: ports, kind: binary, tier: core, mode: active, phase: 3, binary: nmap, version_cmd: [nmap, --version], rate_flag: "-T", install: {method: apt, package: nmap}, notes: "Service/version verification (-sV). Timing from nmap_timing in config."}
   rustscan:     {stage: ports, kind: binary, tier: core, mode: active, phase: 3, binary: rustscan, version_cmd: [rustscan, --version], install: {method: github_release, repo: RustScan/RustScan, asset_pattern: "verify-at-implementation"}, notes: "Phase 3, verify asset and checksum names at implementation."}
   masscan:      {stage: ports, kind: binary, tier: opt_in, mode: active, phase: 3, binary: masscan, version_cmd: [masscan, --version], rate_flag: "--max-rate", needs_root: true, install: {method: apt, package: masscan}, notes: "Opt-in only. Rate hard-capped by speed (masscan_max_rate)."}
@@ -161,7 +161,7 @@ tools:
   # ---------------- urls ----------------
   gau:          {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: gau, version_cmd: [gau, --version], install: {method: go_install, package: "github.com/lc/gau/v2/cmd/gau@latest"}}
   waybackurls:  {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: waybackurls, install: {method: go_install, package: "github.com/tomnomnom/waybackurls@latest"}}
-  katana:       {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: katana, version_cmd: [katana, -version], rate_flag: "-rl", install: {<<: *pd_release, name: katana, repo: projectdiscovery/katana}}
+  katana:       {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: katana, version_cmd: [katana, -version], rate_flag: "-rl", install: {<<: *pd_release, name: katana, repo: projectdiscovery/katana, checksums_pattern: "katana-{version}-checksums.txt"}}
   hakrawler:    {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: hakrawler, install: {method: go_install, package: "github.com/hakluke/hakrawler@latest"}}
   gospider:     {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: gospider, install: {method: go_install, package: "github.com/jaeles-project/gospider@latest"}}
   subjs:        {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: subjs, install: {method: go_install, package: "github.com/lc/subjs@latest"}, notes: "JS file discovery."}

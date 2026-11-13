@@ -2,10 +2,10 @@
 
 ## RESUME HERE
 
-- Status: 10a-10d closed; 10e (install/update CLI, --all, idempotency, exit code 6, tool_versions, bin_dir, doctor --fix) implemented and committed; wait for the 10e review before Part 11
+- Status: 10a-10e closed; 10f (close-out: apt binary presence check, adversarial cases, docs 5a/6 sync, real dry-run) implemented and committed. Part 10's gate still needs a real `install --all` on Kali (sudo password required here) before it can be called closed.
 - Last code commit: run `git log --oneline -1`
-- Baseline: 543 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean
-- Next action: wait for the 10e review; after approval run the Part 11 audit. Do not start 10f (none exists) or Phase 3.
+- Baseline: 550 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean
+- Next action: run the real `install --all` / `update --all` on Kali with sudo available, then Part 11. Do not start Part 11 before that run is recorded.
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: none
@@ -136,11 +136,12 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 
 - `_fetch_text`'s default 64 KiB cap has no dedicated test; the cap is only exercised through an explicit `max_bytes=64` argument in the test, so a regression in the default would pass the suite.
 - Non-UTF-8 checksums-file rejection (`InstallError: checksums file is not UTF-8`) has no test.
+- `Ctrl-C` during `install`/`update` is untested: a `KeyboardInterrupt` mid-download or mid-apt is not mapped to exit 130 by the command body (MASTER_PLAN lists it as an adversarial case).
 - Accepted exception: `go_install` and `pipx` pass the parent process's `PATH` to their child (named in docs/10 section 3d with the reason). Every other child env is a fixed, explicit dict. Tests never exercise a custom parent `PATH`, so a change in that behaviour would not be caught by the suite.
 
 - `doctor --fix` is accepted but refuses until the `install` CLI exists (10e); it never pretends to have fixed anything.
 - `doctor` checks apt packages by reading `/var/lib/dpkg/status`; on a non-Debian system every package reports `unknown` instead of guessing. `dnsutils` is not covered because it appears only in the `dig` entry's `install` block.
-- `rustscan` is excluded from 10c's download path. Its real release assets (tag 2.4.1, repo redirects to bee-san/RustScan) are named `x86_64-linux-rustscan.zip` / `aarch64-linux-rustscan.zip`, which do not match the `{arch}` values (`amd64`/`arm64`) the registry uses, and no checksums asset was listed; `tools.yaml` still holds the literal placeholder. Resolve this before any install path includes rustscan.
+- `rustscan` is excluded from the download path. Live check 2026-11-13 (tag 2.4.1 via the `bee-san/RustScan` redirect, now followed): assets are `x86-linux-rustscan.zip`, `x86_64-linux-rustscan.tar.gz.zip`, `aarch64-linux-rustscan.zip`, `rustscan.deb.zip` - none matches the `amd64`/`arm64` `{arch}` values, and there is no checksums asset. `tools.yaml` keeps the literal placeholder, and the real `install --all --dry-run` reports it as the only failure.
 - `installer/registry.load_plans(versions=)` is not yet wired to `config.tool_versions`: nothing in `src/` passes the pins, only the tests do. The `install`/`update` CLI must pass `config.tool_versions` when it is wired in 10e; until then a pin in config.yaml has no effect.
 - `doctor` does not check wordlists: no Phase-2 adapter consumes one, and no wordlist path exists in `tools.yaml` or `config.yaml`. Only the phase-3 DNS-bruteforce tools (`puredns`, `massdns`, `amass`, `findomain`, `dnsx`) would need one. Revisit when any of those gets an adapter.
 - `RunContext` now carries `limiter` and `ports`, and `HostStatusRecord` carries `location`; all were documented in docs/09 before their code landed. The engine builds one limiter per stage.

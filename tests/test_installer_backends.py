@@ -54,7 +54,8 @@ def always(message: str) -> bool:
 # ---------------------------------------------------------------- apt
 
 
-def test_apt_runs_sudo_non_interactively_with_the_documented_env() -> None:
+def test_apt_runs_sudo_non_interactively_with_the_documented_env(monkeypatch) -> None:
+    monkeypatch.setattr(apt.shutil, "which", lambda name: f"/usr/bin/{name}")
     runner, calls = fake_runner()
     steps = apt.install_apt(plan_for("nmap"), confirm=always, runner=runner)
     assert steps == ("nmap: sudo apt-get install -y nmap (sudo required)",)

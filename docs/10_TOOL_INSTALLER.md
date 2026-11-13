@@ -114,13 +114,13 @@ Other rules:
 - `Missing tools: N. Run: reconkit install --all` when anything is missing;
 - `--json` writes one document; warnings keep exit code `0`. Python < 3.11 or an unreadable `config.yaml` exits `1`.
 
-`--fix` offers the same actions as `install` for the missing tools.
+`--fix` runs the same selection as `install --all`; tools that are already installed are skipped by the idempotency rule in section 1, so it never reinstalls a working tool.
 
 ## 6. Update Behavior
 
-- `update` compares installed version (from `version_cmd`) with latest release (or the pin in `config.yaml` `tool_versions`) and updates only when different.
+- `update` compares installed version (from `version_cmd`) with latest release (or the pin in `config.yaml` `tool_versions`) and updates only when different. `apt` and `pipx` have no such comparison and re-run their package-manager install; section 1 states that limitation and the extra sudo prompts it causes.
 - Updates never happen silently during a scan. Only `update` (and `install`) change tools.
-- After updating `nuclei`, also refresh templates (`nuclei -ut` once confirmed against `--help`).
+- After installing or updating `nuclei`, templates are refreshed with `nuclei -ut` (implemented; `-ut, -update-templates` confirmed from `nuclei --help`, engine v3.11.1). A failed refresh is reported but does not mark the tool failed.
 - `doctor` warns when a tool's major version is newer than the version its parser fixture was recorded against. This needs per-tool fixture metadata that `tools.yaml` does not carry yet, so the warning is Phase 3.
 - Rollback: previous binary kept as `<name>.prev` until the new version passes its version check.
 

@@ -758,3 +758,15 @@ Per-stage counts: subs 11, dns 5, live 4, ports 6, tech 5, urls 8, vulns 8, shot
 - The unverified sudo-marker risk bullet is in docs/PROGRESS.md (Open risks).
 - Tests: 20 in `tests/test_install_cli.py`, 542 in the suite.
 - Pitfalls added this pass: PIT-31 (custom `env=` without `PATH` cannot resolve a bare binary), with `test_regression_custom_env_without_path_cannot_resolve_binary` and the `Regression: PIT-31` docstring on the nuclei test.
+
+## Part 10f - close-out (code + real run)
+
+- What 10e already covered, so 10f did not duplicate it: Windows refusal for `install` (added for `update` too), the TTY key prompt and `.env` copy-without-overwrite (10e tests; 10f adds the existing-`.env` and missing-`.env.example` branches), `--no-keys` end-to-end (`tests/test_engine.py::test_env_filtering_and_no_keys`), second `install` changing nothing (`test_install_skips_a_tool_that_is_actually_usable`). The three Part 8 stubs (`install`, `update`, `doctor --fix`) are all wired.
+- Real run, first attempt (2026-11-13, this Kali box): `reconkit install --all --dry-run --no-color` exited 5 with three genuine defects that the fake-runner tests could never have caught:
+  1. `RustScan/RustScan` answers the releases API with HTTP 301 (the repo moved to `bee-san/RustScan`) and `release_for` did not follow redirects. Fixed with `follow_redirects=True` plus `test_release_lookup_follows_a_rename_redirect`.
+  2. `naabu` and `katana` reported "no checksums asset". Live API shows `naabu-checksums.txt` and `katana-1.8.0-checksums.txt`, so the shared `{name}_{version}_checksums.txt` anchor was wrong for both. `tools.yaml` now overrides each pattern (verified names, fetched today).
+  3. After the fix the same command exits 5 with exactly one failure: `rustscan` (the documented placeholder), every other tool `would install`.
+- New safety check: `install_apt` now confirms the binary is on `PATH` after a successful `apt-get` (the MASTER_PLAN adversarial case "apt succeeds but the binary is still missing"), with `test_apt_that_leaves_no_binary_is_an_error`. `shutil.which` is monkeypatched in the apt tests so they do not depend on the host.
+- New adversarial tests: a `PATH` copy whose `version_cmd` fails is not treated as installed; an unparsable version line is not treated as current; existing `.env` is kept and the table still prints; missing `.env.example` prints no table.
+- docs/10 section 5a and section 6 synced to the code: `--fix` runs the `install --all` selection and relies on idempotency; `update` points at the apt/pipx limitation; the nuclei refresh is stated as implemented with the confirmed `-ut, -update-templates` flag.
+- Not verified: the real non-dry install. It needs a sudo password on this box (`sudo -n true` returns "a sudo: a password is required"), so `install --all` would skip every apt tool; the run has to happen in a shell where `sudo -v` has been done. Also untested: Ctrl-C mid-install (logged in Open risks).

@@ -128,6 +128,7 @@ def release_for(
         url,
         headers={"Accept": "application/vnd.github+json", "User-Agent": USER_AGENT},
         timeout=timeout,
+        follow_redirects=True,
     )
     if response.status_code != 200:
         raise InstallError(f"{plan.name}: release lookup failed with HTTP {response.status_code}")

@@ -7,6 +7,7 @@ import shutil
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 import yaml
 from typer.testing import CliRunner
 
@@ -14,7 +15,8 @@ from reconkit import cli
 from reconkit.cli import app
 from reconkit.core.runner import ExecResult, run_exec
 from reconkit.doctor import key_checks
-from reconkit.installer import github_release
+from reconkit.errors import InstallError
+from reconkit.installer import apt, github_release
 from reconkit.installer.github_release import install_selected
 from reconkit.installer.registry import bin_dir, load_plans, plan_for
 from reconkit.ui import make_console, render_keys
@@ -301,3 +303,86 @@ def test_regression_custom_env_without_path_cannot_resolve_binary(tmp_path: Path
     assert found.returncode == 0
     missing = run_exec(["reconkit-probe"], timeout=5.0, env={"HOME": str(tmp_path)})
     assert missing.returncode is None
+
+
+# ---------------------------------------------------------------- Part 10f
+
+
+def test_apt_that_leaves_no_binary_is_an_error(monkeypatch) -> None:
+    monkeypatch.setattr(apt.shutil, "which", lambda name: None)
+    runner, calls = fake_runner()
+    with pytest.raises(InstallError, match="is not on PATH"):
+        apt.install_apt(plan_for("nmap"), confirm=lambda message: True, runner=runner)
+    assert [call[0][0] for call in calls] == ["sudo"]
+
+
+def test_path_copy_that_fails_its_version_check_is_not_installed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    copy = tmp_path / "assetfinder"
+    copy.write_bytes(b"#!/bin/sh\n")
+    monkeypatch.setattr(github_release.shutil, "which", lambda name: str(copy))
+    create = bin_dir(tmp_path) / "assetfinder"
+
+    def run(argv: list[str], timeout: float | None = None, env=None) -> ExecResult:
+        if argv[0] == "go":
+            create.parent.mkdir(parents=True, exist_ok=True)
+            create.write_bytes(b"#!/bin/sh\n")
+            return ExecResult(returncode=0, stdout="", stderr="", truncated=False)
+        if argv[0] == str(create):
+            return ExecResult(returncode=0, stdout="assetfinder 2.0.0", stderr="", truncated=False)
+        return ExecResult(returncode=1, stdout="", stderr="boom", truncated=False)
+
+    outcomes, code = install_selected(
+        [plan_for("assetfinder")], bin_dir=bin_dir(tmp_path), runner=run
+    )
+    assert outcomes[0].up_to_date is False
+    assert code == 0
+
+
+def test_unparsable_version_line_is_not_treated_as_current(tmp_path: Path) -> None:
+    plan = replace(plan_for("assetfinder"), package="github.com/tomnomnom/assetfinder@2.0.0")
+    binary = bin_dir(tmp_path) / "assetfinder"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"#!/bin/sh\n")
+    runner, _ = fake_runner(version_text="not a version at all")
+    outcomes, _ = install_selected([plan], bin_dir=bin_dir(tmp_path), update=True, runner=runner)
+    assert outcomes[0].up_to_date is False
+
+
+def test_existing_env_is_kept_and_the_table_still_prints(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("KEEP=1\n", encoding="utf-8")
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli.typer, "confirm", lambda *a, **k: True)
+    buffer = io.StringIO()
+    monkeypatch.setattr(
+        cli, "make_console", lambda no_color=False: make_console(stream=buffer, no_color=no_color)
+    )
+    cli._maybe_ask_keys(no_color=True)
+    assert (tmp_path / ".env").read_text(encoding="utf-8") == "KEEP=1\n"
+    out = buffer.getvalue()
+    assert "keeping existing" in out
+    assert "CERTSPOTTER_API" in out
+
+
+def test_missing_env_example_prints_no_table(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli.typer, "confirm", lambda *a, **k: True)
+    buffer = io.StringIO()
+    monkeypatch.setattr(
+        cli, "make_console", lambda no_color=False: make_console(stream=buffer, no_color=no_color)
+    )
+    cli._maybe_ask_keys(no_color=True)
+    out = buffer.getvalue()
+    assert "not found" in out
+    assert "CERTSPOTTER" not in out
+    assert not (tmp_path / ".env").exists()
+
+
+def test_cli_update_refuses_non_linux(monkeypatch) -> None:
+    monkeypatch.setattr(cli.sys, "platform", "darwin")
+    result = CliRunner().invoke(app, ["update", "--all", "--dry-run"])
+    assert result.exit_code == 1
+    assert "Linux is required" in result.output

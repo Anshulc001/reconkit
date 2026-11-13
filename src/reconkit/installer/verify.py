@@ -32,6 +32,9 @@ def check_version(
 
     No version_cmd means nothing to check. The child gets only `env` (or `HOME`
     when the backend does not say otherwise), never the parent environment.
+
+    A caller that passes a bare binary name must supply `env` with `PATH` too;
+    the default `HOME`-only env only resolves absolute paths (PIT-31).
     """
     if not version_args:
         return

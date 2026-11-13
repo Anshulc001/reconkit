@@ -256,3 +256,26 @@ def test_rustscan_placeholder_cannot_resolve() -> None:
     with httpx.Client(transport=httpx.MockTransport(respond)) as http:
         with pytest.raises(InstallError, match="has no asset"):
             release_for(plan, client=http, arch="amd64")
+
+
+def test_release_lookup_follows_a_rename_redirect() -> None:
+    """Regression: a renamed repo answers the API with 301; follow it."""
+    moved = "https://api.github.com/repos/bee-san/RustScan/releases/latest"
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == API:
+            return httpx.Response(301, headers={"Location": moved})
+        return httpx.Response(
+            200,
+            json={
+                "tag_name": "v2.6.0",
+                "assets": [
+                    {"name": ASSET, "browser_download_url": ASSET_URL},
+                    {"name": CHECKSUMS, "browser_download_url": CHECKSUMS_URL},
+                ],
+            },
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        release = release_for(subfinder_plan(), client=http, arch="amd64")
+    assert release.tag == "v2.6.0"
