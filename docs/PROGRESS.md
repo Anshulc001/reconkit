@@ -121,7 +121,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Known pitfalls table + regression rules added by user addendum; `scripts/check.ps1` now warns on a `fix:` commit without a test change, and existing guards carry `Regression:` docstrings (no behavior change).
 - Part 5 uses an injected, limiter-bound DNS probe and a required injected `rng` (no S311 default); `Workspace` rejects Windows-reserved target labels and chmods only its own dirs; `Workspace.write` is synchronous (`fsync` + `os.replace`), so the engine must offload large outputs.
 - `src/reconkit/adapters/dns_python.py` is dead code: a 59-byte tracked stub created by `f4d81e2` from the docs/03 name; the real adapter is `dnspython.py` (`80ddd93`, updated in `75eb261`). Nothing imports it, but `docs/03_ARCHITECTURE.md:70` still names it. Kept pending the docs/03 fix (Part 11); do not use it.
-- Part 6b adds `--resume` (docs/02); resume is stage-level and reruns an interrupted stage because asset writes are batched at stage end. State timestamps use the injected `now` source (default `store.utc_now()`); `Store.scan_runs()`/`subdomains()` are the resume reads. CNAME warnings stay in `ScanSummary.warnings` because the schema has no CNAME column.
+- Part 6b adds `--resume` (docs/02); resume is stage-level and reruns an interrupted stage because asset writes are batched at stage end. State timestamps use the injected `now` source (default `store.utc_now()`); `Store.scan_runs()`/`subdomains()` are the resume reads. CNAME warnings stay in `ScanSummary.warnings` because the schema has no CNAME column. Double-confirmation is intentional: an established `ALIVE`/`DNS_ONLY` host has prior evidence, so one NXDOMAIN only means `SHUT_DOWN`; a second consecutive NXDOMAIN is required for `DEAD`. A never-probed host has no prior service to confirm, so its first NXDOMAIN is `DEAD`. This avoids one transient resolver failure erasing an established host while still recording genuine new non-existence.
 
 ## Open risks
 
@@ -137,11 +137,14 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - CLI must catch `ValueError` from `check_target`/`validate_target` and exit 2.
 - OTX anonymous requests return 429 (synthetic fixture); HackerTarget's free tier returned one row for example.com, so multi-row parsing is only covered by MockTransport tests.
 - subfinder keys are bridged by its adapter into a temporary 0600 `provider-config.yaml`; only certspotter, chaos, github and virustotal are configured. The other keyed providers' free tiers and sign-up URLs remain unverified, and no real subfinder has accepted the generated file yet.
-- assetfinder's `FB_APP_ID`/`FB_APP_SECRET` (Facebook developer app) and `SPYSE_API_TOKEN` were omitted: the Facebook source is no longer a documented free subdomain API, and the Spyse service status is unverified.
 - `urlscan`, `chaos` and `github_subdomains` now carry `keys`; their adapters are still Phase 3. `URLSCAN_API_KEY` is reconkit's own name, `PDCP_API_KEY` and `GITHUB_TOKEN` are the tools' real names.
 - Part 6a: one `scan_runs` row per executed stage; `ScanOptions.speed` is `SpeedName`; `Store.transaction()` uses SQLite's implicit transaction (explicit `BEGIN` failed inside one); `check_installed()` runs via `asyncio.to_thread`; workspace/scope reads stay synchronous and short; `FindingRecord` is not persisted because the findings table is deferred.
 - Wildcard detection is still not wired into the engine: `is_wildcard` stays 0 and no wildcard-unknown warning is emitted.
 - Resume is stage-level; tools completed inside a crashed stage are rerun. CNAME dangling warnings are not persisted, and real NXDOMAIN/CNAME behavior has not been exercised.
+
+## Fix backlog
+
+1. **Persist dangling-CNAME evidence.** `host_status_history` has no CNAME/dangling column, so a takeover-relevant `SHUT_DOWN` warning exists only in `ScanSummary.warnings` and is lost on the next run. Add persistence when the schema is next migrated (Part 9).
 
 ## Next task
 

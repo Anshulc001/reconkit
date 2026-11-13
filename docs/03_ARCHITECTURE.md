@@ -141,7 +141,7 @@ workspaces/<domain>/
 | `SHUT_DOWN` | `ALIVE` | `DNS_ONLY` | `DEAD` | `SHUT_DOWN` kept (warning) | `SHUT_DOWN` kept |
 | `DEAD` | `ALIVE` | `DNS_ONLY` | `DEAD` | `DEAD` kept (warning) | `DEAD` kept |
 
-- Only NXDOMAIN can produce `DEAD`; timeout, SERVFAIL, no answer and resolver/tool errors keep the previous state and add a warning. `SHUT_DOWN` is takeover-relevant: the engine warns when the host's known CNAME points outside the target. `host_status_history` is written only by the `dns` and `live` stages.
+- Only NXDOMAIN can produce `DEAD`; timeout, SERVFAIL, no answer and resolver/tool errors keep the previous state and add a warning. A previously `ALIVE`/`DNS_ONLY` host therefore needs **two consecutive NXDOMAIN observations** before `DEAD`: the first becomes `SHUT_DOWN`, the second `DEAD`. A host with no previous state has no established service to confirm, so its first NXDOMAIN is `DEAD`. `SHUT_DOWN` is takeover-relevant: the engine warns when the host's known CNAME points outside the target. `host_status_history` is written only by the `dns` and `live` stages.
 - **Wildcard API:** `WildcardDetector(probe=..., rng=..., probes=...)` is built per run. `probe` is the DNS adapter's `resolve_host` bound to the run context, so probes reuse that resolver and limiter; `rng` is injected; `probes` comes from `wildcard_check.probes`. `await detect(target)` returns `WildcardResult`, and `result.matches(ips=..., cnames=...)` decides `is_wildcard`.
 - Exact rules: docs/09_TOOL_CONTRACTS.md.
 
