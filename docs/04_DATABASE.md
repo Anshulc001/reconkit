@@ -80,6 +80,8 @@ CREATE TABLE host_status_history (
   status_code  INTEGER,
   location     TEXT,
   title        TEXT,
+  cnames_json  TEXT NOT NULL DEFAULT '[]',     -- CNAMEs observed in this pass
+  dangling_cname TEXT,                         -- first outside-target CNAME on SHUT_DOWN
   ips_json     TEXT NOT NULL DEFAULT '[]',
   tech_json    TEXT NOT NULL DEFAULT '[]',
   waf          TEXT,                           -- CDN/WAF marker from httpx (Phase 2)
@@ -169,7 +171,8 @@ CREATE TABLE monitor_changes (            -- Phase 3
 - No DNS answer (NXDOMAIN) means `DEAD`, unless the previous known state was `ALIVE` or `DNS_ONLY`, which makes it `SHUT_DOWN`. This state rule is unconditional; agreeing checks affect `confidence` only.
 - `fqdn` stored lowercase, no trailing dot, validated before insert.
 - `Store.scan_runs(target_id)` and `Store.subdomains(target_id)` are read queries used by engine resume; both return plain dictionaries and never expose the connection.
-- `Store.host_rows(target_id)` returns the latest host state/confidence, latest status code, distinct source tools and open ports for the UI. `Store.recent_scan_runs(limit)` returns recent stage runs joined to target domains for `status`. `Store.completed_run_ids(target_id, stage)` returns completed/partial run ids newest-first for `diff`; all three are read-only and never expose the connection.
+- `Store.host_rows(target_id)` returns the latest host state/confidence, latest status code, distinct source tools and open ports for the UI. `Store.recent_scan_runs(limit)` returns recent stage runs joined to target domains for `status`. `Store.completed_run_ids(target_id, stage)` returns completed/partial run ids newest-first for `diff`; `Store.latest_cnames(subdomain_id)` returns the CNAMEs from the latest status row; all four are read-only and never expose the connection.
+- `host_status_history.cnames_json` is written for every persisted status row and is never NULL. `dangling_cname` is NULL unless the row is `SHUT_DOWN` and the stored CNAME points outside the target. When a later NXDOMAIN pass has no CNAME of its own, the engine reuses `Store.latest_cnames()` so the takeover-relevant warning survives the process restart.
 
 ## 6. Diff Queries (core of `diff`)
 
@@ -202,7 +205,8 @@ No soft delete. `db delete -d X` removes a target and its rows after confirmatio
 
 ## 11. Migrations
 
-- `schema_version` table + ordered migration functions in `core/store.py`.
+- `schema_version` table + ordered migration scripts in `core/store.py`.
+- Schema version 2 adds `host_status_history.cnames_json` (`NOT NULL DEFAULT '[]'`) and `dangling_cname` (`NULL`). Existing rows therefore get an empty list and no dangling value, never NULL for the list.
 - Every schema change: documented here, has a migration, has a test, never destroys existing data.
 
 ## 12. Seed Data

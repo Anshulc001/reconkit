@@ -16,7 +16,7 @@ from pathlib import Path
 
 from reconkit.errors import ConfigError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 REDACTED = "***"
 
 _SCHEMA_V1 = """
@@ -127,7 +127,12 @@ CREATE TABLE urls (
 );
 """
 
-_MIGRATIONS: tuple[tuple[int, str], ...] = ((1, _SCHEMA_V1),)
+_SCHEMA_V2 = """
+ALTER TABLE host_status_history ADD COLUMN cnames_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE host_status_history ADD COLUMN dangling_cname TEXT;
+"""
+
+_MIGRATIONS: tuple[tuple[int, str], ...] = ((1, _SCHEMA_V1), (2, _SCHEMA_V2))
 
 _COUNT_SQL: dict[str, str] = {
     "targets": "SELECT COUNT(*) FROM targets",
@@ -456,6 +461,8 @@ class Store:
         status_code: int | None = None,
         title: str | None = None,
         location: str | None = None,
+        cnames: Sequence[str] = (),
+        dangling_cname: str | None = None,
         ips: Sequence[str] = (),
         tech: Sequence[str] = (),
         waf: str | None = None,
@@ -464,9 +471,9 @@ class Store:
     ) -> int:
         cursor = self._conn.execute(
             "INSERT INTO host_status_history"
-            " (subdomain_id, run_id, state, status_code, title, location, ips_json, tech_json,"
-            "  waf, tools_json, checked_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " (subdomain_id, run_id, state, status_code, title, location, cnames_json,"
+            "  dangling_cname, ips_json, tech_json, waf, tools_json, checked_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 subdomain_id,
                 run_id,
@@ -474,6 +481,8 @@ class Store:
                 status_code,
                 title,
                 location,
+                json.dumps(list(cnames)),
+                dangling_cname,
                 json.dumps(list(ips)),
                 json.dumps(list(tech)),
                 waf,
@@ -577,6 +586,18 @@ class Store:
             (subdomain_id,),
         ).fetchone()
         return None if row is None else str(row["state"])
+
+    def latest_cnames(self, subdomain_id: int) -> tuple[str, ...]:
+        """CNAMEs from the latest status row, or an empty tuple when none exist."""
+        row = self._conn.execute(
+            "SELECT cnames_json FROM host_status_history"
+            " WHERE subdomain_id = ? ORDER BY id DESC LIMIT 1",
+            (subdomain_id,),
+        ).fetchone()
+        if row is None:
+            return ()
+        raw = json.loads(str(row["cnames_json"]))
+        return tuple(str(value) for value in raw)
 
     def diff_new(self, latest_run_id: int) -> list[str]:
         rows = self._conn.execute(

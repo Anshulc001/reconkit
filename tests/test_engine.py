@@ -534,6 +534,56 @@ def test_shut_down_after_alive_with_external_cname() -> None:
     assert any("dangling CNAME" in warning for warning in result.warnings)
 
 
+async def test_regression_dangling_cname_survives_restart(tmp_path: Path) -> None:
+    """Regression: PIT-29 stored CNAME evidence must survive a process restart."""
+    rec = Recorder()
+    specs = {"dns-fake": tool("dns-fake", Stage.DNS)}
+    first_adapters = {
+        "dns-fake": adapter(
+            "dns-fake",
+            Stage.DNS,
+            rec,
+            records=[
+                SubdomainRecord(
+                    fqdn="old.example.com",
+                    source="fake",
+                    ips=["203.0.113.9"],
+                    cnames=["old.appspot.com"],
+                )
+            ],
+        )
+    }
+    first_store = Store(tmp_path / "recon.db")
+    first_engine = make_engine(tmp_path, specs, first_adapters, store=first_store)
+    await first_engine.run("example.com", ScanOptions(stages=(Stage.DNS,), mock=True, speed="slow"))
+    first_store.close()
+
+    second_store = Store(tmp_path / "recon.db")
+    second_adapters = {
+        "dns-fake": adapter(
+            "dns-fake",
+            Stage.DNS,
+            rec,
+            records=[host("old.example.com", HostState.DEAD)],
+        )
+    }
+    second_engine = make_engine(tmp_path, specs, second_adapters, store=second_store)
+    summary = await second_engine.run(
+        "example.com", ScanOptions(stages=(Stage.DNS,), mock=True, speed="slow")
+    )
+    assert any("dangling CNAME" in warning for warning in summary.warnings)
+    row = second_store._conn.execute(
+        "SELECT state, cnames_json, dangling_cname FROM host_status_history"
+        " ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert (row["state"], row["cnames_json"], row["dangling_cname"]) == (
+        "SHUT_DOWN",
+        '["old.appspot.com"]',
+        "old.appspot.com",
+    )
+    second_store.close()
+
+
 def test_dead_only_on_nxdomain() -> None:
     assert (
         transition(None, HostEvidence(dns=DnsSignal.NXDOMAIN, dns_tools=("dns",))).state

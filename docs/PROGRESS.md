@@ -2,10 +2,10 @@
 
 ## RESUME HERE
 
-- Status: Part 8 done; Part 9 (installer + doctor) next
-- Last code commit: run `git log --oneline -1`; Part 8 is the newest `feat:` commit
-- Baseline: 437 passed, 2 skipped; all four checks PASS (twice)
-- Next action: implement Part 9 in `docs/MASTER_PLAN.md`: docs/10 installer/doctor, then replace the CLI stubs
+- Status: Part 9 fix-backlog done; Part 10 next
+- Last code commit: run `git log --oneline -1`; Part 9 is the newest commit
+- Baseline: 440 passed, 2 skipped; all four checks PASS (twice)
+- Next action: await user direction for Part 10; no Part 10 work has started
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: none
@@ -112,6 +112,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Part 7: `ScanSummary` does not carry skipped tools, so the Tools table renders executed `ToolResult`s (ok/failed/timeout) only; skipped adapter rows remain in `tool_runs` and are a Part 8 wiring concern. The zero-tool empty state uses the explicit "skipped or excluded" line instead of docs/02's 3-tool example.
 - Part 8: no command is shorthand for `lite`; `--json` accepts one target (multiple `-l` targets are rejected with exit 2); docs/02 now explicitly defers `--timeout-<stage>`, so only `--phase-timeout` sets a stage limit; `doctor`/`install`/`update` are Part 9 stubs, and `db list`, `db export`, `export` and `scope import` are explicit exit-1 stubs.
 - Part 8: `Engine.open` loads `.env` values and the CLI has no `os.environ`/`getenv`; shell-exported key variables are therefore ignored. The active fast-mode typed confirmation runs outside `--mock`, where no traffic is possible.
+- Part 9: schema v2 adds `host_status_history.cnames_json` and `dangling_cname`; DNS-only resolved hosts now get a status row so their CNAME survives a restart, and a later NXDOMAIN reuses the latest stored CNAME. The migration is additive and existing rows default to `[]`/NULL. Wildcard wiring and stage-level resume were triaged, not fixed, because this part was limited to the Fix backlog.
 
 ## Open risks
 
@@ -127,8 +128,9 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - OTX anonymous requests return 429 (synthetic fixture); HackerTarget's free tier returned one row for example.com, so multi-row parsing is only covered by MockTransport tests.
 - subfinder keys are bridged by its adapter into a temporary 0600 `provider-config.yaml`; only certspotter, chaos, github and virustotal are configured. The other keyed providers' free tiers and sign-up URLs remain unverified, and no real subfinder has accepted the generated file yet.
 - Part 6a: one `scan_runs` row per executed stage; `ScanOptions.speed` is `SpeedName`; `Store.transaction()` uses SQLite's implicit transaction (explicit `BEGIN` failed inside one); `check_installed()` runs via `asyncio.to_thread`; workspace/scope reads stay synchronous and short; `FindingRecord` is not persisted because the findings table is deferred.
-- Wildcard detection is still not wired into the engine: `is_wildcard` stays 0 and no wildcard-unknown warning is emitted.
-- Resume is stage-level; tools completed inside a crashed stage are rerun. CNAME dangling warnings are not persisted, and real NXDOMAIN/CNAME behavior has not been exercised.
+- Part 9 triage: wildcard detection is still not wired into the engine; `is_wildcard` stays 0 and no wildcard-unknown warning is emitted. This is not a Fix backlog item and needs engine integration, so it remains open for a later part.
+- Part 9 triage: resume remains stage-level; tools completed inside a crashed stage are rerun. Per-tool checkpointing is a larger engine change, so this stays a documented limitation. Real NXDOMAIN/CNAME behavior remains unverified.
+- Part 9: the dangling warning can reuse only a CNAME stored by an earlier resolved pass; `dnspython`'s NXDOMAIN path returns no CNAME in that pass.
 - Part 7 rendering is tested with `StringIO`/fake TTY only; real terminal widths and the CLI's `HostRow` source are unverified until Part 8.
 - `docs/09_TOOL_CONTRACTS.md` has now contradicted docs/02 twice (the earlier `needs_key` registry issue and Part 7's JSONL-vs-single-document contract), so it needs a full fresh-eyes pass against docs/02 before the Part 11 final docs sync; do not treat docs/09 as authoritative until then.
 - Part 8: `db list`/`db export`/`export` are command stubs, and `diff` compares only the latest two completed `subs` runs plus matched `live`/`ports` runs; real tools, real terminals and the stubs remain unverified.
@@ -136,4 +138,4 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 
 ## Fix backlog
 
-1. **Persist dangling-CNAME evidence.** `host_status_history` has no CNAME/dangling column, so a takeover-relevant `SHUT_DOWN` warning exists only in `ScanSummary.warnings` and is lost on the next run. Add persistence when the schema is next migrated (Part 9).
+No open items. Part 9 fixed the dangling-CNAME persistence gap with schema version 2 and a restart regression test.

@@ -14,7 +14,7 @@ import json
 import secrets
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import IntEnum, StrEnum
 from pathlib import Path
 from typing import Any, cast
@@ -109,6 +109,7 @@ class HostTransition:
     sources: tuple[str, ...]
     warnings: tuple[str, ...]
     persist: bool
+    dangling_cname: str | None = None
 
 
 def confidence_for(
@@ -167,6 +168,7 @@ def decide_host_state(
         )
         sources = evidence.dns_tools or tuple(tool for tool, _ in evidence.web)
         warnings: list[str] = []
+        dangling: str | None = None
         if state is HostState.SHUT_DOWN:
             outside = sorted(
                 {
@@ -176,7 +178,8 @@ def decide_host_state(
                 }
             )
             if outside:
-                warnings.append(f"possible dangling CNAME: {outside[0]} (outside {target})")
+                dangling = outside[0]
+                warnings.append(f"possible dangling CNAME: {dangling} (outside {target})")
         return HostTransition(
             state,
             confidence_for(
@@ -188,6 +191,7 @@ def decide_host_state(
             sources,
             tuple(warnings),
             True,
+            dangling_cname=dangling,
         )
 
     if evidence.dns is DnsSignal.RESOLVED:
@@ -1003,22 +1007,37 @@ class Engine:
         if defer:
             return
         for host, signal in signals.items():
-            if signal is not DnsSignal.NXDOMAIN:
-                continue
-            previous = self._previous_state(target_id, host, run_id)
+            previous, previous_cnames = self._previous_facts(target_id, host, run_id)
+            current_cnames = tuple(sorted(cnames.get(host, set())))
+            evidence_cnames = (
+                current_cnames
+                if current_cnames or signal is not DnsSignal.NXDOMAIN
+                else previous_cnames
+            )
             transition = decide_host_state(
                 previous,
                 HostEvidence(
                     dns=signal,
                     dns_tools=tuple(sorted(tools.get(host, set()))),
                     dns_disagree=host in disagree,
-                    cnames=tuple(sorted(cnames.get(host, set()))),
+                    cnames=evidence_cnames,
                 ),
                 target=target,
                 high_min=self.config.confidence.high_min_sources,
                 medium_min=self.config.confidence.medium_min_sources,
             )
-            self._write_host(target_id, run_id, host, transition, None, tuple(ips.get(host, ())))
+            self._write_host(
+                target_id,
+                run_id,
+                host,
+                transition,
+                None,
+                tuple(ips.get(host, ())),
+                evidence_cnames,
+            )
+            for warning in transition.warnings:
+                if warning not in self._warnings:
+                    self._warnings.append(warning)
 
     def _persist_live(
         self,
@@ -1058,7 +1077,10 @@ class Engine:
                 dns_ok=dns_ok,
                 cnames=tuple(sorted(dns_cnames.get(host, set()))),
             )
-            previous = self._previous_state(target_id, host, run_id)
+            previous, previous_cnames = self._previous_facts(target_id, host, run_id)
+            current_cnames = tuple(sorted(dns_cnames.get(host, set())))
+            if signal is DnsSignal.NXDOMAIN and not current_cnames:
+                evidence = replace(evidence, cnames=previous_cnames)
             transition = decide_host_state(
                 previous,
                 evidence,
@@ -1073,17 +1095,28 @@ class Engine:
                 records[0][1] if records else None,
             )
             ips = tuple(sorted(dns_ips.get(host, set())))
-            self._write_host(target_id, run_id, host, transition, best, ips)
+            self._write_host(
+                target_id,
+                run_id,
+                host,
+                transition,
+                best,
+                ips,
+                tuple(evidence.cnames),
+            )
             if transition.state is HostState.ALIVE:
                 alive.add(host)
             for warning in transition.warnings:
                 if warning not in self._warnings:
                     self._warnings.append(warning)
 
-    def _previous_state(self, target_id: int, host: str, run_id: int) -> HostState | None:
+    def _previous_facts(
+        self, target_id: int, host: str, run_id: int
+    ) -> tuple[HostState | None, tuple[str, ...]]:
         sub_id = self.store.upsert_subdomain(target_id, host, run_id=run_id)
         raw = self.store.previous_state(sub_id)
-        return HostState(raw) if raw is not None else None
+        previous = HostState(raw) if raw is not None else None
+        return previous, self.store.latest_cnames(sub_id)
 
     def _write_host(
         self,
@@ -1093,6 +1126,7 @@ class Engine:
         transition: HostTransition,
         best: HostStatusRecord | None,
         ips: tuple[str, ...],
+        cnames: tuple[str, ...],
     ) -> None:
         sub_id = self.store.upsert_subdomain(
             target_id,
@@ -1109,6 +1143,8 @@ class Engine:
             status_code=None if best is None else best.status_code,
             title=None if best is None else best.title,
             location=None if best is None else best.location,
+            cnames=cnames,
+            dangling_cname=transition.dangling_cname,
             ips=ips,
             tech=() if best is None else best.tech,
             waf=None if best is None else best.waf,

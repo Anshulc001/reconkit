@@ -82,6 +82,72 @@ def test_migration_is_idempotent(tmp_path: Path) -> None:
         second.close()
 
 
+def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None:
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE schema_version (version INTEGER NOT NULL);
+        INSERT INTO schema_version (version) VALUES (1);
+        CREATE TABLE host_status_history (
+          id           INTEGER PRIMARY KEY,
+          subdomain_id INTEGER NOT NULL,
+          run_id       INTEGER NOT NULL,
+          state        TEXT NOT NULL,
+          status_code  INTEGER,
+          location     TEXT,
+          title        TEXT,
+          ips_json     TEXT NOT NULL DEFAULT '[]',
+          tech_json    TEXT NOT NULL DEFAULT '[]',
+          waf          TEXT,
+          tools_json   TEXT NOT NULL DEFAULT '[]',
+          checked_at   TEXT NOT NULL
+        );
+        INSERT INTO host_status_history
+          (subdomain_id, run_id, state, checked_at)
+          VALUES (1, 1, 'ALIVE', '2026-11-13T10:00:00Z');
+        """
+    )
+    conn.close()
+
+    migrated = Store(db_path)
+    try:
+        columns = {
+            str(row["name"]): row
+            for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
+        }
+        assert migrated.schema_version == SCHEMA_VERSION == 2
+        assert "cnames_json" in columns
+        assert "dangling_cname" in columns
+        row = migrated._conn.execute(
+            "SELECT cnames_json, dangling_cname FROM host_status_history"
+        ).fetchone()
+        assert row["cnames_json"] == "[]"
+        assert row["dangling_cname"] is None
+    finally:
+        migrated.close()
+
+
+def test_host_status_persists_cnames_and_latest_cnames(store: Store) -> None:
+    target_id, run_id = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "old.example.com", run_id=run_id)
+    store.append_host_status(
+        sub_id,
+        run_id,
+        "SHUT_DOWN",
+        cnames=["old.appspot.com"],
+        dangling_cname="old.appspot.com",
+    )
+    assert store.latest_cnames(sub_id) == ("old.appspot.com",)
+    row = store._conn.execute(
+        "SELECT cnames_json, dangling_cname FROM host_status_history"
+    ).fetchone()
+    assert (row["cnames_json"], row["dangling_cname"]) == (
+        '["old.appspot.com"]',
+        "old.appspot.com",
+    )
+
+
 def test_newer_schema_is_refused(tmp_path: Path) -> None:
     db_path = tmp_path / "recon.db"
     db = Store(db_path)
