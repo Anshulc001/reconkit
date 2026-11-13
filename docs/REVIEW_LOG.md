@@ -748,3 +748,11 @@ Per-stage counts: subs 11, dns 5, live 4, ports 6, tech 5, urls 8, vulns 8, shot
 - docs/10 section 1 now states the UX cost: because apt/pipx have no version comparison, `update --all` re-asks the sudo confirmation for every apt/pipx tool on every run.
 - Exit codes unchanged: `ERROR=1`, `USAGE=2`, `SCOPE=3`, `NO_TOOL=4`, `PARTIAL=5`, `ALL_FAILED=6`, `INTERRUPTED=130` (code 6 added in 10e, no renumbering).
 - Tests: 18 in `tests/test_install_cli.py`, 540 in the suite.
+
+### Part 10e - second review pass
+
+- The keys-table claim was only in prose: the pasted cli diff was from `0d6f762`, and the actual `render_keys` call landed in `14c43cf`. Two tests now prove the call path, not just the renderer: `test_keys_table_is_printed_by_the_prompt` captures the console `_maybe_ask_keys` builds and asserts "wrote"/"CERTSPOTTER_API"/"missing"; `test_declining_keys_prints_nothing` asserts empty output and no `.env` when the prompt is declined. docs/05 section 6.1 now states which branch prints the table (chosen keys, including when `.env` already exists) and that declining prints nothing.
+- `_refresh_templates` was a new subprocess call site; it passed only `HOME`. That is a PIT-30-adjacent gap in the making: `nuclei` lives under `$HOME/go/bin` here, and `execvpe` with no `PATH` in the child env only searches `os.defpath`, so the refresh would have failed to find the binary. It now passes `{"HOME", "PATH"}` (the documented exception in docs/10 section 3d) and the nuclei test pins the exact env keys.
+- Engine exit codes were re-checked: `NO_TOOL = 4`, `INTERRUPTED = 130` unchanged.
+- The unverified sudo-marker risk bullet is in docs/PROGRESS.md (Open risks).
+- Tests: 20 in `tests/test_install_cli.py`, 542 in the suite.

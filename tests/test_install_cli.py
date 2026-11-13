@@ -134,7 +134,10 @@ def test_nuclei_templates_are_refreshed_after_a_change(tmp_path: Path) -> None:
     outcomes, code = install_selected([plan], bin_dir=bin_dir(tmp_path), update=True, runner=runner)
     assert code == 0
     assert outcomes[0].steps[-1] == "nuclei: templates refreshed"
-    assert ["nuclei", "-ut"] in [call[0] for call in calls]
+    refresh = next(call for call in calls if call[0] == ["nuclei", "-ut"])
+    assert refresh[1] is not None
+    assert set(refresh[1]) == {"HOME", "PATH"}
+    assert refresh[1]["HOME"] == str(Path.home())
 
 
 def test_cli_install_without_a_selection_is_a_usage_error() -> None:
@@ -253,3 +256,36 @@ def test_keys_table_lists_names_and_states() -> None:
     assert "CERTSPOTTER_API" in out
     assert "missing" in out
     assert "tool" in out
+
+
+def test_keys_table_is_printed_by_the_prompt(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    shutil.copy2(REPO / ".env.example", tmp_path / ".env.example")
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli.typer, "confirm", lambda *a, **k: True)
+    buffer = io.StringIO()
+    monkeypatch.setattr(
+        cli,
+        "make_console",
+        lambda no_color=False: make_console(stream=buffer, no_color=no_color),
+    )
+    cli._maybe_ask_keys(no_color=True)
+    out = buffer.getvalue()
+    assert "wrote" in out
+    assert "CERTSPOTTER_API" in out
+    assert "missing" in out
+
+
+def test_declining_keys_prints_nothing(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli.typer, "confirm", lambda *a, **k: False)
+    buffer = io.StringIO()
+    monkeypatch.setattr(
+        cli,
+        "make_console",
+        lambda no_color=False: make_console(stream=buffer, no_color=no_color),
+    )
+    cli._maybe_ask_keys(no_color=True)
+    assert buffer.getvalue() == ""
+    assert not (tmp_path / ".env").exists()

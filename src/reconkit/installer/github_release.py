@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import tempfile
@@ -452,10 +453,16 @@ def desired_version(
 
 
 def _refresh_templates(plan: InstallPlan, *, runner: Runner) -> str | None:
-    """`nuclei -ut` after a nuclei change; the flag is in its real --help."""
+    """`nuclei -ut` after a nuclei change; the flag is in its real --help.
+
+    `HOME` is required (PIT-30: nuclei writes its config under `$HOME/.config`)
+    and `PATH` is passed because the binary lives wherever the user installed Go
+    tooling, exactly like the go_install/pipx exception in docs/10 section 3d.
+    """
     if plan.name != "nuclei":
         return None
-    outcome = runner(["nuclei", "-ut"], timeout=120.0, env={"HOME": str(Path.home())})
+    env = {"HOME": str(Path.home()), "PATH": os.environ.get("PATH", "")}
+    outcome = runner(["nuclei", "-ut"], timeout=120.0, env=env)
     if outcome.timed_out or outcome.returncode != 0:
         return "templates not refreshed"
     return "templates refreshed"

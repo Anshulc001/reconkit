@@ -4,7 +4,7 @@
 
 - Status: 10a-10d closed; 10e (install/update CLI, --all, idempotency, exit code 6, tool_versions, bin_dir, doctor --fix) implemented and committed; wait for the 10e review before Part 11
 - Last code commit: run `git log --oneline -1`
-- Baseline: 540 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean
+- Baseline: 542 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean
 - Next action: wait for the 10e review; after approval run the Part 11 audit. Do not start 10f (none exists) or Phase 3.
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
