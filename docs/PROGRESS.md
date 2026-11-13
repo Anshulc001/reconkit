@@ -4,8 +4,8 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit.
 
 ## Environment
 
-- WSL2 Ubuntu, user `anshuanshu`, repo `~/reconkit` (Windows path only for backup: do not edit `/mnt/c`).
-- venv `.venv` (Python 3.11, created with `uv`); activate with `. .venv/bin/activate`.
+- Windows, one canonical checkout: `C:\Users\anshu\Desktop\recon\reconkit` (Git Bash paths: `/c/Users/anshu/Desktop/recon/reconkit`). Do not create a second copy.
+- venv `.venv` (Python 3.11 via `uv`); activate with `. .venv/Scripts/activate` in Git Bash. System `python` is 3.10, so always use the venv or `uv`.
 - Checks (run all four, report PASS/FAIL with `if cmd; then ...`):
 
 ```bash
@@ -15,7 +15,8 @@ ruff format --check .
 mypy src/reconkit
 ```
 
-- Pre-commit hook (`.githooks/pre-commit`) runs those checks and requires `docs/PROGRESS.md` when `src/` or `tests/` change. `git config core.hooksPath .githooks` is set by `scripts/bootstrap.sh`.
+- Pre-commit hook (`.githooks/pre-commit`) runs those checks and requires `docs/PROGRESS.md` when `src/` or `tests/` change. `git config core.hooksPath .githooks` is set by `scripts/bootstrap.sh`. The hook and bootstrap support both `.venv/bin` (POSIX) and `.venv/Scripts` (Windows).
+- Push from this checkout: `git push reconkit main` (remote is named `reconkit`, not `origin`).
 
 ## Task status
 
@@ -55,6 +56,8 @@ Letters d-j are mapped from `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTURE
 - `scope.yaml` defaults: missing `expires` = never expires; missing `max_speed` = `slow`.
 - `check_target` reports `out_of_scope` before expiry (out always wins) and raises `ValueError` on an invalid target.
 - `AGENTS.md` environment corrected from Kali to Ubuntu to match the actual machine.
+- Consolidated to a single Windows checkout on the Desktop; the WSL clone is no longer used. Pushes come from the Desktop checkout (`git push reconkit main`).
+- `_kill_tree` guards on `sys.platform != "win32"` so mypy passes on Windows; the process-group kill itself only runs on POSIX.
 - Commits are authored by `Anshul <anshulc4444@gmail.com>` with no AI co-author trailer.
 
 ## Open risks

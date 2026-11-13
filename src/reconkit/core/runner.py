@@ -6,6 +6,7 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Iterable, Mapping
@@ -182,7 +183,7 @@ def _validate_argv(argv: list[str]) -> None:
 
 
 def _kill_tree(process: subprocess.Popen[bytes]) -> None:
-    if os.name == "posix":
+    if sys.platform != "win32":
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
         except ProcessLookupError:

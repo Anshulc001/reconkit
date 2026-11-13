@@ -16,7 +16,7 @@ plan (5-10 lines, assumptions) -> implement -> tests (normal, empty, malformed, 
 
 - Never say a check passed unless you ran it and pasted the output.
 - Test results with `if cmd; then echo PASS; else echo FAIL; fi`, never `echo $?`.
-- Work only in `~/reconkit` inside WSL. Never push unless asked.
+- Work only in the Desktop checkout `C:\Users\anshu\Desktop\recon\reconkit`. Never edit other copies. Never push unless asked.
 - Root domains use `validate_target()`; discovered hosts use `validate_host()`.
 - Tool flags and JSON field names come from the real tool's `--help` or real sample output, never from memory.
 - Child processes get only the env keys passed in; pass `HOME` explicitly for tools that read config from it.
@@ -31,7 +31,7 @@ plan (5-10 lines, assumptions) -> implement -> tests (normal, empty, malformed, 
 - **Purpose:** A command-line reconnaissance orchestrator for **authorized** security testing. It runs several recon tools per stage, merges and deduplicates their output, scores confidence by how many tools agree, and tracks changes between scans in SQLite.
 - **Users:** Penetration testers and bug bounty hunters working inside a written scope.
 - **Stack:** Python 3.11+, Typer (CLI), Rich (terminal UI), Pydantic v2 (schemas), asyncio, httpx (HTTP), dnspython, PyYAML, SQLite (stdlib `sqlite3`), pytest, ruff, mypy.
-- **Environment:** VS Code on Windows connected with the WSL extension to **WSL2 Ubuntu**. The repo lives at `~/reconkit` inside Ubuntu. **Never** at `/mnt/c/...` (slow, SQLite locking problems, CRLF line endings).
+- **Environment:** Windows + VS Code, one canonical checkout at `C:\Users\anshu\Desktop\recon\reconkit`. Do not create or edit a second copy (no WSL clone, no `/mnt/c` mirror). Push and run checks from this checkout only. Python comes from `uv` (3.11); `python` on PATH is 3.10.
 
 ## 2. Source of truth
 
