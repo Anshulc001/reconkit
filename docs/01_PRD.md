@@ -58,7 +58,7 @@
 - **Acceptance criteria:**
   - Shows each tool: installed, version, path.
   - Shows per-stage coverage (example: `subs 6/9 ready`).
-  - Checks system packages (`libpcap-dev`, `jq`), wordlists, Python version, `scope.yaml` presence, and which API keys are set (names only, never values).
+  - Checks system packages (`libpcap-dev`, `jq`), Python version, `scope.yaml` presence, and which API keys are set (names only, never values).
 - **Edge cases:** tool present but not executable, version command fails, wrong `httpx` program found.
 
 ### Feature 3 - Passive recon (`passive`, `subs`, `dns`)

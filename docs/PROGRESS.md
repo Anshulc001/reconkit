@@ -2,10 +2,10 @@
 
 ## RESUME HERE
 
-- Status: Part 10 docs pre-fix committed; plan awaiting user approval; no Part 10 code
-- Last code commit: run `git log --oneline -1`; Part 9 is the newest commit
-- Baseline: 443 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean
-- Next action: get approval for the Part 10 sub-step plan in docs/REVIEW_LOG.md (Part 10 docs pre-fix); implement only after approval
+- Status: Part 10 docs pre-fix and the three scope decisions committed; 10a (doctor) approved, no 10a code yet
+- Last code commit: run `git log --oneline -1`; Part 9 is the newest code commit
+- Baseline: 443 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean. `.venv` was rebuilt from scratch with `python3` 3.14.8 (the old one was a Windows venv); see Deviations
+- Next action: implement 10a only - doctor's real checks, `--json` and its exit rules - then report diff and tests; do not start 10b
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: none
@@ -115,9 +115,11 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Part 9: schema v2 adds `host_status_history.cnames_json` and `dangling_cname`; DNS-only resolved hosts now get a status row so their CNAME survives a restart, and a later NXDOMAIN reuses the latest stored CNAME. The migration is additive and existing rows default to `[]`/NULL. This is also a row-frequency change: the `dns` stage now writes one status row per host with a signal (`RESOLVED` -> `DNS_ONLY`, `NXDOMAIN` -> `SHUT_DOWN`/`DEAD`) instead of only NXDOMAIN rows; docs/03 and docs/04 state it, and `test_dns_resolved_then_two_nxdomain_is_shut_down_then_dead` guards that the extra row does not break the two-consecutive-NXDOMAIN `DEAD` rule. Wildcard wiring and stage-level resume were triaged, not fixed, because this part was limited to the Fix backlog.
 
 - Part 10 docs pre-fix (docs only): docs/10 now matches docs/02's install surface (`--stage`/`--yes` removed from the grammar), states that `doctor` runs on Windows while `install`/`update` exit 1 there, adds 3b prerequisites (jq, dnsutils via `dig`, Go/GOBIN, pipx-via-apt), 5a doctor output/exit rules, Go/PyPI download hosts, and defers the fixture-version doctor warning to Phase 3 pending per-tool metadata. Open for review: `--all` phase scope, the installer exit code when every tool fails, and where wordlists live.
+- Part 10 scope decisions (docs only): `--all` stays "core tier, no phase filter" and MASTER_PLAN Part 4 now names only `masscan` as opt-in (`rustscan`/`nmap` are core-but-phase-3, and `phase` is build tracking, not a security gate). Exit code 6 was added to docs/02 section 6 for "every requested tool failed to install or update"; 4 and 5 keep their scan meanings. The doctor wordlists check was removed from docs/01 and docs/02 and logged under Open risks. No `src/`, `tests/`, `tools.yaml` or `config.yaml` change.
 
 ## Open risks
 
+- `doctor` does not check wordlists: no Phase-2 adapter consumes one, and no wordlist path exists in `tools.yaml` or `config.yaml`. Only the phase-3 DNS-bruteforce tools (`puredns`, `massdns`, `amass`, `findomain`, `dnsx`) would need one. Revisit when any of those gets an adapter.
 - `RunContext` now carries `limiter` and `ports`, and `HostStatusRecord` carries `location`; all were documented in docs/09 before their code landed. The engine builds one limiter per stage.
 - `dnspython` resolves A/AAAA/CNAME only: the record models have no NS/MX/TXT fields, and adding them would change the database schema. `pyscan` sends no payload and reads no banner (the banner read is optional).
 - `HttpAdapter` is documented in docs/09 section 3. Domain filtering happens in `run()` because the contract's `parse_output(raw)` receives no target; `parse_output` normalizes and validates only.

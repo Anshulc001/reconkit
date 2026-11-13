@@ -17,7 +17,7 @@
 ### Setup and health
 | Command | Purpose | Phase |
 |---|---|---|
-| `doctor [--fix]` | Tools, versions, system packages, wordlists, API key names + Keys table, per-stage coverage | 2 |
+| `doctor [--fix]` | Tools, versions, system packages, API key names + Keys table, per-stage coverage | 2 |
 | `install [TOOL...\|--all] [--dry-run]` | Install missing tools into `~/.reconkit/bin`; interactive TTY asks once about API keys (docs/05 §6.1, task i) | 2 |
 | `update [TOOL...\|--all] [--dry-run]` | Update tools (and nuclei templates) | 2 |
 | `scope check -d DOMAIN` | Show whether a target is allowed by `scope.yaml` | 2 |
@@ -143,6 +143,7 @@ One live line per stage: stage name, current tool, `done/total` tools, elapsed, 
 | 3 | Scope violation (target not allowed, scope missing or expired) |
 | 4 | No usable tool for the stage |
 | 5 | Partial success (some tools failed or timed out) |
+| 6 | Every requested tool failed to install or update |
 | 130 | Interrupted by user (state saved, resumable) |
 
 If passive stages have already completed and an active stage is denied by scope, the run still exits `3`; the passive results already collected are kept and reported.
