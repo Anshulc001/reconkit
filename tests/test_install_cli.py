@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 
 from reconkit import cli
 from reconkit.cli import app
-from reconkit.core.runner import ExecResult
+from reconkit.core.runner import ExecResult, run_exec
 from reconkit.doctor import key_checks
 from reconkit.installer import github_release
 from reconkit.installer.github_release import install_selected
@@ -124,6 +124,7 @@ def test_exit_code_is_aggregated_over_every_selected_tool(tmp_path: Path) -> Non
 
 
 def test_nuclei_templates_are_refreshed_after_a_change(tmp_path: Path) -> None:
+    """Regression: PIT-31 - the refresh env carries HOME and PATH, not HOME alone."""
     plan = replace(
         plan_for("assetfinder"),
         name="nuclei",
@@ -289,3 +290,14 @@ def test_declining_keys_prints_nothing(tmp_path: Path, monkeypatch) -> None:
     cli._maybe_ask_keys(no_color=True)
     assert buffer.getvalue() == ""
     assert not (tmp_path / ".env").exists()
+
+
+def test_regression_custom_env_without_path_cannot_resolve_binary(tmp_path: Path) -> None:
+    """Regression: PIT-31 - a custom env without PATH cannot resolve a bare name."""
+    probe = tmp_path / "reconkit-probe"
+    probe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    probe.chmod(0o700)
+    found = run_exec(["reconkit-probe"], timeout=5.0, env={"PATH": str(tmp_path)})
+    assert found.returncode == 0
+    missing = run_exec(["reconkit-probe"], timeout=5.0, env={"HOME": str(tmp_path)})
+    assert missing.returncode is None
