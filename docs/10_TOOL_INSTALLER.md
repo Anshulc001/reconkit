@@ -44,7 +44,11 @@ Version policy: `@latest` in a `go_install` package means the newest release. A 
 
 ## 3a. Required system packages
 
-Tools may declare `requires_apt` (example: naabu needs `libpcap-dev`) and `requires` (other tools, example: puredns needs massdns). The installer installs dependencies first and reports them in `--dry-run`.
+Tools may declare `requires_apt` (example: naabu needs `libpcap-dev`) and `requires` (other tools, example: puredns needs massdns).
+
+- `requires_apt` is installed **before** the tool's own backend runs, with its own confirmation line: `naabu: sudo apt-get install -y libpcap-dev (required by naabu)`. The two prompts are never merged: a declined prerequisite raises `InstallSkipped` for the tool, so the tool itself is not installed either. `--dry-run` lists the prerequisite as its own step and starts no process.
+- Prerequisites are only reached when the tool is actually installed. An already-installed tool is skipped by the idempotency rule in section 1, so `install <tool>` does not repair a missing `requires_apt` package for it; use `update <tool>` or install the package yourself.
+- `requires` (another reconkit tool) is parsed into the plan but is **not** auto-installed: `puredns` needs `massdns`, which is itself an apt tool. Installing tool-in-tool dependencies is deferred to a future part; install the named tool explicitly.
 
 ## 3b. Prerequisites
 

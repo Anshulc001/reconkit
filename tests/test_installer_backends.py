@@ -306,6 +306,58 @@ def test_dispatch_uses_each_backend_and_isolates_failures(tmp_path: Path) -> Non
     assert calls[2][0] == ["go", "install", "github.com/tomnomnom/assetfinder@latest"]
 
 
+def test_requires_apt_is_installed_before_the_tool_with_its_own_prompt(tmp_path: Path) -> None:
+    plan = replace(plan_for("puredns"), requires_apt=("libpcap-dev",))
+    runner, calls = fake_runner(create=tmp_path / "puredns")
+    prompts: list[str] = []
+
+    def confirm(message: str) -> bool:
+        prompts.append(message)
+        return True
+
+    outcomes, code = install_plans([plan], bin_dir=tmp_path, confirm=confirm, runner=runner)
+    assert code == 0
+    assert prompts == ["puredns: sudo apt-get install -y libpcap-dev (required by puredns)"]
+    assert calls[0][0] == ["sudo", "-n", "apt-get", "install", "-y", "libpcap-dev"]
+    assert calls[0][1] == APT_ENV
+    assert calls[1][0] == ["go", "install", "github.com/d3mondev/puredns/v2@latest"]
+    assert outcomes[0].steps[0] == (
+        "puredns: sudo apt-get install -y libpcap-dev (required by puredns)"
+    )
+
+
+def test_a_declined_prerequisite_skips_the_whole_tool(tmp_path: Path) -> None:
+    plan = replace(plan_for("puredns"), requires_apt=("libpcap-dev",))
+    runner, calls = fake_runner(create=tmp_path / "puredns")
+    outcomes, code = install_plans(
+        [plan], bin_dir=tmp_path, confirm=lambda _message: False, runner=runner
+    )
+    assert calls == []
+    assert outcomes[0].skipped is True
+    assert "required by puredns" in (outcomes[0].error or "")
+    assert "declined" in (outcomes[0].error or "")
+    assert code == 6
+    assert not (tmp_path / "puredns").exists()
+
+
+def test_dry_run_lists_the_apt_prerequisite_and_runs_nothing(tmp_path: Path) -> None:
+    plan = replace(plan_for("puredns"), requires_apt=("libpcap-dev",))
+    runner, calls = fake_runner()
+    outcomes, code = install_plans(
+        [plan], bin_dir=tmp_path, dry_run=True, confirm=always, runner=runner
+    )
+    assert code == 0
+    assert calls == []
+    assert outcomes[0].steps[0] == (
+        "puredns: sudo apt-get install -y libpcap-dev (required by puredns)"
+    )
+    assert "go install" in outcomes[0].steps[1]
+
+
+def test_naabu_declares_libpcap_as_its_prerequisite() -> None:
+    assert plan_for("naabu").requires_apt == ("libpcap-dev",)
+
+
 def test_dispatch_marks_a_declined_apt_plan_skipped_and_exits_5(tmp_path: Path) -> None:
     runner, calls = fake_runner(create=tmp_path / "assetfinder")
     outcomes, code = install_plans(

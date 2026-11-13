@@ -851,3 +851,33 @@ Every restore below was checked with `sha256sum`; the digests before and after e
   `@latest` go_install reporting gap is deferred to a future part (`docs/10` section 6 says so explicitly; it is
   non-destructive and needs its own docs-first design), and authenticated GitHub release lookups are deferred to
   Part 11 planning. Neither is a Part 10 blocker. Do not start Part 11 until the apt run's output is recorded.
+
+### Part 10f - `requires_apt` was never installed (docs/10 3a was false)
+
+- Defect: `InstallPlan.requires_apt` was parsed and read only by `doctor` (system-packages list). No installer
+  backend consumed it, so `install --all` would install `naabu` without `libpcap-dev`, while docs/10 section 3a
+  said "The installer installs dependencies first and reports them in `--dry-run`". Found by checking our own
+  instruction before spending the scarce sudo run, not by the run itself.
+- Docs first (docs/10 3a): `requires_apt` is installed before the tool with its own prompt; a declined
+  prerequisite skips the tool; `--dry-run` lists the step; prerequisites are not reached for an already-installed
+  tool; `requires` (puredns -> massdns) is still not auto-installed and is deferred.
+- Code: `github_release._install_one` now calls `_install_required_packages` before dispatching, and merges the
+  prerequisite steps ahead of the backend steps via `replace(outcome, steps=(*prelude, *outcome.steps))`. The old
+  dispatch body moved unchanged to `_dispatch_backend`. `apt.apt_install_package` (the confirmed primitive) is
+  reused, so the prerequisite prompt is `naabi`-style distinct: `naabu: sudo apt-get install -y libpcap-dev
+  (required by naabu)`. A declined prerequisite raises `InstallSkipped` out of `_install_one`, so
+  `install_selected`/`install_plans` mark the **tool** skipped and never call its backend.
+- Tests added (`tests/test_installer_backends.py`): `test_requires_apt_is_installed_before_the_tool_with_its_own_prompt`,
+  `test_a_declined_prerequisite_skips_the_whole_tool`, `test_dry_run_lists_the_apt_prerequisite_and_runs_nothing`,
+  `test_naabu_declares_libpcap_as_its_prerequisite`.
+- Mutation proofs (restore verified by `sha256sum` = `12f009fde7df9e11a694b64da90e12ca5f5dc2707bc5227318c51ed6292945c5`):
+  - A: `for package in plan.requires_apt:` -> `for package in ():` -> the ordering, declined and dry-run tests all
+    FAILED (`3 failed`), e.g. `assert 'puredns: go install ...' == 'puredns: sudo apt-get install -y libpcap-dev ...'`.
+  - B: wrap `apt_install_package` in `except InstallSkipped: continue` -> `test_a_declined_prerequisite_skips_the_whole_tool`
+    FAILED (`assert [go install ...] == []`); the tool was installed despite the refusal.
+  - Note: the `MUTANT_*_EXIT=` lines printed `0` because `$?` captured `tail` in the pipeline, not pytest. The
+    `3 failed` / `1 failed` summary lines are pytest's real verdict; the restored run used `if ... then ... fi`.
+- Gate: `565 passed`; ruff, ruff format and mypy clean.
+- Consequence for the gate run: on this box `naabu` is already installed, so `install --all` will install only
+  `massdns` through apt. A live `libpcap-dev` proof needs `update naabu` (when the release comparison says "not
+  current") or a machine without naabu.

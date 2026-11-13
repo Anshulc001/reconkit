@@ -303,7 +303,66 @@ def _require_confirm(confirm: Confirm | None, plan: InstallPlan) -> Confirm:
     return confirm
 
 
+def _install_required_packages(
+    plan: InstallPlan,
+    *,
+    confirm: Confirm | None,
+    runner: Runner,
+    dry_run: bool,
+) -> tuple[str, ...]:
+    """Install `requires_apt` first, as its own confirmed step (docs/10 3a)."""
+    steps: list[str] = []
+    for package in plan.requires_apt:
+        message = f"{plan.name}: sudo apt-get install -y {package} (required by {plan.name})"
+        steps.append(message)
+        if dry_run:
+            continue
+        apt.apt_install_package(
+            package,
+            name=plan.name,
+            message=message,
+            confirm=_require_confirm(confirm, plan),
+            runner=runner,
+        )
+    return tuple(steps)
+
+
 def _install_one(
+    plan: InstallPlan,
+    *,
+    bin_dir: Path,
+    client: httpx.Client | None,
+    dry_run: bool,
+    arch: str | None,
+    verify_checksums: bool,
+    confirm: Confirm | None,
+    runner: Runner,
+    has_pipx: bool | None,
+) -> InstallOutcome:
+    """Install the apt prerequisites, then dispatch the plan (docs/10 3)."""
+    prelude = _install_required_packages(
+        plan,
+        confirm=confirm,
+        runner=runner,
+        dry_run=dry_run,
+    )
+    outcome = _dispatch_backend(
+        plan,
+        bin_dir=bin_dir,
+        client=client,
+        dry_run=dry_run,
+        arch=arch,
+        verify_checksums=verify_checksums,
+        confirm=confirm,
+        runner=runner,
+        has_pipx=has_pipx,
+    )
+    if prelude:
+        outcome = replace(outcome, steps=(*prelude, *outcome.steps))
+    return outcome
+
+
+def _dispatch_backend(
     plan: InstallPlan,
     *,
     bin_dir: Path,
