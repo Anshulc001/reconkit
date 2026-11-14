@@ -59,6 +59,8 @@ CREATE TABLE subdomains (
                 CHECK (confidence IN ('HIGH','MEDIUM','LOW','UNCONFIRMED')),
   source_count  INTEGER NOT NULL DEFAULT 0,
   is_wildcard   INTEGER NOT NULL DEFAULT 0,
+  provenance    TEXT NOT NULL DEFAULT 'dns'    -- how the row entered: 'subs' or 'dns'
+                CHECK (provenance IN ('subs','dns')),
   first_seen_run INTEGER NOT NULL REFERENCES scan_runs(id),
   last_seen_run  INTEGER NOT NULL REFERENCES scan_runs(id),
   UNIQUE (target_id, fqdn)
@@ -173,6 +175,7 @@ CREATE TABLE monitor_changes (            -- Phase 3: not created in this build
 - Confidence from `source_count`: >=3 HIGH, 2 MEDIUM, 1 LOW (thresholds from `config.yaml`); `UNCONFIRMED` when tools disagree.
 - No DNS answer (NXDOMAIN) means `DEAD`, unless the previous known state was `ALIVE` or `DNS_ONLY`, which makes it `SHUT_DOWN`. This state rule is unconditional; agreeing checks affect `confidence` only.
 - `fqdn` stored lowercase, no trailing dot, validated before insert.
+- `provenance` records how a row entered `subdomains`: `subs` when a discovery tool first reported it, `dns` when a `dns`/`live`/`ports` pass created the row first. A `dns` row has no `subdomain_sources` rows and `source_count` 0, so it is not a discovery result. A later discovery sighting upgrades it to `subs`, and the upgrade is never reversed; `first_seen_run` still records when the row was created and never changes.
 - `Store.scan_runs(target_id)` and `Store.subdomains(target_id)` are read queries used by engine resume; both return plain dictionaries and never expose the connection.
 - `Store.host_rows(target_id)` returns the latest host state/confidence, latest status code, distinct source tools and open ports for the UI. `Store.recent_scan_runs(limit)` returns recent stage runs joined to target domains for `status`. `Store.completed_run_ids(target_id, stage)` returns completed/partial run ids newest-first for `diff`; `Store.latest_cnames(subdomain_id)` returns the CNAMEs from the latest status row; all four are read-only and never expose the connection.
 - `host_status_history.cnames_json` is written for every persisted status row and is never NULL. `dangling_cname` is NULL unless the row is `SHUT_DOWN` and the stored CNAME points outside the target. When a later NXDOMAIN pass has no CNAME of its own, the engine reuses `Store.latest_cnames()` so the takeover-relevant warning survives the process restart.
@@ -180,7 +183,7 @@ CREATE TABLE monitor_changes (            -- Phase 3: not created in this build
 
 ## 6. Diff Queries (core of `diff`)
 
-- **NEW:** `first_seen_run = <latest run>`.
+- **NEW:** the host's first discovery sighting is the latest discovery run: `provenance = 'subs'` and no `subdomain_sources` row for any earlier run. A row created by `dns`/`live`/`ports` (`provenance = 'dns'`) is never NEW; the run in which a discovery tool first reports it is the first run at which it can appear as NEW. NEW is therefore not `first_seen_run = <latest run>`: a host the `dns` stage resolved before any tool returned it would otherwise be reported new.
 - **GONE:** seen in the run before the previous one, **and** missing from both the previous run and the latest run - two consecutive misses (for discovery stages). This needs the three latest completed discovery run ids; with fewer than three, `gone` is empty. No schema change is needed: presence per run is already recorded in `subdomain_sources.run_id`, so the query is the old "seen in X, not in Y" test applied twice.
 - **Pending (not a change):** seen in the previous run, not in the latest. Not reported as `GONE`; surfaced as `pending_gone` so the user can see the rule working. It is the previous single-miss query under a new name.
 - **NOW DEAD:** the latest `host_status_history` row for the subdomain is `DEAD` and the previous known state was not `DEAD`.
@@ -213,6 +216,7 @@ No soft delete. This build has no delete command; removing a target's rows is a 
 
 - `schema_version` table + ordered migration scripts in `core/store.py`.
 - Schema version 2 adds `host_status_history.cnames_json` (`NOT NULL DEFAULT '[]'`) and `dangling_cname` (`NULL`). Existing rows therefore get an empty list and no dangling value, never NULL for the list.
+- Schema version 3 adds `subdomains.provenance` (`TEXT NOT NULL DEFAULT 'dns'`, `CHECK (provenance IN ('subs','dns'))`) and back-fills existing rows: any row with a `subdomain_sources` entry becomes `subs`, every other row stays `dns`. Nothing is destroyed; `first_seen_run` is untouched.
 - Every schema change: documented here, has a migration, has a test, never destroys existing data.
 
 ## 12. Seed Data

@@ -1383,7 +1383,7 @@ def seed_subs_run(
 ) -> int:
     run_id = store.create_scan_run(target_id, Stage.SUBS.value, "slow")
     for fqdn in hosts:
-        sub_id = store.upsert_subdomain(target_id, fqdn, run_id=run_id)
+        sub_id = store.upsert_subdomain(target_id, fqdn, run_id=run_id, provenance="subs")
         store.add_subdomain_source(sub_id, run_id, "subfinder")
     store.finish_scan_run(run_id, status)
     return run_id
@@ -1420,6 +1420,106 @@ def test_diff_with_three_runs_confirms_gone(tmp_path: Path) -> None:
     assert report.latest_run_id == latest
     assert report.gone == ("gone.example.com",)
     assert report.pending_gone == ()
+
+
+async def test_dns_only_host_has_dns_provenance_and_is_never_new(tmp_path: Path) -> None:
+    """Regression: PIT-44 (12b) - a DNS-resolved host is not a discovery result.
+
+    The dns stage used to create the row with no marker, so `diff_new` (which
+    keyed on `first_seen_run`) reported a host no discovery tool ever returned
+    as NEW. The row stays, marked `dns`, and is excluded from NEW.
+    """
+    specs = {"subs-a": tool("subs-a", Stage.SUBS), "dns-a": tool("dns-a", Stage.DNS)}
+    first = make_engine(
+        tmp_path,
+        specs,
+        {
+            "subs-a": adapter("subs-a", Stage.SUBS, Recorder(), records=[sub("base.example.com")]),
+            "dns-a": adapter("dns-a", Stage.DNS, Recorder(), records=[]),
+        },
+    )
+    await first.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True, speed="slow")
+    )
+    second = make_engine(
+        tmp_path,
+        specs,
+        {
+            "subs-a": adapter("subs-a", Stage.SUBS, Recorder(), records=[]),
+            "dns-a": adapter(
+                "dns-a",
+                Stage.DNS,
+                Recorder(),
+                records=[SubdomainRecord(fqdn="alias.example.com", source="fake", ips=["1.2.3.4"])],
+            ),
+        },
+        store=first.store,
+    )
+    await second.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True, speed="slow")
+    )
+
+    row = second.store._conn.execute(
+        "SELECT provenance, source_count FROM subdomains WHERE fqdn = ?",
+        ("alias.example.com",),
+    ).fetchone()
+    assert (row["provenance"], row["source_count"]) == ("dns", 0)
+    sources = second.store._conn.execute(
+        "SELECT COUNT(*) FROM subdomain_sources x JOIN subdomains s ON s.id = x.subdomain_id"
+        " WHERE s.fqdn = ?",
+        ("alias.example.com",),
+    ).fetchone()[0]
+    assert sources == 0
+    assert second.diff("example.com").new == ()
+
+
+async def test_a_discovered_host_keeps_its_real_provenance_and_is_new(
+    tmp_path: Path,
+) -> None:
+    """Regression guard: real discovery is still `subs` and still NEW."""
+    specs = {"subs-a": tool("subs-a", Stage.SUBS), "dns-a": tool("dns-a", Stage.DNS)}
+    first = make_engine(
+        tmp_path,
+        specs,
+        {
+            "subs-a": adapter("subs-a", Stage.SUBS, Recorder(), records=[sub("base.example.com")]),
+            "dns-a": adapter("dns-a", Stage.DNS, Recorder(), records=[]),
+        },
+    )
+    await first.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True, speed="slow")
+    )
+    second = make_engine(
+        tmp_path,
+        specs,
+        {
+            "subs-a": adapter("subs-a", Stage.SUBS, Recorder(), records=[sub("www.example.com")]),
+            "dns-a": adapter(
+                "dns-a",
+                Stage.DNS,
+                Recorder(),
+                records=[
+                    SubdomainRecord(fqdn="www.example.com", source="fake", ips=["1.2.3.4"]),
+                    SubdomainRecord(fqdn="alias.example.com", source="fake", ips=["1.2.3.4"]),
+                ],
+            ),
+        },
+        store=first.store,
+    )
+    await second.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True, speed="slow")
+    )
+
+    rows = {
+        str(row["fqdn"]): str(row["provenance"])
+        for row in second.store._conn.execute("SELECT fqdn, provenance FROM subdomains")
+    }
+    assert rows == {
+        "alias.example.com": "dns",
+        "base.example.com": "subs",
+        "www.example.com": "subs",
+    }
+    assert second.diff("example.com").new == ("www.example.com",)
 
 
 def test_diff_with_one_run_has_nothing_to_compare(tmp_path: Path) -> None:

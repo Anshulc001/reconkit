@@ -89,6 +89,24 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (1);
+        CREATE TABLE subdomains (
+          id INTEGER PRIMARY KEY,
+          target_id INTEGER NOT NULL,
+          fqdn TEXT NOT NULL,
+          state TEXT NOT NULL DEFAULT 'UNKNOWN',
+          confidence TEXT NOT NULL DEFAULT 'LOW',
+          source_count INTEGER NOT NULL DEFAULT 0,
+          is_wildcard INTEGER NOT NULL DEFAULT 0,
+          first_seen_run INTEGER NOT NULL,
+          last_seen_run INTEGER NOT NULL,
+          UNIQUE (target_id, fqdn)
+        );
+        CREATE TABLE subdomain_sources (
+          subdomain_id INTEGER NOT NULL,
+          run_id INTEGER NOT NULL,
+          tool TEXT NOT NULL,
+          PRIMARY KEY (subdomain_id, run_id, tool)
+        );
         CREATE TABLE host_status_history (
           id           INTEGER PRIMARY KEY,
           subdomain_id INTEGER NOT NULL,
@@ -116,7 +134,7 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 2
+        assert migrated.schema_version == SCHEMA_VERSION == 3
         assert "cnames_json" in columns
         assert "dangling_cname" in columns
         row = migrated._conn.execute(
@@ -427,16 +445,131 @@ def test_host_status_history_order(store: Store) -> None:
 def test_diff_new(store: Store) -> None:
     target_id, run_a = make_run(store)
     _, run_b = make_run(store)
-    a = store.upsert_subdomain(target_id, "a.example.com", run_id=run_a)
+    a = store.upsert_subdomain(target_id, "a.example.com", run_id=run_a, provenance="subs")
     store.add_subdomain_source(a, run_a, "crtsh")
-    b = store.upsert_subdomain(target_id, "b.example.com", run_id=run_b)
+    b = store.upsert_subdomain(target_id, "b.example.com", run_id=run_b, provenance="subs")
     store.add_subdomain_source(b, run_b, "crtsh")
     assert store.diff_new(run_b) == ["b.example.com"]
 
 
+def provenance_of(store: Store, fqdn: str) -> str:
+    row = store._conn.execute(
+        "SELECT provenance FROM subdomains WHERE fqdn = ?", (fqdn,)
+    ).fetchone()
+    return str(row["provenance"])
+
+
+def test_a_dns_created_row_is_never_new(store: Store) -> None:
+    """12b: a row the dns stage created is not a discovery result."""
+    target_id, run_id = make_run(store)
+    store.upsert_subdomain(target_id, "alias.example.com", run_id=run_id)
+    assert provenance_of(store, "alias.example.com") == "dns"
+    assert store.diff_new(run_id) == []
+
+
+def test_a_discovered_host_keeps_subs_provenance_and_is_new(store: Store) -> None:
+    """Regression guard: the discovery path still writes subs and is still NEW."""
+    target_id, run_id = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "www.example.com", run_id=run_id, provenance="subs")
+    store.add_subdomain_source(sub_id, run_id, "crtsh")
+    assert provenance_of(store, "www.example.com") == "subs"
+    assert store.diff_new(run_id) == ["www.example.com"]
+
+
+def test_provenance_upgrades_to_subs_and_becomes_new_at_that_run(store: Store) -> None:
+    target_id, dns_run = make_run(store)
+    _, subs_run = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "late.example.com", run_id=dns_run)
+    assert store.diff_new(dns_run) == []
+    same_id = store.upsert_subdomain(
+        target_id, "late.example.com", run_id=subs_run, provenance="subs"
+    )
+    store.add_subdomain_source(same_id, subs_run, "subfinder")
+    assert same_id == sub_id
+    assert provenance_of(store, "late.example.com") == "subs"
+    row = store._conn.execute(
+        "SELECT first_seen_run FROM subdomains WHERE id = ?", (sub_id,)
+    ).fetchone()
+    assert row["first_seen_run"] == dns_run  # creation time is not rewritten
+    assert store.diff_new(subs_run) == ["late.example.com"]
+
+
+def test_provenance_never_downgrades(store: Store) -> None:
+    target_id, first = make_run(store)
+    _, later = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "kept.example.com", run_id=first, provenance="subs")
+    store.add_subdomain_source(sub_id, first, "crtsh")
+    store.upsert_subdomain(target_id, "kept.example.com", run_id=later)  # a dns pass
+    assert provenance_of(store, "kept.example.com") == "subs"
+
+
+def test_a_dns_only_host_stays_out_of_new_across_many_runs(store: Store) -> None:
+    target_id, first = make_run(store)
+    store.upsert_subdomain(target_id, "alias.example.com", run_id=first)
+    runs = [first]
+    for _ in range(3):
+        _, run_id = make_run(store)
+        runs.append(run_id)
+        store.upsert_subdomain(target_id, "alias.example.com", run_id=run_id)
+    assert [store.diff_new(run_id) for run_id in runs] == [[], [], [], []]
+
+
+def test_v2_database_migrates_provenance_with_backfill(tmp_path: Path) -> None:
+    db_path = tmp_path / "v2.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE schema_version (version INTEGER NOT NULL);
+        INSERT INTO schema_version (version) VALUES (2);
+        CREATE TABLE subdomains (
+          id INTEGER PRIMARY KEY,
+          target_id INTEGER NOT NULL,
+          fqdn TEXT NOT NULL,
+          state TEXT NOT NULL DEFAULT 'UNKNOWN',
+          confidence TEXT NOT NULL DEFAULT 'LOW',
+          source_count INTEGER NOT NULL DEFAULT 0,
+          is_wildcard INTEGER NOT NULL DEFAULT 0,
+          first_seen_run INTEGER NOT NULL,
+          last_seen_run INTEGER NOT NULL,
+          UNIQUE (target_id, fqdn)
+        );
+        CREATE TABLE subdomain_sources (
+          subdomain_id INTEGER NOT NULL,
+          run_id INTEGER NOT NULL,
+          tool TEXT NOT NULL,
+          PRIMARY KEY (subdomain_id, run_id, tool)
+        );
+        INSERT INTO subdomains (id, target_id, fqdn, first_seen_run, last_seen_run)
+          VALUES (1, 1, 'www.example.com', 1, 1), (2, 1, 'alias.example.com', 1, 1);
+        INSERT INTO subdomain_sources (subdomain_id, run_id, tool) VALUES (1, 1, 'crtsh');
+        """
+    )
+    conn.close()
+
+    migrated = Store(db_path)
+    try:
+        columns = {
+            str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(subdomains)")
+        }
+        assert migrated.schema_version == SCHEMA_VERSION == 3
+        assert "provenance" in columns
+        rows = {
+            str(row["fqdn"]): str(row["provenance"])
+            for row in migrated._conn.execute("SELECT fqdn, provenance FROM subdomains")
+        }
+        assert rows == {"www.example.com": "subs", "alias.example.com": "dns"}
+        # The resume query still reads the migrated rows.
+        assert [row["fqdn"] for row in migrated.subdomains(1)] == [
+            "alias.example.com",
+            "www.example.com",
+        ]
+    finally:
+        migrated.close()
+
+
 def add_hosts(store: Store, target_id: int, run_id: int, names: list[str]) -> None:
     for name in names:
-        sub_id = store.upsert_subdomain(target_id, name, run_id=run_id)
+        sub_id = store.upsert_subdomain(target_id, name, run_id=run_id, provenance="subs")
         store.add_subdomain_source(sub_id, run_id, "subfinder")
 
 

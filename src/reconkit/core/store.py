@@ -16,7 +16,7 @@ from pathlib import Path
 
 from reconkit.errors import ConfigError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 REDACTED = "***"
 
 _SCHEMA_V1 = """
@@ -132,7 +132,14 @@ ALTER TABLE host_status_history ADD COLUMN cnames_json TEXT NOT NULL DEFAULT '[]
 ALTER TABLE host_status_history ADD COLUMN dangling_cname TEXT;
 """
 
-_MIGRATIONS: tuple[tuple[int, str], ...] = ((1, _SCHEMA_V1), (2, _SCHEMA_V2))
+_SCHEMA_V3 = """
+ALTER TABLE subdomains ADD COLUMN provenance TEXT NOT NULL DEFAULT 'dns'
+  CHECK (provenance IN ('subs','dns'));
+UPDATE subdomains SET provenance = 'subs'
+  WHERE id IN (SELECT subdomain_id FROM subdomain_sources);
+"""
+
+_MIGRATIONS: tuple[tuple[int, str], ...] = ((1, _SCHEMA_V1), (2, _SCHEMA_V2), (3, _SCHEMA_V3))
 
 _COUNT_SQL: dict[str, str] = {
     "targets": "SELECT COUNT(*) FROM targets",
@@ -443,20 +450,24 @@ class Store:
         confidence: str | None = None,
         source_count: int | None = None,
         is_wildcard: bool | None = None,
+        provenance: str | None = None,
     ) -> int:
         self._conn.execute(
             "INSERT INTO subdomains"
             " (target_id, fqdn, state, confidence, source_count, is_wildcard,"
-            "  first_seen_run, last_seen_run)"
+            "  provenance, first_seen_run, last_seen_run)"
             " VALUES (:target_id, :fqdn, COALESCE(:state, 'UNKNOWN'),"
             "  COALESCE(:confidence, 'LOW'), COALESCE(:source_count, 0),"
-            "  COALESCE(:is_wildcard, 0), :run_id, :run_id)"
+            "  COALESCE(:is_wildcard, 0), COALESCE(:provenance, 'dns'),"
+            "  :run_id, :run_id)"
             " ON CONFLICT(target_id, fqdn) DO UPDATE SET"
             "  last_seen_run = excluded.last_seen_run,"
             "  state = COALESCE(:state, subdomains.state),"
             "  confidence = COALESCE(:confidence, subdomains.confidence),"
             "  source_count = COALESCE(:source_count, subdomains.source_count),"
-            "  is_wildcard = COALESCE(:is_wildcard, subdomains.is_wildcard)",
+            "  is_wildcard = COALESCE(:is_wildcard, subdomains.is_wildcard),"
+            "  provenance = CASE WHEN excluded.provenance = 'subs'"
+            "   THEN 'subs' ELSE subdomains.provenance END",
             {
                 "target_id": target_id,
                 "fqdn": fqdn,
@@ -464,6 +475,7 @@ class Store:
                 "confidence": confidence,
                 "source_count": source_count,
                 "is_wildcard": None if is_wildcard is None else int(is_wildcard),
+                "provenance": provenance,
                 "run_id": run_id,
             },
         )
@@ -629,10 +641,12 @@ class Store:
 
     def diff_new(self, latest_run_id: int) -> list[str]:
         rows = self._conn.execute(
-            "SELECT fqdn FROM subdomains"
-            " WHERE target_id = (SELECT target_id FROM scan_runs WHERE id = ?)"
-            "   AND first_seen_run = ?"
-            " ORDER BY fqdn",
+            "SELECT s.fqdn FROM subdomains s"
+            " WHERE s.target_id = (SELECT target_id FROM scan_runs WHERE id = ?)"
+            "   AND s.provenance = 'subs'"
+            "   AND NOT EXISTS (SELECT 1 FROM subdomain_sources x"
+            "                   WHERE x.subdomain_id = s.id AND x.run_id < ?)"
+            " ORDER BY s.fqdn",
             (latest_run_id, latest_run_id),
         ).fetchall()
         return [str(row["fqdn"]) for row in rows]

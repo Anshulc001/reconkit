@@ -1107,6 +1107,7 @@ class Engine:
                 run_id=run_id,
                 confidence=confidence.value,
                 source_count=len(tools),
+                provenance="subs",
             )
             for tool in sorted(tools):
                 self.store.add_subdomain_source(sub_id, run_id, tool)
