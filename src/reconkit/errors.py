@@ -12,7 +12,15 @@ class ScopeError(Exception):
 
 
 class ToolNotInstalled(Exception):
-    """No usable tool is available for the stage (exit code 4)."""
+    """No usable tool is available for the stage (exit code 4).
+
+    Intentionally never raised. A tool that is absent at selection time is
+    recorded as `skipped (not installed)` and the stage continues (docs/09
+    selection rules), while exit code 4 is derived in `Engine._exit_code` from
+    "no selected tool ran at all". The name stays in the vocabulary that
+    docs/06 section 6 defines for adapters, but a skip must not raise it: doing
+    so would turn a normal "not installed" into a stage failure.
+    """
 
     exit_code: ClassVar[int] = 4
 

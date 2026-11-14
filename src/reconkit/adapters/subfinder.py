@@ -75,7 +75,9 @@ class SubfinderAdapter(BinaryAdapter):
             target = validate_target(ctx.target)
         except (TypeError, ValueError):
             raise ToolFailed("subfinder: invalid target") from None
-        argv = [self.binary, "-d", target, "-silent", "-nc", "-duc"]
+        # The child gets only the env keys passed in, so it has no PATH: launch the
+        # path binary_path() resolved (docs/09 adapter contract), never the bare name.
+        argv = [self.binary_path() or self.binary, "-d", target, "-silent", "-nc", "-duc"]
         argv += ctx.pacer.tool_rate_args(self.name, "passive")
         if self._provider_config is not None:
             argv += ["-pc", str(self._provider_config)]

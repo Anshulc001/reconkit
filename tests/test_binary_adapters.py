@@ -224,15 +224,66 @@ def test_identity_timeout_is_not_installed(monkeypatch: pytest.MonkeyPatch) -> N
 def test_subfinder_command_and_rate_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = SubfinderAdapter()
     argv = adapter.build_command(make_ctx())
-    assert argv == ["subfinder", "-d", "example.com", "-silent", "-nc", "-duc", "-rl", "20"]
+    # argv[0] is whatever this machine resolves (managed dir, PATH or bare
+    # name); pins the flags here and the resolution in the 11d-findings-e tests.
+    assert Path(argv[0]).name == "subfinder"
+    assert argv[1:] == ["-d", "example.com", "-silent", "-nc", "-duc", "-rl", "20"]
 
 
 def test_assetfinder_command() -> None:
-    assert AssetfinderAdapter().build_command(make_ctx()) == [
-        "assetfinder",
-        "--subs-only",
-        "example.com",
-    ]
+    argv = AssetfinderAdapter().build_command(make_ctx())
+    assert Path(argv[0]).name == "assetfinder"
+    assert argv[1:] == ["--subs-only", "example.com"]
+
+
+BINARY_STAND_INS = [(SubfinderAdapter, "subfinder"), (AssetfinderAdapter, "assetfinder")]
+
+
+def _managed_stand_in(home: Path, binary: str, body: str) -> Path:
+    target = home / ".reconkit" / "bin" / binary
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body, encoding="utf-8")
+    target.chmod(0o755)
+    return target
+
+
+@pytest.mark.parametrize(("adapter_cls", "binary"), BINARY_STAND_INS)
+def test_build_command_launches_the_resolved_managed_binary(
+    adapter_cls: type[BinaryAdapter], binary: str, isolated_home: Path
+) -> None:
+    """Regression: 11d-findings-e.
+
+    The child gets only the env keys that were passed in, so it has no PATH
+    to resolve a bare name against. An explicit --tools run of an installed
+    binary therefore failed with "not installed or not executable" while
+    check_installed() reported it present. Launch the resolved path; do not
+    widen the child env to fix this. Fix build_command, never this assertion.
+    """
+    target = _managed_stand_in(isolated_home, binary, "#!/bin/sh\nexit 0\n")
+    adapter = adapter_cls()
+    assert adapter.binary_path() == str(target)
+    argv = adapter.build_command(make_ctx())
+    assert Path(argv[0]).is_absolute()
+    assert argv[0] == str(target)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shell stand-in")
+@pytest.mark.parametrize(("adapter_cls", "binary"), BINARY_STAND_INS)
+async def test_installed_binary_in_managed_dir_actually_runs(
+    adapter_cls: type[BinaryAdapter], binary: str, isolated_home: Path
+) -> None:
+    """Regression: 11d-findings-e, end to end.
+
+    The product contradicted itself: doctor said installed, the scan said
+    "not installed". This runs the adapter for real against a stand-in in the
+    managed directory - no monkeypatched run_exec, no network, no real tool -
+    and requires it to launch. On the bare-name code the spawn fails, which is
+    exactly the symptom. Fix build_command, never this test.
+    """
+    _managed_stand_in(isolated_home, binary, "#!/bin/sh\necho www.example.com\n")
+    result = await adapter_cls().run(make_ctx())
+    assert result.status is ToolStatus.OK
+    assert [record.fqdn for record in result.records] == ["www.example.com"]
 
 
 def test_httpx_command_dedupes_and_lowercases_hosts() -> None:
