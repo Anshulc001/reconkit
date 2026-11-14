@@ -6,11 +6,11 @@
 - PIT-32 (after Part 10f): an A/B test confirmed that `run_exec`'s `start_new_session=True` hid a valid `sudo -v` ticket from children (sudo `tty_tickets` is session-scoped). `runner.py` now keeps POSIX children in the parent's session and gives each its own process group (`start_new_session=is_windows`, `process_group=0` on POSIX), with two regression tests. This was the prerequisite for the live gate run.
 - Deferred by ruling (not Part 10 blockers): `update` idempotency for `@latest` go_install tools (reporting gap, binaries byte-identical; needs a new version-probe mechanism and its own docs-first pass, docs/10 section 6) and authenticated GitHub release lookups (a Part 11 planning decision).
 - Last code commit: run `git log --oneline -1`
-- Baseline: 569 passed, 0 skipped on Linux (Python 3.14.8 here); ruff, ruff format and mypy clean
+- Baseline: 570 passed, 0 skipped on Linux (Python 3.14.8 here); ruff, ruff format and mypy clean
 - Next action: Part 11 (docs sync, README/SETUP rewrite, fresh-eyes audit, final report) may begin once the user says so. Part 11 cannot close without at least one real run against an authorized target on real Kali; mock-only is insufficient.
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
-- Known open bugs: 11d-findings-a/b/c, logged 2026-11-14 (see "11d-findings" below); 11d-findings-d awaits a maintainer decision. (a) blocks any `live`/`ports`/`--active` run.
+- Known open bugs: 11d-findings-**a is fixed** 2026-11-14 (see "11d-findings-a - fixed" below); 11d-findings-b/c remain open; 11d-findings-d awaits a maintainer decision. (a) no longer blocks a `live`/`ports`/`--active` run, but none has been run yet.
 - Read first: AGENTS.md, this block, last 3 REVIEW_LOG entries, current part in docs/MASTER_PLAN.md
 
 Read this after `AGENTS.md`, before touching code. Update it in every commit.
@@ -196,6 +196,19 @@ Artifact checks (raw, from the file): `PRAGMA integrity_check` = `ok`; `PRAGMA f
 - `_persist_live` calls the same `_write_host` (engine.py ~1085), so the `live` stage has the identical defect for `ALIVE` hosts. This is why `live`/`ports`/`--active` were not run on top of it.
 - **Regression test this fix must add (currently absent):** run `SUBS` with two tools reporting `www.example.com`, then `DNS` with one tool resolving it, and assert the stored row is `("MEDIUM", 2)`. Today it reads `("LOW", 1)` and fails.
 
+### 11d-findings-a - fixed 2026-11-14
+
+- **Mechanism.** `_write_host` no longer supplies `source_count` at all. docs/04 section 5 defines it as the distinct tools in `subdomain_sources`, and only `_persist_discovery` writes that table, so a state pass was never a legitimate author of the column - it was overwriting a value it had no data to justify. `_write_host` now supplies `confidence` only when the transition is `UNCONFIRMED` (a disagreement signal, which a state pass does have standing to assert), and `upsert_subdomain`'s `COALESCE` keeps the discovery value untouched.
+- **Why nothing is lost.** The pass-local tools are still recorded per pass in `host_status_history.tools_json` (`append_host_status(..., tools=transition.sources)`, engine.py 1140-1154), and the regression test asserts that row rather than trusting the argument.
+- **Latent guard folded in, by ruling.** `_persist_dns` now has `if not transition.persist: continue`, mirroring `_persist_live`, so the same call site is no longer asymmetric in two directions at once.
+- **Rejected shapes.** `source_count = MAX(incoming, stored)` would make `MEDIUM`/`HIGH` permanent, because confidence must be able to fall when a host genuinely loses a source. Deriving the count from `subdomain_sources` at write time is more doc-faithful but would produce the (b) outcome through a second mechanism, blurring the (a)/(b) boundary this row was kept separate for.
+- **Regression test** `tests/test_engine.py::test_dns_pass_does_not_overwrite_discovery_confidence`, docstring opening `Regression: 11d-findings-a`: `SUBS` (two tools report `www.example.com`) -> `DNS` (one tool resolves it) -> assert `("MEDIUM", 2)`, plus a `tools_json == ["dns-a"]` assertion for the provenance claim above.
+  - Before the fix, with the old `engine.py` restored and only the new test kept: `E AssertionError: assert ('LOW', 1) == ('MEDIUM', 2)`, `1 failed, 35 deselected`, exit 1. That is the same pair the real run stored for all four hosts, so the test reproduces the production symptom rather than merely describing it.
+  - After the fix: `1 passed, 35 deselected`, exit 0.
+- **Side effect on (b), disclosed and deliberately not fixed.** With `source_count` no longer passed, the apex `testfire.net` - which reads `1` today only because `_write_host` stamped it - would insert at the schema default `0` on the next run. That value is more defensible, but the row is still created by the `dns` stage with `first_seen_run=2`, so **11d-findings-b is unaffected in substance and stays open**.
+- **Checks** (`.venv`, Python 3.14.8): `pytest -q` -> **570 passed** (the previous 569 plus the new test, so nothing else was depending on the clobbered value); `ruff check .` -> `All checks passed!`; `ruff format --check .` -> `69 files already formatted`; `mypy src/reconkit` -> `Success: no issues found in 37 source files`.
+- **Scope of this commit:** `src/reconkit/engine.py`, `tests/test_engine.py`, this file. 11d-findings-b, (c) and (d) were not touched and remain open. Nothing was pushed.
+
 ### 11d-findings-b (medium) - the DNS stage creates subdomain rows
 
 - `_persist_dns` (engine.py 1015-1018) and `_previous_facts` (engine.py 1115-1122) both call `upsert_subdomain(target_id, host, run_id=run_id)` with no `confidence`/`source_count`, so a host with no row is INSERTed with the schema defaults (`source_count=0`, `confidence='LOW'`) and `first_seen_run=<dns run id>`.
@@ -217,7 +230,7 @@ Artifact checks (raw, from the file): `PRAGMA integrity_check` = `ok`; `PRAGMA f
 
 ### Latent, not exercised by this run
 
-- `_persist_dns` calls `_write_host` without the `if not transition.persist: continue` guard that `_persist_live` uses (engine.py ~1086). It is unreachable today because `_dns_facts` emits only `RESOLVED`/`NXDOMAIN` signals, but it is one refactor away from writing spurious status rows. Fold into (a)'s fix or give it its own ticket.
+- `_persist_dns` calls `_write_host` without the `if not transition.persist: continue` guard that `_persist_live` uses (engine.py ~1086). It is unreachable today because `_dns_facts` emits only `RESOLVED`/`NXDOMAIN` signals, but it is one refactor away from writing spurious status rows. Ruled into (a)'s fix, not a separate ticket; see the fixed block above. (Left as written, since this records the state found by the run.)
 
 ### Test coverage, measured
 
@@ -229,7 +242,7 @@ Artifact checks (raw, from the file): `PRAGMA integrity_check` = `ok`; `PRAGMA f
 
 ### Not done, by ruling
 
-- No `src/` or `tests/` change in this entry; no `live`/`ports`/`--active` run until (a) is fixed, tested and committed.
+- No `src/` or `tests/` change in this entry; no `live`/`ports`/`--active` run until (a) is fixed, tested and committed. (a) has since been fixed in the block above; that run is still not done.
 - 11d-findings-d stays open pending the maintainer.
 
 ## Fix backlog

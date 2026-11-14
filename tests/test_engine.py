@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -456,6 +457,48 @@ async def test_engine_persists_three_distinct_tools_as_high(tmp_path: Path) -> N
         ("www.example.com",),
     ).fetchone()
     assert (row["confidence"], row["source_count"]) == ("HIGH", 3)
+
+
+async def test_dns_pass_does_not_overwrite_discovery_confidence(tmp_path: Path) -> None:
+    """Regression: 11d-findings-a.
+
+    A dns pass used to write `source_count=len(transition.sources)`, and on a
+    DNS-only pass those are the DNS tools alone, so it lowered the discovery
+    row from (MEDIUM, 2) to (LOW, 1) on every later stage. `source_count` is
+    defined by `subdomain_sources`, which only the discovery pass writes, so a
+    state pass must leave it alone. Fix `_write_host`, never this expectation.
+    """
+    rec = Recorder()
+    specs = {
+        "subs-a": tool("subs-a", Stage.SUBS),
+        "subs-b": tool("subs-b", Stage.SUBS),
+        "dns-a": tool("dns-a", Stage.DNS),
+    }
+    adapters = {
+        "subs-a": adapter("subs-a", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "subs-b": adapter("subs-b", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "dns-a": adapter(
+            "dns-a",
+            Stage.DNS,
+            rec,
+            records=[SubdomainRecord(fqdn="www.example.com", source="fake", ips=["1.2.3.4"])],
+        ),
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True, speed="slow")
+    )
+    assert summary.exit_code is ExitCode.SUCCESS
+    row = engine.store._conn.execute(
+        "SELECT confidence, source_count FROM subdomains WHERE fqdn = ?",
+        ("www.example.com",),
+    ).fetchone()
+    assert (row["confidence"], row["source_count"]) == ("MEDIUM", 2)
+    # The pass-local tools are not lost: the dns pass still records them.
+    status = engine.store._conn.execute(
+        "SELECT tools_json FROM host_status_history ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert json.loads(status["tools_json"]) == ["dns-a"]
 
 
 async def test_engine_disagreement_is_unconfirmed(tmp_path: Path) -> None:

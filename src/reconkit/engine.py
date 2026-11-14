@@ -1027,6 +1027,8 @@ class Engine:
                 high_min=self.config.confidence.high_min_sources,
                 medium_min=self.config.confidence.medium_min_sources,
             )
+            if not transition.persist:
+                continue
             self._write_host(
                 target_id,
                 run_id,
@@ -1129,13 +1131,21 @@ class Engine:
         ips: tuple[str, ...],
         cnames: tuple[str, ...],
     ) -> None:
+        # `source_count` is defined by the rows in `subdomain_sources` (docs/04 section 5),
+        # which only the discovery pass writes, so a dns/live pass must not supply it.
+        # A state pass may still assert disagreement, and nothing is lost here because
+        # the pass-local tools are already stored in `host_status_history.tools_json`.
+        confidence = (
+            Confidence.UNCONFIRMED.value
+            if transition.confidence is Confidence.UNCONFIRMED
+            else None
+        )
         sub_id = self.store.upsert_subdomain(
             target_id,
             host,
             run_id=run_id,
             state=transition.state.value,
-            confidence=None if transition.confidence is None else transition.confidence.value,
-            source_count=len(transition.sources),
+            confidence=confidence,
         )
         self.store.append_host_status(
             sub_id,
