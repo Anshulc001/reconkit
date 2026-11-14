@@ -2,12 +2,12 @@
 
 ## RESUME HERE
 
-- Status: 10f code is done and accepted (2026-11-13). The real non-dry `install --all`, `doctor` and `update --all` have run on Kali and every defect they found is fixed (non-TTY abort, `member`, `verify_checksums`, doctor plan probe, `dnsreaper`/`puredns`/`findomain`/`chaos` registry values). Part 10's gate is open on exactly one item: the sudo-authenticated apt install. That needs a human terminal where `sudo -v` succeeds; this box has no sudo password reachable by the agent, so the apt path has only ever been exercised as `skipped`.
-- PIT-32 (new, after Part 10f): an A/B test confirmed that `run_exec`'s `start_new_session=True` hid a valid `sudo -v` ticket from children (sudo `tty_tickets` is session-scoped). `runner.py` now keeps POSIX children in the parent's session and gives each its own process group (`start_new_session=is_windows`, `process_group=0` on POSIX), with two regression tests. This does not close the gate; it is the prerequisite for the gate run.
+- Status: Part 10 (installer + doctor) CLOSED on 2026-11-14 by ruling. The sudo-authenticated apt path was proven live: after `sudo apt-get remove -y massdns`, `reconkit install --all --no-color` ran confirmation -> `sudo -n apt-get install -y massdns` -> binary-on-PATH -> version check and reported `installed`, and the idempotent re-run reports `massdns: already installed (1.1.0-0kali2)`. Windows refusal was covered by the existing tests.
+- PIT-32 (after Part 10f): an A/B test confirmed that `run_exec`'s `start_new_session=True` hid a valid `sudo -v` ticket from children (sudo `tty_tickets` is session-scoped). `runner.py` now keeps POSIX children in the parent's session and gives each its own process group (`start_new_session=is_windows`, `process_group=0` on POSIX), with two regression tests. This was the prerequisite for the live gate run.
 - Deferred by ruling (not Part 10 blockers): `update` idempotency for `@latest` go_install tools (reporting gap, binaries byte-identical; needs a new version-probe mechanism and its own docs-first pass, docs/10 section 6) and authenticated GitHub release lookups (a Part 11 planning decision).
 - Last code commit: run `git log --oneline -1`
 - Baseline: 569 passed, 0 skipped on Linux (Python 3.14.8 here); ruff, ruff format and mypy clean
-- Next action: the user runs `sudo -v` in a real terminal, then `reconkit install --all --no-color` is run and its output recorded, showing at least one real `apt-get install` end to end (confirmation -> sudo -> apt-get -> binary-on-PATH check -> version check passing). Then close the Part 10 gate and start Part 11. Hold here: do not start Part 11 before that output is recorded.
+- Next action: Part 11 (docs sync, README/SETUP rewrite, fresh-eyes audit, final report) may begin once the user says so. Part 11 cannot close without at least one real run against an authorized target on real Kali; mock-only is insufficient.
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: none
@@ -46,7 +46,7 @@ mypy src/reconkit
 | f3 | done | ee06075 | remaining phase-2 tools: binary adapters `subfinder`, `assetfinder`, `httpx`, `naabu` |
 | g | done | 36cd3a4, 6b hash in Part 7 | wildcard, workspace, engine, confidence, host states, resume, exit codes done |
 | h | done | Part 8 hash in Part 9 | `ui.py` + `cli.py`; installer/doctor stubs remain for i |
-| i | partial | Part 10a commit | `doctor.py` done; `installer/` pending 10b+ |
+| i | done | `9c4319b` (with `5df7e98`, `66b117c`) | `doctor.py` + `installer/`; Part 10 closed 2026-11-14 |
 | j | pending | - | docs sync, README, final check |
 
 Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTURE.md` section 5. There is no `core/consensus.py`: consensus lives in `engine.py`.
@@ -136,6 +136,8 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Part 10f follow-up (massdns version display): `installed_version()` returned `str(copy)` whenever `version_args` was empty, so an apt package with no self-reported version (`massdns`) showed `/usr/bin/massdns` while every other apt row showed a version. `InstallPlan` now carries `version_command` from `version_cmd[0]`, but only when it names a different program than `binary`, so the managed-copy preference is unchanged for every existing tool; `installed_version` resolves and runs it, and the apt post-install check uses it. `massdns` now declares `[dpkg-query, -W, '-f=${Version}', massdns]`, and the idempotent row reads `(1.1.0-0kali2)` after a fresh install. `sqlmap` has the same gap and is deferred under Open risks. docs/10 defined the contract first (`66b117c`).
 
 ## Open risks
+
+- `~/.reconkit/bin/nuclei` may be absent: an orphaned installer process (pty mishap during the 2026-11-14 gate run) attempted a nuclei reinstall and failed at the 100 MB `MEMBER_LIMIT` (`'nuclei' exceeds 104857600 bytes`). `/home/kali/go/bin/nuclei` (v3.11.1) currently satisfies `installed_copy()`, so the table reads `already installed`; the managed copy was not restored and the limit is unchanged. Not a Part 10 defect.
 
 - `sqlmap` (apt, no `version_cmd` in `tools.yaml`) has the same gap massdns had: its install-table row and doctor display a bare path instead of a version. The `version_command` mechanism added for massdns applies unchanged (`[sqlmap, --version]`); this is deferred as a separate item because sqlmap is `intrusive` and outside Part 10's core-tool proof. No guard test enforces it yet.
 

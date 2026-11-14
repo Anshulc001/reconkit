@@ -203,6 +203,7 @@ Re-read REVIEW_LOG "Bugs found", "Decisions for user review" and "Not verified" 
 =====================================================
 PART 10: installer/ + doctor.py (commit `feat:`)
 =====================================================
+Status: CLOSED (2026-11-14). Decisive items: `5df7e98` (children stay in the parent's session so a cached `sudo -v` ticket is visible) and `9c4319b` (apt tools with no version flag report dpkg's version); live fresh `massdns` install recorded in REVIEW_LOG.
 Docs/10 first. DECISION (log under Deviations): the installer targets Debian-family Linux (Kali/Ubuntu). On native Windows, `doctor` runs and reports found/missing, `--mock` and the pure-Python adapters work, and `install`/`update` refuse with a clear message and a documented nonzero exit code; they never try apt. Write this into docs/10.
 - Prerequisites: libpcap-dev, jq, dnsutils, Go and Go bin in PATH, pipx/pip for Python tools. Verify package names for Kali AND Ubuntu from official package pages before writing them; cite URLs and dates in PROGRESS. Use `python3` >= 3.11, never a pinned apt python.
 - Every install command is an argv list via the runner (shell=False). Never pipe curl into a shell. sudo only when not root and only for apt, announced before running. Go tools via `go install <module>@<version policy from docs>`; pin or justify.
