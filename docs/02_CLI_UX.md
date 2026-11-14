@@ -47,10 +47,12 @@
 ### State and output
 | Command | Purpose |
 |---|---|
-| `diff -d X` | Only new / changed / gone items since the previous run |
+| `diff -d X` | New / changed / gone items since the previous run; `GONE` needs two consecutive misses |
 | `status [--json]` | Progress of running or finished scans |
 | `db list\|export -d X [--new-only]` | **Phase 3 stub** in this build: exits 1 with a clear message; no data is read |
 | `export -d X --format json\|md\|html` | **Phase 3 stub** in this build: exits 1 with a clear message; no report is written |
+
+**`diff` semantics.** `diff` compares the two latest completed discovery runs for the target: `scan_runs` rows for the `subs` stage whose status is `completed` or `partial`, newest first. Resume does not change which runs these are (a resumed stage produces its own row like any other run); no other stage takes part in the comparison. A host is **`GONE` only after two consecutive misses**: it must have been seen in the run *before* the previous one and be missing from both the previous run and the latest run. One miss is not a change and is never reported as `GONE`, because a single flaky passive source (a CT log timing out, a subfinder run returning fewer names) is indistinguishable from a real removal in one run. Consequences a user will see: a host that is missing from only the latest run is silent in the table and is listed once under `Not reported as GONE yet (needs two consecutive misses)`; a host that comes back after one miss is neither `NEW` (its first sighting is not reset) nor `GONE`; a real removal appears as `GONE` on the run after the second consecutive miss; and with fewer than three completed discovery runs nothing can be confirmed gone, so `gone` is empty and `diff` says so.
 
 ## 3. Flags
 
@@ -120,7 +122,7 @@ The `hosts` objects always carry `state`, `confidence` and `sources`; the top-le
 
 `stages[].skipped` lists every tool the engine selected out before it ran, as `{"tool":"<name>","reason":"<why>"}` objects - `no adapter yet (phase N)`, `requires --active`, `not installed`, or the docs/05 rule 6 block. A stage that has no adapter for any tool in its pool therefore shows its skips instead of an empty `results` array, so `results: []` means "ran, found nothing" only when `skipped` is empty too. `summary.tools_skipped` counts these rows along with any executed tool whose status is `skipped`; it is the total, not a per-tool count of executed results.
 
-`diff --json` writes one document with `type: diff`, the two run ids, and arrays `new`, `gone`, `state_changes`, `ports_opened` and `ports_closed`. `status --json` writes one document with `type: status` and a `runs` array; each run carries `id`, `target`, `stage`, `speed`, `status`, `started_at` and `finished_at`. `install`/`update`/`scope check`/the `db` and `export` stubs do not accept `--json` in this build.
+`diff --json` writes one document with `type: diff`, the run ids it compared (`baseline_run_id`, `previous_run_id`, `latest_run_id`; `baseline_run_id` is `null` until a third completed discovery run exists), and arrays `new`, `gone`, `pending_gone`, `state_changes`, `ports_opened` and `ports_closed`. `pending_gone` holds the hosts that are missing from the latest run only: the same list the human output prints under "not reported as GONE yet", so a script can apply its own tolerance without re-querying. `gone` follows the two-consecutive-miss rule above. `status --json` writes one document with `type: status` and a `runs` array; each run carries `id`, `target`, `stage`, `speed`, `status`, `started_at` and `finished_at`. `install`/`update`/`scope check`/the `db` and `export` stubs do not accept `--json` in this build.
 
 ### Colors (Rich theme)
 

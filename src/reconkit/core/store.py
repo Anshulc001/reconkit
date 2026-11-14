@@ -609,7 +609,29 @@ class Store:
         ).fetchall()
         return [str(row["fqdn"]) for row in rows]
 
-    def diff_gone(self, previous_run_id: int, latest_run_id: int) -> list[str]:
+    def diff_gone(
+        self, baseline_run_id: int, previous_run_id: int, latest_run_id: int
+    ) -> list[str]:
+        """Hosts absent from two consecutive runs, still present in the one before.
+
+        docs/02 and docs/04 section 6: one miss is source flakiness, not a change.
+        """
+        rows = self._conn.execute(
+            "SELECT s.fqdn FROM subdomains s"
+            " WHERE s.target_id = (SELECT target_id FROM scan_runs WHERE id = ?)"
+            "   AND EXISTS (SELECT 1 FROM subdomain_sources x"
+            "               WHERE x.subdomain_id = s.id AND x.run_id = ?)"
+            "   AND NOT EXISTS (SELECT 1 FROM subdomain_sources x"
+            "                   WHERE x.subdomain_id = s.id AND x.run_id = ?)"
+            "   AND NOT EXISTS (SELECT 1 FROM subdomain_sources x"
+            "                   WHERE x.subdomain_id = s.id AND x.run_id = ?)"
+            " ORDER BY s.fqdn",
+            (latest_run_id, baseline_run_id, previous_run_id, latest_run_id),
+        ).fetchall()
+        return [str(row["fqdn"]) for row in rows]
+
+    def diff_pending_gone(self, previous_run_id: int, latest_run_id: int) -> list[str]:
+        """Hosts missing from the latest run only: not GONE, reported as pending."""
         rows = self._conn.execute(
             "SELECT s.fqdn FROM subdomains s"
             " WHERE s.target_id = (SELECT target_id FROM scan_runs WHERE id = ?)"

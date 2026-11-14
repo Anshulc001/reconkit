@@ -434,14 +434,61 @@ def test_diff_new(store: Store) -> None:
     assert store.diff_new(run_b) == ["b.example.com"]
 
 
-def test_diff_gone(store: Store) -> None:
+def add_hosts(store: Store, target_id: int, run_id: int, names: list[str]) -> None:
+    for name in names:
+        sub_id = store.upsert_subdomain(target_id, name, run_id=run_id)
+        store.add_subdomain_source(sub_id, run_id, "subfinder")
+
+
+def test_diff_pending_gone_is_a_single_miss(store: Store) -> None:
     target_id, run_a = make_run(store)
     _, run_b = make_run(store)
-    a = store.upsert_subdomain(target_id, "a.example.com", run_id=run_a)
-    store.add_subdomain_source(a, run_a, "crtsh")
-    b = store.upsert_subdomain(target_id, "b.example.com", run_id=run_b)
-    store.add_subdomain_source(b, run_b, "crtsh")
-    assert store.diff_gone(run_a, run_b) == ["a.example.com"]
+    add_hosts(store, target_id, run_a, ["a.example.com", "kept.example.com"])
+    add_hosts(store, target_id, run_b, ["kept.example.com"])
+    assert store.diff_pending_gone(run_a, run_b) == ["a.example.com"]
+
+
+def test_regression_diff_gone_needs_two_consecutive_misses(store: Store) -> None:
+    """Regression: the 2026-11-14 testfire.net finding (35 names, then 8).
+
+    A single flaky discovery run reported 27 hosts as GONE even though nothing
+    had been re-probed. docs/02: one miss is not a change.
+    """
+    target_id, run_1 = make_run(store)
+    _, run_2 = make_run(store)
+    _, run_3 = make_run(store)
+    first = [f"h{index:02d}.example.com" for index in range(35)]
+    second = first[:8]
+    add_hosts(store, target_id, run_1, first)
+    add_hosts(store, target_id, run_2, second)
+
+    # One miss: the 27 are pending, never gone, and no baseline run exists yet.
+    assert store.diff_pending_gone(run_1, run_2) == first[8:]
+
+    add_hosts(store, target_id, run_3, second)
+    assert store.diff_gone(run_1, run_2, run_3) == first[8:]
+    assert store.diff_pending_gone(run_2, run_3) == []
+
+
+def test_diff_gone_needs_the_baseline_run_not_just_two_empty_ones(store: Store) -> None:
+    target_id, run_1 = make_run(store)
+    _, run_2 = make_run(store)
+    _, run_3 = make_run(store)
+    _, run_4 = make_run(store)
+    add_hosts(store, target_id, run_1, ["old.example.com"])
+    # Absent from run_2, so run_2 cannot vouch for it as the baseline of 3 and 4.
+    assert store.diff_gone(run_2, run_3, run_4) == []
+
+
+def test_diff_gone_is_not_confirmed_when_the_host_reappears(store: Store) -> None:
+    target_id, run_1 = make_run(store)
+    _, run_2 = make_run(store)
+    _, run_3 = make_run(store)
+    add_hosts(store, target_id, run_1, ["flaky.example.com", "steady.example.com"])
+    add_hosts(store, target_id, run_2, ["steady.example.com"])
+    add_hosts(store, target_id, run_3, ["flaky.example.com", "steady.example.com"])
+    assert store.diff_gone(run_1, run_2, run_3) == []
+    assert store.diff_pending_gone(run_2, run_3) == []
 
 
 def test_diff_state_changed(store: Store) -> None:
@@ -558,3 +605,14 @@ def test_only_store_imports_sqlite3() -> None:
         if "import sqlite3" in path.read_text(encoding="utf-8")
     ]
     assert importers == ["store.py"]
+
+
+def test_diff_gone_needs_the_miss_to_be_consecutive(store: Store) -> None:
+    """Seen in both baseline and previous, missing from the latest only: not GONE."""
+    target_id, run_1 = make_run(store)
+    _, run_2 = make_run(store)
+    _, run_3 = make_run(store)
+    add_hosts(store, target_id, run_1, ["a.example.com"])
+    add_hosts(store, target_id, run_2, ["a.example.com"])
+    assert store.diff_gone(run_1, run_2, run_3) == []
+    assert store.diff_pending_gone(run_2, run_3) == ["a.example.com"]

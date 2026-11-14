@@ -64,9 +64,10 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 
 1. `reconkit diff -d example.com`
 2. Rows are labelled `NEW`, `GONE`, `STATE` (`old -> new`), `PORT OPEN` and `PORT CLOSED`; there are no `[NOW ALIVE]`/`[WENT DOWN]` section labels.
-3. `--json` gives the same data for scripts or AI agents.
+3. `GONE` means the host has been missing for **two consecutive** completed discovery runs (docs/02); a host missing from the latest run only is not a change and is printed once below the table as `Not reported as GONE yet (needs two consecutive misses): a.example.com, b.example.com`.
+4. `--json` gives the same data for scripts or AI agents, including `pending_gone`.
 
-- **Empty:** `No changes since run #7.` (no date is printed).
+- **Empty:** `No changes since run #7.` (no date is printed). A run that has only one or two completed discovery runs prints `No changes since run #7.` / the first-run line plus the note `GONE needs three discovery runs to compare; nothing can be confirmed gone yet.`
 - **No previous run:** `No completed discovery run for this target.` when there is no run at all, or `First run for this target (#7). Nothing to compare.` when only one exists.
 
 ## Flow 8 - Status of a long scan

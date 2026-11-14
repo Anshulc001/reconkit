@@ -1184,3 +1184,63 @@ async def test_wildcard_never_probes_under_mock(tmp_path: Path) -> None:
     await engine.run("example.com", ScanOptions(stages=(Stage.DNS,), mock=True, speed="fast"))
     assert probes == []
     assert stored_wildcard(engine) == {"www.example.com": 0, "own.example.com": 0}
+
+
+def seed_subs_run(
+    store: Store, target_id: int, hosts: list[str], *, status: str = "completed"
+) -> int:
+    run_id = store.create_scan_run(target_id, Stage.SUBS.value, "slow")
+    for fqdn in hosts:
+        sub_id = store.upsert_subdomain(target_id, fqdn, run_id=run_id)
+        store.add_subdomain_source(sub_id, run_id, "subfinder")
+    store.finish_scan_run(run_id, status)
+    return run_id
+
+
+def test_diff_with_two_runs_reports_pending_and_no_gone(tmp_path: Path) -> None:
+    """Regression: docs/02 two-miss rule - one miss is never GONE."""
+    engine = make_engine(tmp_path, specs={}, adapters={})
+    target_id = engine.store.create_target("example.com")
+    first = seed_subs_run(engine.store, target_id, ["gone.example.com", "kept.example.com"])
+    latest = seed_subs_run(engine.store, target_id, ["kept.example.com"])
+
+    report = engine.diff("example.com")
+
+    assert (report.baseline_run_id, report.previous_run_id, report.latest_run_id) == (
+        None,
+        first,
+        latest,
+    )
+    assert report.gone == ()
+    assert report.pending_gone == ("gone.example.com",)
+
+
+def test_diff_with_three_runs_confirms_gone(tmp_path: Path) -> None:
+    engine = make_engine(tmp_path, specs={}, adapters={})
+    target_id = engine.store.create_target("example.com")
+    baseline = seed_subs_run(engine.store, target_id, ["gone.example.com", "kept.example.com"])
+    seed_subs_run(engine.store, target_id, ["kept.example.com"])
+    latest = seed_subs_run(engine.store, target_id, ["kept.example.com"])
+
+    report = engine.diff("example.com")
+
+    assert report.baseline_run_id == baseline
+    assert report.latest_run_id == latest
+    assert report.gone == ("gone.example.com",)
+    assert report.pending_gone == ()
+
+
+def test_diff_with_one_run_has_nothing_to_compare(tmp_path: Path) -> None:
+    """First-ever run: no crash, no spurious GONE, nothing pending."""
+    engine = make_engine(tmp_path, specs={}, adapters={})
+    target_id = engine.store.create_target("example.com")
+    latest = seed_subs_run(engine.store, target_id, ["a.example.com"])
+
+    report = engine.diff("example.com")
+
+    assert (report.baseline_run_id, report.previous_run_id, report.latest_run_id) == (
+        None,
+        None,
+        latest,
+    )
+    assert (report.gone, report.pending_gone) == ((), ())

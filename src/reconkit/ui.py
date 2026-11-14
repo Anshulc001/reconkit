@@ -292,10 +292,12 @@ def diff_document(report: DiffSnapshot) -> dict[str, object]:
     return {
         "type": "diff",
         "target": report.target,
+        "baseline_run_id": report.baseline_run_id,
         "previous_run_id": report.previous_run_id,
         "latest_run_id": report.latest_run_id,
         "new": list(report.new),
         "gone": list(report.gone),
+        "pending_gone": list(report.pending_gone),
         "state_changes": [
             {"fqdn": fqdn, "old_state": old, "new_state": new}
             for fqdn, old, new in report.state_changes
@@ -344,6 +346,8 @@ def render_diff(
     )
     if not changes:
         target.print(Text(f"No changes since run #{report.previous_run_id}."))
+        _print_pending_gone(report, target)
+        _print_gone_baseline_note(report, target)
         return 0
     table = Table(title="Changes", header_style="bold")
     table.add_column("Change")
@@ -360,7 +364,31 @@ def render_diff(
     for fqdn, port in report.ports_closed:
         table.add_row(Text("PORT CLOSED"), Text(fqdn), Text(str(port)))
     target.print(table)
+    _print_pending_gone(report, target)
+    _print_gone_baseline_note(report, target)
     return 0
+
+
+def _print_pending_gone(report: DiffSnapshot, target: Console) -> None:
+    """docs/02: a single miss is not GONE; say so instead of staying silent."""
+    if not report.pending_gone:
+        return
+    names = ", ".join(report.pending_gone)
+    target.print(
+        Text(
+            f"Not reported as GONE yet (needs two consecutive misses): {names}",
+            style="yellow",
+        )
+    )
+
+
+def _print_gone_baseline_note(report: DiffSnapshot, target: Console) -> None:
+    """docs/08 Flow 7: with fewer than three runs nothing can be confirmed gone."""
+    if report.baseline_run_id is not None or report.latest_run_id is None:
+        return
+    target.print(
+        Text("GONE needs three discovery runs to compare; nothing can be confirmed gone yet.")
+    )
 
 
 def status_document(runs: Iterable[RunSnapshot]) -> dict[str, object]:

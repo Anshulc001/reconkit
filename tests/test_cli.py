@@ -393,6 +393,13 @@ def test_diff_and_status_after_two_mock_runs(tmp_path: Path) -> None:
     document = json.loads(diff.stdout)
     assert document["type"] == "diff"
     assert document["previous_run_id"] != document["latest_run_id"]
+    # docs/02: GONE needs two consecutive misses, so two runs confirm nothing.
+    assert document["baseline_run_id"] is None
+    assert document["gone"] == []
+    assert document["pending_gone"] == []
+    human = runner.invoke(app, ["diff", "-d", "example.com", "--config", str(config)])
+    assert human.exit_code == 0
+    assert "GONE needs three discovery runs" in human.stderr
     status = runner.invoke(app, ["status", "--config", str(config), "--json"])
     assert status.exit_code == 0
     payload = json.loads(status.stdout)

@@ -178,11 +178,13 @@ CREATE TABLE monitor_changes (            -- Phase 3: not created in this build
 ## 6. Diff Queries (core of `diff`)
 
 - **NEW:** `first_seen_run = <latest run>`.
-- **GONE:** seen in previous run, not in latest (for discovery stages).
+- **GONE:** seen in the run before the previous one, **and** missing from both the previous run and the latest run - two consecutive misses (for discovery stages). This needs the three latest completed discovery run ids; with fewer than three, `gone` is empty. No schema change is needed: presence per run is already recorded in `subdomain_sources.run_id`, so the query is the old "seen in X, not in Y" test applied twice.
+- **Pending (not a change):** seen in the previous run, not in the latest. Not reported as `GONE`; surfaced as `pending_gone` so the user can see the rule working. It is the previous single-miss query under a new name.
 - **NOW DEAD:** the latest `host_status_history` row for the subdomain is `DEAD` and the previous known state was not `DEAD`.
 - **State change:** compare last two `host_status_history` rows per subdomain.
 - **Port change:** compare `ports.state` and presence between runs.
-- **Same kind only:** `diff_new`/`diff_gone` rely on per-run `*_sources` rows, so diffs compare discovery runs with discovery runs and port runs with port runs. A single-stage run must never be compared with a run that covered different stages, or every unrelated host would look GONE.
+- **Same kind only:** `diff_new`/`diff_gone`/`diff_pending_gone` rely on per-run `*_sources` rows, so diffs compare discovery runs with discovery runs and port runs with port runs. A single-stage run must never be compared with a run that covered different stages, or every unrelated host would look GONE.
+- **No new table or column:** `diff_gone(baseline, previous, latest)` and `diff_pending_gone(previous, latest)` are read queries over `subdomains` + `subdomain_sources`; the existing `run_id` column on `subdomain_sources` is the whole history they need.
 
 ## 7. Data Validation
 

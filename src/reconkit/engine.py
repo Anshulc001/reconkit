@@ -334,6 +334,8 @@ class DiffSnapshot:
     state_changes: tuple[tuple[str, str, str], ...]
     ports_opened: tuple[tuple[str, int], ...]
     ports_closed: tuple[tuple[str, int], ...]
+    pending_gone: tuple[str, ...] = ()
+    baseline_run_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -454,6 +456,9 @@ class Engine:
         discovery = self.store.completed_run_ids(target_id, Stage.SUBS.value)
         latest = discovery[0] if discovery else None
         previous = discovery[1] if len(discovery) > 1 else None
+        # docs/02: GONE needs two consecutive misses, so it also needs the run
+        # before the previous one. Fewer than three runs confirms nothing gone.
+        baseline = discovery[2] if len(discovery) > 2 else None
         if latest is None or previous is None:
             return DiffSnapshot(normalized, previous, latest, (), (), (), (), ())
         live = self.store.completed_run_ids(target_id, Stage.LIVE.value)
@@ -463,10 +468,12 @@ class Engine:
             previous,
             latest,
             tuple(self.store.diff_new(latest)),
-            tuple(self.store.diff_gone(previous, latest)),
+            tuple(self.store.diff_gone(baseline, previous, latest)) if baseline is not None else (),
             tuple(self.store.diff_state_changed(live[1], live[0])) if len(live) > 1 else (),
             tuple(self.store.diff_ports_opened(ports[1], ports[0])) if len(ports) > 1 else (),
             tuple(self.store.diff_ports_closed(ports[1], ports[0])) if len(ports) > 1 else (),
+            pending_gone=tuple(self.store.diff_pending_gone(previous, latest)),
+            baseline_run_id=baseline,
         )
 
     async def run(self, target: str, options: ScanOptions | None = None) -> ScanSummary:
