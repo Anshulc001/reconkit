@@ -1171,7 +1171,7 @@ class Engine:
     ) -> None:
         # `source_count` is defined by the rows in `subdomain_sources` (docs/04 section 5),
         # which only the discovery pass writes, so a dns/live pass must not supply it.
-        # A state pass may still assert disagreement, and nothing is lost here because
+        # A state pass may still record disagreement, and nothing is lost here because
         # the pass-local tools are already stored in `host_status_history.tools_json`.
         confidence = (
             Confidence.UNCONFIRMED.value

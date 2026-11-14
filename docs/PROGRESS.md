@@ -11,6 +11,7 @@
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
 - Known open bugs: 11d-findings-**a, d and e are fixed** 2026-11-14 (a: consensus clobber; d: docs wording only; e: binary adapters launched a bare `argv[0]`); 11d-findings-b and 11d-findings-c remain open with scoped tickets. (a) no longer blocks a `live`/`ports`/`--active` run, but none has been run yet.
+- 11c audit question (open, named, not investigated): does any escaping exception reaching `cli.py:226` carry a secret into unredacted terminal output, given keys travel in headers and not URLs? `cli.py` imports no `redact`/`_secrets`, and that branch formats its message from raw `str(exc)`. Raised by the 2026-11-14 S3-8 scan; the other eight broad-`except` sites are justified in REVIEW_LOG.
 - Read first: AGENTS.md, this block, last 3 REVIEW_LOG entries, current part in docs/MASTER_PLAN.md
 
 Read this after `AGENTS.md`, before touching code. Update it in every commit.
