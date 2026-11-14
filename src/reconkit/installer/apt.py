@@ -97,7 +97,7 @@ def install_apt(
     if shutil.which(plan.binary) is None:
         raise InstallError(f"{plan.name}: apt-get finished but {plan.binary} is not on PATH")
     check_version(
-        plan.binary,
+        plan.version_command or plan.binary,
         plan.version_args,
         name=plan.name,
         runner=runner,

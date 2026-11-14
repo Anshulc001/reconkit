@@ -929,3 +929,32 @@ Every restore below was checked with `sha256sum`; the digests before and after e
   `setsid()` on their own and detach. `_kill_tree` is unchanged and still targets only `os.getpgid(process.pid)`.
 - Check output: `tests/test_runner.py` 34 passed; full gate recorded in PROGRESS. The real sudo-authenticated
   `install --all` proof is still outstanding and is the only open Part 10 gate item.
+
+## Part 10f follow-up - massdns version display (code)
+
+- Symptom: the idempotent `install --all` row read
+  `massdns  apt  already installed  massdns: already installed (/usr/bin/massdns)`, while every other apt tool
+  showed a version (`amass (v5.1.3)`, `dig (DiG 9.20.30-1-Debian)`, `nmap (Nmap version 7.991 ...)`).
+- Cause: `github_release.installed_version()` returns `str(copy)` when `plan.version_args` is empty, and
+  `registry._plan()` discarded `version_cmd[0]`. `massdns --help` has no version flag and `massdns -v` reads a
+  filename, so the plan had no `version_cmd` at all. The dpkg package version is the only source:
+  `dpkg-query -W -f='${Version}' massdns` -> `1.1.0-0kali2`.
+- Fix: docs/10 (commit `66b117c`) defines `version_cmd[0]` as the program that reports the version, defaulting to
+  `binary`. `InstallPlan.version_command` is set only when the head differs from `binary` (so the managed-copy
+  preference is unchanged); `installed_version` resolves it with `shutil.which` and runs it; `apt.install_apt`
+  passes it to `check_version`. `tools.yaml` gives massdns `[dpkg-query, -W, '-f=${Version}', massdns]`.
+- Tests: `test_massdns_version_command_is_the_package_manager` and
+  `test_massdns_version_cmd_reports_dpkg_version` (fake runner; asserts the exact argv
+  `['/usr/bin/dpkg-query', '-W', '-f=${Version}', 'massdns']` and the state `1.1.0-0kali2`). Full gate:
+  `569 passed`, ruff/format/mypy clean.
+- Live proof: after `sudo apt-get remove -y massdns`, a fresh `reconkit install --all --no-color` under a pty
+  authenticated with `sudo -v` reported `massdns apt installed`; `dpkg-query` then read
+  `install ok installed 1.1.0-0kali2` and `command -v massdns` -> `/usr/bin/massdns`. The next idempotent
+  `install --all` (no sudo needed) showed `massdns  apt  already installed  1.1.0-0kali2`.
+- Caveat: the pty driver's first attempt answered the earlier "Free only, or add keys?" prompt with `y`, so the
+  massdns confirmation went unanswered and the run was killed. The orphaned installer continued: it installed
+  `katana` into `~/.reconkit/bin` and attempted `nuclei`, which failed with
+  `'nuclei' exceeds 104857600 bytes`. The following idempotent run reports both as `already installed`
+  (nuclei via `/home/kali/go/bin/nuclei`, v3.11.1). `.env` was not modified.
+- `install --all` exits 5 because `rustscan`'s placeholder asset (`verify-at-implementation`) still fails; that is
+  the known, tested exclusion, not a massdns failure.

@@ -134,7 +134,7 @@ tools:
   dnspython:    {stage: dns, kind: python, tier: core, mode: passive, phase: 2, install: {method: none}, notes: "A/AAAA/CNAME/NS/MX/TXT, wildcard probe, dangling CNAME check."}
   dnsx:         {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dnsx, version_cmd: [dnsx, -version], rate_flag: "-rl", install: {<<: *pd_release, name: dnsx, repo: projectdiscovery/dnsx}}
   puredns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: puredns, version_cmd: [puredns, --version], requires: [massdns], install: {method: go_install, package: "github.com/d3mondev/puredns/v2@latest"}}
-  massdns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: massdns, install: {method: apt, package: massdns}}
+  massdns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: massdns, version_cmd: [dpkg-query, -W, '-f=${Version}', massdns], install: {method: apt, package: massdns}}
   dig:          {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dig, version_cmd: [dig, -v], install: {method: apt, package: dnsutils}}
 
   # ---------------- live (active) ----------------

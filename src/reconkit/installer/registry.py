@@ -31,6 +31,7 @@ class InstallPlan:
     member: str | None = None
     verify_checksums: bool | None = None
     version: str = "latest"
+    version_command: str | None = None
     version_args: tuple[str, ...] = ()
     fallback: InstallPlan | None = None
     requires_apt: tuple[str, ...] = ()
@@ -81,12 +82,17 @@ def _plan(name: str, entry: Mapping[str, Any], version: str) -> InstallPlan:
     requires_apt = _names(entry.get("requires_apt"), "requires_apt", name)
     requires = _names(entry.get("requires"), "requires", name)
     version_cmd = entry.get("version_cmd")
+    version_command: str | None = None
     version_args: tuple[str, ...] = ()
     if version_cmd is not None:
         if not isinstance(version_cmd, list) or not all(
             isinstance(part, str) for part in version_cmd
         ):
             raise ConfigError(f"tool {name!r} in tools.yaml has an invalid version_cmd")
+        # A head equal to the binary is the default; carry only a different program
+        # (for example dpkg-query for a package with no version flag).
+        if version_cmd and version_cmd[0] != binary:
+            version_command = version_cmd[0]
         version_args = tuple(version_cmd[1:])
     if install is None:
         return InstallPlan(
@@ -94,6 +100,7 @@ def _plan(name: str, entry: Mapping[str, Any], version: str) -> InstallPlan:
             method="none",
             binary=binary,
             tier=tier,
+            version_command=version_command,
             version_args=version_args,
             requires_apt=requires_apt,
             requires=requires,
@@ -135,6 +142,7 @@ def _plan(name: str, entry: Mapping[str, Any], version: str) -> InstallPlan:
         member=_text(install.get("member"), "member", name),
         verify_checksums=_flag(install.get("verify_checksums"), "verify_checksums", name),
         version=version,
+        version_command=version_command,
         version_args=version_args,
         fallback=fallback,
         requires_apt=requires_apt,
@@ -184,6 +192,7 @@ def load_plans(
             member=plan.member,
             verify_checksums=plan.verify_checksums,
             version=plan.version,
+            version_command=plan.version_command,
             version_args=plan.version_args,
             fallback=plan.fallback,
             requires_apt=specs[name].requires_apt,

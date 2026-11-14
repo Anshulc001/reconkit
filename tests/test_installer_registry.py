@@ -49,6 +49,12 @@ def test_version_args_come_from_version_cmd() -> None:
     assert plan_for("crtsh").version_args == ()
 
 
+def test_massdns_version_command_is_the_package_manager() -> None:
+    plan = plan_for("massdns")
+    assert plan.version_command == "dpkg-query"
+    assert plan.version_args == ("-W", "-f=${Version}", "massdns")
+
+
 def test_requires_and_requires_apt_are_carried() -> None:
     assert plan_for("naabu").requires_apt == ("libpcap-dev",)
     assert plan_for("puredns").requires == ("massdns",)

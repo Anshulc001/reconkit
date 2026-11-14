@@ -62,6 +62,24 @@ def test_installed_version_uses_the_managed_copy_first(tmp_path: Path) -> None:
     assert calls[0][0] == [str(binary), "-h"]
 
 
+def test_massdns_version_cmd_reports_dpkg_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = bin_dir(tmp_path) / "massdns"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"#!/bin/sh\n")
+    monkeypatch.setattr(
+        github_release.shutil,
+        "which",
+        lambda name: "/usr/bin/dpkg-query" if name == "dpkg-query" else None,
+    )
+    runner, calls = fake_runner(version_text="1.1.0-0kali2")
+    state = github_release.installed_version(plan_for("massdns"), bin_dir(tmp_path), runner=runner)
+    assert state == "1.1.0-0kali2"
+    assert calls[0][0] == ["/usr/bin/dpkg-query", "-W", "-f=${Version}", "massdns"]
+    assert calls[0][1] == {"HOME": str(Path.home())}
+
+
 def test_install_skips_a_tool_that_is_already_usable(tmp_path: Path) -> None:
     binary = bin_dir(tmp_path) / "assetfinder"
     binary.parent.mkdir(parents=True)

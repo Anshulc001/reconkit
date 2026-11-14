@@ -476,14 +476,25 @@ def installed_version(
     runner: Runner = run_exec,
     timeout: float = VERSION_TIMEOUT_S,
 ) -> str | None:
-    """Return the installed version line, or None when the tool is not usable."""
+    """Return the installed version line, or None when the tool is not usable.
+
+    `version_command` names the program that reports the version and defaults to
+    the resolved copy; a distro package with no version flag points it at its
+    package manager (docs/10 section 3c).
+    """
     copy = installed_copy(plan, bin_dir)
     if copy is None:
         return None
+    argv0 = str(copy)
+    if plan.version_command is not None:
+        found = shutil.which(plan.version_command)
+        if found is None:
+            return None
+        argv0 = found
     if not plan.version_args:
-        return str(copy)
+        return argv0
     outcome = runner(
-        [str(copy), *plan.version_args],
+        [argv0, *plan.version_args],
         timeout=timeout,
         env={"HOME": str(Path.home())},
     )
