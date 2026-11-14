@@ -195,7 +195,7 @@ Single machine, thousands of hosts per target. Beyond that is out of scope (see 
 | No adapter available for a stage | Exit code 4 with install hint |
 | `scope.yaml` missing/expired/mismatch | Refuse active stage, exit code 3 |
 | DB locked or corrupt | Clear error; never silently continue; suggest `--db` path |
-| Ctrl+C | Stop launching tools, kill children, mark run `interrupted`, exit 130 (resumable) |
+| Ctrl+C | Stop launching new tools, mark the stage run `interrupted`, exit 130 (resumable); a child already running is not explicitly killed in this build |
 | Network down | Passive HTTP sources fail fast with one summary line |
 
 ## 14. Linux Workflow Rules

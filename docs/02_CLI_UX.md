@@ -90,15 +90,15 @@ These numbers mirror `config.yaml`, which is the source of truth: slow `passive.
 ### Result table (example `passive` / `diff`)
 
 ```
-Subdomain            State      Ports     Sources                           Trust
-api.example.com      ALIVE 200  80,443    crtsh, subfinder, otx, dnsx       HIGH (4)
-vpn.example.com      DNS_ONLY   443,1194  assetfinder, naabu, nmap          HIGH (3)
-old.example.com      SHUT_DOWN  -         crtsh                             LOW (1)
-new.example.com      [NEW]      -         certspotter, hackertarget         MEDIUM (2)
+Subdomain          State      Status  Ports    Sources                    Trust
+api.example.com    ALIVE      200     80,443   crtsh, subfinder, otx      HIGH (3)
+vpn.example.com    DNS_ONLY   -       443      assetfinder, naabu         MEDIUM (2)
+old.example.com    SHUT_DOWN  -       -        crtsh                      LOW (1)
+new.example.com    UNKNOWN    -       -        certspotter, hackertarget  MEDIUM (2)
 ```
 
-- A final summary line: counts per state, new items, tools skipped or failed.
-- A "Tools" panel lists each adapter: `ok`, `skipped (not installed)`, `failed (reason)`, `timeout`.
+- A final summary line: counts per state and tool statuses. New items are shown by `diff`, not in the stage summary.
+- A "Tools" table lists each adapter with stage, status (`ok`, `skipped`, `failed`, `timeout`), item count and a short detail.
 
 ### Doctor output
 
@@ -130,12 +130,12 @@ The `hosts` objects always carry `state`, `confidence` and `sources`; the top-le
 State words are always printed (never color alone). Symbols are ASCII-safe.
 
 ### Progress
-One live line per stage: stage name, current tool, `done/total` tools, elapsed, estimated remaining, next planned pause (in slow mode). Disabled with `--json`/`--silent`.
+This build has no live progress line; each stage prints its tables when it finishes, and the summary reports counts and tool statuses. `--json`/`--silent` suppress the human output. (`ui.render_progress` exists but is not wired.)
 
 ### Empty, error and success states
 - **Empty:** `No results from 3 tools (crtsh, subfinder, otx). Check 'reconkit doctor'.`
 - **Error:** one line cause + one line fix, never a raw traceback (traceback with `-v`).
-- **Success:** summary line + path of workspace and DB.
+- **Success:** summary line. This build does not print the workspace or DB path; they come from `config.yaml` (`workspace_dir`, `db_path`).
 
 ## 6. Exit Codes
 

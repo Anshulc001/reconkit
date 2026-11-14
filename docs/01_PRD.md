@@ -75,13 +75,13 @@
 - **Acceptance criteria:**
   - Uses at least two methods when available (for example httpx plus the Python probe).
   - SHUT_DOWN is only set for hosts that were ALIVE or resolving in an earlier run.
-  - `diff` shows transitions such as `[NOW ALIVE]`, `[WENT DOWN]`.
+  - `diff` shows transitions as `STATE` rows (`old -> new`) alongside `NEW`/`GONE` and port rows.
 - **Edge cases:** WAF/CDN blocks, timeouts, redirects, TLS errors, non-HTTP services.
 
 ### Feature 5 - Port scanning (`ports`)
 - **Purpose:** Find open ports and services on in-scope hosts.
 - **Acceptance criteria:**
-  - Default scan is a top-ports connect scan (no root needed). `--ports` and `--full` change it.
+  - Default scan is a connect scan (no root needed) over each adapter's default port set; this build has no `--ports`/`--full` flags (docs/02).
   - If two scanners disagree, the port is stored as `unconfirmed`, not dropped.
   - Only hosts inside `scope.yaml` (including `in_scope_cidrs` for IPs) are scanned.
 - **Edge cases:** filtered ports, rate limiting, IPv6, CDN IPs shared by many hosts.
@@ -102,7 +102,7 @@
 
 ### Feature 8 - Change tracking (`diff`, `status`, `db`, `export`)
 - **Acceptance criteria:**
-  - `diff` shows only NEW/CHANGED/GONE items vs the previous run.
+  - `diff` shows only new, gone, state-changed and port-changed items vs the previous run.
   - `status --json` reports phase, counts and elapsed time of running or finished scans.
   - `export` writes json, md or html; `--json` works on every command.
 
@@ -150,7 +150,7 @@
 
 ## 12. Open Questions
 
-No blocking questions for Phase 2. Release asset names were verified against real releases during Part 10 (docs/10 §3c); `nuclei` stays Phase 3; key support is limited to the free keys listed in docs/05 §7.
+No blocking product questions. Release asset names were verified against real releases during Part 10 (docs/10 §3c) and `nuclei` stays Phase 3. Which optional keys a user configures first remains a deployment preference, not a product decision; free mode needs none.
 
 ## 13. Definition of Done
 

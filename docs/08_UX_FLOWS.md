@@ -14,14 +14,14 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 
 ## Flow 2 - Install tools
 
-1. `reconkit install --all --dry-run` lists: tool, method, source, destination.
+1. `reconkit install --all --dry-run` prints one row per tool with `tool`, `method`, `result` and `detail` (the detail carries the destination, release URL or apt command).
 2. `reconkit install --all` asks to confirm sudo for apt packages (`libpcap-dev`, `nmap`, ...).
 3. Per tool: download, verify checksum, place in `~/.reconkit/bin`, run version command.
 4. Final: summary table. `doctor` is a separate command; the installer does not re-run it.
 
-- **Loading state:** one progress line per tool.
-- **Error state:** `subfinder: checksum mismatch - not installed` (fails closed), continues with others, exit code 5.
-- **Empty state:** `Everything already installed.`
+- **Loading state:** a single final table; the installer has no live per-tool progress line.
+- **Error state:** `subfinder_...zip: checksum mismatch (expected ..., got ...)` (fails closed), continues with others, exit code 5.
+- **Empty state:** every row still prints, each as `already installed` with its version or path; there is no separate "everything installed" line.
 
 ## Flow 3 - Define scope
 
@@ -32,11 +32,11 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 ## Flow 4 - Passive recon (default, safe)
 
 1. `reconkit passive -d example.com` (speed `slow`)
-2. Header: target, speed, tools selected, estimated time.
-3. Live line: `subs: crtsh done | waiting 14s | next: certspotter (2/6)`.
-4. Wildcard check result line.
-5. Result table with State / Sources / Trust; tools panel.
-6. Footer: counts, new items, workspace and DB paths.
+2. The stage runs silently until it finishes (no header or estimated time in this build).
+3. There is no live progress line; `ui.render_progress` is not wired.
+4. The wildcard check runs before results are accepted; an `unknown` detection adds a warning instead of a result line.
+5. Result table columns: `Subdomain`, `State`, `Status`, `Ports`, `Sources`, `Trust`, followed by the Tools table.
+6. Footer: counts per state and tool statuses. It does not print workspace or DB paths.
 
 - **Success:** exit 0.
 - **Partial:** some tools skipped/failed, exit 5, results still saved.
@@ -48,26 +48,26 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 1. `reconkit live -d example.com --active`
 2. Scope gate runs first; blocked = exit 3 and no traffic.
 3. Slow mode: hosts shuffled, random pause between hosts, rate-limited probes.
-4. Table: State (ALIVE / DNS_ONLY / SHUT_DOWN / DEAD), status code, title, tech, sources, trust.
-5. Transitions flagged: `[NOW ALIVE]`, `[WENT DOWN]`.
+4. Table columns: `Subdomain`, `State` (ALIVE / DNS_ONLY / SHUT_DOWN / DEAD), `Status`, `Ports`, `Sources`, `Trust`. Title and tech are not rendered in this build.
+5. State changes are not flagged in the stage table; `diff` shows them later as `STATE` rows (`old -> new`).
 
 - **Fast speed:** `--speed fast` prints a warning and requires typing `I AM AUTHORIZED`.
 
 ## Flow 6 - Port scanning (active)
 
-1. `reconkit ports -d example.com --active` (top ports, connect scan, slow)
-2. Candidate ports from the fast scanner; second tool verifies when available.
-3. Table: Host, IP, Port, Service, State (`open`/`unconfirmed`), Sources, Trust.
-4. `--ports 80,443,8080` or `--full` change the port set; `--full` warns about duration at the chosen speed.
+1. `reconkit ports -d example.com --active` (connect scan, default port set, slow)
+2. Each selected port scanner uses its own default port set; results are merged by host, IP and port.
+3. Table columns: `Subdomain`, `State`, `Status`, `Ports`, `Sources`, `Trust`; the IP, service and per-port state are stored but not rendered as separate columns.
+4. This build has no `--ports`/`--full` flags; the port set comes from the adapters (docs/02).
 
 ## Flow 7 - Diff
 
 1. `reconkit diff -d example.com`
-2. Sections: `[NEW]` hosts and ports, `[NOW ALIVE]`, `[WENT DOWN]`, `[NOW DEAD]`, `[GONE]`.
+2. Rows are labelled `NEW`, `GONE`, `STATE` (`old -> new`), `PORT OPEN` and `PORT CLOSED`; there are no `[NOW ALIVE]`/`[WENT DOWN]` section labels.
 3. `--json` gives the same data for scripts or AI agents.
 
-- **Empty:** `No changes since run #7 (2026-11-12).`
-- **No previous run:** `First run for this target. Nothing to compare.`
+- **Empty:** `No changes since run #7.` (no date is printed).
+- **No previous run:** `No completed discovery run for this target.` when there is no run at all, or `First run for this target (#7). Nothing to compare.` when only one exists.
 
 ## Flow 8 - Status of a long scan
 
@@ -80,7 +80,7 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 
 ## Flow 9 - Interrupt and resume
 
-1. User presses Ctrl+C. Engine stops launching tools, kills children, marks run `interrupted`, exit 130.
+1. User presses Ctrl+C. The engine stops launching new tools, marks the stage run `interrupted`, and exits 130. A child process already running is not explicitly killed in this build.
 2. `reconkit run -d example.com --active --resume` continues from the unfinished stage; completed stages are not repeated, and the interrupted stage is rerun from its start.
 
 ## Flow 10 - Export (Phase 3 stub in this build)

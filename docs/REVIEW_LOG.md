@@ -988,3 +988,33 @@ Every restore below was checked with `sha256sum`; the digests before and after e
   message; stage-table tools without adapters remain Phase 3 by design; `docs/PROGRESS.md` line 101 about the
   original uv/WSL venv is an environment deviation, not current setup advice.
 - Checks: docs-only change; the pre-commit hook runs the full gate (569 passed, ruff, format, mypy).
+
+## Part 11b-2 - docs/08 flow audit and follow-ups
+
+- `docs/01` §12: the deployment question "which optional keys a user configures first" is restored; it was removed in
+  11b by folding three questions into one "no blocking questions" sentence, which was a judgment call, not a resolved
+  item. Release asset names and the `nuclei` phase are genuinely closed.
+- `docs/01` Feature 5: removed the nonexistent `--ports`/`--full` flags; ports come from each adapter's default set.
+- `docs/02`: the result-table example now has the real `Status` column and plausible rows; the tools panel is a table
+  with stage/status/items/detail; the Progress section states that no live line is wired
+  (`ui.render_progress` is uncalled); the summary line no longer claims "new items"; the success state no longer
+  claims workspace/DB paths are printed (they are not).
+- `docs/03` failure table: Ctrl+C marks the run `interrupted` and exits 130, but a child already running is **not**
+  explicitly killed in this build; the old "kill children" claim was wrong.
+- `docs/08` Flow 2: dry-run columns are `tool/method/result/detail`; the installer has no per-tool progress line, only
+  a final table; checksum errors use the real message shape; the empty state is not a separate line.
+- `docs/08` Flow 4: no header/estimated time and no live progress line; the wildcard check only surfaces as a warning
+  when detection is `unknown`; real result columns include `Status`; the footer has counts and tool statuses but no
+  workspace/DB paths.
+- `docs/08` Flow 5: no title/tech columns and no `[NOW ALIVE]`/`[WENT DOWN]` tags in the stage table; changes appear
+  later as `STATE` rows in `diff`.
+- `docs/08` Flow 6: removed `--ports`/`--full` (they do not exist); no IP/service columns are rendered.
+- `docs/08` Flow 7: real labels are `NEW`, `GONE`, `STATE`, `PORT OPEN`, `PORT CLOSED`; empty message has no date;
+  the no-run message is `No completed discovery run for this target.`, and the one-run message includes `(#N)`.
+- `docs/08` Flow 9: Ctrl+C does not explicitly kill a running child; only new launches stop.
+- `pyproject.toml`: the `live` marker description now says Kali/Ubuntu instead of WSL2.
+- Evidence for the flow fixes: a real `passive -d example.com --mock` run printed the six-column table
+  (`Subdomain/State/Status/Ports/Sources/Trust`) and the counts/tool-status footer, and a second run plus `diff`
+  printed `No changes since run #1.` A fresh DB printed `No completed discovery run for this target.`
+- Remaining by design: docs/10's Windows refusal message still matches the code's literal `Use WSL2 Kali` string;
+  port IP/service data is stored but not rendered; stage-table tools without adapters remain Phase 3.

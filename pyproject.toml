@@ -59,7 +59,7 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
-    "live: real-tool smoke tests (WSL2 Kali only, authorized targets)",
+    "live: real-tool smoke tests (Kali/Ubuntu only, authorized targets)",
 ]
 
 [tool.mypy]
