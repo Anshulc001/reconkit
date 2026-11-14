@@ -60,6 +60,19 @@ STAGE_ORDER: tuple[Stage, ...] = (
     Stage.URLS,
     Stage.VULNS,
 )
+# Raw output goes to the stage's own workspace directory when there is one.
+# `dns` has none - the layout is exactly the six documented directories - so it
+# uses `meta`, like the phase-3 `vulns`/`shots` stages (docs/03 section 5, 12a).
+RAW_OUTPUT_DIRS: dict[Stage, str] = {
+    Stage.SUBS: "subs",
+    Stage.DNS: "meta",
+    Stage.LIVE: "live",
+    Stage.PORTS: "ports",
+    Stage.TECH: "tech",
+    Stage.URLS: "urls",
+    Stage.VULNS: "meta",
+    Stage.SHOTS: "meta",
+}
 SkipReason = str
 Selected = list[tuple[ToolSpec, type[BaseToolAdapter]]]
 Skipped = list[tuple[ToolSpec, SkipReason]]
@@ -877,7 +890,7 @@ class Engine:
             async with semaphore:
                 await pacer.before_tool(mode.value)
                 tool_ctx = ctx.model_copy(update={"env": self._tool_env(spec, opts)})
-                result = await self._run_one(run_id, adapter, tool_ctx)
+                result = await self._run_one(run_id, adapter, tool_ctx, workspace)
             results.append(result)
             done.add(spec.name)
 
@@ -894,6 +907,7 @@ class Engine:
         run_id: int,
         adapter: type[BaseToolAdapter],
         ctx: RunContext,
+        workspace: Workspace,
     ) -> ToolResult:
         started = time.perf_counter()
         try:
@@ -912,6 +926,9 @@ class Engine:
                 error=redact(f"{type(exc).__name__}: {exc}", self._secrets),
                 duration_s=time.perf_counter() - started,
             )
+        result = result.model_copy(
+            update={"raw_path": self._write_raw(workspace, run_id, adapter, result)}
+        )
         self._record(
             run_id,
             adapter.name,
@@ -921,6 +938,29 @@ class Engine:
             error=result.error,
         )
         return result
+
+    def _write_raw(
+        self,
+        workspace: Workspace,
+        run_id: int,
+        adapter: type[BaseToolAdapter],
+        result: ToolResult,
+    ) -> str | None:
+        """Write one redacted, capped raw file per executed tool (docs/03 section 5).
+
+        Raw capture is a diagnostic side channel: a write that fails (disk full,
+        permissions, a rejected name) leaves `raw_path` empty and changes neither
+        the tool result nor its `tool_runs` row.
+        """
+        try:
+            path = workspace.write(
+                RAW_OUTPUT_DIRS[adapter.stage],
+                f"{run_id}-{adapter.name}.txt",
+                result.raw_text or "",
+            )
+        except (OSError, ValueError, TypeError):
+            return None
+        return str(path)
 
     def _record(
         self,

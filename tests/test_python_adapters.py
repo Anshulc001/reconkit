@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -819,3 +820,64 @@ def test_python_adapters_import_no_forbidden_modules(module: str) -> None:
 def test_python_adapters_are_base_adapters() -> None:
     for adapter in (DnsPythonAdapter, PyprobeAdapter, PyscanAdapter):
         assert issubclass(adapter, BaseToolAdapter)
+
+
+# ------------------------------------------------------------ 12a raw capture
+
+FIXTURE_JSON: dict[str, str] = {
+    "dnspython": '{"www.example.com": {"ips": ["203.0.113.5"]}}',
+    "pyprobe": '{"www.example.com": {"status_code": 200}}',
+    "pyscan": '[{"fqdn": "www.example.com", "ip": "203.0.113.5", "port": 443}]',
+}
+
+
+async def test_python_adapters_capture_their_fixture_in_mock_mode(tmp_path: Path) -> None:
+    fixtures = tmp_path / "fixtures"
+    for name, payload in FIXTURE_JSON.items():
+        directory = fixtures / name
+        directory.mkdir(parents=True)
+        (directory / "example.com.json").write_text(payload, encoding="utf-8")
+
+    adapters = (
+        DnsPythonAdapter(fixtures_dir=fixtures),
+        PyprobeAdapter(fixtures_dir=fixtures),
+        PyscanAdapter(fixtures_dir=fixtures),
+    )
+    for adapter in adapters:
+        result = await adapter.run(make_ctx(mock=True))
+        assert result.status is ToolStatus.OK
+        assert result.raw_text == (fixtures / adapter.name / "example.com.json").read_text(
+            encoding="utf-8"
+        )
+
+
+async def test_pyprobe_raw_text_is_json_evidence_of_each_host() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html><title>Example</title></html>")
+
+    result = await PyprobeAdapter(transport=httpx.MockTransport(handler)).run(
+        make_ctx(hosts=["www.example.com"])
+    )
+    document = json.loads(result.raw_text or "")
+    assert document["records"][0]["fqdn"] == "www.example.com"
+    assert document["records"][0]["status_code"] == 200
+    assert document["error"] is None
+
+
+async def test_dnspython_raw_text_carries_the_outcome_counters() -> None:
+    resolver = FakeResolver({("bad.example.com", "A"): dns.resolver.NoNameservers()})
+    result = await DnsPythonAdapter(resolver=resolver).run(make_ctx(hosts=["bad.example.com"]))
+    document = json.loads(result.raw_text or "")
+    assert document["error"] == "servfail=1"
+    assert document["records"] == []
+
+
+async def test_pyscan_raw_text_carries_the_blocked_count() -> None:
+    async def empty_resolve(_host: str) -> list[str]:
+        return []
+
+    adapter = PyscanAdapter(connect=make_connect({443}, {}), resolve=empty_resolve)
+    result = await adapter.run(make_ctx(hosts=["www.example.com"], ports=[443]))
+    document = json.loads(result.raw_text or "")
+    assert document["error"] == "blocked=1"
+    assert document["records"] == []

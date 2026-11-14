@@ -722,3 +722,52 @@ def test_naabu_parser_accepts_ipv6() -> None:
     records = NaabuAdapter().parse_output('{"ip":"2001:db8::5","port":443}\n')
     assert records[0].fqdn == "2001:db8::5"
     assert records[0].ip == "2001:db8::5"
+
+
+# ------------------------------------------------------------ 12a raw capture
+
+
+async def test_binary_run_captures_stdout_and_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Both streams reach raw_text, stderr under its own marker."""
+    fake_exec(monkeypatch, outcome(stdout="a.example.com\n", stderr="[INF] warning\n"))
+    result = await SubfinderAdapter().run(make_ctx())
+    assert result.status is ToolStatus.OK
+    assert result.raw_text == "a.example.com\n--- stderr ---\n[INF] warning\n"
+
+
+async def test_binary_run_without_stderr_keeps_stdout_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome(stdout="a.example.com\n"))
+    result = await SubfinderAdapter().run(make_ctx())
+    assert result.raw_text == "a.example.com\n"
+
+
+async def test_binary_failed_run_captures_its_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome(stdout="partial line\n", stderr="error: boom", returncode=1))
+    result = await SubfinderAdapter().run(make_ctx())
+    assert result.status is ToolStatus.FAILED
+    assert result.raw_text == "partial line\n--- stderr ---\nerror: boom"
+
+
+async def test_binary_timeout_captures_partial_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome(stdout="a.example.com\n", timed_out=True))
+    result = await SubfinderAdapter().run(make_ctx())
+    assert result.status is ToolStatus.TIMEOUT
+    assert result.raw_text == "a.example.com\n"
+
+
+async def test_parse_error_keeps_the_raw_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A parse bug is the case the raw file exists for."""
+    fake_exec(monkeypatch, outcome(stdout="@@ not a host @@\n"))
+    result = await SubfinderAdapter().run(make_ctx())
+    assert result.status is ToolStatus.FAILED
+    assert result.raw_text == "@@ not a host @@\n"
+
+
+async def test_mock_run_captures_the_fixture_text(tmp_path: Path) -> None:
+    fixtures = tmp_path / "fixtures"
+    directory = fixtures / "subfinder"
+    directory.mkdir(parents=True)
+    (directory / "example.com.txt").write_text("a.example.com\n", encoding="utf-8")
+    result = await SubfinderAdapter(fixtures_dir=fixtures).run(make_ctx(mock=True))
+    assert result.status is ToolStatus.OK
+    assert result.raw_text == "a.example.com\n"

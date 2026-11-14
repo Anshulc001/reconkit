@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from reconkit.adapters.base import BaseToolAdapter
+from reconkit.adapters.base import BaseToolAdapter, records_output
 from reconkit.core.runner import validate_host
 from reconkit.errors import ParseError
 from reconkit.models import PortRecord, Record, RunContext, Stage, ToolResult, ToolStatus
@@ -50,11 +50,17 @@ class PyscanAdapter(BaseToolAdapter):
 
     async def run(self, ctx: RunContext) -> ToolResult:
         if ctx.mock:
+            fixture = ""
             try:
-                mock_records = self.parse_output(self._read_fixture(ctx))
+                fixture = self._read_fixture(ctx)
+                mock_records = self.parse_output(fixture)
             except ParseError as exc:
-                return ToolResult(tool=self.name, status=ToolStatus.FAILED, error=str(exc))
-            return ToolResult(tool=self.name, status=ToolStatus.OK, records=mock_records)
+                return ToolResult(
+                    tool=self.name, status=ToolStatus.FAILED, error=str(exc), raw_text=fixture
+                )
+            return ToolResult(
+                tool=self.name, status=ToolStatus.OK, records=mock_records, raw_text=fixture
+            )
 
         requested = [port for port in ctx.ports if 1 <= port <= 65535]
         ports = ctx.pacer.order(requested or list(DEFAULT_PORTS), kind="port")
@@ -112,11 +118,13 @@ class PyscanAdapter(BaseToolAdapter):
             problems.append(f"errors={failures}")
         if blocked:
             problems.append(f"blocked={blocked}")
+        error = ", ".join(problems) or None
         return ToolResult(
             tool=self.name,
             status=ToolStatus.OK,
             records=records,
-            error=", ".join(problems) or None,
+            error=error,
+            raw_text=records_output(records, error),
         )
 
     @staticmethod

@@ -9,7 +9,7 @@ import pytest
 
 import reconkit.core.workspace as workspace_module
 from reconkit.adapters.dnspython import DnsOutcome, DnsResult
-from reconkit.core.runner import validate_host
+from reconkit.core.runner import MAX_OUTPUT_BYTES, validate_host
 from reconkit.core.wildcard import WildcardDetector, WildcardStatus
 from reconkit.core.workspace import STAGES, Workspace
 
@@ -236,11 +236,32 @@ def test_workspace_empty_output_is_written(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8") == ""
 
 
-def test_workspace_large_output_is_written(tmp_path: Path) -> None:
+def test_workspace_large_output_is_written_up_to_the_cap(tmp_path: Path) -> None:
+    """12a: a raw file is capped, never dropped and never written unbounded."""
     workspace = Workspace.create(tmp_path / "workspaces", "example.com")
-    payload = "A" * (2 * 1024 * 1024)
+    payload = "A" * (MAX_OUTPUT_BYTES + 2 * 1024)
     path = workspace.write("urls", "large.txt", payload)
-    assert path.stat().st_size == len(payload)
+    assert path.stat().st_size == MAX_OUTPUT_BYTES
+    assert path.read_text(encoding="utf-8") == payload[:MAX_OUTPUT_BYTES]
+
+
+def test_workspace_write_honours_an_explicit_byte_cap(tmp_path: Path) -> None:
+    workspace = Workspace.create(tmp_path / "workspaces", "example.com")
+    assert workspace.write("meta", "exact.txt", "12345", max_bytes=5).read_text() == "12345"
+    assert workspace.write("meta", "short.txt", "123456", max_bytes=5).read_text() == "12345"
+
+
+def test_workspace_cap_never_writes_a_broken_multibyte_character(tmp_path: Path) -> None:
+    workspace = Workspace.create(tmp_path / "workspaces", "example.com")
+    path = workspace.write("meta", "wide.txt", "\u00e9" * 10, max_bytes=3)
+    assert path.read_text(encoding="utf-8") == "\u00e9"
+    assert path.stat().st_size == 2
+
+
+def test_workspace_write_rejects_a_non_positive_cap(tmp_path: Path) -> None:
+    workspace = Workspace.create(tmp_path / "workspaces", "example.com")
+    with pytest.raises(ValueError, match="max_bytes"):
+        workspace.write("meta", "zero.txt", "data", max_bytes=0)
 
 
 def test_workspace_same_filename_twice_replaces_atomically(tmp_path: Path) -> None:

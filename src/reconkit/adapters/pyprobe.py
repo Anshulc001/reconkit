@@ -14,7 +14,7 @@ from pathlib import Path
 
 import httpx
 
-from reconkit.adapters.base import USER_AGENT, BaseToolAdapter
+from reconkit.adapters.base import USER_AGENT, BaseToolAdapter, records_output
 from reconkit.core.runner import validate_host
 from reconkit.errors import ParseError
 from reconkit.models import (
@@ -57,11 +57,17 @@ class PyprobeAdapter(BaseToolAdapter):
 
     async def run(self, ctx: RunContext) -> ToolResult:
         if ctx.mock:
+            fixture = ""
             try:
-                mock_records = self.parse_output(self._read_fixture(ctx))
+                fixture = self._read_fixture(ctx)
+                mock_records = self.parse_output(fixture)
             except ParseError as exc:
-                return ToolResult(tool=self.name, status=ToolStatus.FAILED, error=str(exc))
-            return ToolResult(tool=self.name, status=ToolStatus.OK, records=mock_records)
+                return ToolResult(
+                    tool=self.name, status=ToolStatus.FAILED, error=str(exc), raw_text=fixture
+                )
+            return ToolResult(
+                tool=self.name, status=ToolStatus.OK, records=mock_records, raw_text=fixture
+            )
 
         semaphore = asyncio.Semaphore(ctx.pacer.parallel_limit("active"))
         async with httpx.AsyncClient(
@@ -87,7 +93,13 @@ class PyprobeAdapter(BaseToolAdapter):
         records: list[Record] = [record for record in outcomes if record is not None]
         unreachable = len(outcomes) - len(records)
         error = f"unreachable={unreachable}" if unreachable else None
-        return ToolResult(tool=self.name, status=ToolStatus.OK, records=records, error=error)
+        return ToolResult(
+            tool=self.name,
+            status=ToolStatus.OK,
+            records=records,
+            error=error,
+            raw_text=records_output(records, error),
+        )
 
     async def _probe(
         self,

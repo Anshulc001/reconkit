@@ -17,7 +17,7 @@ import dns.asyncresolver
 import dns.exception
 import dns.resolver
 
-from reconkit.adapters.base import BaseToolAdapter
+from reconkit.adapters.base import BaseToolAdapter, records_output
 from reconkit.core.runner import validate_host
 from reconkit.errors import ParseError
 from reconkit.models import (
@@ -65,11 +65,17 @@ class DnsPythonAdapter(BaseToolAdapter):
 
     async def run(self, ctx: RunContext) -> ToolResult:
         if ctx.mock:
+            fixture = ""
             try:
-                mock_records = self.parse_output(self._read_fixture(ctx))
+                fixture = self._read_fixture(ctx)
+                mock_records = self.parse_output(fixture)
             except ParseError as exc:
-                return ToolResult(tool=self.name, status=ToolStatus.FAILED, error=str(exc))
-            return ToolResult(tool=self.name, status=ToolStatus.OK, records=mock_records)
+                return ToolResult(
+                    tool=self.name, status=ToolStatus.FAILED, error=str(exc), raw_text=fixture
+                )
+            return ToolResult(
+                tool=self.name, status=ToolStatus.OK, records=mock_records, raw_text=fixture
+            )
 
         semaphore = asyncio.Semaphore(ctx.pacer.parallel_limit("passive"))
         hosts: list[str] = []
@@ -105,7 +111,13 @@ class DnsPythonAdapter(BaseToolAdapter):
         error = None
         if problems:
             error = ", ".join(f"{name}={count}" for name, count in sorted(problems.items()))
-        return ToolResult(tool=self.name, status=ToolStatus.OK, records=records, error=error)
+        return ToolResult(
+            tool=self.name,
+            status=ToolStatus.OK,
+            records=records,
+            error=error,
+            raw_text=records_output(records, error),
+        )
 
     async def resolve_host(self, ctx: RunContext, host: str) -> DnsResult:
         """Resolve one host; every failure mode stays distinct."""

@@ -111,6 +111,10 @@ class ToolResult(BaseModel):
     duration_s: float = 0.0
     error: str | None = None
     raw_path: str | None = None
+    # Captured output for the raw-output file (docs/09 section 3). It is
+    # unredacted in memory and redacted only by Workspace.write, so it is
+    # excluded from every serialization (`--json` included).
+    raw_text: str | None = Field(default=None, exclude=True)
 
 
 class InstallStatus(BaseModel):

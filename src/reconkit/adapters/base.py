@@ -7,6 +7,7 @@ own (binary execution goes through core/runner).
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -49,9 +50,34 @@ class FetchFailed(Exception):
     """One HTTP attempt failed; adapters turn it into a failed ToolResult."""
 
 
+RAW_STDERR_MARK = "--- stderr ---"
+
+
 def strip_ansi(text: str) -> str:
     """Remove terminal colour codes before parsing tool output."""
     return _ANSI.sub("", text)
+
+
+def capture_output(stdout: str, stderr: str) -> str:
+    """One raw text per run: stdout, then stderr under a marker (docs/09 section 3)."""
+    if not stderr:
+        return stdout
+    if not stdout.strip():
+        return stderr
+    return f"{stdout.rstrip()}\n{RAW_STDERR_MARK}\n{stderr}"
+
+
+def records_output(records: list[Record], error: str | None = None) -> str:
+    """Raw evidence for a python adapter, which has no child process to capture.
+
+    The document is what the adapter observed per host plus its counters, so a
+    parse or TLS bug can be read off disk instead of reproduced by hand (12a).
+    """
+    document = {
+        "records": [record.model_dump(mode="json") for record in records],
+        "error": error,
+    }
+    return json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
 def parse_subdomain_lines(raw: str, source: str) -> list[Record]:
@@ -117,9 +143,11 @@ class BaseToolAdapter(ABC):
         started = time.perf_counter()
         duration = 0.0
         truncated = False
+        raw_text = ""
         try:
             if ctx.mock:
-                records = self.parse_output(self._read_fixture(ctx))
+                raw_text = self._read_fixture(ctx)
+                records = self.parse_output(raw_text)
             else:
                 with self.prepare(ctx):
                     outcome = await asyncio.to_thread(
@@ -129,12 +157,14 @@ class BaseToolAdapter(ABC):
                         env=self.child_env(ctx),
                     )
                     duration = outcome.duration_s
+                    raw_text = capture_output(outcome.stdout, outcome.stderr)
                     if outcome.timed_out:
                         return ToolResult(
                             tool=self.name,
                             status=ToolStatus.TIMEOUT,
                             error="timed out",
                             duration_s=duration,
+                            raw_text=raw_text,
                         )
                     detail = outcome.stderr.strip()[:MAX_ERROR_CHARS] or "no output"
                     if outcome.returncode is None:
@@ -143,6 +173,7 @@ class BaseToolAdapter(ABC):
                             status=ToolStatus.FAILED,
                             error=f"not installed or not executable: {detail}",
                             duration_s=duration,
+                            raw_text=raw_text,
                         )
                     if outcome.returncode != 0:
                         return ToolResult(
@@ -150,16 +181,22 @@ class BaseToolAdapter(ABC):
                             status=ToolStatus.FAILED,
                             error=f"exit {outcome.returncode}: {detail}",
                             duration_s=duration,
+                            raw_text=raw_text,
                         )
                     truncated = outcome.truncated
                     records = self.parse_output(outcome.stdout)
         except (ParseError, FetchFailed, ToolFailed) as exc:
-            return ToolResult(tool=self.name, status=ToolStatus.FAILED, error=str(exc))
+            return ToolResult(
+                tool=self.name, status=ToolStatus.FAILED, error=str(exc), raw_text=raw_text
+            )
         except RuntimeError as exc:
             # runner.run_exec only raises when its pipes cannot be created;
             # keep that a failed result instead of a traceback.
             return ToolResult(
-                tool=self.name, status=ToolStatus.FAILED, error=f"runner error: {exc}"
+                tool=self.name,
+                status=ToolStatus.FAILED,
+                error=f"runner error: {exc}",
+                raw_text=raw_text,
             )
         elapsed = duration or time.perf_counter() - started
         return ToolResult(
@@ -168,6 +205,7 @@ class BaseToolAdapter(ABC):
             records=records,
             duration_s=elapsed,
             error="output truncated" if truncated else None,
+            raw_text=raw_text,
         )
 
     @abstractmethod
@@ -292,18 +330,29 @@ class HttpAdapter(BaseToolAdapter):
 
     async def run(self, ctx: RunContext) -> ToolResult:
         started = time.perf_counter()
+        raw_text = ""
         try:
-            raw = self._read_fixture(ctx) if ctx.mock else await self._request(ctx)
-            records = self._within_target(self.parse_output(raw), ctx.target)
+            raw_text = self._read_fixture(ctx) if ctx.mock else await self._request(ctx)
+            records = self._within_target(self.parse_output(raw_text), ctx.target)
         except ParseError as exc:
-            return ToolResult(tool=self.name, status=ToolStatus.FAILED, error=str(exc))
+            return ToolResult(
+                tool=self.name, status=ToolStatus.FAILED, error=str(exc), raw_text=raw_text
+            )
         except FetchFailed as exc:
-            return ToolResult(tool=self.name, status=ToolStatus.FAILED, error=str(exc))
+            # No body was read (429, 5xx, timeout, refused): the failure message
+            # is the only evidence this run produced, so it is the raw file.
+            return ToolResult(
+                tool=self.name,
+                status=ToolStatus.FAILED,
+                error=str(exc),
+                raw_text=raw_text or str(exc),
+            )
         return ToolResult(
             tool=self.name,
             status=ToolStatus.OK,
             records=records,
             duration_s=time.perf_counter() - started,
+            raw_text=raw_text,
         )
 
     async def _request(self, ctx: RunContext) -> str:

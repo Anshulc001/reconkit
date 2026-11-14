@@ -16,6 +16,10 @@ from typing import IO
 from pydantic import BaseModel
 
 REDACTED = "***"
+# One cap for a child's output and for the raw-output file the engine writes
+# (docs/03 section 5); the workspace imports this instead of inventing a second
+# limit or a config key.
+MAX_OUTPUT_BYTES = 1_000_000
 _READ_CHUNK = 8192
 _LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 # Discovered hosts may contain underscores (real subdomains like dev_api do).
@@ -83,7 +87,7 @@ def run_exec(
     *,
     timeout: float,
     env: Mapping[str, str] | None = None,
-    max_output_bytes: int = 1_000_000,
+    max_output_bytes: int = MAX_OUTPUT_BYTES,
     cwd: Path | str | None = None,
 ) -> ExecResult:
     """Run one program without a shell and return its captured output.

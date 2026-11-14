@@ -21,7 +21,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from reconkit.core.pacing import Pacer, RateLimiter
@@ -85,6 +85,7 @@ class ToolResult(BaseModel):
     duration_s: float = 0.0
     error: str | None = None        # short, redacted
     raw_path: str | None = None     # raw output file in workspace
+    raw_text: str | None = Field(default=None, exclude=True)  # captured output, never serialized
 
 class InstallStatus(BaseModel):
     installed: bool
@@ -135,7 +136,7 @@ class BaseToolAdapter(ABC):
 - `pyprobe` never follows redirects: it records the status code and the raw `Location` in `HostStatusRecord.location`. It tries `https` then `http` per host, and a TLS failure on one scheme must not end the probe: the next scheme is tried, and a working one yields `ALIVE`. Only when no scheme answers and at least one failed with a TLS error is the record `state=UNKNOWN`; a plain connect failure on every scheme is no record (`unreachable=`). Never a crash and never `DEAD`.
 - `parse_output` normalizes and validates subdomain names; only names equal to or under `ctx.target` are kept before records are returned.
 - In `--mock` mode `run` reads `tests/fixtures/<name>/<target>.<ext>` (or the only file in that directory) instead of making a request. HTTP adapters use the raw response text; `python` adapters use JSON fixtures: `dnspython` maps host to `{ips, cnames}` or `{state: DEAD}`, `pyprobe` maps host to `{status_code, title, location}`, and `pyscan` is a list of `{fqdn, ip, port, state}`.
-- Rate: if the registry has `rate_flag`, the adapter appends it with the value from `pacer.tool_rate_args(name)`.
+- **Raw output (12a).** Every adapter run captures its output in `ToolResult.raw_text`, for every status - `ok`, `failed`, `timeout` and the selection-time skip is not a run at all. A binary adapter captures `stdout` followed by `stderr` under a `--- stderr ---` separator when stderr is non-empty (the runner's own `max_output_bytes` cap already limits each stream); an HTTP adapter captures the response body, or the failure message when the request failed before any body was read; the `python` adapters (`dnspython`, `pyprobe`, `pyscan`) have no child process, so they capture their per-host evidence as a JSON document (`records` plus the `error` counters) instead of hand-rolling a text format. A `--mock` run captures the fixture text it parsed. The field holds unredacted text in memory and is excluded from every serialization, so it never appears in `--json`. The engine, not the adapter, writes it: `Workspace.write` applies `store.redact()` and the `max_output_bytes` cap, and `raw_path` is set on the same result only after that write returns (docs/03 section 5). One executed tool is always exactly one file, even when the capture is empty; a failed write leaves `raw_path` at `None` and changes neither the status nor the error.
 
 ## 4. Stage Registry (who runs where)
 

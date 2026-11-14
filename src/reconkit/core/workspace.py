@@ -15,7 +15,7 @@ from collections.abc import Iterable
 from contextlib import suppress
 from pathlib import Path
 
-from reconkit.core.runner import validate_target
+from reconkit.core.runner import MAX_OUTPUT_BYTES, validate_target
 from reconkit.core.store import redact
 
 STAGES: tuple[str, ...] = ("subs", "live", "ports", "urls", "tech", "meta")
@@ -45,6 +45,20 @@ def _chmod(path: Path, mode: int) -> None:
     """Best effort: Windows only honours a subset of POSIX modes."""
     with suppress(OSError):
         path.chmod(mode)
+
+
+def cap_bytes(text: str, max_bytes: int) -> str:
+    """Cut `text` to at most `max_bytes` UTF-8 bytes (docs/03 section 5).
+
+    A multi-byte character split by the cut is dropped instead of being written
+    as a broken sequence. The output is capped, never silently emptied.
+    """
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be > 0")
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    return encoded[:max_bytes].decode("utf-8", "ignore")
 
 
 class Workspace:
@@ -108,8 +122,9 @@ class Workspace:
         text: str,
         *,
         secrets: Iterable[str] | None = None,
+        max_bytes: int = MAX_OUTPUT_BYTES,
     ) -> Path:
-        """Redact then atomically write one raw output file."""
+        """Redact, cap, then atomically write one raw output file."""
         if not isinstance(text, str):
             raise TypeError("workspace content must be a string")
         destination = self.path(stage, filename)
@@ -117,7 +132,7 @@ class Workspace:
         _chmod(destination.parent, DIR_MODE)
 
         values = self.secrets if secrets is None else tuple(secrets)
-        cleaned = redact(text, values)
+        cleaned = cap_bytes(redact(text, values), max_bytes)
 
         fd, temp_name = tempfile.mkstemp(
             prefix=".reconkit-", suffix=".part", dir=destination.parent

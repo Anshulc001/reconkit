@@ -13,7 +13,9 @@ from reconkit.adapters.base import BaseToolAdapter
 from reconkit.adapters.dnspython import DnsOutcome, DnsResult
 from reconkit.adapters.registry import ToolKey, ToolSpec
 from reconkit.config import load_config
+from reconkit.core.runner import MAX_OUTPUT_BYTES
 from reconkit.core.store import REDACTED, Store
+from reconkit.core.workspace import Workspace
 from reconkit.engine import (
     STAGE_ORDER,
     DnsSignal,
@@ -93,6 +95,8 @@ def adapter(
     records: list[Record] | None = None,
     error: Exception | None = None,
     wait: bool = False,
+    raw_text: str | None = None,
+    status: ToolStatus = ToolStatus.OK,
 ) -> type[BaseToolAdapter]:
     class Fake(BaseToolAdapter):
         async def run(self, ctx: RunContext) -> ToolResult:
@@ -105,8 +109,10 @@ def adapter(
                 await asyncio.Event().wait()
             return ToolResult(
                 tool=name,
-                status=ToolStatus.OK,
+                status=status,
                 records=records or [],
+                error=None if status is ToolStatus.OK else "exit 1: boom",
+                raw_text=raw_text,
             )
 
         def build_command(self, ctx: RunContext) -> list[str]:
@@ -1244,3 +1250,179 @@ def test_diff_with_one_run_has_nothing_to_compare(tmp_path: Path) -> None:
         latest,
     )
     assert (report.gone, report.pending_gone) == ((), ())
+
+
+# ------------------------------------------------------- 12a raw output on disk
+
+
+def raw_result(summary, tool_name: str):
+    """The one ToolResult for `tool_name` in a single-stage run."""
+    results = [result for stage in summary.stages for result in stage.results]
+    return next(result for result in results if result.tool == tool_name)
+
+
+async def test_each_executed_tool_writes_one_raw_file_and_sets_raw_path(tmp_path: Path) -> None:
+    """12a: one redacted file per executed tool, named by run and tool."""
+    rec = Recorder()
+    specs = {"alpha": tool("alpha", Stage.SUBS), "beta": tool("beta", Stage.SUBS)}
+    adapters = {
+        "alpha": adapter(
+            "alpha", Stage.SUBS, rec, records=[sub("a.example.com")], raw_text="alpha out\n"
+        ),
+        "beta": adapter(
+            "beta", Stage.SUBS, rec, records=[sub("b.example.com")], raw_text="beta out\n"
+        ),
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
+    )
+
+    run_id = summary.stages[0].run_id
+    stage_dir = tmp_path / "workspaces" / "example.com" / "subs"
+    assert sorted(path.name for path in stage_dir.iterdir()) == sorted(
+        [f"{run_id}-alpha.txt", f"{run_id}-beta.txt"]
+    )
+    for name in ("alpha", "beta"):
+        written = raw_result(summary, name).raw_path
+        assert written is not None
+        assert Path(written).read_text(encoding="utf-8") == f"{name} out\n"
+
+
+async def test_failed_tool_still_writes_its_raw_output(tmp_path: Path) -> None:
+    """12a's main behavior change: a failed tool keeps its bytes on disk."""
+    rec = Recorder()
+    specs = {"flaky": tool("flaky", Stage.SUBS)}
+    adapters = {
+        "flaky": adapter(
+            "flaky",
+            Stage.SUBS,
+            rec,
+            raw_text="partial line\n--- stderr ---\nexit 1: boom",
+            status=ToolStatus.FAILED,
+        )
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
+    )
+
+    result = raw_result(summary, "flaky")
+    written = Path(result.raw_path or "")
+    assert written.is_file()
+    assert written.read_text(encoding="utf-8") == "partial line\n--- stderr ---\nexit 1: boom"
+    row = engine.store._conn.execute("SELECT status FROM tool_runs").fetchone()
+    assert row["status"] == "failed"
+
+
+async def test_a_crashed_tool_writes_an_empty_file_instead_of_nothing(tmp_path: Path) -> None:
+    """One executed tool = exactly one file, even when it raised before any output."""
+    rec = Recorder()
+    specs = {"crasher": tool("crasher", Stage.SUBS)}
+    adapters = {"crasher": adapter("crasher", Stage.SUBS, rec, error=RuntimeError("boom"))}
+    engine = make_engine(tmp_path, specs, adapters)
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
+    )
+
+    result = raw_result(summary, "crasher")
+    assert result.status is ToolStatus.FAILED
+    written = Path(result.raw_path or "")
+    assert written.is_file()
+    assert written.read_bytes() == b""
+
+
+async def test_raw_output_file_is_capped_at_max_output_bytes(tmp_path: Path) -> None:
+    rec = Recorder()
+    specs = {"chatty": tool("chatty", Stage.SUBS)}
+    adapters = {
+        "chatty": adapter("chatty", Stage.SUBS, rec, raw_text="A" * (MAX_OUTPUT_BYTES + 5000))
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
+    )
+
+    written = Path(raw_result(summary, "chatty").raw_path or "")
+    assert written.stat().st_size == MAX_OUTPUT_BYTES
+
+
+async def test_raw_output_file_is_redacted_with_the_run_secrets(tmp_path: Path) -> None:
+    """PIT-22 extended to the file the engine now fills with tool output."""
+    rec = Recorder()
+    specs = {"leaky": tool("leaky", Stage.SUBS)}
+    adapters = {"leaky": adapter("leaky", Stage.SUBS, rec, raw_text="provider token=sk-live-abc\n")}
+    engine = make_engine(tmp_path, specs, adapters, env={"ONLY_ME": "sk-live-abc"})
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
+    )
+
+    content = Path(raw_result(summary, "leaky").raw_path or "").read_text(encoding="utf-8")
+    assert "sk-live-abc" not in content
+    assert REDACTED in content
+
+
+async def test_a_failed_workspace_write_keeps_the_tool_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A raw-write failure is contained: the result, row and assets survive."""
+
+    def boom(*_args: object, **_kwargs: object) -> Path:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Workspace, "write", boom)
+    rec = Recorder()
+    specs = {"tool": tool("tool", Stage.SUBS)}
+    adapters = {
+        "tool": adapter("tool", Stage.SUBS, rec, records=[sub("www.example.com")], raw_text="out\n")
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
+    )
+
+    result = raw_result(summary, "tool")
+    assert result.status is ToolStatus.OK
+    assert result.raw_path is None
+    row = engine.store._conn.execute("SELECT status FROM tool_runs").fetchone()
+    assert row["status"] == "ok"
+    stored = engine.store._conn.execute("SELECT fqdn FROM subdomains").fetchone()
+    assert stored["fqdn"] == "www.example.com"
+
+
+async def test_raw_file_names_do_not_collide_across_tools_or_runs(tmp_path: Path) -> None:
+    """Two tools in one stage and the same tool in two runs keep separate files."""
+    rec = Recorder()
+    specs = {"alpha": tool("alpha", Stage.SUBS), "beta": tool("beta", Stage.SUBS)}
+    adapters = {
+        "alpha": adapter("alpha", Stage.SUBS, rec, raw_text="alpha\n"),
+        "beta": adapter("beta", Stage.SUBS, rec, raw_text="beta\n"),
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+    options = ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
+    first = await engine.run("example.com", options)
+    second = await engine.run("example.com", options)
+
+    paths = [
+        raw_result(summary, name).raw_path
+        for summary in (first, second)
+        for name in ("alpha", "beta")
+    ]
+    assert len(set(paths)) == 4
+    stage_dir = tmp_path / "workspaces" / "example.com" / "subs"
+    assert len(list(stage_dir.iterdir())) == 4
+
+
+async def test_raw_output_keeps_nul_and_ansi_bytes_verbatim(tmp_path: Path) -> None:
+    """A binary payload is evidence: NUL and ANSI bytes reach the file unchanged."""
+    rec = Recorder()
+    payload = "a\x00b\x1b[31mred\x1b[0m\n"
+    specs = {"ansi": tool("ansi", Stage.SUBS)}
+    adapters = {"ansi": adapter("ansi", Stage.SUBS, rec, raw_text=payload)}
+    engine = make_engine(tmp_path, specs, adapters)
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
+    )
+
+    written = Path(raw_result(summary, "ansi").raw_path or "")
+    assert written.read_bytes() == payload.encode("utf-8")
