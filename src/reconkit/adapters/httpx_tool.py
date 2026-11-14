@@ -44,8 +44,10 @@ class HttpxAdapter(BinaryAdapter):
                 hosts.append(host)
         if not hosts:
             raise ToolFailed("httpx: no hosts to probe")
+        # The child gets only the env keys passed in, so it has no PATH: launch the
+        # path binary_path() resolved (docs/09 adapter contract), never the bare name.
         argv = [
-            self.binary,
+            self.binary_path() or self.binary,
             "-silent",
             "-json",
             "-no-stdin",

@@ -345,7 +345,7 @@ No open items from Part 9. Part 9 fixed the dangling-CNAME persistence gap with 
 
 | ID | Severity | Finding | State |
 |---|---|---|---|
-| A-1 | high | `httpx_tool.py:48`, `naabu.py:41` launch bare `argv[0]`; child env has no `PATH` (`engine.py:867-870`, `base.py:213-219`), so `live`/`ports` fail while `doctor` says installed - 11d-e unfixed in two adapters | open, fix queued |
+| A-1 | high | `httpx_tool.py:48`, `naabu.py:41` launch bare `argv[0]`; child env has no `PATH` (`engine.py:867-870`, `base.py:213-219`), so `live`/`ports` fail while `doctor` says installed - 11d-e unfixed in two adapters | **fixed in this commit** |
 | G-1 | high | `Workspace.write` (`workspace.py:104`) has no callers and `raw_path` (`models.py:112`) is never set, while docs/03:120 step 9 and docs/03:83 promise raw output files | ticketed, no code |
 | G-2 | high | `Pacer.before_host()` (`pacing.py:73`) is never called; docs/03:125 documents it and `config.yaml` sets `active.host_delay` [1,5]/[0,2], so inter-host pacing has never applied | open, contract ambiguity reported |
 | G-3 | medium | `scope.passive_warning()` (`scope.py:325`) has no callers, so the documented out-of-scope passive warning never prints | ticketed, no code |
@@ -356,3 +356,11 @@ No open items from Part 9. Part 9 fixed the dangling-CNAME persistence gap with 
 | C-2 | low | subfinder's provider file is `mkstemp` in the system temp dir (`subfinder.py:76-79`, 0600, removed in `finally`); a `SIGKILL` in between leaves a key file | ticketed, no code |
 | G-4 | low | `ExitCode.ALL_FAILED = 6` (`engine.py:83`) is unreachable; `_exit_code` (`engine.py:592-604`) returns `NO_TOOL` when every tool failed | ticketed, no code |
 | G-6 | docs | the 11d-e blast-radius claim ("only two `build_command` implementations") is false; corrected in place above | corrected |
+
+### 11c-A-1 - fixed 2026-11-14
+
+- **Fix:** `httpx_tool.py` and `naabu.py` now launch `self.binary_path() or self.binary`, the same shape as the accepted 11d-e fix; the child env is still not widened with `PATH` (the minimal-env rule and the hijack surface are unchanged).
+- **Red first:** the new test `test_active_binary_adapters_launch_the_resolved_managed_binary` (parametrized over httpx and naabu) failed on both before the change with `AssertionError: assert False ... where PosixPath('httpx') = Path('httpx')` and the same for `naabu`: `2 failed, 69 deselected`, exit 1. That is the production symptom (doctor sees the managed copy, the spawn gets a bare name and no PATH).
+- **Green after:** `4 passed, 67 deselected` on the targeted slice; full suite **587 passed** (585 + the 2 new cases). ruff, ruff format and mypy clean.
+- **Two existing assertions hardened, and why:** `test_httpx_command_dedupes_and_lowercases_hosts` and `test_naabu_command_and_ports` compared the whole argv against a bare `argv[0]`, which only held while the tool happened not to resolve. They now pin `Path(argv[0]).name` plus the flags, and resolution itself is pinned by the new test (the same hardening 11d-e applied to subfinder/assetfinder).
+- **Not verified:** neither adapter was executed against a real target or a real binary. The evidence is the managed-stand-in test plus the static path (`runner.py:105-124` -> `base.py:158-164`).

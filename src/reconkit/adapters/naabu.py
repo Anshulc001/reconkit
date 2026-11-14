@@ -37,8 +37,10 @@ class NaabuAdapter(BinaryAdapter):
         if not hosts:
             raise ToolFailed("naabu: no hosts to scan")
         ports = [port for port in ctx.ports if 1 <= port <= 65535]
+        # The child gets only the env keys passed in, so it has no PATH: launch the
+        # path binary_path() resolved (docs/09 adapter contract), never the bare name.
         argv = [
-            self.binary,
+            self.binary_path() or self.binary,
             "-silent",
             "-json",
             "-no-stdin",

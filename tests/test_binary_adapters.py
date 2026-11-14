@@ -313,6 +313,29 @@ def test_build_command_launches_the_resolved_managed_binary(
     assert argv[0] == str(target)
 
 
+ACTIVE_BINARY_STAND_INS = [(HttpxAdapter, "httpx"), (NaabuAdapter, "naabu")]
+
+
+@pytest.mark.parametrize(("adapter_cls", "binary"), ACTIVE_BINARY_STAND_INS)
+def test_active_binary_adapters_launch_the_resolved_managed_binary(
+    adapter_cls: type[BinaryAdapter], binary: str, isolated_home: Path
+) -> None:
+    """Regression: 11c-A-1.
+
+    The same defect as 11d-findings-e, missed by that fix: the live and ports
+    adapters built argv[0] from the bare binary name while the engine gives the
+    child no PATH, so an install that lives only in ~/.reconkit/bin reported
+    "not installed or not executable" even though doctor showed it present.
+    Fix build_command, never this assertion.
+    """
+    target = _managed_stand_in(isolated_home, binary, "#!/bin/sh\nexit 0\n")
+    adapter = adapter_cls()
+    assert adapter.binary_path() == str(target)
+    argv = adapter.build_command(make_ctx(hosts=["www.example.com"], ports=[443]))
+    assert Path(argv[0]).is_absolute()
+    assert argv[0] == str(target)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shell stand-in")
 @pytest.mark.parametrize(("adapter_cls", "binary"), BINARY_STAND_INS)
 async def test_installed_binary_in_managed_dir_actually_runs(
@@ -336,8 +359,8 @@ def test_httpx_command_dedupes_and_lowercases_hosts() -> None:
     argv = HttpxAdapter().build_command(
         make_ctx(hosts=["WWW.Example.COM", "www.example.com", "api.example.com"])
     )
-    assert argv == [
-        "httpx",
+    assert Path(argv[0]).name == "httpx"
+    assert argv[1:] == [
         "-silent",
         "-json",
         "-no-stdin",
@@ -361,8 +384,8 @@ def test_naabu_command_and_ports() -> None:
     argv = NaabuAdapter().build_command(
         make_ctx(hosts=["www.example.com"], ports=[443, 80, 70000, 0])
     )
-    assert argv == [
-        "naabu",
+    assert Path(argv[0]).name == "naabu"
+    assert argv[1:] == [
         "-silent",
         "-json",
         "-no-stdin",

@@ -1170,3 +1170,12 @@ Every restore below was checked with `sha256sum`; the digests before and after e
 - Consolidated findings and states: see the `## Part 11c` table in `docs/PROGRESS.md`; the head-line items are A-1 (high, fix queued), G-1 (high, ticketed), G-2 (high, contract ambiguity reported), G-3 (medium, ticketed), C-1 (known), E-1/E-2/E-3, C-2 and G-4 (low, ticketed).
 - Not verified: the two (d) edges above; every finding is static analysis - no tool was executed and no target was touched in this audit.
 - Checks: docs-only change; the pre-commit hook runs the full gate (585 passed, ruff, format, mypy).
+
+## Part 11c-A-1 - active binary adapters launched a bare argv[0] (code)
+
+- **Symptom:** `doctor` reported `httpx v1.12.0` and `naabu 2.7.0` at `~/.reconkit/bin/...`, while a `live` or `ports` stage would record `failed` with `not installed or not executable` - the same self-contradiction 11d-e removed from subfinder/assetfinder.
+- **Root cause:** `httpx_tool.py:48` and `naabu.py:41` built `argv[0]` from the bare `self.binary`; `Engine._tool_env` (`engine.py:867-870`) passes only key variables and `BinaryAdapter.child_env` (`base.py:213-219`) adds only `HOME`/`USERPROFILE`, so the child has no `PATH`. `run_exec` turns the resulting `OSError` into `returncode=None` (`runner.py:105-124`) and `base.py:158-164` maps that to `failed`. `check_installed()` used `binary_path()`, hence the disagreement.
+- **Fix:** launch `self.binary_path() or self.binary` in both adapters. The child env was deliberately not widened with `PATH`.
+- **Guarding tests:** `test_active_binary_adapters_launch_the_resolved_managed_binary` (new, parametrized over both adapters; docstring `Regression: 11c-A-1`), red before the fix (`2 failed, 69 deselected`, `PosixPath('httpx').is_absolute()` False) and green after (`4 passed, 67 deselected`; full suite 587). `test_httpx_command_dedupes_and_lowercases_hosts` and `test_naabu_command_and_ports` were hardened from a bare `argv[0]` to `Path(argv[0]).name` for the same environment-dependence reason as 11d-e.
+- **Not verified:** no real binary and no target were used; the test launches a stand-in in the managed directory.
+- **Why 11d-e missed it:** that entry claimed subfinder/assetfinder were the only two `build_command` implementations. Corrected in `docs/PROGRESS.md` (11c-G-6).
