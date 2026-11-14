@@ -124,6 +124,8 @@ workspaces/<domain>/
 - Single `Pacer` object per run, built from the chosen speed preset plus `--delay` overrides.
 - API: `await pacer.before_tool(mode)`, `await pacer.before_host()`, `pacer.order(items, kind="host"|"port")`, `pacer.parallel_limit(mode)`, `pacer.tool_rate_args(tool, mode)`, `pacer.next_pause_range(mode)` for the progress line, `pacer.reset()` per stage.
 - `tool_rate_args(tool, mode)` uses `passive.requests_per_second` for passive tools and `active.requests_per_second` for active ones; `nmap -T<n>` and `masscan --max-rate` always use the active preset values. Whole-number rates print without `.0`.
+- `before_host()` spaces **host dispatches** in active stages, and is awaited by the adapters that issue one request or connection per host: `pyscan` (a connect batch per host) and `pyprobe` (an HTTP probe per host). The pause is `active.host_delay` from the speed preset; the first host of a stage does not wait. `pyprobe` dispatches hosts sequentially when `parallel_limit("active")` is `1` (the `slow` preset), so the pause falls between real dispatches; at higher limits it keeps parallel dispatch (normal `host_delay` is `[0, 2]`, fast is `[0, 0]`).
+- One-shot binary tools (`httpx`, `naabu`) are **exempt** from `before_host()`: they receive the whole host list in a single process and pace themselves through `-rl`/`-rate` from `tool_rate_args()`. No adapter may use `before_host()` as request pacing; it only spaces host dispatches.
 - Randomness (`random.uniform`) and sleeping are **injected** (rng, sleep) so tests run instantly with a fake clock.
 - Passive stages also use the Pacer (third-party APIs ban bursts).
 - Per-source HTTP adapters share an async rate limiter (requests/second from the preset).
