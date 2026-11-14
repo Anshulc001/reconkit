@@ -365,6 +365,7 @@ No open items from Part 9. Part 9 fixed the dangling-CNAME persistence gap with 
 - **Red first:** both new tests failed before the wiring because no pause was recorded at all (`StopIteration` on the `delay:` lookup): `2 failed, 35 deselected`. Green after: `2 passed, 35 deselected`.
 - **Assertion strength:** both tests assert ordering, not call count - host B's resolve/probe appears only after the recorded pause, the pause follows host A's connect/probe, the first host never waits, and the pause value is inside slow's `active.host_delay` `[1, 5]`.
 - **Not changed:** `httpx`/`naabu` (exempt by the new docs text), `dnspython` (passive; `before_host()` reads the active preset), `normal`/`fast` parallelism.
+- **Known asymmetry, now stated in docs/03 §7:** `pyprobe` pauses between hosts only in `slow`; at `normal`/`fast` parallel dispatch leaves the shared rate limiter as its only pacing. `pyscan` calls `before_host()` at every speed, which is a no-op when the preset range is `[0, 0]` (`fast`).
 
 ### 11c-A-1 - fixed 2026-11-14
 
