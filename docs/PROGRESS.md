@@ -245,7 +245,7 @@ Artifact checks (raw, from the file): `PRAGMA integrity_check` = `ok`; `PRAGMA f
 - **Cause:** `subfinder.py:78` and `assetfinder.py:23` build `argv[0]` from `self.binary`, the bare name, while `Engine._tool_env` (engine.py 843-846) passes only the adapter's API-key vars - no `PATH`. The child therefore has no `PATH` to resolve a bare name against; `run_exec` turns the `OSError` into `returncode=None` (runner.py 116-123) and `base.py:141-146` maps that to `failed`.
 - **Reproduced directly** with the empty env the engine passes: `subprocess.run(["subfinder", "-version"], env={})` -> `FileNotFoundError`; the same call with `/home/kali/.reconkit/bin/subfinder` -> `rc=0`.
 - **Spec violated, not just a bug:** docs/09 adapter contract says the base resolves the binary in `~/.reconkit/bin` first and then `PATH`, and docs/10 section 5 says the managed directory comes first in the run-time lookup order so "no PATH edit is needed to run a Go tool". `check_installed()` uses `binary_path()`; `build_command()` did not.
-- **Blast radius:** the only two `build_command` implementations in this build (`subfinder`, `assetfinder`). Other binary tools are `phase: 3` and are skipped as "no adapter yet".
+- **Blast radius:** the only two `build_command` implementations in this build (`subfinder`, `assetfinder`). Other binary tools are `phase: 3` and are skipped as "no adapter yet". **CORRECTION (11c, 2026-11-14): this was false.** `httpx_tool.py:48` and `naabu.py:41` also implement `build_command` and still launched a bare `argv[0]`; see 11c-A-1 below. The fix in `df218b5` covered only the two adapters named here.
 - **Fix shape:** launch `binary_path()` (resolved absolute path), falling back to the bare name only if resolution returns `None`. Do **not** widen the child env with `PATH`: the minimal-env rule is deliberate and a search path is a hijack surface.
 - **Tests a fix needs:** `build_command()[0]` is absolute and equals `binary_path()` for both adapters, and a run-level test with a fake executable in a temporary managed directory that asserts the adapter actually launches it (no network, no real tool required).
 
@@ -329,3 +329,30 @@ No open items from Part 9. Part 9 fixed the dangling-CNAME persistence gap with 
 - **Open item 13 - 11e cannot be satisfied** until every item above is closed or explicitly deferred by ruling; RESUME must not say "ALL DONE" before then.
 - **Open item 14 - no active run has ever been executed.** Every real run so far is `passive` (subs + dns). `live`, `ports`, `tech`, `urls`, `vulns` and any `--active` path have never run against a real target, so the scope gate, the host-delay pacing and the active adapters are proven only by tests.
 - **11c status line, kept honest:** the audit begins after this commit; its findings are recorded separately and are **not** included in the list above. This section must be extended by the same day's audit commit before 11f can be attempted.
+
+## Part 11c - fresh-eyes audit (2026-11-14, read-only)
+
+- Scope of the read: `engine.py` (all 1238 lines), `cli.py` (all 702), `core/scope.py`, `core/runner.py`, `core/pacing.py`, `core/workspace.py`, `core/wildcard.py`, `adapters/base.py`, `adapters/dnspython.py`, `pyprobe.py`, `pyscan.py`, `subfinder.py`, `assetfinder.py`, `httpx_tool.py`, `naabu.py`, `crtsh.py`, `certspotter.py`, `otx.py`, `hackertarget.py`, `adapters/__init__.py`, `doctor.py` (report + key paths), `store.redact`, `installer/github_release.py` (`install_selected`, `desired_version`), plus `config.yaml`, `tools.yaml` stage modes and the matching docs sections. No `src/` or `tests/` change in this commit.
+- **(a) active without `--active` + scope pass: no bypass found.** Four layers hold: `cli.py:47` `_ACTIVE_ONLY`; `cli.py:168-170`; `engine.py:707-741` `_select` skips every `mode: active` spec unless `opts.active`; `engine.py:683-712` `_active_hosts` calls `require_active` and `_skip_active` downgrades active specs to `skipped` on `ScopeError`, with exit 3. Adjacent defect found: **A-1** below.
+- **(b) timeout becoming DEAD/SHUT_DOWN: none found.** DEAD has one producer (`dnspython.py:126-127`, NXDOMAIN only, read back at `engine.py:960-967`); SERVFAIL/TIMEOUT/ERROR emit no record; the uncertain branch keeps the previous state or `UNKNOWN` (`engine.py:234-255`); `pyprobe` maps TLS errors to `UNKNOWN` and drops timeouts.
+- **(c) secrets: no proven leak; one new low item.** `cli.py:227` still formats raw `str(exc)` (known question), and `-v` prints a traceback (`cli.py:125-127`). Keys reach headers only (`certspotter.py:33`, `otx.py:23`), never argv (`subfinder.py:88-89`); child output is redacted against the env values (`runner.py:184-189`); DB writes redact (`engine.py:867-877`); `doctor` prints key names only and computes `Set` from `.env` (`doctor.py:266-273`), so the all-`no` table in the fresh-venv run was correct. New: **C-2** below.
+- **(d) traceback escaping: none demonstrated.** Scan path has a last-resort handler (`cli.py:225-229`); `install_selected` catches `InstallSkipped`/`InstallError` per plan (`github_release.py:601-611`); `desired_version` swallows `InstallError` (`:518-521`). Unverified: `BrokenPipeError` with a closed stdout, and the fast-active prompt EOF path.
+- **(e) blocking calls in async: three low findings** (E-1/E-2/E-3 below). Positives: `run_exec`/`check_installed` run via `asyncio.to_thread` (`base.py:141-150`, `engine.py:735`), DNS uses `dns.asyncresolver`, `pyscan` uses `asyncio.open_connection`.
+- **(f) confidence from non-distinct tools: none found.** `confidence_for` applies `set()` (`engine.py:118-131`); discovery groups per `fqdn` by `result.tool` (`engine.py:940-970`); ports key by tool and turn disagreement into `UNCONFIRMED` (`engine.py:1204-1238`); `_write_host` no longer supplies `source_count` (11d-a).
+- **(g) docs/code mismatches: G-1, G-2, G-3, G-4 below**, plus the known 11c-bis-1/2 tickets, docs/09's undefined "exclude from counts", and **G-6**: the 11d-e blast-radius claim above is false.
+
+### 11c consolidated findings (nothing dropped)
+
+| ID | Severity | Finding | State |
+|---|---|---|---|
+| A-1 | high | `httpx_tool.py:48`, `naabu.py:41` launch bare `argv[0]`; child env has no `PATH` (`engine.py:867-870`, `base.py:213-219`), so `live`/`ports` fail while `doctor` says installed - 11d-e unfixed in two adapters | open, fix queued |
+| G-1 | high | `Workspace.write` (`workspace.py:104`) has no callers and `raw_path` (`models.py:112`) is never set, while docs/03:120 step 9 and docs/03:83 promise raw output files | ticketed, no code |
+| G-2 | high | `Pacer.before_host()` (`pacing.py:73`) is never called; docs/03:125 documents it and `config.yaml` sets `active.host_delay` [1,5]/[0,2], so inter-host pacing has never applied | open, contract ambiguity reported |
+| G-3 | medium | `scope.passive_warning()` (`scope.py:325`) has no callers, so the documented out-of-scope passive warning never prints | ticketed, no code |
+| C-1 | medium (known) | `cli.py:227` unredacted `str(exc)`; `-v` traceback; reachability still unproven (keys travel in headers) | known question |
+| E-1 | low | synchronous SQLite transaction + `_persist_stage` on the event loop (`engine.py:551-556`) | ticketed, no code |
+| E-2 | low | `load_scope()` file read + YAML parse inside async `_active_hosts` (`engine.py:687`) | ticketed, no code |
+| E-3 | low | `Workspace.create` mkdir/chmod inside `async def run` (`engine.py:463`) | ticketed, no code |
+| C-2 | low | subfinder's provider file is `mkstemp` in the system temp dir (`subfinder.py:76-79`, 0600, removed in `finally`); a `SIGKILL` in between leaves a key file | ticketed, no code |
+| G-4 | low | `ExitCode.ALL_FAILED = 6` (`engine.py:83`) is unreachable; `_exit_code` (`engine.py:592-604`) returns `NO_TOOL` when every tool failed | ticketed, no code |
+| G-6 | docs | the 11d-e blast-radius claim ("only two `build_command` implementations") is false; corrected in place above | corrected |

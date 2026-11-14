@@ -1155,3 +1155,18 @@ Every restore below was checked with `sha256sum`; the digests before and after e
   records it ever running.
 - 11f (final report) remains unwritten. The RESUME block was stale until this commit corrected it.
 - Pitfalls added this entry: PIT-33 (docs-only commits bypass the pre-commit PROGRESS requirement).
+
+## Part 11c - fresh-eyes audit (docs only, 2026-11-14)
+
+- What was read: `engine.py` (all 1238 lines), `cli.py` (all 702), `core/scope.py`, `core/runner.py`, `core/pacing.py`, `core/workspace.py`, `core/wildcard.py`, `adapters/base.py`, all twelve adapters, `doctor.py` (report and key paths), `store.redact`, `installer/github_release.py` (`install_selected`, `desired_version`), `config.yaml` and the `tools.yaml` stage modes. No `src/` or `tests/` change in this entry.
+- Requirement -> outcome, one row per MASTER_PLAN:222 hunt category:
+  - (a) active tool without `--active` + scope pass: no bypass. `cli.py:47`, `cli.py:168-170`, `engine.py:707-741` (selection), `engine.py:683-712` (gate + skip), exit 3 on denial.
+  - (b) timeout becoming DEAD/SHUT_DOWN: none. `dnspython.py:126-127` is the only DEAD producer; `engine.py:234-255` keeps the previous state on uncertain evidence; `pyprobe.py:112-124` maps TLS failures to `UNKNOWN`.
+  - (c) secrets: no proven leak. Keys only in headers (`certspotter.py:33`, `otx.py:23`), never argv (`subfinder.py:88-89`); redaction in `runner.py:184-189`, `engine.py:867-877`, `store.redact`; `doctor.py:266-273` prints names and computes `Set` from `.env`. Open question stays `cli.py:227` / `-v` (`cli.py:125-127`).
+  - (d) traceback escaping: none demonstrated. `cli.py:225-229`, `github_release.py:601-611`, `:518-521`. Unverified: `BrokenPipeError`, fast-active prompt EOF.
+  - (e) blocking in async: E-1 `engine.py:551-556`, E-2 `engine.py:687`, E-3 `engine.py:463`. No structural change made.
+  - (f) confidence from non-distinct tools: none. `engine.py:118-131` uses `set()`; ports disagree into `UNCONFIRMED` (`engine.py:1204-1238`).
+  - (g) docs/code mismatches: G-1 workspace never written (`workspace.py:104` no callers, `models.py:112` never set vs docs/03:120); G-2 `pacer.before_host()` never called (`pacing.py:73`, docs/03:125, `config.yaml` host_delay); G-3 `scope.passive_warning()` never called (`scope.py:325`); G-4 unreachable `ExitCode.ALL_FAILED`; G-6 the 11d-e blast-radius claim is false (`httpx_tool.py:48`, `naabu.py:41`).
+- Consolidated findings and states: see the `## Part 11c` table in `docs/PROGRESS.md`; the head-line items are A-1 (high, fix queued), G-1 (high, ticketed), G-2 (high, contract ambiguity reported), G-3 (medium, ticketed), C-1 (known), E-1/E-2/E-3, C-2 and G-4 (low, ticketed).
+- Not verified: the two (d) edges above; every finding is static analysis - no tool was executed and no target was touched in this audit.
+- Checks: docs-only change; the pre-commit hook runs the full gate (585 passed, ruff, format, mypy).
