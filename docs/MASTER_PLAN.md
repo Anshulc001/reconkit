@@ -226,6 +226,303 @@ PART 11: docs sync, README, final audit (commit `docs:`)
 11f. Print a FINAL REPORT in chat: what is verified (with pointers to REVIEW_LOG sections), what is NOT verified, all "Decisions for user review", and the git state (`git status --short`, `git log --oneline -25`, `git ls-remote reconkit main`). Then STOP. Do not push.
 
 =====================================================
+PART 12: evidence, secrets and loop hygiene (commit `fix:`/`docs:` per item)
+=====================================================
+Status: **PLANNED 2026-11-14, NOT STARTED.** This section was written at the
+owner's request after Part 11 and the two post-Part-11 fix sessions. It is a
+planning artifact: no `src/` or `tests/` change may start until the owner
+approves or amends this text. The owner may reorder, drop or re-scope any item;
+nothing here is a licence to implement an item the owner has not approved.
+
+Goal: close the evidence and hygiene backlog that Part 11 deferred, and settle
+the three product questions that block a ports-stage capability (12i) and the
+exit-code semantics of an empty stage (12k). Every item already has a written
+ticket in `docs/PROGRESS.md` ("Open risks", "11c consolidated findings",
+"11d-findings-*"); this part is the order in which they get fixed, plus the
+decisions that must be taken before any of that code is written.
+
+Docs read first (before any item): `docs/04_DATABASE.md` (sections 3-6 - any
+column, migration and diff rule), `docs/03_ARCHITECTURE.md` (sections 5, 7, 13 -
+layers, pacing, event loop), `docs/05_SECURITY.md` (rules 6 and 8, section 6.1 -
+secrets, IP gate, key handling), `docs/06_CODE_STYLE.md` (section 6 - exception
+vocabulary), `docs/09_TOOL_CONTRACTS.md` (sections 3-5 - adapter contract,
+selection rules, confidence), `docs/02_CLI_UX.md` (sections 5-6 - JSON shape and
+exit codes), `docs/10_TOOL_INSTALLER.md` (section 5a - doctor/version display),
+`tools.yaml`, `config.yaml`, and the REVIEW_LOG sections "Part 11c - fresh-eyes
+audit", "Part 11 close-out - rulings", "Bug-fix session", "Rule decision - diff
+GONE needs two consecutive misses" and "Real-tool verification session 2".
+
+Order: decisions first (12i, 12a, 12c, 12d, 12f, 12g, 12k each need an owner
+ruling or a docs decision before their code), then the small code fixes
+(12e, 12j), then the two cross-cutting ones (12b, 12h). One item per commit;
+each item runs the full self-review loop (S1-S7) before the next starts. A
+renumbering is not allowed: reference these IDs in REVIEW_LOG.
+
+DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
+- 12i (ports capability) is a **decision item**, not a code item. Do not assume
+  either "fund the redesign" or "add a second adapter".
+- 12a, 12c, 12d, 12f, 12g and 12k each need one explicit choice recorded in
+  docs before code; the plan states the options and the recommended default.
+- Assumed: no new dependencies (G3), no scope-bypass path, adapters stay free of
+  store/scope/ui/cli imports, and a schema change means docs/04 plus a migration
+  and a `schema_version` bump in the same commit.
+- Assumed: "the owner approves" means the text of this section is accepted as
+  written or amended in chat; a later session must not treat this section as
+  self-approval.
+
+12a. G-1 - raw tool output is never written (high, code + docs, cross-cutting)
+  What: `Workspace.write` (`core/workspace.py`) has no callers and
+  `ToolResult.raw_path` is never set, while docs/03 section 5 step 9 and section
+  3 promise a raw output file per tool. Every parse bug so far (pyprobe TLS,
+  certspotter empties, HackerTarget quota) had to be reproduced with a scratch
+  script because the run kept no bytes.
+  Decision needed: **wire it** (adapter contract returns raw text or a path, the
+  engine writes it through `Workspace.write` with redaction, `raw_path` set on
+  the result and printed/JSON-visible) **or delete the promise** (remove the
+  docs lines and the dead method). Recommended: wire it, because the code exists
+  and every real-tool session has wanted it. Decide what is stored: stdout only
+  or stdout+stderr, and whether a failed tool's output is written too (recommend
+  yes, capped by the existing `max_output_bytes`).
+  Size: cross-cutting - `models.ToolResult`, `adapters/base.py` (both base
+  classes), the four python adapters, `engine._run_one`, `core/workspace.py`,
+  docs/03, and `ui` only if `raw_path` becomes visible.
+  Tests: a mock run writes exactly one redacted file per executed tool and sets
+  `raw_path`; a failing/timed-out tool still writes its partial output; a secret
+  in tool output never reaches the file (extend the PIT-22 test to a real
+  adapter result); Windows path containment unchanged.
+  Adversarial: tool output containing a token, an ANSI escape, NUL bytes, a
+  filename that collides across two tools in one stage, a workspace write that
+  raises (the run must still record the tool result).
+  Mutation targets: drop the redaction call; set `raw_path` before the write
+  succeeds; skip the write on failure.
+
+12b. 11d-findings-b - the DNS stage invents discovery rows (medium, code + docs, medium)
+  What: `_persist_dns` and `_previous_facts` INSERT `subdomains` rows for hosts
+  discovery never returned, so `first_seen_run` points at a `dns` run, there is
+  no `subdomain_sources` row, and `diff_new`/`--new-only` can report a host as
+  new that was never discovered. Reproduced offline (`alias.example.com`,
+  `DNS_ONLY`, `sources: []`).
+  Ruling already recorded (Part 11 close-out): keep the row, mark its provenance
+  `dns`, and exclude it from `diff_new` and discovery counts.
+  Size: medium - one migration (`subdomains.provenance` or equivalent, docs/04
+  first), the two engine call sites, `diff_new`, `host_rows`/JSON `sources`, and
+  the docs/04 section 5 rule.
+  Tests: a resolved host discovery never returned is stored with `dns`
+  provenance and is NOT `NEW`; a discovered host keeps `subs` provenance; a host
+  first seen in `dns` then discovered in `subs` upgrades its provenance and is
+  `NEW` at that later run; existing apex fixture unchanged in state.
+  Adversarial: host resolved by DNS and discovered by no tool across many runs;
+  provenance upgrade ordering; resume across the migration boundary.
+  Mutation targets: drop the provenance filter in `diff_new`; write `subs` for
+  the DNS-only path.
+
+12c. 11d-findings-c - `duration_s` is 0.0 for real work (low, code + docs, small)
+  What: three writers disagree - `HttpAdapter.run` omits it on the parse-error
+  and fetch-failure branches, `DnsPythonAdapter.run` never sets it, and
+  `Engine._run_one` discards its own measurement on the success path. Observed
+  again in session 2: `dnspython ok 36 0.0`, `pyprobe ok 8 0.0`, `otx failed 0.0`
+  next to a real 429.
+  Decision needed: which measurement is authoritative. Recommended: the adapter
+  measures its own work and `_run_one` fills it only when the result did not
+  provide one, with docs/04 saying so for the column.
+  Size: small - `adapters/base.py`, `adapters/dnspython.py`,
+  `engine._run_one`, docs/04.
+  Tests: a 429 stores `> 0`; a parse error stores `> 0`; a successful
+  `dnspython` stores `> 0`; a timeout keeps the duration `_run_one` already
+  measures; no double counting when both would fill it (assert the adapter
+  value wins, or the documented one).
+  Adversarial: clock that returns the same instant (must still store `0.0`
+  rather than a negative); adapter raising after measuring.
+  Mutation targets: discard the adapter measurement; overwrite a non-zero
+  adapter value with `_run_one`'s.
+
+12d. 11d-findings-f (remaining half) - an UNKNOWN host carries no reason (low-medium, code + docs, cross-cutting)
+  What: the short-circuit bug is fixed (PIT-37); what remains is that a host
+  recorded `UNKNOWN` because no scheme answered still stores no cause, so
+  "expired certificate / untrusted CA / handshake rejected / incomplete CA
+  store" cannot be told apart without probing again. The TLS text is classified
+  by substring and discarded.
+  Decision needed: where the reason lives - a new `host_status_history` column
+  (docs/04 migration, redacted, bounded length) or a `tool_runs.detail` field
+  (docs/04, no new column on history). Recommended: a bounded, redacted detail
+  on the status row, because the reason belongs to the host state, not the tool
+  run. Decide whether it is shown in the human table or only in the DB/JSON.
+  Size: cross-cutting - `models.HostStatusRecord`, `pyprobe`, `engine`
+  (`_persist`/`_write_host`), `store` (migration), docs/04, optionally `ui`.
+  Tests: a TLS-only failure stores the reason; a plain connect failure stores
+  none; a long reason is truncated; a reason containing a configured secret is
+  redacted before it reaches the DB; schema migration is additive on an existing
+  v2 database.
+  Adversarial: exception text with a newline or a URL containing a query secret;
+  reason on a host that later becomes ALIVE (must not resurrect).
+  Mutation targets: drop the truncation; store the unredacted text.
+
+12e. 11d-findings-g - an inconclusive live pass writes no history row (medium, code + docs, small)
+  What: `decide_host_state` sets `persist = previous is not None` for
+  inconclusive evidence and `_persist` skips the write, so a first run that did
+  contact a host leaves no `host_status_history` row, which is indistinguishable
+  from a run that never touched it. docs/04 section 5 promises one row per host
+  per status pass with a `dns`-stage exemption only.
+  Decision needed (docs/04 first): persist the UNKNOWN transition, or record a
+  per-host probe outcome; recommended: persist the row with the UNKNOWN state
+  when a probe was attempted, and keep the existing "no evidence" skip when
+  nothing was attempted.
+  Size: small - `engine.decide_host_state`/`_persist`, docs/04.
+  Tests: an inconclusive first pass writes one UNKNOWN row; the second
+  consecutive NXDOMAIN rule still holds; a host with no probe attempt writes
+  nothing; existing PIT-29 CNAME tests stay green.
+  Adversarial: timeout then success; timeout on a host whose previous state was
+  ALIVE (must keep ALIVE and still write the attempted pass).
+  Mutation targets: persist on every pass including "no attempt"; skip the row
+  on inconclusive evidence.
+
+12f. C-1 - unredacted exception text on the last-resort path (medium, decision + code, small)
+  What: `cli.py`'s last-resort handler formats raw `str(exc)`, and `-v` prints a
+  traceback; `cli.py` imports no `redact` and has no secret source, so an
+  escaping exception could print a key if one ever appeared in an exception
+  message. No reachable leak has been demonstrated (keys travel in headers, not
+  URLs).
+  Decision needed (architecture, docs/03): give the CLI a redaction source
+  (constructor-injected secrets, or an engine/`ui` redaction call) or make the
+  CLI a pass-through that can never format exception text except through
+  `redact()`. Recommended: a small `configure_redaction()` set by the CLI from
+  the same env it already loads, applied in `_report_error` and the `-v`
+  traceback.
+  Size: small code, but it is an architecture decision; touches `cli.py`,
+  `core/store.redact` (or a new helper in an existing module - no new file),
+  docs/03 and docs/05.
+  Tests: an exception whose message contains a configured key is printed
+  redacted, with and without `-v`; a message with no secret is unchanged; the
+  traceback path redacts too.
+  Adversarial: key substring inside a longer token; exception raised before the
+  env is loaded; `--json` error path.
+  Mutation targets: remove the redaction call from `_report_error`; forget the
+  `-v` branch.
+
+12g. C-2 - a SIGKILL can strand the subfinder provider file (low, decision + code, small)
+  What: the adapter writes `provider-config.yaml` with `mkstemp` in the system
+  temp dir (0600) and deletes it in `finally`; a `SIGKILL` in between leaves a
+  key file. `finally` is the mitigation today.
+  Decision needed (docs/09): choose a SIGKILL-resistant shape - an anonymous
+  `memfd`/`O_TMPFILE` file passed via `/proc/self/fd` (Linux-only, needs a
+  documented fallback), a per-run 0700 directory that a later run cleans up, or
+  accept the risk with the current text and a doctor warning. Recommended: the
+  per-run 0700 directory with startup cleanup, because it works on both
+  platforms and is testable without root.
+  Size: small (one adapter + docs/09 + a cleanup step), no schema change.
+  Tests: a run leaves no provider file; a stale file from a previous run is
+  removed on the next start; Windows path behaves as documented; the file is
+  never in argv except as a path.
+  Adversarial: two concurrent runs (must not cleanse each other's live file);
+  crash between mkdir and write.
+  Mutation targets: skip the cleanup; widen the directory mode.
+
+12h. E-1/E-2/E-3 - blocking calls on the event loop (low, code, medium, ordering risk)
+  What: the SQLite transaction and `_persist_stage` run on the event loop
+  (`engine.py`), `load_scope()` reads and parses YAML inside async
+  `_active_hosts`, and `Workspace.create` mkdirs/chmods inside `async def run`.
+  None causes a wrong result; together they can stall other stages' I/O.
+  Decision needed (docs/03): move them behind `asyncio.to_thread`, or accept
+  them with a documented bound. Recommended: `to_thread` for the scope read and
+  the workspace mkdir, and for the persistence block keep it on the loop but
+  document why (single-writer SQLite ordering) unless the owner wants the
+  transaction moved as well.
+  Size: medium - `engine.run`/`_active_hosts`/`_persist_stage`, plus tests that
+  assert ordering did not change.
+  Tests: a scope file read that sleeps does not block a concurrent heartbeat
+  task (injected slow read); persistence ordering across two stages is
+  unchanged; resume still seeds before the first stage.
+  Adversarial: cancellation during a `to_thread` call; a scope error raised
+  inside the thread; two targets in one CLI invocation.
+  Mutation targets: move the transaction back onto the loop (ordering test must
+  catch it) - or, if the transaction stays, remove the documented reason.
+
+12i. Ports capability: `naabu` is permanently blocked and confidence cannot pass LOW (medium capability gap, DECISION ITEM, large)
+  What: `naabu` is skipped at selection time because it resolves hostnames
+  inside its own process, so docs/05 rule 6 cannot filter the address it
+  connects to; every other ports adapter except `pyscan` is phase 3 with no
+  adapter. With one selectable tool, ports confidence can only ever be LOW, and
+  the open/closed disagreement rule needs two scanners.
+  **This is a decision item. Do not assume an answer.** Options: (a) fund the
+  pre-resolve redesign - the engine resolves, applies `ip_allowed`, and passes
+  `naabu` explicit IPs, which changes what `PortRecord.fqdn` means for every
+  consumer and needs a re-verification of naabu's real output; (b) add a second
+  port adapter (`nmap`, `rustscan` or `smap` are already in `tools.yaml` as
+  phase 3, so this is implementation, not registry work); (c) leave ports as a
+  LOW-only, `pyscan`-only stage and document the ceiling as accepted for this
+  build. Owner must choose before any code. If (a): docs/05 rule 6 and docs/09
+  selection rules first, then a pre-resolve step, then adapter changes, then a
+  real run against an authorized target with `in_scope_cidrs` set. If (b):
+  docs/09 stage table first, then the adapter, then a real binary check.
+  Size: (a) large and cross-cutting; (b) one adapter; (c) docs only.
+  Tests: (a) an IP outside `in_scope_cidrs` is never connected to by any port
+  adapter and the hostname is never re-resolved inside the child (must be
+  observable, not asserted from docs); (b) two port adapters produce MEDIUM on
+  agreement and UNCONFIRMED on open/closed disagreement.
+  Adversarial: (a) a host whose A record is inside and AAAA outside; (b) one
+  adapter reports open and the other closed; both after a failed tool.
+  Mutation targets: only after the owner picks an option.
+
+12j. katana/nuclei version-line parsing (low, code + docs/10, small)
+  What: `installed_version()` returns `text.splitlines()[0]`, so `katana` shows
+  `__` and `nuclei` shows `[I...` in the doctor table, which also defeats
+  `_same_version()` and makes `update` unable to call them up to date. The
+  masscan half of the same audit is already fixed (PIT-35).
+  Decision needed: per-tool version regex in `tools.yaml` (a `version_regex`
+  field, docs/10 section 3c) or a parsing rule in the installer. Recommended:
+  the registry field, because the banner text is a property of the tool.
+  Size: small - `installer/registry.py`, `installer/github_release.py`, docs/10,
+  `tools.yaml` rows for the banner-first tools.
+  Tests: katana and nuclei parse a real captured banner; masscan's nonzero-exit
+  case still passes (PIT-35); a banner with no match falls back to the first
+  line, not to `wrong program`; `_same_version` reports current for a matching
+  parsed version.
+  Adversarial: banner with ANSI colour; version line on line 3; two versions in
+  the text.
+  Mutation targets: fall back to `splitlines()[0]`; accept any substring match.
+
+12k. Exit code for a stage that executed nothing (low-medium, DECISION + code, small)
+  What: a stage whose pool has no adapter (or whose adapters were all skipped)
+  executes zero tools, is recorded `completed`, and contributes nothing to the
+  run's exit code. Session 2: `tech`/`urls`/`vulns` ran zero tools, `scan_runs`
+  says `completed`, and exit 5 came from `otx` + `hackertarget`; a clean passive
+  stage in the same shape would exit 0.
+  Decision needed (docs/02): does a requested stage with zero executed tools
+  make the run partial (5), keep today's behaviour (0/4 per stage), or emit a
+  warning and stay 0? Recommended: exit 5 with a warning naming the stage, since
+  the user requested work that no tool performed; the alternative is a warning
+  only, to avoid failing a run for a build gap.
+  Size: small - `engine._exit_code`, `ScanSummary.warnings`, docs/02 section 6.
+  Tests: `run --active` with only passive adapters installed and a clean passive
+  stage exits per the ruling and names the empty stages; a stage with a failed
+  tool keeps its current code; a resumed run does not double-count.
+  Adversarial: every stage empty; a stage empty because of `--tools` filtering
+  (must not be treated the same as "no adapter exists"); scope-denied run.
+  Mutation targets: after the ruling, remove the warning; make every skip count.
+
+PART 12 ADVERSARIAL LIST (beyond each item's own): a schema migration applied to
+a database written by 2026-11-14 code (v2, real `recon.db` copy) must be
+additive and must pass `PRAGMA integrity_check`/`foreign_key_check`; a resumed
+run across a migration; `--json` shape changes must stay documented and tested
+in the same commit; every item must leave the scope gate, the IP gate and the
+pacing rules exactly as they are (no item may touch `scope.yaml`, and 12i is the
+only item allowed to change how an address is filtered, after its ruling).
+
+PART 12 MUTATION TARGETS: one per item, listed above. In addition, the exit-code
+change (12k) and the redaction change (12f) must each be proved by mutating the
+new code and watching the new test fail, then restoring.
+
+PART 12 GATE: (1) the owner has approved or amended this section and ruled on
+12i, 12a, 12c, 12d, 12f, 12g and 12k before their code starts; (2) every item
+is either closed with its own commit, or explicitly re-deferred by the owner in
+writing (PROGRESS "Open risks" updated in the same commit); (3) `pytest` twice,
+`ruff check`, `ruff format --check` and `mypy` clean after every item; (4) each
+item's docs change landed in the same commit as its code, with docs-first where
+the item says so; (5) no new dependency, no new module outside docs/03, no new
+CLI flag or command outside docs/02; (6) PIT rows added for every bug found;
+(7) PROGRESS RESUME, Deviations and Open risks updated; (8) nothing pushed.
+
+=====================================================
 LATER BUG FIXES (any session)
 =====================================================
 Reproduce with a failing test first, fix, run the SELF-REVIEW LOOP on the fix, log it in REVIEW_LOG "Bugs found", update RESUME. Never change behavior without a test.
