@@ -1359,3 +1359,167 @@ exit=1
 - **Doc change so the two owners are unmistakable:** docs/02 section 6 now states under the table that code 6 comes from `installer.github_release.exit_code()` and that the scan enum deliberately stops at 5 plus 130; the `ExitCode` docstring says the same. No behaviour change.
 - **Verdict:** not broken. It is one enum for scans and a separate int for the installer; the 6 never lived on the scan path.
 - **Checkout question (answered 2026-11-14):** all commits are in `/home/kali/Desktop/reconkit` (Kali, `uname -a` -> `Linux kali 7.2.15+kali-amd64`). The owner confirmed the history: development started on Windows (`C:\Users\anshu\Desktop\recon\reconkit`), the folder was copy-pasted to Kali to finish the parts needing real Debian tooling, and every commit since then exists only here. So Kali is canonical and the Windows folder is a stale pre-Part-10 snapshot, not a mirror. The exact snapshot commit cannot be read from Kali (no marker, two trees, one copied `.git`); the bound is at or before the last Part-9 commit `cd57fb5`, and the owner can pin it with `git log -1 --oneline` on the Windows box. Nothing was synced, copied or deleted. Consequence recorded under Open risks: the Windows-only acceptance criteria are unverified anywhere with the current code.
+
+## Tool flags and fields verified against the real tools (2026-11-14)
+
+- **Why:** G4 forbids guessing a flag or a JSON field. This pass checks every phase-2 tool and the phase-3 candidates named in the request (`nmap`, `rustscan`, `naabu`, `masscan`, `subfinder`, `assetfinder`, `massdns`, `httpx`, `katana`, `nuclei`) against the real binary on this Kali box where installed, and the tool's official source where not. Documentation only; no code changed in this commit.
+- **Where the table lives:** `docs/09_TOOL_CONTRACTS.md` section 9. It is reproduced here as the evidence record.
+- **Form:** binaries were preferred (9 of 11 external tools are installed here); the two that are not (`assetfinder`, `rustscan`) were checked against the official repo/docs. The four HTTP endpoints were checked with live requests or their official reference. Every command below ran on 2026-11-14 in `/home/kali/Desktop/reconkit`.
+
+| Tool | Relied on | Verified by | Mismatch |
+|---|---|---|---|
+| crtsh | `?q=%.<domain>&output=json`, fields `name_value`, `common_name` | live 200, 28,454 bytes | none; unencoded `%` in `q` 404s, httpx encodes |
+| certspotter | `/v1/issuances` + `domain`/`include_subdomains`/`expand=dns_names`, field `dns_names`, Bearer auth | official APIv1 reference + live 200 (17 entries) | none |
+| otx | `/api/v1/indicators/domain/{d}/passive_dns`, `passive_dns[].hostname` | official external-API page; live anonymous call 429 | shape not re-verified live |
+| hackertarget | `?q=<domain>`, text `host,ip` | live 200 `www.example.com,172.66.147.243` | quota string unverified |
+| subfinder | `-d -silent -nc -duc -pc -rl -version` | installed v2.17.0 `-h`; official README | none |
+| assetfinder | `--subs-only <domain>`, domain positional; `-h` identity probe | official README + `main.go` | binary not installed; probe inferred |
+| httpx | `-u -json -silent -no-stdin -duc -nc -sc -title -location -td -cdn -rl`; keys `input url status_code title location tech cdn_name` | installed v1.12.0 `-h`, `-ldv`, two localhost probes | none |
+| naabu | `-silent -json -no-stdin -duc -nc -scan-type c -host -p -rate`; keys `host ip port` | installed v2.7.0 `-h`, two localhost scans | `host` omitted for IP inputs (adapter falls back to `ip`) |
+| nmap | `-sV`, `-T<0-5>`, `-p`, `--version` | installed 7.991 | `rate_flag: -T` needs a digit appended |
+| masscan | `--max-rate`, `--version`, needs root | installed 1.3.2; `--max-rate 100 --echo` shows `rate = 100` | **`--version` exits 1**, so doctor calls a real Masscan "wrong program" |
+| rustscan | `-V, --version` | not installed; Kali package page shows `rustscan -h` | not verified against a binary |
+| massdns | `-r`, `-t`, `-o` (L/S/F/B, no JSON); version via `dpkg-query` | installed 1.1.0-0kali2 | none; a future adapter must parse text |
+| katana | `-rl`, `-version` | installed v1.8.0 | version line is not the first line |
+| nuclei | `-rl`, `-tags`, `-version` | installed v3.11.1 | same first-line defect |
+| dig | `dig -v` version command | installed 9.20.30 | none |
+| dnspython/pyprobe/pyscan | library/stdlib only | dnspython 2.9.2 with `NXDOMAIN`; stdlib imports | none |
+
+Raw evidence:
+
+```
+$ for b in nmap masscan naabu subfinder assetfinder httpx katana nuclei massdns dig jq go curl; do printf "%-12s " "$b"; command -v "$b" || echo MISSING; done
+nmap         /usr/bin/nmap
+masscan      /usr/bin/masscan
+naabu        /usr/bin/naabu
+subfinder    /home/kali/go/bin/subfinder
+assetfinder  MISSING
+httpx        /home/kali/go/bin/httpx
+katana       /home/kali/go/bin/katana
+nuclei       /home/kali/go/bin/nuclei
+massdns      /usr/bin/massdns
+dig          /usr/bin/dig
+jq           /usr/bin/jq
+go           /usr/bin/go
+curl         /usr/bin/curl
+```
+
+```
+$ nmap --version | head -2
+Nmap version 7.991 ( https://nmap.org )
+Platform: x86_64-pc-linux-gnu
+$ masscan --version
+Masscan version 1.3.2 ( https://github.com/robertdavidgraham/masscan )
+Compiled on: Jul 25 2024 16:44:22
+Compiler: gcc 14.1.0
+OS: Linux
+CPU: unknown (64 bits)
+GIT version: unknown
+$ naabu -version | tail -3
+		projectdiscovery.io
+
+[INF] Current Version: 2.7.0
+$ subfinder -version
+[INF] Current Version: v2.17.0
+[INF] Subfinder Config Directory: /home/kali/.config/subfinder
+$ httpx -version | tail -2
+[INF] Current Version: v1.12.0
+$ katana -version
+[INF] Current version: v1.8.0
+$ nuclei -version | head -1
+[INF] Nuclei Engine Version: v3.11.1
+$ dig -v
+DiG 9.20.30-1-Debian
+```
+
+Flag presence, straight from the binaries:
+
+```
+$ nmap --help | grep -nE '^\s*-sV|^\s*-T<|-p <'
+31:  -p <port ranges>: Only scan specified ports
+39:  -sV: Probe open ports to determine service/version info
+62:  -T<0-5>: Set timing template (higher is faster)
+$ naabu -h | grep -inE 'json|no-color|scan-type|-host|-p |-rate'
+8:   -host string[]              hosts to scan ports for (comma-separated)
+14:   -port, -p string              ports to scan (80,443, 100-200)
+24:   -rate int             packets to send per second (default 1000)
+35:   -j, -json                              write output in JSON lines format
+45:   -scan-type, -s string            type of port scan (SYN/CONNECT) (default "c")
+103:   -no-color, -nc            disable colors in CLI output
+$ subfinder -h | grep -nE '^\s+-(d|silent|nc|duc|pc|rl)\b'
+8:   -d, -domain string[]  domains to find subdomains for
+24:   -rl, -rate-limit int      maximum number of http requests to send per second (global)
+30:   -duc, -disable-update-check  disable automatic subfinder update check
+41:   -pc, -provider-config string  provider config file (default "/home/kali/.config/subfinder/provider-config.yaml")
+50:   -silent             show only subdomains in output
+53:   -nc, -no-color      disable color in output
+$ httpx -h | grep -nE '^\s+-(u|sc|title|location|td|cdn|rl|duc|no-stdin|nc)\b'
+10:   -u, -target string[]     input target host(s) to probe
+14:   -sc, -status-code                      display response status-code
+17:   -location                              display response redirect location
+24:   -title                                 display page title
+27:   -td, -tech-detect                      display technology in use based on wappalyzer dataset
+38:   -cdn                                   display cdn/waf in use (default true)
+88:   -rl, -rate-limit int          maximum requests to send per second (default 150)
+105:   -duc, -disable-update-check  disable automatic httpx update check
+159:   -no-stdin                        Disable Stdin processing
+174:   -nc, -no-color            disable colors in cli output
+$ katana -h | grep -nE '^\s+-rl'
+100:   -rl, -rate-limit int                maximum requests to send per second (default 150)
+$ nuclei -h | grep -nE 'rate-limit|\-tags'
+50:   -tags string[]                     templates to run based on tags (comma-separated, file)
+153:   -rl, -rate-limit int                     maximum number of requests to send per second (default 150)
+```
+
+Real JSON output, produced by running the installed binaries against a local `python3 -m http.server` on 127.0.0.1:18080 (no packets left this machine):
+
+```
+$ httpx -u 127.0.0.1:18080 -json -silent -sc -title -location -td -cdn -nc -duc
+{"timestamp":"2026-11-14T13:47:12.211473768-05:00","port":"18080","url":"http://127.0.0.1:18080","input":"127.0.0.1:18080","title":"reconkit probe","scheme":"http","webserver":"SimpleHTTP/0.6 Python/3.14.8","content_type":"text/html","method":"GET","host":"127.0.0.1","host_ip":"127.0.0.1","path":"/","time":"5.500479ms","a":["127.0.0.1"],"tech":["Python:3.14.8","SimpleHTTP:0.6"],"words":2,"lines":1,"status_code":200,"content_length":30,"failed":false,"knowledgebase":{"pHash":0}}
+
+$ httpx -u 127.0.0.1:18080/subdir -json -silent -sc -title -location -td -cdn -nc -duc
+{"timestamp":"2026-11-14T13:47:31.262194637-05:00","port":"18080","url":"http://127.0.0.1:18080/subdir","input":"127.0.0.1:18080/subdir","location":"/subdir/", ...,"status_code":301, ...}
+
+$ naabu -host 127.0.0.1 -p 18080 -json -silent -nc -duc -no-stdin -scan-type c
+{"ip":"127.0.0.1","timestamp":"2026-11-14T18:47:12.26100621Z","port":18080,"protocol":"tcp","tls":false}
+
+$ naabu -host localhost -p 18080 -json -silent -nc -duc -no-stdin -scan-type c
+{"host":"localhost","ip":"127.0.0.1","timestamp":"2026-11-14T18:47:32.005116457Z","port":18080,"protocol":"tcp","tls":false}
+```
+
+The httpx JSON key list was also read from the binary itself (`httpx -ldv`), which contains `input`, `url`, `status_code`, `title`, `location`, `tech`, `cdn_name`, `webserver`, `host`, `port`.
+
+```
+$ masscan --max-rate 100 -p1234 --echo | grep -inE 'rate|ports'
+2:rate = 100
+8:ports = 1234
+$ dpkg-query -W '-f=${Version}' massdns; echo
+1.1.0-0kali2
+$ massdns -h
+Usage: massdns [options] [domainlist]
+  -r  --resolvers        Text file containing DNS resolvers.
+  -t  --type             Record type to be resolved. (Default: A)
+  -o  --output           Flags for output formatting.
+Output flags:
+  L - domain list output
+  S - simple text output
+  F - full text output
+  B - binary output
+```
+
+```
+$ curl -s -m 25 "https://crt.sh/?q=%25.example.com&output=json" -w "http=%{http_code} bytes=%{size_download}\n"
+http=200 bytes=28454
+$ curl -s -m 25 "https://api.certspotter.com/v1/issuances?domain=example.com&include_subdomains=true&expand=dns_names" -w "http=%{http_code}\n"
+http=200 bytes=7739   -> 17 entries, first keys include dns_names
+$ curl -s -m 25 "https://api.hackertarget.com/hostsearch/?q=example.com"
+http=200 bytes=31
+www.example.com,172.66.147.243
+$ curl -s -m 25 "https://otx.alienvault.com/api/v1/indicators/domain/example.com/passive_dns"
+http=429 bytes=80   -> {"detail": ...}; shape taken from the official API page instead
+```
+
+Two defects found, both outside the adapter contract and fixed/ticketed separately:
+
+1. **`masscan --version` exits 1** while printing `Masscan version 1.3.2 (...)` on stdout. `installer.github_release.installed_version()` returns `None` for any nonzero exit, so `default_status()` reports `installed=False, path=/usr/bin/masscan` and doctor prints `masscan | wrong program | failed` for a genuine, working Masscan. Confirmed with `reconkit doctor` on 2026-11-14.
+2. **Banner-first version text.** `installed_version()` returns `text.splitlines()[0]`; for katana and nuclei the first line is ASCII art, so doctor shows `__` and `[I…`. Adapter-backed tools are unaffected because they use `check_installed()` and a version regex. Cosmetic, but it also defeats `_same_version` for those tools.
