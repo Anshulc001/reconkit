@@ -10,7 +10,7 @@
 - Next action: Part 11 (docs sync, README/SETUP rewrite, fresh-eyes audit, final report) may begin once the user says so. Part 11 cannot close without at least one real run against an authorized target on real Kali; mock-only is insufficient.
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
-- Known open bugs: none
+- Known open bugs: 11d-findings-a/b/c, logged 2026-11-14 (see "11d-findings" below); 11d-findings-d awaits a maintainer decision. (a) blocks any `live`/`ports`/`--active` run.
 - Read first: AGENTS.md, this block, last 3 REVIEW_LOG entries, current part in docs/MASTER_PLAN.md
 
 Read this after `AGENTS.md`, before touching code. Update it in every commit.
@@ -180,6 +180,58 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Part 8: `db list`/`db export`/`export` are command stubs, and `diff` compares only the latest two completed `subs` runs plus matched `live`/`ports` runs; real tools, real terminals and the stubs remain unverified.
 - Part 8: `--timeout-<stage>` is explicitly deferred in docs/02; `--phase-timeout` is the only stage-timeout flag, and multi-target `--json` is rejected pending a batch document shape.
 
+## 2026-11-14 - 11d-findings (first real authorized run; findings only, no fixes)
+
+First real passive run against an authorized target produced `/tmp/rk_testfire.db`: 6 `scan_runs`, 48 `tool_runs`, 4 `subdomains`, 12 `subdomain_sources`, 0 `urls`, 0 `ports`. These four tickets are logged separately from 11c's fresh-eyes audit and from 11d's close-out. **Only this file changed in this entry** - no `src/`, `tests/`, `tools.yaml` or `config.yaml` change, nothing pushed.
+
+Artifact checks (raw, from the file): `PRAGMA integrity_check` = `ok`; `PRAGMA foreign_key_check` empty; `schema_version` = 2 (matches docs/04 section 11); the four table DDLs match docs/04 section 3. The DB's filesystem `mtime` equals `scan_runs` row 6 `finished_at` to the second (06:11:42 -0500 = 11:11:42Z), so the file is a genuine run artifact, not hand-written text. It was last written ~95 minutes before the review started, so nothing in that session wrote to it.
+
+### 11d-findings-a (high) - `_write_host` overwrites the discovery consensus
+
+- `_persist_discovery` (engine.py 911-941) is correct: it groups by `fqdn`, collects the distinct tool names, and passes `confidence=confidence_for(tools)` with `source_count=len(tools)`.
+- `_write_host` (engine.py 1125-1140) then passes `source_count=len(transition.sources)`. On a DNS-only pass `decide_host_state` (engine.py 184-190) sets `sources` to the DNS tools only, so on this run that is `("dnspython",)` and the count is 1.
+- `Store.upsert_subdomain`'s ON CONFLICT clause is `source_count = COALESCE(:source_count, subdomains.source_count)` (store.py 427-431). `COALESCE` protects the stored value only against `None`, and `_write_host` never passes `None`, so every DNS pass replaces the discovery value with a non-null worse one.
+- Observed: `demo.testfire.net` has `crtsh` + `hackertarget` `subdomain_sources` rows in runs 1, 3 and 5, yet stores `source_count=1, confidence=LOW`. `config.yaml` sets `medium_min_sources: 2`, so the documented rule (docs/04 section 5, docs/09 "Discovery stages") requires `MEDIUM`/2.
+- The stored value is predicted by the write order, which is why it is a clobber and not a mis-merge: run 1 `subs` -> 2/MEDIUM, run 2 `dns` -> 1/LOW, run 3 -> 2/MEDIUM, run 4 -> 1/LOW, run 5 -> 2/MEDIUM, run 6 -> 1/LOW. Final state 1/LOW, which is exactly what the DB holds.
+- `_persist_live` calls the same `_write_host` (engine.py ~1085), so the `live` stage has the identical defect for `ALIVE` hosts. This is why `live`/`ports`/`--active` were not run on top of it.
+- **Regression test this fix must add (currently absent):** run `SUBS` with two tools reporting `www.example.com`, then `DNS` with one tool resolving it, and assert the stored row is `("MEDIUM", 2)`. Today it reads `("LOW", 1)` and fails.
+
+### 11d-findings-b (medium) - the DNS stage creates subdomain rows
+
+- `_persist_dns` (engine.py 1015-1018) and `_previous_facts` (engine.py 1115-1122) both call `upsert_subdomain(target_id, host, run_id=run_id)` with no `confidence`/`source_count`, so a host with no row is INSERTed with the schema defaults (`source_count=0`, `confidence='LOW'`) and `first_seen_run=<dns run id>`.
+- Observed: the apex `testfire.net` has no `subdomain_sources` row in any run, `first_seen_run=2` (a `dns` run) and `source_count=1` (set afterwards by `_write_host`). The other three hosts point at `subs` runs.
+- Kept separate from (a) because it is a different decision: (a) writes the wrong number, (b) decides that the row exists at all and what its provenance is.
+
+### 11d-findings-c (low) - `duration_s` recorded as 0.0 for real I/O
+
+- `HttpAdapter.run` (base.py 286-301) measures `started` but omits `duration_s` on both the `ParseError` and `FetchFailed` branches, so the `ToolResult` takes the Pydantic default `0.0` (models.py 110). `otx` therefore stores `0.0` next to `rate limited (HTTP 429)`, although a response was received.
+- `DnsPythonAdapter.run` never sets `duration_s` on any return path (dnspython.py ~100), so `dnspython` stores `0.0` with 4 items.
+- `Engine._run_one` (engine.py 794-818) computes `started` but uses it only on the timeout/exception paths, then records `result.duration_s`; its own measurement is discarded on the normal path.
+- This is metadata loss, not missing I/O. The three `ok` HTTP tools store real, varying durations (crtsh 0.66 / 13.76 / 51.85 s; hackertarget 0.89 / 1.08 / 1.15 s), and `subfinder`/`assetfinder` store sub-millisecond real `FileNotFoundError` timings.
+
+### 11d-findings-d (docs conflict; needs a maintainer decision - not actioned)
+
+- docs/03 "What if" says `Tool missing` -> "Skip, report `skipped (not installed)`", and docs/09 selection says missing tools are reported as `skipped`. docs/MASTER_PLAN's adapter rules instead require a missing binary to be "a distinct failed result".
+- The code follows MASTER_PLAN: `subfinder` and `assetfinder` store `failed` with `not installed or not executable: [Errno 2] No such file or directory: ...`.
+- A planning document outranking the two docs it is meant to implement is backwards from the project's source-of-truth order, but this is the maintainer's call. No docs or code change was made.
+
+### Latent, not exercised by this run
+
+- `_persist_dns` calls `_write_host` without the `if not transition.persist: continue` guard that `_persist_live` uses (engine.py ~1086). It is unreachable today because `_dns_facts` emits only `RESOLVED`/`NXDOMAIN` signals, but it is one refactor away from writing spurious status rows. Fold into (a)'s fix or give it its own ticket.
+
+### Test coverage, measured
+
+- `grep -rn "source_count" tests/` -> 29 text occurrences: **25 in `tests/test_store.py`** (upsert semantics only) and **4 in `tests/test_engine.py`**. An earlier note in this session said "29, sampled the first 20, all store" - that sample stopped before the engine file. This line is the corrected account.
+- The 4 engine occurrences: two are direct `confidence_for([...])` unit calls with no DB; the other two (`test_engine_persists_three_distinct_tools_as_high`, `test_min_sources_hides_low_source_results`) run `stages=(Stage.SUBS,)` only and therefore never reach `_write_host`.
+- The multi-stage tests that do reach it (`tests/test_engine.py:741,763` with `SUBS, DNS, LIVE`; `:840` with `SUBS, LIVE`) assert stage status, `tool_runs` counts, resume flags and host state - never `source_count`/`confidence`. The clobbered value is written into those fixtures and never examined.
+- No existing test encodes the buggy value as expected behaviour, so (a)'s fix needs no assertion updates; it needs the new regression test specified under (a).
+- `pytest -q tests/test_engine.py tests/test_store.py` -> **86 passed, exit 0** (`.venv` Python 3.14.8). The suite is green because no assertion observes this path, not because the path is correct. This is the general lesson: green measures the assertions that were written.
+
+### Not done, by ruling
+
+- No `src/` or `tests/` change in this entry; no `live`/`ports`/`--active` run until (a) is fixed, tested and committed.
+- 11d-findings-d stays open pending the maintainer.
+
 ## Fix backlog
 
-No open items. Part 9 fixed the dangling-CNAME persistence gap with schema version 2 and a restart regression test.
+No open items from Part 9. Part 9 fixed the dangling-CNAME persistence gap with schema version 2 and a restart regression test. The four 11d-findings tickets are tracked in the 2026-11-14 section above, not here.
