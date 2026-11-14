@@ -63,6 +63,15 @@ STAGE_ORDER: tuple[Stage, ...] = (
 SkipReason = str
 Selected = list[tuple[ToolSpec, type[BaseToolAdapter]]]
 Skipped = list[tuple[ToolSpec, SkipReason]]
+# docs/05 rule 6: an active tool may only touch an address inside
+# `in_scope_cidrs`. Until that check is wired into the resolve-then-connect path
+# (11c-G-7), these adapters are skipped at selection time like a missing binary
+# so they can never be launched against an unchecked IP. `--mock` is exempt
+# because it never connects.
+IP_GATE_BLOCKED: dict[str, str] = {
+    "pyscan": "blocked: in_scope_cidrs not enforced on resolved IPs (11c-G-7)",
+    "naabu": "blocked: in_scope_cidrs not enforced on resolved IPs (11c-G-7)",
+}
 Sleep = Callable[[float], Awaitable[None]]
 InstalledCheck = Callable[[type[BaseToolAdapter]], bool]
 Now = Callable[[], str]
@@ -732,6 +741,10 @@ class Engine:
                 continue
             if spec.mode is Mode.ACTIVE and not opts.active:
                 skipped.append((spec, "requires --active"))
+                continue
+            blocked_reason = None if opts.mock else IP_GATE_BLOCKED.get(spec.name)
+            if blocked_reason is not None:
+                skipped.append((spec, blocked_reason))
                 continue
             if not opts.mock and not await asyncio.to_thread(self._is_installed, adapter):
                 skipped.append((spec, "not installed"))

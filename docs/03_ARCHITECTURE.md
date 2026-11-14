@@ -192,6 +192,7 @@ Single machine, thousands of hosts per target. Beyond that is out of scope (see 
 | What if | Expected behavior |
 |---|---|
 | Tool missing | Skip, report `skipped (not installed)`; stage continues. This is the selection-time rule; a binary that was found at selection but cannot be spawned at run time is `failed` with its message instead |
+| Adapter cannot enforce IP scope | Skip at selection time with a `blocked:` reason; the stage continues. docs/05 rule 6 requires every resolved address to be inside `in_scope_cidrs`, so an adapter that resolves and then connects without that check must not run |
 | Tool crashes or exits non-zero | Record `failed` with stderr summary; keep other results |
 | Tool timeout | Kill process group, keep partial output if parseable, record `timeout` |
 | HTTP source returns 429/5xx | `failed` result carrying the status; no retry (only a connection error retries once) |

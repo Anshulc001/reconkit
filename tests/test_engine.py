@@ -161,6 +161,7 @@ def make_engine(
     store: Store | None = None,
     scope_text: str = SCOPE,
     now: Callable[[], str] | None = None,
+    installed: Callable[[type[BaseToolAdapter]], bool] | None = None,
 ) -> Engine:
     config = load_config(CONFIG, speed="fast")
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -178,6 +179,7 @@ def make_engine(
         rng=SilentRng(),
         sleep=no_sleep,
         clock=lambda: 0.0,
+        installed=installed,
         now=now,
     )
 
@@ -302,6 +304,49 @@ async def test_active_without_flag_skips_and_scope_drops_host(tmp_path: Path) ->
     assert "www.example.com" in live_hosts
     live_stage = next(stage for stage in summary.stages if stage.stage is Stage.LIVE)
     assert live_stage.dropped_hosts == ["api.example.com"]
+
+
+async def test_ip_connecting_tools_are_skipped_until_the_cidr_rule_is_wired(
+    tmp_path: Path,
+) -> None:
+    """Regression: 11c-G-7.
+
+    docs/05 rule 6 requires every probed IP to be inside `in_scope_cidrs`, but the
+    resolve-then-connect path does not apply it yet. Both IP-connecting adapters
+    must therefore be skipped at selection time, never launched, and reported with
+    the `blocked:` reason. `--mock` connects to nothing, so it stays selectable.
+    """
+    rec = Recorder()
+    specs = {
+        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
+        "pyscan": tool("pyscan", Stage.PORTS, mode=Mode.ACTIVE),
+        "naabu": tool("naabu", Stage.PORTS, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("example.com")]),
+        "pyscan": adapter("pyscan", Stage.PORTS, rec),
+        "naabu": adapter("naabu", Stage.PORTS, rec),
+    }
+    engine = make_engine(tmp_path, specs, adapters, installed=lambda _adapter: True)
+    await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.LIVE, Stage.PORTS), active=True, speed="slow"),
+    )
+    assert rec.names == ["live-fake"], "an IP-connecting adapter must not run"
+    reason = "blocked: in_scope_cidrs not enforced on resolved IPs (11c-G-7)"
+    rows = [
+        tuple(row)
+        for row in engine.store._conn.execute(
+            "SELECT tool, status, error FROM tool_runs WHERE tool IN ('pyscan','naabu') ORDER BY id"
+        ).fetchall()
+    ]
+    assert rows == [("pyscan", "skipped", reason), ("naabu", "skipped", reason)]
+
+    selected, skipped = await engine._select(
+        Stage.PORTS, ScanOptions(active=True, mock=True, tools=["pyscan", "naabu"])
+    )
+    assert {spec.name for spec, _ in selected} == {"pyscan", "naabu"}
+    assert skipped == []
 
 
 async def test_env_filtering_and_no_keys(tmp_path: Path) -> None:
