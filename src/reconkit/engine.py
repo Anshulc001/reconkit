@@ -638,6 +638,8 @@ class Engine:
                     skipped=[ToolSkip(spec.name, reason) for spec, reason in skipped],
                 )
             )
+            if not results:
+                self._note_empty_stage(stage, skipped)
 
         summary.exit_code = self._exit_code(
             summary, selected_total=selected_total, failed_total=failed_total
@@ -648,6 +650,12 @@ class Engine:
     def _exit_code(
         self, summary: ScanSummary, *, selected_total: int, failed_total: int
     ) -> ExitCode:
+        """The one place the run's exit code is decided (docs/02 section 6).
+
+        Precedence: scope (3) over no-usable-tool (4) over partial (5). A
+        requested stage that executed zero tools is one more source of 5, never
+        a replacement for the existing failed/timeout source.
+        """
         if summary.scope_denied:
             return ExitCode.SCOPE
         new_stages = any(not stage.resumed for stage in summary.stages)
@@ -655,9 +663,18 @@ class Engine:
             return ExitCode.NO_TOOL if new_stages else ExitCode.SUCCESS
         if failed_total == selected_total:
             return ExitCode.NO_TOOL
-        if failed_total:
+        if failed_total or self._empty_stages(summary):
             return ExitCode.PARTIAL
         return ExitCode.SUCCESS
+
+    @staticmethod
+    def _empty_stages(summary: ScanSummary) -> list[Stage]:
+        """Requested stages that executed zero tools; a resumed stage is not new work."""
+        return [
+            outcome.stage
+            for outcome in summary.stages
+            if not outcome.resumed and not outcome.results
+        ]
 
     def _resume_plan(self, target_id: int, opts: ScanOptions) -> tuple[str, dict[Stage, int], bool]:
         """Find the latest scan_key and the stages it already completed."""
@@ -747,6 +764,14 @@ class Engine:
         except ScopeError as exc:
             return hosts, [], str(exc)
         return check.hosts, dropped, None
+
+    def _note_empty_stage(self, stage: Stage, skipped: Skipped) -> None:
+        """docs/02 section 6: a stage that executed no tools says so, once."""
+        reasons = sorted({reason for _spec, reason in skipped})
+        detail = ", ".join(reasons) if reasons else "no adapter"
+        note = f"{stage.value} stage executed no tools: {len(skipped)} tool(s) skipped ({detail})"
+        if note not in self._warnings:
+            self._warnings.append(note)
 
     def _note_passive_warning(self, target: str) -> None:
         """docs/05 rule 1: warn when a passive run targets outside an existing scope file.

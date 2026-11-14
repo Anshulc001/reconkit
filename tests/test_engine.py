@@ -23,6 +23,7 @@ from reconkit.engine import (
     ExitCode,
     HostEvidence,
     ScanOptions,
+    ScanSummary,
     confidence_for,
     decide_host_state,
 )
@@ -1065,6 +1066,159 @@ async def test_exit_code_tool_crash_is_partial(tmp_path: Path) -> None:
     )
     assert summary.exit_code is ExitCode.PARTIAL
     assert any(result.status is ToolStatus.FAILED for result in summary.results)
+
+
+# ------------------------------------------------------- 12k: stages that ran nothing
+
+
+def empty_stage_warnings(summary: ScanSummary) -> list[str]:
+    return [warning for warning in summary.warnings if "executed no tools" in warning]
+
+
+async def test_an_empty_stage_warns_by_name_and_makes_the_run_partial(tmp_path: Path) -> None:
+    """12k: a requested stage that executed zero tools is exit 5, never a silent 0."""
+    rec = Recorder()
+    specs = {"alpha": tool("alpha", Stage.SUBS), "ghost": tool("ghost", Stage.TECH)}
+    adapters = {"alpha": adapter("alpha", Stage.SUBS, rec, records=[sub("www.example.com")])}
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.TECH), mock=True)
+    )
+
+    assert summary.exit_code is ExitCode.PARTIAL
+    tech = next(stage for stage in summary.stages if stage.stage is Stage.TECH)
+    assert tech.results == []
+    assert [skip.tool for skip in tech.skipped] == ["ghost"]
+    notes = empty_stage_warnings(summary)
+    assert len(notes) == 1
+    assert "tech" in notes[0]
+    assert "1 tool(s) skipped" in notes[0]
+
+
+async def test_every_requested_stage_empty_is_no_tool_not_partial(tmp_path: Path) -> None:
+    """docs/02 section 6: all stages empty means nothing usable ran -> 4, each named."""
+    specs = {"ghost": tool("ghost", Stage.TECH), "phantom": tool("phantom", Stage.URLS)}
+    summary = await make_engine(tmp_path, specs, {}).run(
+        "example.com", ScanOptions(stages=(Stage.TECH, Stage.URLS), mock=True)
+    )
+
+    assert summary.exit_code is ExitCode.NO_TOOL
+    notes = empty_stage_warnings(summary)
+    assert len(notes) == 2
+    assert {note.split(" ", 1)[0] for note in notes} == {"tech", "urls"}
+
+
+async def test_empty_stages_and_a_partial_failure_together_are_still_partial(
+    tmp_path: Path,
+) -> None:
+    """One empty stage must not hide another warning or the existing failure cause."""
+    rec = Recorder()
+    specs = {
+        "alpha": tool("alpha", Stage.SUBS),
+        "beta": tool("beta", Stage.SUBS),
+        "ghost": tool("ghost", Stage.TECH),
+        "phantom": tool("phantom", Stage.URLS),
+    }
+    adapters = {
+        "alpha": adapter("alpha", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "beta": adapter("beta", Stage.SUBS, rec, error=RuntimeError("boom")),
+    }
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.TECH, Stage.URLS), mock=True)
+    )
+
+    assert summary.exit_code is ExitCode.PARTIAL
+    assert any(result.status is ToolStatus.FAILED for result in summary.results)
+    notes = empty_stage_warnings(summary)
+    assert {note.split(" ", 1)[0] for note in notes} == {"tech", "urls"}
+
+
+async def test_all_tools_failed_still_outranks_an_empty_stage(tmp_path: Path) -> None:
+    """Precedence: no usable tool (4) wins over the empty-stage 5 (docs/02 section 6)."""
+    rec = Recorder()
+    specs = {
+        "alpha": tool("alpha", Stage.SUBS),
+        "beta": tool("beta", Stage.SUBS),
+        "ghost": tool("ghost", Stage.TECH),
+    }
+    adapters = {
+        "alpha": adapter("alpha", Stage.SUBS, rec, error=RuntimeError("a")),
+        "beta": adapter("beta", Stage.SUBS, rec, error=RuntimeError("b")),
+    }
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.TECH), mock=True)
+    )
+
+    assert summary.exit_code is ExitCode.NO_TOOL
+    assert "tech" in empty_stage_warnings(summary)[0]
+
+
+async def test_a_stage_filtered_out_by_tools_is_not_an_empty_stage(tmp_path: Path) -> None:
+    """A deliberate `--tools` filter is not "no adapter exists": no warning, exit 0."""
+    rec = Recorder()
+    specs = {"alpha": tool("alpha", Stage.SUBS), "ghost": tool("ghost", Stage.TECH)}
+    adapters = {"alpha": adapter("alpha", Stage.SUBS, rec, records=[])}
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS, Stage.TECH), tools=("alpha",), mock=True),
+    )
+
+    assert summary.exit_code is ExitCode.SUCCESS
+    assert [stage.stage for stage in summary.stages] == [Stage.SUBS]
+    assert empty_stage_warnings(summary) == []
+
+
+async def test_a_resumed_run_does_not_warn_about_completed_stages(tmp_path: Path) -> None:
+    """A stage finished in the earlier run is not an empty stage on resume."""
+    rec = Recorder()
+    specs = {"alpha": tool("alpha", Stage.SUBS)}
+    adapters = {"alpha": adapter("alpha", Stage.SUBS, rec, records=[sub("www.example.com")])}
+    engine = make_engine(tmp_path, specs, adapters)
+    first = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
+    second = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, resume=True)
+    )
+
+    assert first.exit_code is ExitCode.SUCCESS
+    assert second.resumed is True
+    assert second.exit_code is ExitCode.SUCCESS
+    assert empty_stage_warnings(second) == []
+
+
+async def test_two_stages_that_ran_tools_still_exit_zero(tmp_path: Path) -> None:
+    """Regression guard: no empty stage and no failure still means 0."""
+    rec = Recorder()
+    specs = {"alpha": tool("alpha", Stage.SUBS), "beta": tool("beta", Stage.TECH)}
+    adapters = {
+        "alpha": adapter("alpha", Stage.SUBS, rec, records=[]),
+        "beta": adapter("beta", Stage.TECH, rec, records=[]),
+    }
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.TECH), mock=True)
+    )
+
+    assert summary.exit_code is ExitCode.SUCCESS
+    assert empty_stage_warnings(summary) == []
+
+
+async def test_scope_denial_keeps_code_3_even_with_an_empty_stage(tmp_path: Path) -> None:
+    """Precedence: scope (3) outranks the empty-stage partial."""
+    rec = Recorder()
+    specs = {
+        "live": tool("live", Stage.LIVE, mode=Mode.ACTIVE),
+        "ghost": tool("ghost", Stage.TECH),
+    }
+    adapters = {"live": adapter("live", Stage.LIVE, rec, records=[alive("example.com")])}
+    scope = SCOPE.replace("allow_active: true", "allow_active: false")
+    summary = await make_engine(tmp_path, specs, adapters, scope_text=scope).run(
+        "example.com",
+        ScanOptions(stages=(Stage.LIVE, Stage.TECH), active=True, mock=True),
+    )
+
+    assert summary.scope_denied is True
+    assert summary.exit_code is ExitCode.SCOPE
+    assert any("live" in note for note in empty_stage_warnings(summary)) or any(
+        "tech" in note for note in empty_stage_warnings(summary)
+    )
 
 
 async def test_min_sources_hides_low_source_results(tmp_path: Path) -> None:

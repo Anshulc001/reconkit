@@ -39,7 +39,7 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 6. Footer: counts per state and tool statuses. It does not print workspace or DB paths.
 
 - **Success:** exit 0.
-- **Partial:** some tools skipped/failed, exit 5, results still saved.
+- **Partial:** some tools skipped/failed, or a requested stage executed no tools (warning names it), exit 5, results still saved.
 - **Failure:** no usable tool for stage: exit 4, hint to run install.
 - **Empty:** message listing which tools returned nothing.
 

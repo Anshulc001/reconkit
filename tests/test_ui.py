@@ -170,6 +170,22 @@ def test_json_hosts_carry_confidence_state_and_sources() -> None:
     assert document["summary"]["unknown"] == 1
 
 
+def test_an_empty_stage_warning_reaches_the_table_and_the_json() -> None:
+    """12k: one warning channel, both surfaces, 5 carried through."""
+    note = "tech stage executed no tools: 5 tool(s) skipped (no adapter yet (phase 2))"
+    summary = make_summary(
+        stages=[StageOutcome(Stage.TECH, 2)], warnings=[note], exit_code=ExitCode.PARTIAL
+    )
+    code, _, err = render_text(summary, hosts=[])
+    assert code == int(ExitCode.PARTIAL)
+    assert "warning: tech stage executed no tools" in err
+
+    code_json, raw, json_err = render_text(summary, hosts=[], json_output=True)
+    assert code_json == int(ExitCode.PARTIAL)
+    assert json_err == ""
+    assert json.loads(raw)["warnings"] == [note]
+
+
 def test_silent_suppresses_tables_but_returns_the_exit_code() -> None:
     code, out, err = render_text(sample_summary(ExitCode.PARTIAL), silent=True)
     assert code == int(ExitCode.PARTIAL)

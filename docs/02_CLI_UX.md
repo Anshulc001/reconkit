@@ -154,11 +154,27 @@ This build has no live progress line; each stage prints its tables when it finis
 | 2 | Usage error (bad flags) |
 | 3 | Scope violation (target not allowed, scope missing or expired) |
 | 4 | No usable tool for the stage |
-| 5 | Partial success (some tools failed or timed out) |
+| 5 | Partial success (some tools failed or timed out, or a requested stage executed no tools) |
 | 6 | Every requested tool failed to install or update |
 | 130 | Interrupted by user (state saved, resumable) |
 
 Code `6` belongs to `install`/`update` only: it is returned by `installer.github_release.exit_code()` (0 when every tool installed, 5 for a partial install, 6 when nothing did). The scan path's enum (`engine.ExitCode`) deliberately stops at 5 plus 130 and cannot emit 6; a scan in which every tool failed is code 4. Do not add a scan-level 6.
+
+**A requested stage that executed zero tools is a partial run (code 5).** Zero executed tools means every tool in that stage's pool was selected out before running - `no adapter yet (phase N)`, `requires --active`, `not installed`, or the docs/05 rule 6 block - so the stage created a `scan_runs` row and `tool_runs` skip rows but no result. Two things follow, both from one engine decision:
+
+- The engine appends one warning per such stage, `"<stage> stage executed no tools: N tool(s) skipped (<reasons>)"`. It is the existing warning channel: the human output prints it as `warning: ...`, `--json` lists it in `warnings`, and `-q`/`--silent` suppress only the text, not the exit code.
+- The run exits 5. Several empty stages add one warning each and still exit 5; no warning overwrites another.
+
+This is an additional cause of 5, not a replacement: stages that did run tools keep their existing result (0 when every selected tool succeeded, 5 when some failed or timed out).
+
+**Precedence, highest first** (one decision site, `Engine._exit_code`):
+
+1. `3` - scope denied (passive results already collected are kept).
+2. `4` - the run has at least one new stage and selected no tool at all (a run resumed entirely from completed stages still exits 0), **or** every selected tool in the run failed. This wins over the empty-stage rule: a run where nothing usable ran or every tool failed is 4 even if another stage was empty.
+3. `5` - at least one requested stage executed zero tools, **or** at least one selected tool failed/timed out.
+4. `0` - otherwise. A resumed run whose requested stages were all already completed keeps 0.
+
+When **every** requested stage is empty, the run follows rule 2 and exits `4`, not 5: no tool ran anywhere, which is the documented meaning of "no usable tool". A stage dropped by `--tools`/`--exclude` is *not* an empty stage - the engine never creates a stage outcome for it, so it neither warns nor changes the exit code; the same applies to `ports` when there are no hosts to scan (the stage is skipped before it builds a pool).
 
 If passive stages have already completed and an active stage is denied by scope, the run still exits `3`; the passive results already collected are kept and reported.
 
