@@ -1552,3 +1552,91 @@ Two defects found, both outside the adapter contract and fixed/ticketed separate
   ```
   The `host,ip` format is confirmed twice; the adapter's `api count exceeded` branch remains unexercised and is named in Open risks rather than guessed.
 - **Not done, deliberately:** no key was used, no rate-limit window was waited out, and nothing was installed to make a probe possible. `assetfinder`/`rustscan` and the Windows acceptance criteria remain named Open risks per the owner's ruling.
+
+## Real-tool verification session - testfire.net (2026-11-14)
+
+- **Purpose:** exercise the code at `c9072d9` against the already-authorized target with real installed tools, no mock, no keys. Verification only: no code changed in this entry. Scope was the existing `scope.yaml` (`in_scope: testfire.net, *.testfire.net`, `allow_active: true`); nothing outside it was contacted.
+- **Step 1 - install.** `reconkit install --all` (real, exit 5). Every tool came back `already installed` from earlier work except `rustscan`:
+
+```
+rustscan           github_release  failed             rustscan: release 2.4.1
+                                                      has no asset
+                                                      'verify-at-implementation'
+rustscan: rustscan: release 2.4.1 has no asset 'verify-at-implementation'
+```
+
+  That is the documented placeholder in tools.yaml, not a new failure. **`libpcap-dev` is NOT installed and could not be installed:** `dpkg -s libpcap-dev` says "package 'libpcap-dev' is not installed", and `sudo -n true` returns `sudo: a password is required`, so the apt step cannot run non-interactively. `install --all` never reaches it because `naabu` is "already installed" and prerequisites only run when their tool installs (the documented consequence in docs/10 section 3a). This prerequisite is therefore **unverified**, independent of the CIDR gate.
+- **Doctor** (exit 0) confirms the same state:
+```
+coverage: subs 11/11 ready, dns 5/5 ready, live 4/4 ready, ports 5/6 ready, tech
+4/5 ready, urls 8/8 ready, vulns 5/8 ready, shots 0/1 ready
+system packages: python3 installed, python3-venv installed, python3-pip installed, git installed, golang-go installed, libpcap-dev missing, jq installed, curl installed
+python 3.14.8 | scope.yaml found | db recon.db writable
+Missing tools: 6. Run: reconkit install --all
+```
+  Every Keys row reads `Set: no`; no key was used and none was added.
+- **Step 3 - the run command, and one trap.** The requested command `reconkit -d testfire.net --active --speed slow --no-keys --json` executed **`lite`, not `run`**: docs/02 section 2 defines the bare form as `lite` (passive only), and `_stages("lite", active)` ignores `--active` entirely (`cli.py:103`). It completed after 2 min 48 s with `subs` + `dns` only and exit 5 (`crtsh` 502, `otx` 429). The full active pipeline was then run as `reconkit run -d testfire.net --active --speed slow --no-keys --json`, twice. Neither run wrote one byte to stderr despite docs/02 section 5 saying tables and progress stay on stderr (recorded below as a finding, not fixed).
+- **Run 1** (19:11:26Z-19:16:56Z, exit 5, `alive 8 / dead 28 / hosts 36`, `tools_ok 8 / tools_failed 2`):
+
+| Stage | Tool | Status | Items | Real detail |
+|---|---|---|---|---|
+| subs | crtsh | failed | 0 | `crtsh: server error (HTTP 502)` |
+| subs | certspotter | ok | 0 | real empty answer |
+| subs | otx | failed | 0 | `otx: rate limited (HTTP 429)` |
+| subs | hackertarget | ok | 3 | |
+| subs | subfinder | ok | 35 | 15.63 s |
+| subs | assetfinder | ok | 4 | 6.49 s |
+| dns | dnspython | ok | 36 | `duration_s` 0.0 (known 11d-findings-c) |
+| live | pyprobe | ok | 8 | `unreachable=28`, `duration_s` 0.0 |
+| live | httpx | ok | 8 | 7.04 s |
+| ports | pyscan | ok | 0 | `blocked=8` - the CIDR gate refused every host because scope.yaml has no `in_scope_cidrs` |
+| tech, urls, vulns | - | - | 0 | **no adapter exists for any tool in these pools** (all phase 3); each stage was created, ran zero tools and completed |
+
+- **Run 2** (19:18:45Z-19:24:09Z, exit 5, `alive 8 / dead 28`, `tools_ok 9 / tools_failed 1`): `crtsh` recovered (ok, 1 item, 8.19 s), `otx` still 429, `subfinder` returned **8** items in 68.55 s instead of 35 in 15.63 s, `certspotter` 0, `hackertarget` 3, `assetfinder` 4; `dns` resolved 9; `live` 8 ALIVE from pyprobe + httpx; `ports` `blocked=8`; tech/urls/vulns again zero tools.
+- **skipped, from `tool_runs` (run 1):** `urlscan`, `amass`, `findomain`, `chaos`, `github_subdomains`, `dnsx`, `puredns`, `massdns`, `dig`, `httprobe`, `tlsx`, `smap`, `nmap`, `rustscan`, `httpx_tech`, `whatweb`, `wafw00f`, `cdncheck`, `webanalyze`, `gau`, `waybackurls`, `katana`, `hakrawler`, `gospider`, `subjs`, `unfurl`, `urlfinder`, `nuclei`, `subzy`, `dnsreaper` all `no adapter yet (phase 3)`; `naabu` skipped as `blocked: resolves inside the binary, so in_scope_cidrs cannot be enforced (11c-G-7)`. These rows are in the database, not in the JSON summary (`tools_skipped: 0`), which is the pre-existing Part 7/8 gap named below.
+- **Step 5 - database, raw.** After both runs:
+```
+targets              1
+scan_runs            17
+tool_runs            99
+subdomains           36
+subdomain_sources    100
+host_status_history  81
+ports                0
+port_sources         0
+urls                 0
+```
+  One full stored status row (`run_id` 13, ALIVE) and one `tool_runs` row:
+```
+            id: 73
+  subdomain_id: 1
+        run_id: 13
+         state: ALIVE
+   status_code: 200
+      location:
+         title: Altoro Mutual
+      ips_json: ["65.61.137.117"]
+     tech_json: ["Apache Tomcat", "Java"]
+           waf:
+    tools_json: ["httpx"]
+    checked_at: 2026-11-14T19:23:39Z
+   cnames_json: []
+dangling_cname:
+
+        id: 42
+    run_id: 7
+      tool: pyscan
+    status: ok
+item_count: 0
+duration_s: 0.0
+     error: blocked=8
+```
+  `ports` is empty, so **the LOW-only confidence ceiling could not be observed in practice**: no port row was written at all. What the run proves is the gate itself (`blocked=8`), not a LOW row.
+- **Step 6 - `reconkit diff -d testfire.net` after run 2** (exit 0): 27 `GONE` rows, no `NEW`, no `CHANGED`. The list is exactly the run-1 discovery set minus run-2's 9 hosts, e.g. `social.testfire.net`, `tv.testfire.net`, `mvaas.testfire.net`, `www.demo.testfire.net`. Cause: `subfinder` returned 35 items in run 1 and 8 in run 2, so the latest-two-subs comparison sees an absent source as a disappearance. `diff` behaved as docs/02 defines it ("gone since the previous run"); the output is nonetheless dominated by source variance rather than a target change.
+- **Findings (no code changed):**
+  1. **Bare `--active` is silently a no-op** (`lite` ignores it). Docs-conformant, but the exact command in this request produced a passive-only run with exit 5 and no warning. Recommend a CLI warning or rejecting `--active` for `lite`; that is a docs-first decision.
+  2. **A stage with zero adapters completes silently.** `tech`, `urls` and `vulns` ran zero tools in both runs and the JSON reports `tools_skipped: 0`; only `tool_runs` shows the 30 skipped rows. With a clean subs stage the same run would exit 0 while three of six requested stages did nothing. Related to the known Part 7/8 gap (skipped tools not in the summary) but broader: it also hides whole empty stages.
+  3. **`--json` writes nothing to stderr** (0 bytes in both runs), while docs/02 section 5 says progress stays on stderr. No progress was visible during 5-minute runs.
+  4. **`diff` amplifies passive-source variance**: 27 of 36 hosts reported GONE after one flaky `subfinder` run. Not a code defect against docs/02, but a real-world usability problem worth a tolerance/union decision.
+  5. **Known items re-confirmed on real data, not new:** `duration_s` 0.0 for `dnspython` and `pyprobe` (11d-findings-c), `pyprobe` carrying `unreachable=28` in `error`, `otx` anonymous 429, `certspotter` legitimately empty, `scan_runs` partial status when a passive source fails.
+- **What this run does NOT prove:** no tech/urls/vulns tool was executed (no adapters), no open port was ever observed (`pyscan` blocked, `naabu` blocked, `nmap`/`rustscan`/`smap` phase 3), `libpcap-dev` is absent, no keyed provider ran, and `killpg`/`sudo`/Windows paths were not exercised.
