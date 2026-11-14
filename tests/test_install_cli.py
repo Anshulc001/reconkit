@@ -80,6 +80,54 @@ def test_massdns_version_cmd_reports_dpkg_version(
     assert calls[0][1] == {"HOME": str(Path.home())}
 
 
+def test_masscan_version_counts_even_though_its_exit_code_is_1(tmp_path: Path) -> None:
+    """Regression: Part B audit - `masscan --version` prints its banner and exits 1.
+
+    `installed_version()` treated every nonzero exit as "not installed", so doctor
+    reported a genuine Masscan 1.3.2 as "wrong program" and refused to use it.
+    The banner names the program, which is the identity evidence we need.
+    """
+    binary = bin_dir(tmp_path) / "masscan"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"#!/bin/sh\n")
+    banner = "Masscan version 1.3.2 ( https://github.com/robertdavidgraham/masscan )"
+
+    def runner(
+        argv: list[str], timeout: float | None = None, env: dict[str, str] | None = None
+    ) -> ExecResult:
+        return ExecResult(
+            returncode=1,
+            stdout=f"\n{banner}\nCompiled on: Jul 25 2024 16:44:22\n",
+            stderr="",
+            timed_out=False,
+            truncated=False,
+        )
+
+    state = github_release.installed_version(plan_for("masscan"), bin_dir(tmp_path), runner=runner)
+    assert state == banner
+
+
+def test_a_nonzero_version_probe_with_unrelated_text_is_not_installed(tmp_path: Path) -> None:
+    """A failing probe must still be rejected; only its own banner may override exit 1."""
+    binary = bin_dir(tmp_path) / "masscan"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"#!/bin/sh\n")
+
+    def runner(
+        argv: list[str], timeout: float | None = None, env: dict[str, str] | None = None
+    ) -> ExecResult:
+        return ExecResult(
+            returncode=1,
+            stdout="error: cannot open adapter\n",
+            stderr="",
+            timed_out=False,
+            truncated=False,
+        )
+
+    state = github_release.installed_version(plan_for("masscan"), bin_dir(tmp_path), runner=runner)
+    assert state is None
+
+
 def test_install_skips_a_tool_that_is_already_usable(tmp_path: Path) -> None:
     binary = bin_dir(tmp_path) / "assetfinder"
     binary.parent.mkdir(parents=True)

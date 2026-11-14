@@ -498,9 +498,14 @@ def installed_version(
         timeout=timeout,
         env={"HOME": str(Path.home())},
     )
-    if outcome.timed_out or outcome.returncode != 0:
+    if outcome.timed_out or outcome.returncode is None:
         return None
     text = (outcome.stdout or outcome.stderr).strip()
+    # Some tools print a valid banner and still exit nonzero (`masscan --version`
+    # exits 1). Accept that only when the banner names the program; anything else
+    # with a nonzero exit stays "not usable" (Part B audit, 2026-11-14).
+    if outcome.returncode != 0 and plan.binary.lower() not in text.lower():
+        return None
     return text.splitlines()[0] if text else str(copy)
 
 
