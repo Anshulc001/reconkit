@@ -45,6 +45,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-31 | The `nuclei -ut` template refresh reported `templates not refreshed` on a working install, because nuclei lives under `$HOME/go/bin` | `_refresh_templates` passed `env={"HOME"}`; `Popen`/`execvpe` resolves a bare program name with the `PATH` inside the env it is given, falling back to `os.defpath` (`/bin:/usr/bin`) | A `runner(...)` call with a custom `env=` that names a bare binary must pass `PATH` too (the documented exception in docs/10 section 3d); where the caller already has an absolute path, pass the absolute path instead | `test_regression_custom_env_without_path_cannot_resolve_binary`, `test_nuclei_templates_are_refreshed_after_a_change` |
 | PIT-32 | `sudo -n` fails inside reconkit (`sudo: a password is required`, exit 1) despite a valid `sudo -v` ticket in the same shell; a direct subprocess call succeeds | `run_exec` passed `start_new_session=True`, so the child called `setsid()` and sudo's `tty_tickets` scoping could not see the ticket cached against the parent's controlling terminal | POSIX children must stay in the parent's session: use `process_group=0` to give the timeout kill its own group, never `start_new_session=True` on POSIX. Windows keeps its old path (both arguments are ignored there) | `test_regression_child_shares_parent_session_but_not_pgid`, `test_regression_kill_tree_kills_only_the_child_group` |
 | PIT-29 | A dangling-CNAME warning disappeared after restart | `host_status_history` had no CNAME columns and DNS-only resolved hosts were not persisted | Store `cnames_json` plus `dangling_cname`; reuse `Store.latest_cnames()` on a later NXDOMAIN | `test_regression_dangling_cname_survives_restart`, `test_dns_resolved_then_two_nxdomain_is_shut_down_then_dead`; migration tests in `test_store.py` |
+| PIT-33 | Three real docs-only commits (`cc70b15`, `722b2d1`, `046e0a2`) closed named Part 11 work but updated neither PROGRESS nor REVIEW_LOG; the RESUME block still read "11a is next" long after 11a shipped, and no 11c findings were ever logged | `.githooks/pre-commit` requires `docs/PROGRESS.md` only when `src/` or `tests/` change, so a docs-only commit is never forced to update the source of truth | Any commit that closes or advances a named task updates `docs/PROGRESS.md` in the same commit, docs-only included, and any finding gets a REVIEW_LOG entry whether or not code changed | n/a (tooling/process; the Part 11 findings backfill entry is the correction) |
 
 ## Commit map
 
@@ -1078,3 +1079,79 @@ Every restore below was checked with `sha256sum`; the digests before and after e
 - Next part must know: `is_wildcard` is a mark only (docs/09's "exclude from counts" is unimplemented and undefined);
   11d-findings-b and (c) remain open; `certspotter` still returns `ok` with 0 items on every real run and needs a
   one-line hypothesis before Part 11 closes.
+
+## Part 11 - findings backfill (docs only, 2026-11-14)
+
+- Why this entry exists: MASTER_PLAN:222 requires every Part 11 finding to be logged under "Bugs found". Only the
+  wildcard wiring had a REVIEW_LOG section; the rest lived in `docs/PROGRESS.md`, in commit subjects, or nowhere.
+  This section is the accounting for the whole Part 11 window (`3a14568`..`b24f39b`). It records dispositions as the
+  code and docs actually stand today. It does not re-verify any fix, and it does not claim an open item is closed.
+- Scope: docs-only. No `src/`, `tests/`, `tools.yaml` or `config.yaml` change. No test is added by this entry; the
+  four guarding tests below pre-date it and are named, not created, here.
+- Provenance of the list: an earlier conversational tally of "14 findings" was never a repo artifact
+  (`grep -rn 11c docs/*.md` returned only MASTER_PLAN:222, MASTER_PLAN:223 and PROGRESS:189). The table below is the
+  first committed enumeration: 14 findings plus one cleanup row.
+
+### Findings
+
+| ID | Finding | Class | Disposition | Commit | Guarding test |
+|---|---|---|---|---|---|
+| 11d-a | `_write_host` overwrote the discovery consensus: `demo.testfire.net` stored `LOW`/1 while docs/04 section 5 requires `MEDIUM`/2 from two sources | logic | FIXED | `1b41f4e` | `tests/test_engine.py::test_dns_pass_does_not_overwrite_discovery_confidence` |
+| 11d-b | the `dns` stage INSERTs subdomain rows for hosts discovery never returned, with `first_seen_run` = a dns run and no `subdomain_sources` row | logic | **OPEN** | ticket in PROGRESS | none (blocked on a product decision) |
+| 11d-c | `tool_runs.duration_s` stores `0.0` for real I/O; three writers | logic | **OPEN** | ticket in PROGRESS | none |
+| 11d-e | `subfinder`/`assetfinder` launched bare `argv[0]` with no `PATH` in the child env, so `doctor` said installed and the scan said not installed | logic | FIXED | `df218b5` (docs `a0d06b5`) | `test_build_command_launches_the_resolved_managed_binary`, `test_installed_binary_in_managed_dir_actually_runs` |
+| D | identity markers were satisfied by ANY marker, so the `httpx` namesake passed `check_installed()` | logic | FIXED | `d265dc0` (docs `22fbd49`) | `test_projectdiscovery_identity_requires_every_marker`, `test_naabu_identity_accepts_real_version_banner`, `test_subfinder_identity_accepts_pre_264_version_only_banner` |
+| W | wildcard filter built but never called; an inconclusive detection was silent | logic | FIXED | `1dd63e5` (docs `581a556`) | see "Wildcard filter wiring in the engine" above (5 tests) |
+| 11d-d | "missing binary" meant two different moments across docs/03, docs/09 (two sections) and MASTER_PLAN | doc text | RESOLVED, docs only | `a0d06b5` | n/a |
+| 11b-2 | docs/08 flows did not match the built CLI; the docs/01 deployment question had been dropped | doc text | RESOLVED, docs only | `d2e3c66` | n/a |
+| - | first-contact contradictions across docs/01, 02, 04, 05, 07 and README | doc text | RESOLVED, docs only | `722b2d1` | n/a |
+| - | AGENTS session-start checklist was duplicated and inconsistent | doc text | RESOLVED, docs only | `046e0a2` | n/a |
+| 11a | README/SETUP were still the WSL2 beginner guide | doc text | RESOLVED, docs only | `cc70b15` | n/a |
+| R1 | managed-directory shadowing: a broken `~/.reconkit/bin` copy shadows a working PATH binary | doc text | **OPEN RISK**, deliberate | `3e2aff9` | n/a (manual mitigation; PROGRESS "Open risks") |
+| R2 | interactive Ctrl+C does not kill an already-running child | doc text | **OPEN RISK** | `86be2bb` | n/a (killpg path unverified on Linux) |
+| - | `certspotter` reporting `ok`/0 on every run | not a defect | EXPLAINED | `430aa1d` | n/a |
+| - | `src/reconkit/adapters/dns_python.py` dead stub | cleanup | REMOVED | `b24f39b` | n/a (docs/03:70 fixed earlier in `3a14568`) |
+
+### Logic findings fixed in this window (symptom / root cause / fix / guard)
+
+- **11d-a (high).** Symptom: `/tmp/rk_testfire_v2.db` stored `LOW`/1 for a host with two `subdomain_sources` rows,
+  where docs/04 section 5 requires `MEDIUM`/2; the stored value followed write order across six runs. Root cause:
+  `_write_host` passed `source_count=len(transition.sources)`, and `upsert_subdomain`'s `COALESCE` guards only
+  `None`, so a state pass overwrote a column it had no data to justify. Fix: `_write_host` supplies no `source_count`
+  and supplies `confidence` only for `UNCONFIRMED`; `_persist_dns` gained the same `if not transition.persist:
+  continue` that `_persist_live` already had. Guard: the test above, red first (`('LOW', 1) == ('MEDIUM', 2)`,
+  `1 failed, 35 deselected`), green after (`1 passed`); full suite 570. Verified on the v2 real run.
+- **11d-e (high).** Symptom: `check_installed()` reported `subfinder v2.17.0` at
+  `/home/kali/.reconkit/bin/subfinder` while a real passive run stored `failed` with `[Errno 2] No such file or
+  directory: 'subfinder'`. Root cause: `build_command()` used the bare name while `Engine._tool_env` passes only key
+  variables, so the child had no `PATH` to resolve it against. Fix: launch `binary_path() or binary`; the child env
+  was deliberately not widened with `PATH` (hijack surface). Guard: the two tests above, red first (`4 failed, 59
+  deselected`, production message reproduced verbatim), green after (574 passed). Two existing argv assertions were
+  hardened from bare `argv[0]` to `Path(argv[0]).name` because they only passed on a box without the tool installed.
+  Verified on the v3 real run.
+- **Identity markers (medium).** Symptom: a binary whose banner carried only one of two markers was accepted, which
+  cannot reject the `httpx` namesake docs/09 promises to reject. Root cause: `check_installed()` used `any()`. Fix:
+  `BinaryAdapter.identity_require_all = True` drives `all()`, with one documented opt-out, `SubfinderAdapter`,
+  because upstream added the `Subfinder Config Directory` line in v2.6.4 and an AND would report a working pre-2024
+  install as not installed. The missing `naabu` positive identity test was added at the same time, so the
+  strictness change did not ship its success path untested. Guard: the three tests above, red first (`4 failed, 2
+  passed, 63 deselected`), green after (identity slice `11 passed`; full suite 580).
+- **Wildcard wiring.** Already logged above in this file; this entry only assigns it an ID so the table is complete.
+
+### Logic findings still open
+
+- **11d-b (medium).** Not a test gap: the fix is a product decision first (drop dns-only hosts, or keep the row and
+  label its provenance as dns and exclude it from discovery counts and `diff_new`), then the two call sites, then
+  the rule in docs/04 section 5. Data-dependent: visible in v1/v2, absent in v3/v4 because `assetfinder` returned
+  the apex.
+- **11d-c (low).** Metadata only. Needs a decision on which measurement is authoritative (adapter-measured vs
+  `Engine._run_one`-measured) recorded in docs/04 before any writer changes; a careless fix double-counts.
+
+### What this entry does not establish
+
+- The ten S3 scans (MASTER_PLAN:38) were **not** re-run for this docs-only commit. 11c still requires one final run
+  of all ten plus a second full `pytest`; both remain outstanding.
+- 11c-bis (fresh-venv `--mock` end-to-end run) is still not done. No REVIEW_LOG entry, commit body or PROGRESS line
+  records it ever running.
+- 11f (final report) remains unwritten. The RESUME block was stale until this commit corrected it.
+- Pitfalls added this entry: PIT-33 (docs-only commits bypass the pre-commit PROGRESS requirement).
