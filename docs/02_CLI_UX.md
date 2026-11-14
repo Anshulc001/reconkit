@@ -152,6 +152,8 @@ This build has no live progress line; each stage prints its tables when it finis
 | 6 | Every requested tool failed to install or update |
 | 130 | Interrupted by user (state saved, resumable) |
 
+Code `6` belongs to `install`/`update` only: it is returned by `installer.github_release.exit_code()` (0 when every tool installed, 5 for a partial install, 6 when nothing did). The scan path's enum (`engine.ExitCode`) deliberately stops at 5 plus 130 and cannot emit 6; a scan in which every tool failed is code 4. Do not add a scan-level 6.
+
 If passive stages have already completed and an active stage is denied by scope, the run still exits `3`; the passive results already collected are kept and reported.
 
 ## 7. Accessibility

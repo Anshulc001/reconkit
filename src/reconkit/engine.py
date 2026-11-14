@@ -77,7 +77,11 @@ Now = Callable[[], str]
 
 
 class ExitCode(IntEnum):
-    """docs/02 exit codes. The CLI maps this; the engine never calls sys.exit."""
+    """Scan-side subset of docs/02 section 6; the CLI maps it, the engine never exits.
+
+    Code 6 is install/update only, from `installer.github_release.exit_code()`.
+    A scan with every tool failed is NO_TOOL (4), never 6.
+    """
 
     SUCCESS = 0
     ERROR = 1
