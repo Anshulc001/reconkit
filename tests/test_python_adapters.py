@@ -312,6 +312,8 @@ async def test_pyprobe_oversized_body_is_capped() -> None:
 
 
 async def test_pyprobe_tls_error_is_a_result() -> None:
+    """A TLS failure on every scheme is still UNKNOWN, never a crash or DEAD."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("SSL: CERTIFICATE_VERIFY_FAILED", request=request)
 
@@ -320,6 +322,35 @@ async def test_pyprobe_tls_error_is_a_result() -> None:
     record = result.records[0]
     assert isinstance(record, HostStatusRecord)
     assert record.state is HostState.UNKNOWN
+
+
+async def test_pyprobe_tls_failure_still_tries_http() -> None:
+    """Regression: 11d-findings-f (real testfire.net run, 2026-11-14).
+
+    Every ALIVE host answered `http` with 200 while `https` failed certificate
+    verification. The probe returned UNKNOWN on the first TLS error and never
+    reached the working scheme, so two tools disagreed on 100% of live hosts.
+    """
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if request.url.scheme == "https":
+            raise httpx.ConnectError(
+                "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
+                "Hostname mismatch, certificate is not valid for 'www.example.com'.",
+                request=request,
+            )
+        return httpx.Response(200, text="<html><title>Example Domain</title></html>")
+
+    adapter = PyprobeAdapter(transport=httpx.MockTransport(handler))
+    result = await adapter.run(make_ctx(hosts=["www.example.com"]))
+    record = result.records[0]
+    assert isinstance(record, HostStatusRecord)
+    assert record.state is HostState.ALIVE
+    assert record.status_code == 200
+    assert record.title == "Example Domain"
+    assert calls == ["https://www.example.com/", "http://www.example.com/"]
 
 
 async def test_pyprobe_connection_refused_has_no_record() -> None:

@@ -100,6 +100,7 @@ class PyprobeAdapter(BaseToolAdapter):
             host = validate_host(host)
         except (TypeError, ValueError):
             return None
+        tls_error = False
         async with semaphore:
             for scheme in SCHEMES:
                 await ctx.limiter.wait()
@@ -115,13 +116,17 @@ class PyprobeAdapter(BaseToolAdapter):
                             location=response.headers.get("location"),
                         )
                 except httpx.ConnectError as exc:
+                    # Regression: 11d-findings-f. A TLS failure on `https` must not
+                    # end the probe: the host may still answer plain `http` (a
+                    # certificate that does not match the name is enough). Only a
+                    # TLS error with no working scheme is evidence of UNKNOWN.
                     if self._is_tls_error(exc):
-                        return HostStatusRecord(
-                            fqdn=host, source=self.name, state=HostState.UNKNOWN
-                        )
+                        tls_error = True
                     continue
                 except (httpx.TimeoutException, httpx.HTTPError):
                     continue
+        if tls_error:
+            return HostStatusRecord(fqdn=host, source=self.name, state=HostState.UNKNOWN)
         return None
 
     @staticmethod

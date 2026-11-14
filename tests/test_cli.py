@@ -222,6 +222,50 @@ def test_bad_flags_exit_two_without_a_traceback(
     assert "Traceback" not in result.stderr
 
 
+def test_bare_command_rejects_active_instead_of_running_lite(tmp_path: Path) -> None:
+    """Regression: 11d-findings-f, bare `--active` was silently a no-op.
+
+    `reconkit -d X --active` is the `lite` shorthand (docs/02 section 2) and ran
+    subs+dns only, with no warning that the requested active stages never ran.
+    """
+    config = make_config(tmp_path)
+    result = CliRunner().invoke(
+        app, ["-d", "example.com", "--active", "--mock", "--config", str(config)]
+    )
+    assert result.exit_code == 2
+    message = " ".join(result.stderr.split())
+    assert "passive-only" in message
+    assert "reconkit run -d X --active" in message
+    # The remedy must survive the 80-column console without a mid-command break.
+    assert "reconkit run -d X --active" in result.stderr
+    assert "Traceback" not in result.stderr
+    # A scan that would have run is not started at all.
+    assert not (tmp_path / "recon.db").exists()
+
+
+@pytest.mark.parametrize("command", ["lite", "passive", "subs", "dns"])
+def test_passive_only_commands_reject_active(tmp_path: Path, command: str) -> None:
+    config = make_config(tmp_path)
+    result = CliRunner().invoke(app, scan_args(config, command, "--active"))
+    assert result.exit_code == 2
+    assert "--active" in result.stderr
+    assert "passive-only" in result.stderr
+
+
+def test_a_stage_with_no_adapter_reports_its_skips(tmp_path: Path) -> None:
+    """Regression: 11d-findings-f, `tools_skipped: 0` for a stage that built nothing."""
+    config = make_config(tmp_path)
+    result = CliRunner().invoke(app, scan_args(config, "tech", "--active", "--json"))
+    assert result.exit_code == 4  # no usable tool for the stage, unchanged
+    document = json.loads(result.stdout)
+    (stage,) = document["stages"]
+    assert stage["stage"] == "tech"
+    assert stage["results"] == []
+    assert stage["skipped"], "a stage with no adapter must list what it skipped"
+    assert all("no adapter yet" in skip["reason"] for skip in stage["skipped"])
+    assert document["summary"]["tools_skipped"] == len(stage["skipped"])
+
+
 def test_active_commands_require_active_flag(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     result = CliRunner().invoke(app, scan_args(config, "live"))

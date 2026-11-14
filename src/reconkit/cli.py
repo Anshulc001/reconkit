@@ -158,6 +158,13 @@ def _run_scan(
         config: AppConfig = load_config(config_path, speed=speed, delay=delay)
         if command in _ACTIVE_ONLY and not active:
             raise ConfigError(f"{command} requires --active and a matching scope.yaml")
+        # docs/02 section 2: the passive-only commands run no active stage, so
+        # accepting --active would promise work the command cannot do.
+        stages = _stages(command, active)
+        if active and all(stage in _PASSIVE_STAGES for stage in stages):
+            raise ConfigError(
+                f"{command!r} is passive-only; --active needs: reconkit run -d X --active"
+            )
         if active and config.default_speed == "fast" and not mock:
             render_message(
                 "warning: active fast mode can be noisy; typed confirmation is required.",
@@ -170,7 +177,6 @@ def _run_scan(
             )
             if answer != "I AM AUTHORIZED":
                 raise ConfigError("fast active scan cancelled")
-        stages = _stages(command, active)
         if json_output and len(targets) > 1:
             raise ConfigError("--json accepts one target per invocation; use -d")
         engine = Engine.open(config, db_path=db_path, scope_path=scope_path)

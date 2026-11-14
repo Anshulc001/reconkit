@@ -107,6 +107,7 @@ def summary_document(summary: ScanSummary, hosts: Iterable[HostRow] = ()) -> dic
                 "resumed": stage.resumed,
                 "dropped_hosts": list(stage.dropped_hosts),
                 "results": [_tool_document(result) for result in stage.results],
+                "skipped": [{"tool": skip.tool, "reason": skip.reason} for skip in stage.skipped],
             }
             for stage in summary.stages
         ],
@@ -119,7 +120,9 @@ def summary_document(summary: ScanSummary, hosts: Iterable[HostRow] = ()) -> dic
             "unknown": state_counts[HostState.UNKNOWN],
             "tools_ok": tool_counts[ToolStatus.OK],
             "tools_failed": tool_counts[ToolStatus.FAILED],
-            "tools_skipped": tool_counts[ToolStatus.SKIPPED],
+            # docs/02 section 5: selection-time skips are counted here too, so a
+            # stage that built nothing cannot read as a stage that found nothing.
+            "tools_skipped": tool_counts[ToolStatus.SKIPPED] + len(summary.skipped),
             "tools_timeout": tool_counts[ToolStatus.TIMEOUT],
         },
     }
@@ -191,6 +194,14 @@ def _tool_table(summary: ScanSummary) -> Table:
                 Text(result.status.value, style=_STATUS_STYLES[result.status]),
                 Text(str(len(result.records))),
                 Text(result.error or "-"),
+            )
+        for skip in stage.skipped:
+            table.add_row(
+                Text(skip.tool),
+                Text(stage.stage.value),
+                Text(ToolStatus.SKIPPED.value, style=_STATUS_STYLES[ToolStatus.SKIPPED]),
+                Text("-"),
+                Text(skip.reason),
             )
     return table
 
@@ -440,14 +451,14 @@ def render(
         return int(summary.exit_code)
 
     target = console if console is not None else make_console(stderr, no_color=no_color)
-    if not rows and not summary.results:
+    if not rows and not summary.results and not summary.skipped:
         render_empty([], console=target)
     else:
         if rows:
             target.print(_host_table(rows))
         else:
             target.print(Text("No hosts found.", style="yellow"))
-        if summary.results:
+        if summary.results or summary.skipped:
             target.print(_tool_table(summary))
         counts: Counter[HostState] = Counter(row.state for row in rows)
         tools: Counter[ToolStatus] = Counter(result.status for result in summary.results)
@@ -456,7 +467,8 @@ def render(
             + ", ".join(f"{counts[state]} {state.value}" for state in HostState)
             + " | tools: "
             + f"{tools[ToolStatus.OK]} ok, {tools[ToolStatus.FAILED]} failed, "
-            + f"{tools[ToolStatus.SKIPPED]} skipped, {tools[ToolStatus.TIMEOUT]} timeout"
+            + f"{tools[ToolStatus.SKIPPED] + len(summary.skipped)} skipped, "
+            + f"{tools[ToolStatus.TIMEOUT]} timeout"
         )
         target.print(Text(summary_line))
     for warning in summary.warnings:

@@ -274,11 +274,20 @@ class ScanOptions:
 
 
 @dataclass
+class ToolSkip:
+    """One tool the engine selected out before it ran (docs/02 section 5)."""
+
+    tool: str
+    reason: str
+
+
+@dataclass
 class StageOutcome:
     stage: Stage
     run_id: int
     results: list[ToolResult] = field(default_factory=list)
     dropped_hosts: list[str] = field(default_factory=list)
+    skipped: list[ToolSkip] = field(default_factory=list)
     resumed: bool = False
 
 
@@ -295,6 +304,10 @@ class ScanSummary:
     @property
     def results(self) -> list[ToolResult]:
         return [result for stage in self.stages for result in stage.results]
+
+    @property
+    def skipped(self) -> list[ToolSkip]:
+        return [skip for stage in self.stages for skip in stage.skipped]
 
 
 @dataclass(frozen=True)
@@ -597,7 +610,13 @@ class Engine:
                 dns_results = list(results)
             self._update_discovered(stage, results, target, discovered, alive)
             summary.stages.append(
-                StageOutcome(stage=stage, run_id=run_id, results=results, dropped_hosts=dropped)
+                StageOutcome(
+                    stage=stage,
+                    run_id=run_id,
+                    results=results,
+                    dropped_hosts=dropped,
+                    skipped=[ToolSkip(spec.name, reason) for spec, reason in skipped],
+                )
             )
 
         summary.exit_code = self._exit_code(
