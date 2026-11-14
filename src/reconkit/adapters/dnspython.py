@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -64,6 +65,7 @@ class DnsPythonAdapter(BaseToolAdapter):
         self._lifetime = lifetime
 
     async def run(self, ctx: RunContext) -> ToolResult:
+        started = time.perf_counter()
         if ctx.mock:
             fixture = ""
             try:
@@ -71,10 +73,18 @@ class DnsPythonAdapter(BaseToolAdapter):
                 mock_records = self.parse_output(fixture)
             except ParseError as exc:
                 return ToolResult(
-                    tool=self.name, status=ToolStatus.FAILED, error=str(exc), raw_text=fixture
+                    tool=self.name,
+                    status=ToolStatus.FAILED,
+                    error=str(exc),
+                    duration_s=time.perf_counter() - started,
+                    raw_text=fixture,
                 )
             return ToolResult(
-                tool=self.name, status=ToolStatus.OK, records=mock_records, raw_text=fixture
+                tool=self.name,
+                status=ToolStatus.OK,
+                records=mock_records,
+                duration_s=time.perf_counter() - started,
+                raw_text=fixture,
             )
 
         semaphore = asyncio.Semaphore(ctx.pacer.parallel_limit("passive"))
@@ -116,6 +126,7 @@ class DnsPythonAdapter(BaseToolAdapter):
             status=ToolStatus.OK,
             records=records,
             error=error,
+            duration_s=time.perf_counter() - started,
             raw_text=records_output(records, error),
         )
 

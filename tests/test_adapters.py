@@ -200,6 +200,41 @@ async def test_429_is_failed_and_not_retried() -> None:
     assert len(calls) == 1
 
 
+async def test_a_429_failure_still_reports_its_own_duration() -> None:
+    """12c: the `otx failed 0.0` gap - a refusal is work that took real time."""
+    adapter = CrtshAdapter(transport=httpx.MockTransport(lambda _r: httpx.Response(429)))
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.FAILED
+    assert result.duration_s > 0
+
+
+async def test_a_parse_error_still_reports_its_own_duration() -> None:
+    adapter = CrtshAdapter(
+        transport=httpx.MockTransport(lambda _r: httpx.Response(200, text="}not json"))
+    )
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.FAILED
+    assert result.duration_s > 0
+
+
+async def test_a_successful_run_reports_the_adapters_own_duration() -> None:
+    payload = fixture("crtsh", "example.com.json")
+    adapter = CrtshAdapter(
+        transport=httpx.MockTransport(lambda _r: httpx.Response(200, text=payload))
+    )
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.OK
+    assert result.duration_s > 0
+
+
+async def test_a_mock_run_duration_is_small_and_measured() -> None:
+    """docs/04 section 5: mock = fixture read + parse, small and positive."""
+    adapter = CrtshAdapter(fixtures_dir=FIXTURES)
+    result = await adapter.run(make_ctx(mock=True))
+    assert result.status == ToolStatus.OK
+    assert 0 < result.duration_s < 5.0
+
+
 async def test_500_is_failed_and_not_retried() -> None:
     calls: list[httpx.Request] = []
 

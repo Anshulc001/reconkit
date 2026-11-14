@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ class PyscanAdapter(BaseToolAdapter):
         self._resolve = resolve if resolve is not None else default_resolve
 
     async def run(self, ctx: RunContext) -> ToolResult:
+        started = time.perf_counter()
         if ctx.mock:
             fixture = ""
             try:
@@ -56,10 +58,18 @@ class PyscanAdapter(BaseToolAdapter):
                 mock_records = self.parse_output(fixture)
             except ParseError as exc:
                 return ToolResult(
-                    tool=self.name, status=ToolStatus.FAILED, error=str(exc), raw_text=fixture
+                    tool=self.name,
+                    status=ToolStatus.FAILED,
+                    error=str(exc),
+                    duration_s=time.perf_counter() - started,
+                    raw_text=fixture,
                 )
             return ToolResult(
-                tool=self.name, status=ToolStatus.OK, records=mock_records, raw_text=fixture
+                tool=self.name,
+                status=ToolStatus.OK,
+                records=mock_records,
+                duration_s=time.perf_counter() - started,
+                raw_text=fixture,
             )
 
         requested = [port for port in ctx.ports if 1 <= port <= 65535]
@@ -124,6 +134,7 @@ class PyscanAdapter(BaseToolAdapter):
             status=ToolStatus.OK,
             records=records,
             error=error,
+            duration_s=time.perf_counter() - started,
             raw_text=records_output(records, error),
         )
 

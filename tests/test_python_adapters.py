@@ -699,6 +699,18 @@ async def test_pyscan_empty_hosts() -> None:
     assert result.error is None
 
 
+async def test_every_python_adapter_times_its_own_work() -> None:
+    """12c: all three measure themselves, mock included, instead of leaving 0.0."""
+    ctx = make_ctx(mock=True)
+    results = [
+        await DnsPythonAdapter().run(ctx),
+        await PyprobeAdapter().run(ctx),
+        await PyscanAdapter().run(ctx),
+    ]
+    assert all(result.status == ToolStatus.OK for result in results)
+    assert all(0 < result.duration_s < 5.0 for result in results)
+
+
 async def test_pyscan_mock_mode_reads_fixture() -> None:
     class ExplodingOpener:
         async def __call__(self, *_args, **_kwargs) -> tuple[None, FakeWriter]:

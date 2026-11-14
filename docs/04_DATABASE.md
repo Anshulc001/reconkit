@@ -45,7 +45,7 @@ CREATE TABLE tool_runs (
   tool         TEXT NOT NULL,
   status       TEXT NOT NULL CHECK (status IN ('ok','skipped','failed','timeout')),
   item_count   INTEGER NOT NULL DEFAULT 0,
-  duration_s   REAL,
+  duration_s   REAL,                            -- wall seconds the tool itself worked; see section 5
   error        TEXT                            -- short, no secrets
 );
 
@@ -165,6 +165,9 @@ CREATE TABLE monitor_changes (            -- Phase 3: not created in this build
 - Engine-created timestamps (`targets.created_at`, `scan_runs.started_at/finished_at`, `host_status_history.checked_at`) come from the injected `Engine(now=...)` source; `store.utc_now()` is the default and tests inject a fixed value.
 - Resume reads `scan_runs` for the target (newest first), groups rows by the `scan_key` stored in `params_json`, and skips stages whose row is `completed` or `partial`. A row left `running` by a crash is marked `interrupted`; a fresh row is created for that stage. Completed-stage rows are never duplicated.
 
+- `tool_runs.duration_s` is **wall seconds of the tool's own work**, not harness overhead, and the adapter owns the measurement on every outcome: ok, failed (429/5xx/timeout/refused), parse error and mock, because a failure still took real time. For binary adapters this is `run_exec`'s measured child wall clock (`ExecResult.duration_s`, taken with `time.monotonic()` around spawn/wait), which is the tool's real work time and therefore **counts as adapter-reported** - the binary adapters are already compliant. `HttpAdapter` and the three python adapters (`dnspython`, `pyprobe`, `pyscan`) measure their own work with `time.perf_counter()`.
+- `Engine._run_one` stores the adapter's value whenever it is positive and **only** substitutes its own wall clock when the adapter reported none. `ToolResult.duration_s` is a plain `float` defaulting to `0.0`, so "none" is exactly `0.0`; any non-positive value is treated the same way (a frozen clock can only produce `0.0`, never a negative one). That one fallback site measures the whole call with `perf_counter`, so a stored value is never negative, an adapter-reported time is never overwritten, and `0.0` can only mean "neither the adapter nor the harness measured".
+- Mock mode does no network or process work, so its duration is the measured wall clock of reading the fixture and parsing it: small (well under a second), positive in practice, and deliberately not a constant. It exists so `--mock` evidence and real runs share one column meaning.
 - A subdomain/port/url is **one row per target**; repeat scans update `last_seen_run` and add source rows. `first_seen_run` never changes.
 - `source_count` = distinct tools in `*_sources` for the latest run in which the item was seen.
 - Confidence from `source_count`: >=3 HIGH, 2 MEDIUM, 1 LOW (thresholds from `config.yaml`); `UNCONFIRMED` when tools disagree.

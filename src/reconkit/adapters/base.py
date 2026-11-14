@@ -187,7 +187,11 @@ class BaseToolAdapter(ABC):
                     records = self.parse_output(outcome.stdout)
         except (ParseError, FetchFailed, ToolFailed) as exc:
             return ToolResult(
-                tool=self.name, status=ToolStatus.FAILED, error=str(exc), raw_text=raw_text
+                tool=self.name,
+                status=ToolStatus.FAILED,
+                error=str(exc),
+                duration_s=duration or time.perf_counter() - started,
+                raw_text=raw_text,
             )
         except RuntimeError as exc:
             # runner.run_exec only raises when its pipes cannot be created;
@@ -196,6 +200,7 @@ class BaseToolAdapter(ABC):
                 tool=self.name,
                 status=ToolStatus.FAILED,
                 error=f"runner error: {exc}",
+                duration_s=duration or time.perf_counter() - started,
                 raw_text=raw_text,
             )
         elapsed = duration or time.perf_counter() - started
@@ -335,8 +340,13 @@ class HttpAdapter(BaseToolAdapter):
             raw_text = self._read_fixture(ctx) if ctx.mock else await self._request(ctx)
             records = self._within_target(self.parse_output(raw_text), ctx.target)
         except ParseError as exc:
+            # A parse failure is still work this adapter did, so it times it too.
             return ToolResult(
-                tool=self.name, status=ToolStatus.FAILED, error=str(exc), raw_text=raw_text
+                tool=self.name,
+                status=ToolStatus.FAILED,
+                error=str(exc),
+                duration_s=time.perf_counter() - started,
+                raw_text=raw_text,
             )
         except FetchFailed as exc:
             # No body was read (429, 5xx, timeout, refused): the failure message
@@ -345,6 +355,7 @@ class HttpAdapter(BaseToolAdapter):
                 tool=self.name,
                 status=ToolStatus.FAILED,
                 error=str(exc),
+                duration_s=time.perf_counter() - started,
                 raw_text=raw_text or str(exc),
             )
         return ToolResult(

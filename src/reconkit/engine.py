@@ -913,22 +913,22 @@ class Engine:
         try:
             result = await asyncio.wait_for(adapter().run(ctx), timeout=ctx.timeout)
         except TimeoutError:
-            result = ToolResult(
-                tool=adapter.name,
-                status=ToolStatus.TIMEOUT,
-                error="timed out",
-                duration_s=time.perf_counter() - started,
-            )
+            result = ToolResult(tool=adapter.name, status=ToolStatus.TIMEOUT, error="timed out")
         except Exception as exc:
             result = ToolResult(
                 tool=adapter.name,
                 status=ToolStatus.FAILED,
                 error=redact(f"{type(exc).__name__}: {exc}", self._secrets),
-                duration_s=time.perf_counter() - started,
             )
-        result = result.model_copy(
-            update={"raw_path": self._write_raw(workspace, run_id, adapter, result)}
-        )
+        update: dict[str, object] = {
+            "raw_path": self._write_raw(workspace, run_id, adapter, result)
+        }
+        if result.duration_s <= 0:
+            # The adapter's own measurement is authoritative; this is the only
+            # fallback site (docs/04 section 5) and it never overwrites one. A
+            # crashed or timed-out adapter reports nothing, so it lands here.
+            update["duration_s"] = time.perf_counter() - started
+        result = result.model_copy(update=update)
         self._record(
             run_id,
             adapter.name,

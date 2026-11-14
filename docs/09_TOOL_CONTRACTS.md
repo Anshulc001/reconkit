@@ -82,7 +82,7 @@ class ToolResult(BaseModel):
     tool: str
     status: ToolStatus
     records: list[Record] = []
-    duration_s: float = 0.0
+    duration_s: float = 0.0          # own wall seconds; 0.0 = not measured (engine fills, docs/04 s5)
     error: str | None = None        # short, redacted
     raw_path: str | None = None     # raw output file in workspace
     raw_text: str | None = Field(default=None, exclude=True)  # captured output, never serialized

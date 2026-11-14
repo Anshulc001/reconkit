@@ -1910,3 +1910,73 @@ duration_s: 0.0
 - **End-to-end runs of the changed path:** `reconkit subs -d example.com --mock --db /tmp/12f/recon.db --silent` -> exit 0 (the startup `.env` load does not disturb a normal run). The last-resort handler was then driven for real with an unwritable DB path: `--db /proc/1/x.db` printed `unexpected error: OperationalError: unable to open database file` and exited 1; with `-v` it printed the full traceback (`cli.py:204 -> engine.py:418 -> store.py:234 -> sqlite3.OperationalError`) - both go through `redact()` and neither contains a secret, so the text is unchanged, which is the no-over-redaction case on a real path.
 - **Not verified:** no real exception carrying a real `.env` key has ever been observed, so this is a guard on an unproven leak path, not a reproduced incident; the fixtures never print a keyed provider error. Windows is untested. A `.env` value shorter than three characters is intentionally not masked by the value list (existing rule of `redact`), and a key that appears only in a *typed* message at the six out-of-scope sites above would not be masked by this part.
 - **Next part must know:** `redact(text)` now means "the configured set" - any new caller that wants a per-run set must pass it explicitly (as `engine`/`workspace`/`store` already do). `configure_redaction` is process-global and replaces; it is called once from the Typer callback, so a test that invokes the app without patching `reconkit.cli.dotenv_values` will configure the real checkout `.env`. 12d's bounded `detail` string should reuse `redact(detail, self._secrets)` and this console path.
+
+## Part 12c: `duration_s` has one authoritative source (11d-findings-c)  (commit subject `feat: let each tool measure its own duration`; hash filled by the next commit)
+
+- **Docs read / goal:** `MASTER_PLAN.md` 12c and its `DECIDED (owner, 2026-11-14)` line, `docs/04` sections 3 and 5, `docs/09` section 3, `docs/03` section 5. Goal: the adapter measures its own work and reports `duration_s` on every outcome; `_run_one` fills a measured value only when the adapter reports none, and never overwrites one. The observed gap was `dnspython ok 36 0.0`, `pyprobe ok 8 0.0`, `otx failed 0.0` beside a real 429 in verification session 2.
+- **Which adapters were already compliant, stated before touching code (as asked):** the binary flow in `BaseToolAdapter.run` already reported a duration - `run_exec` measures the child with `time.monotonic()` around spawn/wait (`ExecResult.duration_s`, `core/runner.py:106,129,180`). That is the tool's real work time, not harness overhead, so **it counts as adapter-reported** and the binary adapters needed no new measurement; only their two branches that omitted it changed. `HttpAdapter.run` also measured its own work on the ok branch (`perf_counter` since 11d), so HTTP adapters only needed the two failure branches. `DnsPythonAdapter`, `PyprobeAdapter` and `PyscanAdapter` never measured anything (every branch left the `0.0` default) and needed the measurement added in their existing run paths.
+- **The ruling made concrete, and the ambiguity resolved:** `ToolResult.duration_s` stays a plain `float` defaulting to `0.0` (no model or DB change), and `0.0` is defined as "the adapter did not measure". `Engine._run_one` stores the adapter's value whenever it is `> 0` and only substitutes its own `perf_counter` delta when the value is `<= 0`; a negative value (only reachable with an injected/frozen clock) is treated the same way, so a stored value is never negative and an adapter value is never overwritten. That is **one fallback site** (`engine.py:926-930`). Timeout and crash rows now fall through the same site instead of measuring inline, so a timed-out tool records the harness's wall clock for the whole `wait_for` call.
+- **Docs changed first:** `docs/04` section 3 column comment (`duration_s REAL -- wall seconds the tool itself worked`) plus three rules in section 5: who reports it and what counts as adapter-reported (binary `run_exec` wall clock included, by name); the positive-value-wins / `<= 0` fallback contract with the one fallback site; and what mock mode means (fixture read + parse, small, positive, never a constant). `docs/09` section 3 gained the contract comment on the field (`0.0 = not measured, engine fills`). No other doc change was needed; the DB schema is untouched.
+- **Files touched:** `src/reconkit/adapters/base.py` (binary ParseError/ToolFailed/FetchFailed and RuntimeError branches now carry `duration or perf_counter-started`; `HttpAdapter` ParseError and FetchFailed branches carry the measurement), `src/reconkit/adapters/dnspython.py`, `src/reconkit/adapters/pyprobe.py`, `src/reconkit/adapters/pyscan.py` (`started` at the top of `run`, reported on mock-ok, mock-parse-error and real-ok), `src/reconkit/engine.py` (single fallback); `tests/test_adapters.py`, `tests/test_python_adapters.py`, `tests/test_engine.py`; `docs/04`, `docs/09`, this entry, `docs/PROGRESS.md`.
+- **Requirement -> test table:**
+  | Requirement (12c `DECIDED` / owner instructions) | Test |
+  |---|---|
+  | a successful adapter run reports a positive duration from its own measurement | `test_a_successful_run_reports_the_adapters_own_duration`, `test_every_python_adapter_times_its_own_work` |
+  | `_run_one` does not overwrite an adapter-provided value | `test_adapter_reported_duration_is_stored_and_never_overwritten` (12.5 stored exactly) |
+  | a failed run (429) reports a positive duration, not 0.0 (the session-2 gap) | `test_a_429_failure_still_reports_its_own_duration` |
+  | a parse-error path reports a positive duration | `test_a_parse_error_still_reports_its_own_duration` |
+  | a mock run has a documented, sensible duration | `test_a_mock_run_duration_is_small_and_measured`, `test_every_python_adapter_times_its_own_work` (docs/04: fixture read + parse, `0 < d < 5`) |
+  | an adapter that cannot measure is filled by the harness's own wall clock | `test_missing_adapter_duration_gets_the_harness_wall_clock` (adapter sleeps 50 ms, reports 0.0, stored `> 0.04` and `==` the result value) |
+  | a frozen clock stores no negative value | `test_a_non_positive_adapter_duration_is_never_stored` (-1.0 replaced) |
+  | a timeout keeps a measured duration (12a/11d behaviour preserved) | `test_phase_timeout_records_a_timeout_row` (existing; now fed by the fallback site) |
+- **Red before green (raw):** the new tests were written first against the fixed code, then the five source files were restored to HEAD (`git checkout -- src/reconkit/adapters/*.py src/reconkit/engine.py`, tests kept), producing a genuine failure of exactly the new behaviour:
+  ```
+  E       AssertionError: assert 0.0 > 0
+  E        +  where 0.0 = ToolResult(tool='crtsh', status=<ToolStatus.FAILED: 'failed'>, records=[], duration_s=0.0, error='crtsh: rate limited (HTTP 429)', raw_path=None, raw_text='crtsh: rate limited (HTTP 429)').duration_s
+  ...
+  E       AssertionError: assert 0.0 > 0
+  E        +  where 0.0 = ToolResult(tool='crtsh', status=<ToolStatus.FAILED: 'failed'>, records=[], duration_s=0.0, error='crtsh: invalid JSON', ...).duration_s
+  ...
+  FAILED tests/test_adapters.py::test_a_429_failure_still_reports_its_own_duration
+  FAILED tests/test_adapters.py::test_a_parse_error_still_reports_its_own_duration
+  FAILED tests/test_python_adapters.py::test_every_python_adapter_times_its_own_work
+  FAILED tests/test_engine.py::test_missing_adapter_duration_gets_the_harness_wall_clock  (assert 0.0 > 0.04)
+  FAILED tests/test_engine.py::test_a_non_positive_adapter_duration_is_never_stored  (assert -1.0 > 0)
+  5 failed, 3 passed, 144 deselected in 0.31s
+  ```
+  The three that passed at HEAD are the ones that guard existing behaviour (HTTP ok duration, the engine's pass-through of a positive value, the HTTP mock duration). The fixed files were then restored from `/tmp/12c` and verified: `adapters/base.py: OK`, `adapters/dnspython.py: OK`, `adapters/pyprobe.py: OK`, `adapters/pyscan.py: OK`, `engine.py: OK` (`sha256sum -c`), and the three test files ran `152 passed in 0.98s`.
+- **Mutation proof (M1, the required one):** `if result.duration_s <= 0:` changed to `if True:` (overwrite unconditionally) -> `test_adapter_reported_duration_is_stored_and_never_overwritten` failed with the raw value:
+  ```
+  >       assert raw_result(summary, "timed").duration_s == 12.5
+  E       AssertionError: assert 0.00025354699755553156 == 12.5
+  1 failed, 57 deselected in 0.15s
+  ```
+  Restored `engine.py` from `/tmp/12c` -> `engine.py: OK`; `pytest -q tests/test_engine.py -k "duration"` -> `3 passed, 55 deselected in 0.21s`.
+- **Self-review findings (S2):**
+  - Broad excepts: none added; the engine's pre-existing `except Exception` now builds a result without a duration and relies on the fallback, which is the intended path for a crashed adapter. The broad-except scan lists the same six `src/` sites as at the 12f baseline (plus the pre-existing `ui.py`/doctor handlers outside this scan's `src/reconkit` filter), none new.
+  - External input: none. The only new values are clock readings; no user string, path or argv is involved.
+  - Secrets: unchanged; durations are floats and never redacted.
+  - Blocking calls in async code: none - `time.perf_counter()` is non-blocking.
+  - Exceptions that can escape: none new; the adapters' `time` calls cannot raise.
+  - Double counting: impossible by construction - the adapter value is used when positive and the fallback is skipped; proved by M1.
+  - Unfinished paths, stated plainly: UI and `--json` do not print `duration_s` (it is a DB/`status` surface); a timeout row's duration includes `wait_for` overhead, which is the harness clock by definition; the six `render_error` sites from 12f remain untouched.
+- **S3 raw output (bash/grep form, 13 scans):** `duration_s=` assignments -> 22 in `src/reconkit`, of which 3 are the pass-through/record in `engine.py` (`result.duration_s`, `_record` param), 2 are `run_exec`'s child clock in `core/runner.py`, and the rest are adapter measurements; exactly one conditional fallback (`engine.py:926`). Hardcoded `duration_s = 0` -> only the two model defaults (`models.py:111`, `core/runner.py:38`). Clocks -> `monotonic` in `core/runner.py` and `core/pacing.py`, `perf_counter` in `engine.py` and the four adapter modules. `assert` in `src/` -> NONE. `shell=True|os.system` -> NONE. `TODO|FIXME|XXX|HACK` -> NONE. `print(` outside `ui.py` -> NONE. `import subprocess` -> `core/runner.py` only. `import sqlite3` -> `core/store.py` only. `os.environ|os.getenv` -> the same four pre-existing sites (`ui.py:148`, `go_install.py:22`, `pipx.py:31`, `github_release.py:542`). `except Exception` -> six pre-existing `src/` sites, none added. `noqa|type: ignore` -> the same three pre-existing test lines. Adapters importing `store/scope/ui/cli` -> NONE. `adapters/*.py` `async def run` -> the four run paths changed, no new adapter.
+- **Adversarial cases:** an adapter that raises after measuring -> the engine builds a fresh `ToolResult` and the fallback fills a positive value (no stale adapter number); a frozen adapter clock -> `0.0`, engine fills its own positive reading, never negative; an adapter reporting a huge value -> stored untouched (M1's inverse); a skipped tool -> `duration_s` stays `NULL` (no row change, `_record` not called for skips).
+- **Raw check output (S1, first pass):**
+  ```
+  --- pytest -q ---
+  ........................................................................ [ 11%]
+  ... (8 lines of dots) ...
+  650 passed in 13.68s
+  --- ruff check . ---
+  All checks passed!
+  --- ruff format --check . ---
+  68 files already formatted
+  --- mypy src/reconkit ---
+  Success: no issues found in 36 source files
+  ```
+  Second pass and the pre-commit output are in the same shape; suite 642 -> 650 (eight new cases: four HTTP, one python-adapter trio, three engine).
+- **End-to-end run of the changed path:** `reconkit run -d example.com --mock --no-keys --db /tmp/12c.db --speed slow` -> exit 0, and the stored `tool_runs` rows are all positive: `crtsh 0.00025068799732252955`, `certspotter 0.0008128530025715008`, `otx 0.00047691899817436934`, `hackertarget 0.0005171979937586002`, `subfinder 0.000467628997284919`, `assetfinder 0.0003922159958165136`, `dnspython 0.00029269300284795463`; the ten skipped tools store `NULL`. No `0.0` row remains in a real CLI run.
+- **Deviations / owner awareness:** `docs/09` was touched for the field contract although the ruling named only `docs/04` (AGENTS section 8 requires the adapter-contract doc to match); the test fake-adapter helper gained two keyword arguments (`duration_s`, `delay`), both defaulted, so existing tests are unchanged; the "0.0 means not measured" meaning is the ambiguity the instructions asked to resolve, and it is now stated in docs/04 rather than left implicit.
+- **Not verified:** no real 429 was re-triggered this session (the session-2 evidence is what motivated the fix; the branch is covered by MockTransport); no real non-mock tool ran, so a real binary `run_exec` duration was not re-observed (the 12a/baseline runs did record it); `perf_counter` resolution and a sub-millisecond real HTTP call are untested on this hardware; Windows is untested. `scope.yaml` untouched, nothing pushed, no sudo.
+- **Next part must know (12k):** `_run_one`'s fallback is the only place that invents a duration; an empty stage still writes no `tool_runs` row, so 12k's exit-5 work must not assume a duration exists. The mock-run durations are sub-millisecond, so any UI sorting by duration would look flat under `--mock`.

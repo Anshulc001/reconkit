@@ -97,6 +97,8 @@ def adapter(
     wait: bool = False,
     raw_text: str | None = None,
     status: ToolStatus = ToolStatus.OK,
+    duration_s: float = 0.0,
+    delay: float = 0.0,
 ) -> type[BaseToolAdapter]:
     class Fake(BaseToolAdapter):
         async def run(self, ctx: RunContext) -> ToolResult:
@@ -107,10 +109,13 @@ def adapter(
                 raise error
             if wait:
                 await asyncio.Event().wait()
+            if delay:
+                await asyncio.sleep(delay)
             return ToolResult(
                 tool=name,
                 status=status,
                 records=records or [],
+                duration_s=duration_s,
                 error=None if status is ToolStatus.OK else "exit 1: boom",
                 raw_text=raw_text,
             )
@@ -1388,6 +1393,51 @@ async def test_a_failed_workspace_write_keeps_the_tool_result(
     assert row["status"] == "ok"
     stored = engine.store._conn.execute("SELECT fqdn FROM subdomains").fetchone()
     assert stored["fqdn"] == "www.example.com"
+
+
+async def test_adapter_reported_duration_is_stored_and_never_overwritten(tmp_path: Path) -> None:
+    """12c: the adapter measures its own work; `_run_one` must not replace it."""
+    rec = Recorder()
+    specs = {"timed": tool("timed", Stage.SUBS)}
+    adapters = {"timed": adapter("timed", Stage.SUBS, rec, duration_s=12.5)}
+    engine = make_engine(tmp_path, specs, adapters)
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
+    )
+
+    assert raw_result(summary, "timed").duration_s == 12.5
+    row = engine.store._conn.execute("SELECT duration_s FROM tool_runs").fetchone()
+    assert row["duration_s"] == 12.5
+
+
+async def test_missing_adapter_duration_gets_the_harness_wall_clock(tmp_path: Path) -> None:
+    """12c: `0.0` means "not measured"; the fallback is a real wall-clock reading."""
+    rec = Recorder()
+    specs = {"slowish": tool("slowish", Stage.SUBS)}
+    adapters = {"slowish": adapter("slowish", Stage.SUBS, rec, duration_s=0.0, delay=0.05)}
+    engine = make_engine(tmp_path, specs, adapters)
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
+    )
+
+    row = engine.store._conn.execute("SELECT duration_s FROM tool_runs").fetchone()
+    # The adapter slept 50 ms and reported nothing, so the stored number can only
+    # be the harness's own measurement of that call - not a default or a copy.
+    assert row["duration_s"] > 0.04
+    assert row["duration_s"] < 5.0
+    assert raw_result(summary, "slowish").duration_s == row["duration_s"]
+
+
+async def test_a_non_positive_adapter_duration_is_never_stored(tmp_path: Path) -> None:
+    """A frozen or backwards clock must not produce a zero or negative row."""
+    rec = Recorder()
+    specs = {"weird": tool("weird", Stage.SUBS)}
+    adapters = {"weird": adapter("weird", Stage.SUBS, rec, duration_s=-1.0, delay=0.02)}
+    engine = make_engine(tmp_path, specs, adapters)
+    await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow"))
+
+    row = engine.store._conn.execute("SELECT duration_s FROM tool_runs").fetchone()
+    assert row["duration_s"] > 0
 
 
 async def test_raw_file_names_do_not_collide_across_tools_or_runs(tmp_path: Path) -> None:
