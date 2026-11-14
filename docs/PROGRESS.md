@@ -356,6 +356,7 @@ No open items from Part 9. Part 9 fixed the dangling-CNAME persistence gap with 
 | C-2 | low | subfinder's provider file is `mkstemp` in the system temp dir (`subfinder.py:76-79`, 0600, removed in `finally`); a `SIGKILL` in between leaves a key file | ticketed, no code |
 | G-4 | low | `ExitCode.ALL_FAILED = 6` (`engine.py:83`) is unreachable; `_exit_code` (`engine.py:592-604`) returns `NO_TOOL` when every tool failed | ticketed, no code |
 | G-6 | docs | the 11d-e blast-radius claim ("only two `build_command` implementations") is false; corrected in place above | corrected |
+| G-7 | high | `scope.ip_allowed()` (`scope.py:296`, `ScopeGate.ip_allowed` `:110`) has zero call sites in `src/`; docs/05 rule 6 requires skipping resolved IPs when no `in_scope_cidrs` are defined, so the documented rule is unenforced. `pyscan.py:75-81` resolves each host and probes `addresses[0]` unchecked | **ticketed, no code - hard precondition on active work (see below)** |
 
 ### 11c-G-2 - fixed 2026-11-14 (Option B, after the ambiguity ruling)
 
@@ -366,6 +367,14 @@ No open items from Part 9. Part 9 fixed the dangling-CNAME persistence gap with 
 - **Assertion strength:** both tests assert ordering, not call count - host B's resolve/probe appears only after the recorded pause, the pause follows host A's connect/probe, the first host never waits, and the pause value is inside slow's `active.host_delay` `[1, 5]`.
 - **Not changed:** `httpx`/`naabu` (exempt by the new docs text), `dnspython` (passive; `before_host()` reads the active preset), `normal`/`fast` parallelism.
 - **Known asymmetry, now stated in docs/03 §7:** `pyprobe` pauses between hosts only in `slow`; at `normal`/`fast` parallel dispatch leaves the shared rate limiter as its only pacing. `pyscan` calls `before_host()` at every speed, which is a no-op when the preset range is `[0, 0]` (`fast`).
+
+### 11c-G-7 - ticketed 2026-11-14 (no code fix)
+
+- **Finding:** docs/05 rule 6 says "probe an IP only if it is inside `in_scope_cidrs`. If no CIDRs are defined, scan hostnames only and skip resolved IPs." The predicate for that rule exists - `scope.ip_allowed()` (`scope.py:296`) and `ScopeGate.ip_allowed()` (`scope.py:110`, "no CIDRs means no IPs") - and is tested directly (`tests/test_scope.py:142-148`), but **nothing in `src/` calls it**. `grep -rn ip_allowed src --include=*.py` returns only the two definitions and the module-level wrapper; no adapter, engine path or CLI path consults it.
+- **Concrete consequence:** `pyscan.py:75-81` resolves each in-scope hostname to `addresses[0]` and probes that IP directly. With no `in_scope_cidrs` in `scope.yaml` (the shipped example has them; the local testfire file does not), a hostname whose A record points at an IP outside any declared range is still probed. The gate therefore authorizes **names**, and the documented IP-level rule is currently decorative.
+- **HARD PRECONDITION, not a background note:** until this is fixed, **no IP-connecting active tool may run** - this covers `pyscan`, `naabu`, and anything else that resolves a host and then connects to the resolved address, now or later. Any future active-stage work must either fix G-7 first or explicitly rule, in writing, that the tool in question is name-only. `pyprobe` is **not** blocked by this gap: it connects by hostname through `httpx` and never touches a resolved IP, so its traffic is governed entirely by `require_active()`'s name check.
+- **Scope:** docs-only ticket. No docs/05 change is needed (the rule already says what should happen); the fix is code that makes the rule true, and it needs its own approval because it changes which active tools may launch.
+- **Not done here:** no fix, no test, no reviewer decision on whether the fix belongs in `_active_hosts`, in each adapter, or in a shared resolve helper.
 
 ### 11c-A-1 - fixed 2026-11-14
 
