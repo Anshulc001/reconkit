@@ -188,7 +188,7 @@ Single machine, thousands of hosts per target. Beyond that is out of scope (see 
 
 | What if | Expected behavior |
 |---|---|
-| Tool missing | Skip, report `skipped (not installed)`; stage continues |
+| Tool missing | Skip, report `skipped (not installed)`; stage continues. This is the selection-time rule; a binary that was found at selection but cannot be spawned at run time is `failed` with its message instead |
 | Tool crashes or exits non-zero | Record `failed` with stderr summary; keep other results |
 | Tool timeout | Kill process group, keep partial output if parseable, record `timeout` |
 | HTTP source returns 429/5xx | `failed` result carrying the status; no retry (only a connection error retries once) |

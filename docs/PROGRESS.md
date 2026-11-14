@@ -10,7 +10,7 @@
 - Next action: Part 11 (docs sync, README/SETUP rewrite, fresh-eyes audit, final report) may begin once the user says so. Part 11 cannot close without at least one real run against an authorized target on real Kali; mock-only is insufficient.
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
-- Known open bugs: 11d-findings-**a is fixed** 2026-11-14 (see "11d-findings-a - fixed" below); 11d-findings-b/c remain open; 11d-findings-d awaits a maintainer decision. (a) no longer blocks a `live`/`ports`/`--active` run, but none has been run yet.
+- Known open bugs: 11d-findings-**a is fixed** and **d is resolved as a docs-wording defect** 2026-11-14; 11d-findings-**e (high)** was found while scoping d and is being fixed next (binary adapters launched a bare `argv[0]`); b/c remain open. (a) no longer blocks a `live`/`ports`/`--active` run, but none has been run yet.
 - Read first: AGENTS.md, this block, last 3 REVIEW_LOG entries, current part in docs/MASTER_PLAN.md
 
 Read this after `AGENTS.md`, before touching code. Update it in every commit.
@@ -225,11 +225,21 @@ Artifact checks (raw, from the file): `PRAGMA integrity_check` = `ok`; `PRAGMA f
 - `Engine._run_one` (engine.py 794-818) computes `started` but uses it only on the timeout/exception paths, then records `result.duration_s`; its own measurement is discarded on the normal path.
 - This is metadata loss, not missing I/O. The three `ok` HTTP tools store real, varying durations (crtsh 0.66 / 13.76 / 51.85 s; hackertarget 0.89 / 1.08 / 1.15 s), and `subfinder`/`assetfinder` store sub-millisecond real `FileNotFoundError` timings.
 
-### 11d-findings-d (docs conflict; needs a maintainer decision - not actioned)
+### 11d-findings-d (low; docs wording - resolved 2026-11-14, docs-only)
 
-- docs/03 "What if" says `Tool missing` -> "Skip, report `skipped (not installed)`", and docs/09 selection says missing tools are reported as `skipped`. docs/MASTER_PLAN's adapter rules instead require a missing binary to be "a distinct failed result".
-- The code follows MASTER_PLAN: `subfinder` and `assetfinder` store `failed` with `not installed or not executable: [Errno 2] No such file or directory: ...`.
-- A planning document outranking the two docs it is meant to implement is backwards from the project's source-of-truth order, but this is the maintainer's call. No docs or code change was made.
+- **This ticket was misdiagnosed when it was logged, and that is corrected here rather than quietly rewritten.** It was recorded as "the code follows MASTER_PLAN" because `subfinder` and `assetfinder` stored `failed`. That attribution was wrong. The code already skips a genuinely absent binary at selection time (engine.py 729, `skipped.append((spec, "not installed"))`), which is exactly what docs/03 section 13 and docs/09 selection rules describe; the `failed` rows had a different cause, now logged as 11d-findings-e.
+- What actually remained was a wording defect: docs/03, docs/09 (at two different sections) and docs/MASTER_PLAN all used "missing binary" for two different moments - absent at selection time (`skipped`, stage continues) and present but unspawnable at run time (`failed` with a message). Read side by side they looked like a conflict; they are not one.
+- Resolved docs-only, no code change for (d): the docs/09 adapter contract now names the run-time case and requires `build_command` to launch the resolved `binary_path()`; docs/09 selection rules and docs/03 section 13 now say explicitly that the `skipped` rule is selection-time; MASTER_PLAN's adapter rule now defers to that rule instead of restating the run-time case as if it were the whole answer.
+
+### 11d-findings-e (high) - binary adapters launched a bare `argv[0]`
+
+- **Symptom, both halves of it:** `check_installed()` reports `subfinder` installed (`v2.17.0`, `/home/kali/.reconkit/bin/subfinder`), while a real passive run records `failed` with `not installed or not executable: [Errno 2] No such file or directory: 'subfinder'`. The product contradicts itself: `doctor` says installed, the scan says not installed.
+- **Cause:** `subfinder.py:78` and `assetfinder.py:23` build `argv[0]` from `self.binary`, the bare name, while `Engine._tool_env` (engine.py 843-846) passes only the adapter's API-key vars - no `PATH`. The child therefore has no `PATH` to resolve a bare name against; `run_exec` turns the `OSError` into `returncode=None` (runner.py 116-123) and `base.py:141-146` maps that to `failed`.
+- **Reproduced directly** with the empty env the engine passes: `subprocess.run(["subfinder", "-version"], env={})` -> `FileNotFoundError`; the same call with `/home/kali/.reconkit/bin/subfinder` -> `rc=0`.
+- **Spec violated, not just a bug:** docs/09 adapter contract says the base resolves the binary in `~/.reconkit/bin` first and then `PATH`, and docs/10 section 5 says the managed directory comes first in the run-time lookup order so "no PATH edit is needed to run a Go tool". `check_installed()` uses `binary_path()`; `build_command()` did not.
+- **Blast radius:** the only two `build_command` implementations in this build (`subfinder`, `assetfinder`). Other binary tools are `phase: 3` and are skipped as "no adapter yet".
+- **Fix shape:** launch `binary_path()` (resolved absolute path), falling back to the bare name only if resolution returns `None`. Do **not** widen the child env with `PATH`: the minimal-env rule is deliberate and a search path is a hijack surface.
+- **Tests a fix needs:** `build_command()[0]` is absolute and equals `binary_path()` for both adapters, and a run-level test with a fake executable in a temporary managed directory that asserts the adapter actually launches it (no network, no real tool required).
 
 ### Latent, not exercised by this run
 
