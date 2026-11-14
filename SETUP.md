@@ -1,110 +1,168 @@
-# SETUP.md - Windows + WSL2 Kali + VS Code (beginner guide)
+# SETUP.md - install reconkit
 
-Do these steps once. You need Windows 10 (build 19041+) or Windows 11.
+reconkit has two supported ways to run:
 
-## Step 1 - Install Kali in WSL2
+- **Kali or Ubuntu (native or WSL2):** the full tool set, real scans and the installer.
+- **Windows:** `doctor`, `--mock` runs and the pure-Python passive flow. `reconkit install` and `update` refuse on Windows and exit `1`.
 
-Open **PowerShell as Administrator** and run:
+You need **Python 3.11 or newer** on both. Do the steps once, then activate the virtual environment in every new terminal.
 
-```powershell
-wsl --install -d kali-linux
-```
+## Part A - Kali / Ubuntu (full setup)
 
-Restart if asked. Open **Kali Linux** from the Start menu and create a Linux username and password.
-
-Check that it is WSL 2:
-
-```powershell
-wsl -l -v
-```
-
-The `VERSION` column for `kali-linux` should say `2`.
-
-## Step 2 - Install VS Code and the WSL extension (on Windows)
-
-1. Install Visual Studio Code on Windows.
-2. Press `Ctrl+Shift+X`, search **WSL** (publisher: Microsoft), click Install.
-
-## Step 3 - Install base packages (inside Kali)
-
-In the Kali window:
+### 1. Install the base packages
 
 ```bash
 sudo apt update
 sudo apt install -y python3 python3-venv python3-pip git golang-go libpcap-dev jq curl
 python3 --version      # must be 3.11 or newer
-git config --global core.autocrlf input
 ```
 
-Everything else (subfinder, httpx, naabu, nuclei, ...) is installed later by `reconkit install --all`.
+If `python3` is older than 3.11, install `uv` (it can fetch Python 3.11 for the venv) or a newer Python from your distribution, then continue. `scripts/bootstrap.sh` uses `uv` when present and otherwise requires Python 3.11+.
 
-## Step 4 - Create the project inside Kali
+### 2. Put the project on the Linux filesystem
 
-```bash
-mkdir -p ~/reconkit
-cd ~/reconkit
-code .
-```
+Use a path such as `~/reconkit` or `~/Desktop/reconkit`. Do **not** run from `/mnt/c/...`: it is slow and can cause SQLite locking and line-ending problems.
 
-`code .` opens VS Code on Windows, connected to Kali. The window's bottom-left corner should say **WSL: kali-linux**.
-
-> Always keep the project in `~/reconkit` (the Linux filesystem), not in `/mnt/c/...`. It is much faster and avoids SQLite locking and line-ending bugs.
-
-## Step 5 - Put the generated files into the project
-
-Option A (simplest): in VS Code (connected to Kali), create files and paste the content.
-
-Option B: copy downloaded files from Windows. Example if they are in your Downloads folder:
+### 3. Create the environment
 
 ```bash
-cp -r /mnt/c/Users/<YourWindowsName>/Downloads/reconkit/. ~/reconkit/
-```
-
-Option C: in Windows Explorer, type `\\wsl$\kali-linux\home\<your-kali-user>\reconkit` in the address bar and drag files in.
-
-## Step 6 - Python environment (after the Phase 2 code is in the folder)
-
-```bash
-cd ~/reconkit
+cd /path/to/reconkit
 ./scripts/bootstrap.sh
 source .venv/bin/activate
 ```
 
-`scripts/bootstrap.sh` uses `uv` when it is installed (creates a Python 3.11 venv) and otherwise falls back to `python3 -m venv` (which needs the `python3-venv` package). The manual equivalent is `python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"`.
+`bootstrap.sh` creates `.venv`, installs reconkit in editable mode with its dev tools, sets the repo's git hooks and adds `~/.reconkit/bin` to the venv's `PATH`.
 
-Run `source .venv/bin/activate` again every time you open a new terminal.
-
-## Step 7 - Install the recon tools and check
+The manual equivalent, if you prefer not to use the script:
 
 ```bash
-reconkit install --all --dry-run   # shows what would be installed
-reconkit install --all             # installs into ~/.reconkit/bin
-reconkit doctor                    # per-stage readiness report
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-## Step 8 - Define your scope (required for active scans)
+### 4. `reconkit: command not found`
+
+This is the most common setup problem. It means the virtual environment is not active in **this** terminal.
+
+```bash
+source .venv/bin/activate
+command -v reconkit          # should point inside .venv/bin
+reconkit doctor
+```
+
+Run `source .venv/bin/activate` again every time you open a new terminal, or call the script directly without activating:
+
+```bash
+.venv/bin/reconkit doctor
+```
+
+### 5. Check what is installed
+
+```bash
+reconkit doctor
+```
+
+`doctor` prints one row per tool (installed, version, path), per-stage coverage, system packages, `scope.yaml` presence, the database path and the API key names that are set. Missing tools are shown as `missing`; a same-named but wrong program is shown as `wrong program`.
+
+### 6. Install the recon tools
+
+```bash
+sudo -v                            # cache your sudo ticket first (optional but recommended)
+reconkit install --all --dry-run   # show every action; changes nothing
+reconkit install --all             # install core tools into ~/.reconkit/bin
+```
+
+- `apt` packages (nmap, massdns, ...) ask for confirmation before running `sudo -n apt-get install`.
+- reconkit never reads or stores your sudo password. If the cached ticket has expired, an apt tool is skipped with a hint; run `sudo -v` again and retry.
+- Without a terminal (CI, a pipe), sudo confirmations are declined automatically and only those tools are skipped.
+- On an interactive terminal, `install` also asks once whether to add API keys. Free mode needs none; choosing keys copies `.env.example` to `.env` (never overwrites) and prints the Keys table.
+
+### 7. Define your scope
+
+Active stages require a scope file.
 
 ```bash
 cp scope.example.yaml scope.yaml
-nano scope.yaml                    # replace with your authorized targets
+nano scope.yaml        # replace with targets you own or are authorized to test
+reconkit scope check -d example.com
 ```
 
-Only put targets in `scope.yaml` that you own or have **written permission** to test.
+Only include targets you own or have **explicit written permission** to test.
 
-## Step 9 - First runs
+### 8. First runs
 
 ```bash
-reconkit passive -d example.com --mock     # fake data, checks the pipeline works
-reconkit passive -d <your-authorized-domain>
-reconkit diff -d <your-authorized-domain>
+reconkit passive -d example.com --mock     # fixtures only; no network or external tools
+reconkit passive -d <authorized-domain>    # real passive sources
+reconkit diff -d <authorized-domain>
+reconkit live -d <authorized-domain> --active
+reconkit ports -d <authorized-domain> --active
 ```
+
+Active scans stay inside `scope.yaml`; out-of-scope hosts are dropped. `--speed fast` on an active stage requires typing `I AM AUTHORIZED`.
+
+## Part B - Windows (mock/passive and doctor only)
+
+If you have a Linux machine (or WSL2 Kali), use Part A there for the real tools. On native Windows you can still run the CLI, `doctor`, fixtures and the pure-Python passive flow.
+
+### 1. Create the environment
+
+PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
+```
+
+Git Bash:
+
+```bash
+./scripts/bootstrap.sh
+source .venv/Scripts/activate
+```
+
+If `py -3.11` is not available, install Python 3.11+ from python.org or use `uv`.
+
+### 2. Run what Windows supports
+
+```powershell
+reconkit doctor
+reconkit passive -d example.com --mock
+```
+
+If PowerShell blocks the activation script, run `.venv\Scripts\activate.bat` from `cmd.exe`, or call `.venv\Scripts\reconkit.exe` directly.
+
+### 3. The installer refuses on Windows
+
+```text
+$ reconkit install --all
+Use WSL2 Kali (see SETUP.md)
+```
+
+That is expected and exits `1`. `install` and `update` only run on Linux. Use a native Kali/Ubuntu checkout or WSL2 Kali for the full tool install; a native Linux box does not require WSL2.
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| `wsl --install` shows help text | Update Windows, or run `wsl --update` |
-| `naabu` build error about `pcap.h` | `sudo apt install -y libpcap-dev` |
-| `httpx` runs the wrong program | The installer puts the correct one in `~/.reconkit/bin`, which comes first in lookup. Run `reconkit doctor`. |
-| Commands not found after install | Open a new terminal and run `source .venv/bin/activate` |
-| Slow disk or `database is locked` | Move the project from `/mnt/c/...` to `~/reconkit` |
+| `reconkit: command not found` | The venv is not active in this terminal: `source .venv/bin/activate` (Linux/Git Bash) or `.venv\Scripts\Activate.ps1` (PowerShell). Or run `.venv/bin/reconkit`. |
+| `Use WSL2 Kali (see SETUP.md)` | You ran `install`/`update` on Windows. Run them from a Linux checkout. |
+| `sudo: a password is required` during install | Run `sudo -v` in the same terminal, then retry. reconkit does not ask for the password itself. |
+| `naabu` fails with a `pcap.h` error | `sudo apt install -y libpcap-dev` and retry; `doctor` lists it under system packages. |
+| `httpx` runs the wrong program | The installer places ProjectDiscovery's binary in `~/.reconkit/bin`; `bootstrap.sh` puts that directory first in the activated venv's `PATH`. Re-activate and run `reconkit doctor`. |
+| Every `github_release` tool fails with HTTP 403 | Unauthenticated GitHub release lookups are limited to 60/hour per IP. Wait for the reset time and retry. |
+| `database is locked` or very slow scans | Move the project off `/mnt/c/...` to the Linux filesystem. |
+| Python is older than 3.11 | Install `uv` or a newer Python, then re-run `./scripts/bootstrap.sh`. |
+
+## Useful checks
+
+```bash
+pytest -q
+ruff check .
+ruff format --check .
+mypy src/reconkit
+```
