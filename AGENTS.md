@@ -1,20 +1,24 @@
-## Session start (do this every time, no questions needed)
-
-1. Read the RESUME block at the top of docs/PROGRESS.md, the last 3 entries of docs/REVIEW_LOG.md, and the part you are on in docs/MASTER_PLAN.md. Read the Known pitfalls table at the top of docs/REVIEW_LOG.md before writing code, and check any new code against it.
-2. Run `git status --short`, `git log --oneline -10`, and scripts/check.ps1. Record the result in REVIEW_LOG.
-3. If the tree is dirty, identify which part the changes belong to and finish or complete that part; never discard work.
-4. If RESUME and git disagree, trust git, fix RESUME, log the discrepancy, and continue.
-5. Continue from the RESUME 'Next action' following docs/MASTER_PLAN.md. Never push. Never redo finished parts. When all parts are done, print the final report and stop.
-
 # AGENTS.md - Instructions for AI coding agents
 
 Read this file first, every session. It points to the documents in `docs/`.
 
 ## 0. Session start (do this first, every session)
 
-1. Read this file, then `docs/PROGRESS.md`, then the `docs/*.md` files for the area you will touch.
-2. Run: `git status; git log --oneline -5`; then `pytest -q`, `ruff check .`, `ruff format --check .`, `mypy src/reconkit`. Report the baseline. If anything fails, fix that first.
-3. Do only the task under "Next task" in `docs/PROGRESS.md` (or the one I give you). One task per turn, then stop.
+1. Read the RESUME block at the top of docs/PROGRESS.md, the last 3 entries of docs/REVIEW_LOG.md, and the part you are on in docs/MASTER_PLAN.md. Read the Known pitfalls table at the top of docs/REVIEW_LOG.md before writing code, and check any new code against it. Then read the `docs/*.md` files for the area you will touch.
+2. Run `git status --short` and `git log --oneline -10`.
+3. Activate the venv and run the gate, one command at a time:
+
+   ```bash
+   source .venv/bin/activate
+   pytest -q
+   ruff check .
+   ruff format --check .
+   mypy src/reconkit
+   ```
+
+   Report the baseline and record it in REVIEW_LOG. If anything fails, fix that first. `scripts/check.ps1` is an optional Windows convenience wrapper for the same four checks, not a required step; there is no bash wrapper.
+4. If the tree is dirty, identify which part the changes belong to and finish or complete that part; never discard work.
+5. Continue from the RESUME "Next action" following docs/MASTER_PLAN.md, doing only that task (or the one I give you), one task per turn, then stop. Never push. Never redo finished parts. When all parts are done, print the final report and stop.
 
 ## 0b. Task loop
 
@@ -40,7 +44,7 @@ plan (5-10 lines, assumptions) -> implement -> tests (normal, empty, malformed, 
 - **Purpose:** A command-line reconnaissance orchestrator for **authorized** security testing. It runs several recon tools per stage, merges and deduplicates their output, scores confidence by how many tools agree, and tracks changes between scans in SQLite.
 - **Users:** Penetration testers and bug bounty hunters working inside a written scope.
 - **Stack:** Python 3.11+, Typer (CLI), Rich (terminal UI), Pydantic v2 (schemas), asyncio, httpx (HTTP), dnspython, PyYAML, SQLite (stdlib `sqlite3`), pytest, ruff, mypy.
-- **Environment:** Windows + VS Code, one canonical checkout. Use the repo root of this checkout only; do not create or edit a second copy (no WSL clone, no `/mnt/c` mirror). Run checks from this checkout only. Python comes from `uv` (3.11); `python` on PATH is 3.10.
+- **Environment:** Linux (Kali or Ubuntu, native or WSL2) is the primary platform; Windows supports mock/passive flows and `doctor`. Use one canonical checkout: this repository root only, no second copy of this checkout (no second WSL checkout, no `/mnt/c` mirror). Run checks from this checkout only. Python 3.11+ is required; use the active `.venv` and verify with `python --version`.
 
 ## 2. Source of truth
 
@@ -72,7 +76,7 @@ Do not contradict these documents. If code and docs disagree, stop and report th
 3. **Pacing:** all network activity goes through the `Pacer` (`core/pacing.py`). Do not call `asyncio.gather` over network tools or hosts without it. Default speed is `slow`.
 4. **Registry only:** tools, install sources and download URLs come from `tools.yaml`. Never add `curl | bash`, unverified downloads, or sources not in the registry.
 5. **Secrets:** API keys come from `.env` / environment only. Never print, log, store in SQLite, or put them in command lines that get logged.
-6. **No exploitation in core:** the `core` and `opt_in` tiers are discovery and inventory only. Tools that send attack payloads belong to the `intrusive` tier (Phase 3, gated by `--intrusive` + scope entry + typed confirmation).
+6. **No exploitation in core:** the `core` and `opt_in` tiers are discovery and inventory only. Tools that send attack payloads belong to the `intrusive` tier (Phase 3). There is no `--intrusive` flag in this build; intrusive tools are not selectable.
 7. **Do not invent** CLI flags, tool flags, DB columns, endpoints or business rules. Change the docs first, then the code. If a tool's flags are unknown, check its `--help` output or ask. Do not guess.
 8. **Honest User-Agent:** `reconkit/<version>` for our own HTTP requests. No User-Agent rotation or evasion features.
 9. **Tests never touch the network or require installed tools.** Use fixtures in `tests/fixtures/`.
