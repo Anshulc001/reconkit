@@ -306,47 +306,91 @@ async def test_active_without_flag_skips_and_scope_drops_host(tmp_path: Path) ->
     assert live_stage.dropped_hosts == ["api.example.com"]
 
 
-async def test_ip_connecting_tools_are_skipped_until_the_cidr_rule_is_wired(
+async def test_naabu_stays_blocked_because_it_resolves_inside_the_binary(
     tmp_path: Path,
 ) -> None:
     """Regression: 11c-G-7.
 
-    docs/05 rule 6 requires every probed IP to be inside `in_scope_cidrs`, but the
-    resolve-then-connect path does not apply it yet. Both IP-connecting adapters
-    must therefore be skipped at selection time, never launched, and reported with
-    the `blocked:` reason. `--mock` connects to nothing, so it stays selectable.
+    `pyscan` enforces docs/05 rule 6 itself, so it is selectable. `naabu` resolves
+    inside its own process, where no adapter can filter the address, so it must stay
+    skipped at selection time with a clear reason instead of running unchecked.
+    `--mock` connects to nothing, so fixture runs keep it selectable.
     """
     rec = Recorder()
     specs = {
-        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
         "pyscan": tool("pyscan", Stage.PORTS, mode=Mode.ACTIVE),
         "naabu": tool("naabu", Stage.PORTS, mode=Mode.ACTIVE),
     }
     adapters = {
-        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("example.com")]),
         "pyscan": adapter("pyscan", Stage.PORTS, rec),
         "naabu": adapter("naabu", Stage.PORTS, rec),
     }
     engine = make_engine(tmp_path, specs, adapters, installed=lambda _adapter: True)
-    await engine.run(
-        "example.com",
-        ScanOptions(stages=(Stage.LIVE, Stage.PORTS), active=True, speed="slow"),
+    selected, skipped = await engine._select(
+        Stage.PORTS, ScanOptions(active=True, tools=["pyscan", "naabu"])
     )
-    assert rec.names == ["live-fake"], "an IP-connecting adapter must not run"
-    reason = "blocked: in_scope_cidrs not enforced on resolved IPs (11c-G-7)"
-    rows = [
-        tuple(row)
-        for row in engine.store._conn.execute(
-            "SELECT tool, status, error FROM tool_runs WHERE tool IN ('pyscan','naabu') ORDER BY id"
-        ).fetchall()
+    assert [spec.name for spec, _ in selected] == ["pyscan"]
+    assert [(spec.name, reason) for spec, reason in skipped] == [
+        (
+            "naabu",
+            "blocked: resolves inside the binary, so in_scope_cidrs cannot be enforced (11c-G-7)",
+        )
     ]
-    assert rows == [("pyscan", "skipped", reason), ("naabu", "skipped", reason)]
 
     selected, skipped = await engine._select(
         Stage.PORTS, ScanOptions(active=True, mock=True, tools=["pyscan", "naabu"])
     )
     assert {spec.name for spec, _ in selected} == {"pyscan", "naabu"}
     assert skipped == []
+
+
+async def test_active_ports_stage_receives_the_cidr_predicate(tmp_path: Path) -> None:
+    """Regression: 11c-G-7.
+
+    The adapter must not import `scope`, so the engine hands down the same
+    `ip_allowed` predicate the active gate's scope file produced.
+    """
+    seen: list[Callable[[str], bool] | None] = []
+    rec = Recorder()
+
+    class FakePorts(BaseToolAdapter):
+        name = "ports-fake"
+        stage = Stage.PORTS
+
+        async def run(self, ctx: RunContext) -> ToolResult:
+            seen.append(ctx.ip_allowed)
+            return ToolResult(tool=self.name, status=ToolStatus.OK, records=[])
+
+        def build_command(self, ctx: RunContext) -> list[str]:
+            raise AssertionError("build_command must not be called")
+
+        def parse_output(self, raw: str) -> list[object]:
+            return []
+
+    specs = {
+        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
+        "ports-fake": tool("ports-fake", Stage.PORTS, mode=Mode.ACTIVE),
+    }
+    adapters: dict[str, type[BaseToolAdapter]] = {
+        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("example.com")]),
+        "ports-fake": FakePorts,
+    }
+    engine = make_engine(
+        tmp_path,
+        specs,
+        adapters,
+        scope_text=SCOPE + "in_scope_cidrs:\n  - 203.0.113.0/24\n",
+        installed=lambda _adapter: True,
+    )
+    await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.LIVE, Stage.PORTS), active=True, speed="slow"),
+    )
+    assert len(seen) == 1
+    predicate = seen[0]
+    assert predicate is not None, "the active ports stage must get a CIDR predicate"
+    assert predicate("203.0.113.5") is True
+    assert predicate("198.51.100.5") is False
 
 
 async def test_env_filtering_and_no_keys(tmp_path: Path) -> None:

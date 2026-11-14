@@ -63,14 +63,13 @@ STAGE_ORDER: tuple[Stage, ...] = (
 SkipReason = str
 Selected = list[tuple[ToolSpec, type[BaseToolAdapter]]]
 Skipped = list[tuple[ToolSpec, SkipReason]]
-# docs/05 rule 6: an active tool may only touch an address inside
-# `in_scope_cidrs`. Until that check is wired into the resolve-then-connect path
-# (11c-G-7), these adapters are skipped at selection time like a missing binary
-# so they can never be launched against an unchecked IP. `--mock` is exempt
+# docs/05 rule 6: an active tool may only touch an address inside `in_scope_cidrs`.
+# `pyscan` enforces it itself through `RunContext.ip_allowed`, so it selects normally.
+# `naabu` resolves inside its own process, where no adapter can filter the address,
+# so it stays skipped at selection time like a missing binary. `--mock` is exempt
 # because it never connects.
 IP_GATE_BLOCKED: dict[str, str] = {
-    "pyscan": "blocked: in_scope_cidrs not enforced on resolved IPs (11c-G-7)",
-    "naabu": "blocked: in_scope_cidrs not enforced on resolved IPs (11c-G-7)",
+    "naabu": "blocked: resolves inside the binary, so in_scope_cidrs cannot be enforced (11c-G-7)",
 }
 Sleep = Callable[[float], Awaitable[None]]
 InstalledCheck = Callable[[type[BaseToolAdapter]], bool]
@@ -497,11 +496,14 @@ class Engine:
                 continue
 
             dropped: list[str] = []
+            ip_allowed: Callable[[str], bool] | None = None
             if opts.active and any(spec.mode is Mode.ACTIVE for spec, _ in selected):
                 hosts, dropped, scope_error = self._active_hosts(target, hosts, opts.speed)
                 if scope_error is not None:
                     summary.scope_denied = True
                     selected, skipped = self._skip_active(selected, skipped, scope_error)
+                else:
+                    ip_allowed = self._ip_allowed()
 
             run_id = self.store.create_scan_run(
                 target_id,
@@ -538,6 +540,7 @@ class Engine:
                         workspace,
                         pacer,
                         opts,
+                        ip_allowed,
                         results,
                         done,
                     ),
@@ -701,6 +704,18 @@ class Engine:
             return hosts, [], str(exc)
         return check.hosts, dropped, None
 
+    def _ip_allowed(self) -> Callable[[str], bool] | None:
+        """docs/05 rule 6 predicate, from the same scope file the active gate read.
+
+        `None` means "no permission": an adapter that connects to a resolved
+        address must treat it as a block, so an unreadable scope can only narrow
+        what may be contacted, never widen it.
+        """
+        try:
+            return load_scope(self.scope_path).ip_allowed
+        except (ConfigError, ScopeError):
+            return None
+
     def _skip_active(
         self, selected: Selected, skipped: Skipped, reason: str
     ) -> tuple[Selected, Skipped]:
@@ -782,6 +797,7 @@ class Engine:
         workspace: Workspace,
         pacer: Pacer,
         opts: ScanOptions,
+        ip_allowed: Callable[[str], bool] | None,
         results: list[ToolResult],
         done: set[str],
     ) -> RunContext:
@@ -804,6 +820,7 @@ class Engine:
             timeout=self.config.timeouts.per_tool_default,
             workspace=workspace.directory,
             mock=opts.mock,
+            ip_allowed=ip_allowed,
         )
 
         semaphore = asyncio.Semaphore(pacer.parallel_limit(mode.value))

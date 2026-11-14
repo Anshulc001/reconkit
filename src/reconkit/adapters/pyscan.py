@@ -1,7 +1,10 @@
 """pyscan TCP connect adapter (docs/09_TOOL_CONTRACTS.md).
 
 Connect-only scan: sends no payload and reads no banner. Connection refused is
-"closed"; a timeout is not proof of anything and is only counted.
+"closed"; a timeout is not proof of anything and is only counted. Every resolved
+address is filtered through `ctx.ip_allowed` first (docs/05 rule 6): no predicate
+or no allowed address means the host is skipped and counted as `blocked=`, never
+probed, and never retried as a hostname.
 """
 
 from __future__ import annotations
@@ -59,6 +62,7 @@ class PyscanAdapter(BaseToolAdapter):
         records: list[Record] = []
         timeouts = 0
         failures = 0
+        blocked = 0
         dispatched = 0
         for raw_host in ctx.hosts:
             try:
@@ -76,7 +80,15 @@ class PyscanAdapter(BaseToolAdapter):
             except OSError:
                 failures += 1
                 continue
-            ip = addresses[0] if addresses else host
+            allowed = self._allowed_addresses(ctx, addresses)
+            if not allowed:
+                # docs/05 rule 6: an address outside in_scope_cidrs is never probed.
+                # An empty answer is not permission to fall back to the hostname:
+                # that would resolve a second time inside open_connection, bypassing
+                # this filter.
+                blocked += 1
+                continue
+            ip = allowed[0]
             outcomes = await asyncio.gather(
                 *(self._probe(ctx, ip, port, semaphore) for port in ports)
             )
@@ -98,12 +110,29 @@ class PyscanAdapter(BaseToolAdapter):
             problems.append(f"timeouts={timeouts}")
         if failures:
             problems.append(f"errors={failures}")
+        if blocked:
+            problems.append(f"blocked={blocked}")
         return ToolResult(
             tool=self.name,
             status=ToolStatus.OK,
             records=records,
             error=", ".join(problems) or None,
         )
+
+    @staticmethod
+    def _allowed_addresses(ctx: RunContext, addresses: list[str]) -> list[str]:
+        """Keep only the resolved addresses docs/05 rule 6 allows this scan to probe."""
+        if ctx.ip_allowed is None:
+            return []
+        allowed: list[str] = []
+        for address in addresses:
+            try:
+                permitted = ctx.ip_allowed(address)
+            except ValueError:
+                continue
+            if permitted:
+                allowed.append(address)
+        return allowed
 
     async def _probe(
         self,

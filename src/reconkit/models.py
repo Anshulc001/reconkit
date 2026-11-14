@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, TypeAlias
@@ -133,3 +134,8 @@ class RunContext(BaseModel):
     workspace: Path
     mock: bool = False
     env: dict[str, str] = {}
+    # docs/05 rule 6: the loaded scope's `in_scope_cidrs` check, handed down by the
+    # engine so an adapter can refuse a resolved address without importing `scope`.
+    # `None` means "no permission": an adapter that connects to a resolved address
+    # must treat it as a block, never as an allow.
+    ip_allowed: Callable[[str], bool] | None = None

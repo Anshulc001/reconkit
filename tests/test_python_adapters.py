@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import dns.exception
@@ -52,6 +52,7 @@ def make_ctx(
     ports: list[int] | None = None,
     mock: bool = False,
     limiter: RateLimiter | None = None,
+    ip_allowed: Callable[[str], bool] | None = lambda _ip: True,
 ) -> RunContext:
     config = load_config(CONFIG, speed="fast")
     return RunContext(
@@ -63,6 +64,7 @@ def make_ctx(
         timeout=5.0,
         workspace=REPO / "workspaces" / "example.com",
         mock=mock,
+        ip_allowed=ip_allowed,
     )
 
 
@@ -547,6 +549,112 @@ async def test_pyscan_awaits_limiter_per_query_and_connection() -> None:
     )
     await adapter.run(make_ctx(hosts=["www.example.com"], ports=[443, 80], limiter=limiter))
     assert limiter.waits == 3
+
+
+async def test_pyscan_probes_only_an_address_inside_in_scope_cidrs() -> None:
+    """Regression: 11c-G-7.
+
+    The resolver answers with an address outside the target's CIDR first; that one
+    must never reach the opener, and the allowed address is the one probed.
+    """
+    probed: list[str] = []
+
+    async def connect(ip: str, port: int) -> tuple[None, FakeWriter]:
+        probed.append(ip)
+        raise ConnectionRefusedError(port)
+
+    def allowed(ip: str) -> bool:
+        return ip == "203.0.113.5"
+
+    adapter = PyscanAdapter(
+        connect=connect,
+        resolve=lambda _host: asyncio.sleep(0, result=["198.51.100.9", "203.0.113.5"]),
+    )
+    result = await adapter.run(make_ctx(hosts=["www.example.com"], ports=[443], ip_allowed=allowed))
+    assert probed == ["203.0.113.5"]
+    assert [(r.ip, r.port, r.state) for r in result.records] == [("203.0.113.5", 443, "closed")]
+    assert result.error is None
+
+
+async def test_pyscan_skips_a_host_whose_address_is_outside_in_scope_cidrs() -> None:
+    """Regression: 11c-G-7. No connection, no invented `closed` row, counted once."""
+    probed: list[str] = []
+
+    async def connect(ip: str, port: int) -> tuple[None, FakeWriter]:
+        probed.append(ip)
+        raise ConnectionRefusedError(port)
+
+    adapter = PyscanAdapter(
+        connect=connect,
+        resolve=lambda _host: asyncio.sleep(0, result=["198.51.100.9"]),
+    )
+    result = await adapter.run(
+        make_ctx(hosts=["www.example.com"], ports=[443], ip_allowed=lambda _ip: False)
+    )
+    assert probed == []
+    assert result.records == []
+    assert result.status == ToolStatus.OK
+    assert result.error == "blocked=1"
+
+
+async def test_pyscan_without_cidrs_probes_no_addresses() -> None:
+    """Regression: 11c-G-7. docs/05 rule 6: no CIDRs means no IPs, so no predicate is a
+    block rather than an implicit allow-all."""
+    probed: list[str] = []
+
+    async def connect(ip: str, port: int) -> tuple[None, FakeWriter]:
+        probed.append(ip)
+        raise ConnectionRefusedError(port)
+
+    adapter = PyscanAdapter(
+        connect=connect,
+        resolve=lambda _host: asyncio.sleep(0, result=["203.0.113.5"]),
+    )
+    result = await adapter.run(make_ctx(hosts=["www.example.com"], ports=[443], ip_allowed=None))
+    assert probed == []
+    assert result.records == []
+    assert result.error == "blocked=1"
+
+
+async def test_pyscan_never_falls_back_to_the_hostname() -> None:
+    """Regression: 11c-G-7. An empty resolution used to hand the hostname to
+    open_connection, which resolves again below the scope filter."""
+    probed: list[str] = []
+
+    async def connect(ip: str, port: int) -> tuple[None, FakeWriter]:
+        probed.append(ip)
+        raise ConnectionRefusedError(port)
+
+    adapter = PyscanAdapter(
+        connect=connect,
+        resolve=lambda _host: asyncio.sleep(0, result=[]),
+    )
+    result = await adapter.run(make_ctx(hosts=["www.example.com"], ports=[443]))
+    assert probed == []
+    assert result.records == []
+    assert result.error == "blocked=1"
+
+
+async def test_pyscan_blocks_a_malformed_resolved_address() -> None:
+    """A resolver answer the CIDR check cannot parse is a block, never a pass."""
+    probed: list[str] = []
+
+    async def connect(ip: str, port: int) -> tuple[None, FakeWriter]:
+        probed.append(ip)
+        raise ConnectionRefusedError(port)
+
+    def allowed(ip: str) -> bool:
+        if ip == "not-an-ip":
+            raise ValueError(ip)
+        return True
+
+    adapter = PyscanAdapter(
+        connect=connect,
+        resolve=lambda _host: asyncio.sleep(0, result=["not-an-ip", "203.0.113.5"]),
+    )
+    result = await adapter.run(make_ctx(hosts=["www.example.com"], ports=[443], ip_allowed=allowed))
+    assert probed == ["203.0.113.5"]
+    assert [(r.ip, r.port) for r in result.records] == [("203.0.113.5", 443)]
 
 
 async def test_pyscan_empty_hosts() -> None:
