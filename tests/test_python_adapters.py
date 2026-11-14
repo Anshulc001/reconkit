@@ -583,6 +583,83 @@ FORBIDDEN = (
 )
 
 
+class FixedRng:
+    """Deterministic stand-in for `random.Random`; the Pacer only calls `uniform`."""
+
+    def __init__(self, value: float = 3.0) -> None:
+        self.value = value
+
+    def uniform(self, _low: float, _high: float) -> float:
+        return self.value
+
+    def shuffle(self, _items: list[object]) -> None:
+        return None
+
+
+def recording_slow_pacer() -> tuple[Pacer, list[str]]:
+    """A slow Pacer whose sleeps are recorded instead of waited on."""
+    events: list[str] = []
+
+    async def sleep(seconds: float) -> None:
+        events.append(f"delay:{seconds:.3f}")
+
+    config = load_config(CONFIG, speed="slow")
+    return Pacer(resolve_speed(config), rng=FixedRng(), sleep=sleep), events
+
+
+async def test_pyscan_waits_between_hosts_before_dispatching_the_next() -> None:
+    """Regression: 11c-G-2.
+
+    Asserts the ordering, not a call count: host B must not be dispatched (resolved
+    or connected) until the pause after host A has completed, and the pause must be
+    the speed preset's active.host_delay, while the first host does not wait.
+    """
+    pacer, events = recording_slow_pacer()
+    ctx = make_ctx(hosts=["a.example.com", "b.example.com"], ports=[443])
+    ctx = ctx.model_copy(update={"pacer": pacer})
+    addresses = {"a.example.com": "203.0.113.5", "b.example.com": "203.0.113.6"}
+
+    async def resolve(host: str) -> list[str]:
+        events.append(f"resolve:{host}")
+        return [addresses[host]]
+
+    async def connect(ip: str, port: int) -> tuple[None, FakeWriter]:
+        events.append(f"connect:{ip}:{port}")
+        raise ConnectionRefusedError(port)
+
+    await PyscanAdapter(connect=connect, resolve=resolve).run(ctx)
+
+    assert events[0] == "resolve:a.example.com", "the first host must not wait"
+    delay = next(event for event in events if event.startswith("delay:"))
+    assert events.index(delay) > events.index("connect:203.0.113.5:443")
+    assert events.index(delay) < events.index("resolve:b.example.com")
+    assert 1.0 <= float(delay.split(":")[1]) <= 5.0
+
+
+async def test_pyprobe_waits_between_hosts_when_dispatch_is_sequential() -> None:
+    """Regression: 11c-G-2.
+
+    A delay awaited concurrently is not spacing: the second request must start only
+    after the pause that follows the first one has completed.
+    """
+    pacer, events = recording_slow_pacer()
+    assert pacer.parallel_limit("active") == 1
+    ctx = make_ctx(hosts=["a.example.com", "b.example.com"])
+    ctx = ctx.model_copy(update={"pacer": pacer})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        events.append(f"probe:{request.url.host}")
+        return httpx.Response(200, text="ok")
+
+    adapter = PyprobeAdapter(transport=httpx.MockTransport(handler))
+    await adapter.run(ctx)
+
+    assert events[0] == "probe:a.example.com", "the first host must not wait"
+    delay = next(event for event in events if event.startswith("delay:"))
+    assert events.index(delay) > events.index("probe:a.example.com")
+    assert events.index(delay) < events.index("probe:b.example.com")
+
+
 @pytest.mark.parametrize("module", ["dnspython", "pyprobe", "pyscan"])
 def test_python_adapters_import_no_forbidden_modules(module: str) -> None:
     path = ADAPTER_DIR / f"{module}.py"

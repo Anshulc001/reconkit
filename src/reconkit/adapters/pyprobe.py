@@ -70,9 +70,20 @@ class PyprobeAdapter(BaseToolAdapter):
             transport=self._transport,
             follow_redirects=False,
         ) as client:
-            outcomes = await asyncio.gather(
-                *(self._probe(ctx, client, host, semaphore) for host in ctx.hosts)
-            )
+            if ctx.pacer.parallel_limit("active") <= 1:
+                # A pause awaited inside a gather is not spacing: dispatch hosts one
+                # at a time so before_host() falls between real requests.
+                outcomes = []
+                for index, host in enumerate(ctx.hosts):
+                    if index:
+                        await ctx.pacer.before_host()
+                    outcomes.append(await self._probe(ctx, client, host, semaphore))
+            else:
+                outcomes = list(
+                    await asyncio.gather(
+                        *(self._probe(ctx, client, host, semaphore) for host in ctx.hosts)
+                    )
+                )
         records: list[Record] = [record for record in outcomes if record is not None]
         unreachable = len(outcomes) - len(records)
         error = f"unreachable={unreachable}" if unreachable else None

@@ -1171,6 +1171,16 @@ Every restore below was checked with `sha256sum`; the digests before and after e
 - Not verified: the two (d) edges above; every finding is static analysis - no tool was executed and no target was touched in this audit.
 - Checks: docs-only change; the pre-commit hook runs the full gate (585 passed, ruff, format, mypy).
 
+## Part 11c-G-2 - inter-host pacing was documented but never called (docs + code)
+
+- **Symptom:** `active.host_delay` is configured for every speed (`[1, 5]` slow, `[0, 2]` normal, `[0, 0]` fast) and docs/03 §7 lists `before_host()`, but nothing called it: active stages sent host after host with no inter-host pause.
+- **Why it was reported instead of guessed:** the docs only listed the method in the API; they did not say which loop owns it, and the three adapter shapes disagree - a sequential loop (`pyscan`), a gather (`pyprobe`), and one process for all hosts (`httpx`/`naabu`). A per-host call inside `pyprobe`'s gather would sleep concurrently rather than space dispatches. Owner ruling: Option B.
+- **Docs first:** `0ced491` - docs/03 §7 now states that `before_host()` spaces host dispatches in `pyscan` and `pyprobe`, uses `active.host_delay`, does not wait for the first host, that `pyprobe` dispatches sequentially at `parallel_limit("active") == 1`, and that `httpx`/`naabu` are exempt and pace via `-rl`/`-rate`.
+- **Code:** `pyscan.run` awaits `before_host()` before the second and later valid host; `pyprobe.run` takes a sequential branch at `parallel_limit("active") <= 1` and keeps the gather above it. `httpx`, `naabu` and passive `dnspython` are untouched (the last because `before_host()` reads the active preset).
+- **Guarding tests:** `test_pyscan_waits_between_hosts_before_dispatching_the_next` and `test_pyprobe_waits_between_hosts_when_dispatch_is_sequential` (docstring `Regression: 11c-G-2`). Red before the wiring: `2 failed, 35 deselected`, both `StopIteration` because no pause was recorded. Green after: `2 passed, 35 deselected`.
+- **Assertion strength:** ordering, not call count - host B is not dispatched until the recorded pause after host A completes, the first host never waits, and the pause is inside slow's `[1, 5]`.
+- **Not verified:** no live active run; the tests inject a recording sleep, so real wall-clock spacing is unmeasured.
+
 ## Part 11c-A-1 - active binary adapters launched a bare argv[0] (code)
 
 - **Symptom:** `doctor` reported `httpx v1.12.0` and `naabu 2.7.0` at `~/.reconkit/bin/...`, while a `live` or `ports` stage would record `failed` with `not installed or not executable` - the same self-contradiction 11d-e removed from subfinder/assetfinder.

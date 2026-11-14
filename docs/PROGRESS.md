@@ -347,7 +347,7 @@ No open items from Part 9. Part 9 fixed the dangling-CNAME persistence gap with 
 |---|---|---|---|
 | A-1 | high | `httpx_tool.py:48`, `naabu.py:41` launch bare `argv[0]`; child env has no `PATH` (`engine.py:867-870`, `base.py:213-219`), so `live`/`ports` fail while `doctor` says installed - 11d-e unfixed in two adapters | **fixed in this commit** |
 | G-1 | high | `Workspace.write` (`workspace.py:104`) has no callers and `raw_path` (`models.py:112`) is never set, while docs/03:120 step 9 and docs/03:83 promise raw output files | ticketed, no code |
-| G-2 | high | `Pacer.before_host()` (`pacing.py:73`) is never called; docs/03:125 documents it and `config.yaml` sets `active.host_delay` [1,5]/[0,2], so inter-host pacing has never applied | open, contract ambiguity reported |
+| G-2 | high | `Pacer.before_host()` (`pacing.py:73`) was never called; docs/03:125 documents it and `config.yaml` sets `active.host_delay` [1,5]/[0,2], so inter-host pacing never applied | **fixed, Option B (docs `0ced491`, code below)** |
 | G-3 | medium | `scope.passive_warning()` (`scope.py:325`) has no callers, so the documented out-of-scope passive warning never prints | ticketed, no code |
 | C-1 | medium (known) | `cli.py:227` unredacted `str(exc)`; `-v` traceback; reachability still unproven (keys travel in headers) | known question |
 | E-1 | low | synchronous SQLite transaction + `_persist_stage` on the event loop (`engine.py:551-556`) | ticketed, no code |
@@ -356,6 +356,15 @@ No open items from Part 9. Part 9 fixed the dangling-CNAME persistence gap with 
 | C-2 | low | subfinder's provider file is `mkstemp` in the system temp dir (`subfinder.py:76-79`, 0600, removed in `finally`); a `SIGKILL` in between leaves a key file | ticketed, no code |
 | G-4 | low | `ExitCode.ALL_FAILED = 6` (`engine.py:83`) is unreachable; `_exit_code` (`engine.py:592-604`) returns `NO_TOOL` when every tool failed | ticketed, no code |
 | G-6 | docs | the 11d-e blast-radius claim ("only two `build_command` implementations") is false; corrected in place above | corrected |
+
+### 11c-G-2 - fixed 2026-11-14 (Option B, after the ambiguity ruling)
+
+- **Ambiguity, resolved by you:** the docs named `before_host()` only in the API list and did not say which loop owns it. The ruling was Option B: wire the per-host active adapters, keep one-shot tools exempt, and make `pyprobe` dispatch sequentially at `parallel_limit == 1` so the pause is real spacing rather than a concurrent sleep.
+- **Docs first:** `0ced491` added two bullets to docs/03 §7 - the two per-host adapters, the preset delay, the first-host exemption, the sequential-dispatch rule, and a named exemption sentence for `httpx`/`naabu` (`-rl`/`-rate`, not `before_host()`).
+- **Code:** `pyscan.run` awaits `before_host()` before the second and later valid host (so invalid hosts skipped by `validate_host` do not consume a pause); `pyprobe.run` takes a sequential branch when `parallel_limit("active") <= 1` and keeps the gather above it.
+- **Red first:** both new tests failed before the wiring because no pause was recorded at all (`StopIteration` on the `delay:` lookup): `2 failed, 35 deselected`. Green after: `2 passed, 35 deselected`.
+- **Assertion strength:** both tests assert ordering, not call count - host B's resolve/probe appears only after the recorded pause, the pause follows host A's connect/probe, the first host never waits, and the pause value is inside slow's `active.host_delay` `[1, 5]`.
+- **Not changed:** `httpx`/`naabu` (exempt by the new docs text), `dnspython` (passive; `before_host()` reads the active preset), `normal`/`fast` parallelism.
 
 ### 11c-A-1 - fixed 2026-11-14
 

@@ -59,12 +59,17 @@ class PyscanAdapter(BaseToolAdapter):
         records: list[Record] = []
         timeouts = 0
         failures = 0
+        dispatched = 0
         for raw_host in ctx.hosts:
             try:
                 host = validate_host(raw_host)
             except (TypeError, ValueError):
                 failures += 1
                 continue
+            if dispatched:
+                # Space real host dispatches; the first host of the stage does not wait.
+                await ctx.pacer.before_host()
+            dispatched += 1
             await ctx.limiter.wait()
             try:
                 addresses = await self._resolve(host)
