@@ -1476,7 +1476,7 @@ async def test_each_executed_tool_writes_one_raw_file_and_sets_raw_path(tmp_path
 
 
 async def test_failed_tool_still_writes_its_raw_output(tmp_path: Path) -> None:
-    """12a's main behavior change: a failed tool keeps its bytes on disk."""
+    """Regression: PIT-41 - a failed tool keeps its bytes on disk (12a, G-1)."""
     rec = Recorder()
     specs = {"flaky": tool("flaky", Stage.SUBS)}
     adapters = {
@@ -1577,7 +1577,7 @@ async def test_a_failed_workspace_write_keeps_the_tool_result(
 
 
 async def test_adapter_reported_duration_is_stored_and_never_overwritten(tmp_path: Path) -> None:
-    """12c: the adapter measures its own work; `_run_one` must not replace it."""
+    """Regression: PIT-43 - the adapter's own duration is stored, never replaced (12c)."""
     rec = Recorder()
     specs = {"timed": tool("timed", Stage.SUBS)}
     adapters = {"timed": adapter("timed", Stage.SUBS, rec, duration_s=12.5)}

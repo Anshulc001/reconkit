@@ -459,6 +459,7 @@ def dotenv_secret(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 def test_report_error_redacts_a_secret_in_the_message(
     dotenv_secret: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Regression: PIT-42 - the last-resort handler redacts the message (12f, C-1)."""
     config = make_config(tmp_path)
     monkeypatch.setattr(Engine, "open", _raise_unexpected(f"boom {LEAK_VALUE}"))
     result = CliRunner().invoke(app, scan_args(config))
