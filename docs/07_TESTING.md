@@ -19,8 +19,8 @@ Pure logic with fixtures: parsers, scope matching, pacing with a fake clock, con
 ### Integration tests (no network)
 CLI invoked through Typer's `CliRunner` with `--mock`, a temp workspace and temp DB. Fake binaries (small scripts in `tests/fakebin/`) test the runner, timeouts and failure handling.
 
-### Live smoke tests (WSL2 Kali only, manual or marked)
-`pytest -m live` runs real tools against a domain you own or a lab target. Excluded from the default run. Never part of CI.
+### Live smoke tests (Kali/Ubuntu only, manual)
+The `live` marker is registered in `pyproject.toml`, but no live test is checked in yet. A real authorized-target run is performed manually on Kali/Ubuntu, never in the default run or CI.
 
 ## 3. Tools
 
@@ -37,19 +37,18 @@ CLI invoked through Typer's `CliRunner` with `--mock`, a temp workspace and temp
 ```
 tests/
   conftest.py            # temp dirs, temp DB, fake scope files, fake clock
-  fixtures/
-    subfinder/  assetfinder/  crtsh/  certspotter/  otx/  hackertarget/
-    httpx/  naabu/  dns/
-  fakebin/               # tiny fake executables for runner tests
-  test_scope.py
-  test_pacing.py
-  test_runner.py
-  test_store_diff.py
-  test_consensus.py
-  test_wildcard.py
-  test_adapter_<tool>.py
-  test_cli_passive.py  test_cli_live.py  test_cli_ports.py
-  test_installer.py
+  fixtures/              # sanitized real tool output, one directory per tool
+  fakebin/               # tiny fake executables for runner/installer tests
+  test_adapters.py       # HTTP adapters: parsing, caps, keys, mock mode
+  test_binary_adapters.py
+  test_python_adapters.py
+  test_engine.py         # stage order, tiers, scope, consensus, host state, resume
+  test_scope.py  test_pacing.py  test_runner.py  test_config.py
+  test_store.py  test_wildcard_workspace.py  test_ui.py  test_cli.py
+  test_registry.py  test_package.py
+  test_doctor.py
+  test_installer_registry.py  test_installer_backends.py
+  test_installer_github_release.py  test_installer_verify.py  test_install_cli.py
   test_no_shell_true.py  # scans src for shell=True / os.system
 ```
 
@@ -84,14 +83,13 @@ Expected: delays between tools in [5,30], parallel limit 1, hosts shuffled.
 
 ## 6. Coverage
 
-- Target: ~85% on `core/`, `engine.py`, `adapters/`; CLI layer smoke-tested.
-- Prioritize: scope gate, subprocess safety, pacing, consensus, store diff, installer verification.
+- No coverage threshold is enforced. The suite prioritizes the scope gate, subprocess safety, pacing, consensus, store diff and installer verification.
 
 ## 7. Commands
 
 ```bash
 Test:        pytest -q
-Live tests:  pytest -m live -q        # WSL2 Kali only, authorized target
+Live tests:  pytest -m live -q        # Kali/Ubuntu only, authorized target; none checked in yet
 Lint:        ruff check .
 Format:      ruff format --check .
 Type check:  mypy src/reconkit

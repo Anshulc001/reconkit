@@ -8,7 +8,7 @@
   - Every result shows where it came from and how much to trust it.
   - Never hide failures: a skipped or failed tool is always reported.
   - Works without color (`--no-color`, or when output is not a terminal).
-  - Machine-friendly: `--json` on every command.
+  - Machine-friendly: `--json` on the scan commands, `doctor`, `diff` and `status`.
 
 ## 2. Command Grammar
 
@@ -47,8 +47,8 @@
 |---|---|
 | `diff -d X` | Only new / changed / gone items since the previous run |
 | `status [--json]` | Progress of running or finished scans |
-| `db list\|export -d X [--new-only]` | Query stored assets without SQL |
-| `export -d X --format json\|md\|html` | Write a report |
+| `db list\|export -d X [--new-only]` | **Phase 3 stub** in this build: exits 1 with a clear message; no data is read |
+| `export -d X --format json\|md\|html` | **Phase 3 stub** in this build: exits 1 with a clear message; no report is written |
 
 ## 3. Global Flags
 
@@ -66,7 +66,7 @@
 | `--resume` | Continue the latest unfinished run for the target; completed stages are not repeated |
 | `--no-keys` | Force free mode: ignore API keys from `.env` (task h; policy in docs/05 §6.1) |
 | `--json` | One JSON document on stdout, no colors or progress |
-| `--no-color`, `-v/--verbose`, `-q/--quiet` | Output control |
+| `--no-color`, `-v/--verbose`, `-q/--silent` | Output control |
 | `--config PATH`, `--scope PATH`, `--db PATH` | Override file locations |
 
 Not provided (by design): any flag that skips the scope gate.
@@ -114,7 +114,7 @@ One JSON document is written to stdout; tables and progress stay on stderr. The 
 
 The `hosts` objects always carry `state`, `confidence` and `sources`; the top-level `summary` object carries the counts. `ToolResult` objects under `stages[].results` use the schemas in docs/09.
 
-`diff --json` writes one document with `type: diff`, the two run ids, and arrays `new`, `gone`, `state_changes`, `ports_opened` and `ports_closed`. `status --json` writes one document with `type: status` and a `runs` array; each run carries its target, stage, speed, status and timestamps.
+`diff --json` writes one document with `type: diff`, the two run ids, and arrays `new`, `gone`, `state_changes`, `ports_opened` and `ports_closed`. `status --json` writes one document with `type: status` and a `runs` array; each run carries `id`, `target`, `stage`, `speed`, `status`, `started_at` and `finished_at`. `install`/`update`/`scope check`/the `db` and `export` stubs do not accept `--json` in this build.
 
 ### Colors (Rich theme)
 
@@ -130,7 +130,7 @@ The `hosts` objects always carry `state`, `confidence` and `sources`; the top-le
 State words are always printed (never color alone). Symbols are ASCII-safe.
 
 ### Progress
-One live line per stage: stage name, current tool, `done/total` tools, elapsed, estimated remaining, next planned pause (in slow mode). Disabled with `--json`/`--quiet`.
+One live line per stage: stage name, current tool, `done/total` tools, elapsed, estimated remaining, next planned pause (in slow mode). Disabled with `--json`/`--silent`.
 
 ### Empty, error and success states
 - **Empty:** `No results from 3 tools (crtsh, subfinder, otx). Check 'reconkit doctor'.`

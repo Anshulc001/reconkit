@@ -70,13 +70,12 @@ This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 fla
 ## 8. Logging
 
 - Never log: API keys, tokens, passwords, full webhook URLs, cookies.
-- Log: command start/finish, tool status, scope decisions, errors, installer actions.
-- Logs go to `workspaces/<target>/meta/reconkit.log` and the console (Rich). Log level from `-v/-q`.
+- This build has no file logger; diagnostics and tool status go to the console (Rich), with `-v`/`-q` controlling detail. A `workspaces/<target>/meta/reconkit.log` file is deferred; `meta/` currently holds run metadata and summaries only.
 
 ## 9. Data Protection
 
 - Results can describe a client's infrastructure: keep the workspace and DB private (permissions `0600` for DB, `0700` for workspace).
-- `db delete -d X` removes stored data for a target.
+- This build has no delete command; remove a target's rows manually until one is documented in docs/02.
 
 ## 10. Input Handling
 

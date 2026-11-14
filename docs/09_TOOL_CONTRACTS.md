@@ -88,7 +88,7 @@ class ToolResult(BaseModel):
 
 class InstallStatus(BaseModel):
     installed: bool
-    version: str | None = None      # from tools.yaml version_cmd (None if unknown)
+    version: str | None = None      # from the tool's version command (None if unknown)
     path: Path | None = None        # resolved binary path (None for http/python adapters)
 
 class RunContext(BaseModel):
@@ -152,7 +152,7 @@ Phase 2 = working adapter in the first build. Phase 3 = listed in `tools.yaml`, 
 | vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) | - |
 | shots | active | gowitness (opt_in) | - |
 
-Selection rules: use adapters that are installed (or http/python kind), allowed by tier (`opt_in` needs `--tools` or `--include-noisy`; `intrusive` needs `--intrusive` + scope), allowed by mode (active adapters only when `--active`), and filtered by `--tools` / `--exclude`. Missing tools are reported as `skipped`, never fatal unless no adapter remains (exit 4).
+Selection rules: use adapters that are installed (or http/python kind), allowed by tier (`opt_in` needs `--tools` or `--include-noisy`; `intrusive` tools are refused in this build because there is no `--intrusive` flag), allowed by mode (active adapters only when `--active`), and filtered by `--tools` / `--exclude`. Missing tools are reported as `skipped`, never fatal unless no adapter remains (exit 4).
 
 Speed controls how many run at once: slow = 1, normal = 2-3 (passive) / 2 (active), fast = all. In `slow` the pool runs in registry order with random delays.
 
@@ -198,4 +198,4 @@ Stored with source `smap` and confidence LOW until an active scan confirms; neve
 - `httpx`: the ProjectDiscovery binary, not the Python `httpx` CLI or Kali's differently named package; installer places the right one in `~/.reconkit/bin`.
 - `naabu`: needs libpcap; use connect scan when not root.
 - `amass`: run passive only; slow, so keep it last in slow mode.
-- HTTP sources: free tiers rate-limit; treat 429 as `skipped (rate limited)` after one back-off.
+- HTTP sources: free tiers rate-limit; 429 and 5xx are `failed` results carrying the status, with no retry. Only a connection error retries once.

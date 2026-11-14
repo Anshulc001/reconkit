@@ -67,7 +67,7 @@ reconkit/
       base.py         # BaseToolAdapter
       registry.py     # loads tools.yaml, maps names to adapter classes
       crtsh.py certspotter.py otx.py hackertarget.py
-      subfinder.py assetfinder.py dns_python.py
+      subfinder.py assetfinder.py dnspython.py
       pyprobe.py httpx_tool.py pyscan.py naabu.py
     installer/
       registry.py github_release.py go_install.py apt.py pipx.py verify.py
@@ -85,7 +85,7 @@ workspaces/<domain>/
   ports/   raw scanner output
   urls/    raw URL/crawl output (Phase 3)
   tech/    raw technology/WAF output (Phase 3)
-  meta/    run metadata, summaries, reconkit.log
+  meta/    run metadata and summaries
 ```
 
 ### Workspace API (`core/workspace.py`)
@@ -93,7 +93,7 @@ workspaces/<domain>/
 - `Workspace.create(root, target, secrets=...)` validates `target` with `validate_target()`, creates `workspaces/<domain>/` and exactly the six stage directories above (mode `0700`), and is idempotent.
 - `workspace.path(stage, filename)` accepts only a documented stage and one plain filename. Traversal, absolute/UNC paths, `..`, trailing dot/space, hidden names and Windows device names (`CON`, `NUL`, `COM1`, ...) are rejected with `ValueError`. A target whose first label is a device name is rejected too, because Windows cannot create that directory.
 - `workspace.write(stage, filename, text)` passes `text` through `store.redact()` with the run's secrets before any bytes reach disk, then writes a temporary file in the same directory and `os.replace()`s it (mode `0600`). A failure leaves the destination untouched and no temporary file behind. Writing the same filename again replaces it atomically.
-- Raw tool output uses `subs`, `live`, `ports`, `urls` or `tech`; run metadata and `reconkit.log` use `meta`. No other directory is created.
+- Raw tool output uses `subs`, `live`, `ports`, `urls` or `tech`; run metadata and summaries use `meta`. No other directory is created.
 
 ### Engine API (`engine.py`)
 
@@ -169,7 +169,7 @@ workspaces/<domain>/
 |---|---|---|
 | Python | Fast to write/fix with AI agents; simple parsing; Kali ships Python | Go (AutoAR's language): single binary, but slower to extend with AI for this use case |
 | SQLite + workspace files | Diffing, resume, queries; plus human-browsable raw output | Flat files only (no history), Postgres (too heavy) |
-| WSL2 Kali, project in `~/reconkit` | Real Linux tools; fast disk; no CRLF/locking issues | Native Windows, `/mnt/c` |
+| Native Linux checkout (Kali/Ubuntu), separate Windows checkout | Real Linux tools; fast disk; no CRLF/locking issues | WSL2-only workflow; `/mnt/c` |
 | Slow-by-default pacing | Avoids API bans, WAF blocks, rate-limit violations | Max parallelism |
 | Adapter + registry | Add a tool without touching core | Hard-coded pipelines |
 | Own `~/.reconkit/bin` | No sudo, no global breakage, correct `httpx` | System PATH only |
@@ -191,17 +191,17 @@ Single machine, thousands of hosts per target. Beyond that is out of scope (see 
 | Tool missing | Skip, report `skipped (not installed)`; stage continues |
 | Tool crashes or exits non-zero | Record `failed` with stderr summary; keep other results |
 | Tool timeout | Kill process group, keep partial output if parseable, record `timeout` |
-| HTTP source returns 429/5xx | Back off once, then `skipped (rate limited)` |
+| HTTP source returns 429/5xx | `failed` result carrying the status; no retry (only a connection error retries once) |
 | No adapter available for a stage | Exit code 4 with install hint |
 | `scope.yaml` missing/expired/mismatch | Refuse active stage, exit code 3 |
 | DB locked or corrupt | Clear error; never silently continue; suggest `--db` path |
 | Ctrl+C | Stop launching tools, kill children, mark run `interrupted`, exit 130 (resumable) |
 | Network down | Passive HTTP sources fail fast with one summary line |
 
-## 14. WSL2 Workflow Rules
+## 14. Linux Workflow Rules
 
-- Repo at `~/reconkit` in Kali. Never `/mnt/c/...`.
-- Code in VS Code (Remote-WSL). Terminal, venv, tools all inside Kali.
+- Repo in a native Linux checkout (current path in PROGRESS "Environment"). Never `/mnt/c/...`.
+- Terminal, venv and tools all live in that Linux checkout; VS Code may attach to it from Windows.
 - Unit tests use fixtures and also pass on plain Windows (no tools needed).
-- Real tool runs and integration smoke tests happen in WSL2 Kali.
-- The current path, environment and check commands live in `docs/PROGRESS.md` section "Environment"; the Kali/WSL lines above are historical.
+- Real tool runs and integration smoke tests happen on Kali/Ubuntu.
+- The current path, environment and check commands live in PROGRESS "Environment".

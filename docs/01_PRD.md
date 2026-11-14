@@ -5,7 +5,7 @@
 - **Product name:** reconkit
 - **One-line description:** A CLI that runs several recon tools per stage, cross-checks their results, and tracks what changed between scans.
 - **Product type:** Command-line tool (single-user, local-first)
-- **Primary platform:** Linux (Kali) via WSL2; development in VS Code on Windows (Remote-WSL)
+- **Primary platform:** Linux (Kali or Ubuntu), native. Windows is a separate checkout for mock/passive use and `doctor`; `install`/`update` refuse there (docs/10 §2).
 
 ## 2. Problem
 
@@ -115,7 +115,7 @@
 - Cloud storage uploads, chat bots, AI agent loops.
 - Mobile app analysis (APK/IPA/ADB), GitHub/S3 scanning, AEM or 100+ misconfig checks.
 - Exploitation tools in `core` or `opt_in` tiers.
-- Native Windows execution of recon tools (use WSL2 Kali).
+- Native Windows execution of recon tools; Windows runs mock/passive flows and `doctor` only.
 - Evasion features (User-Agent rotation, proxy rotation).
 
 ## 8. MVP Scope
@@ -124,15 +124,15 @@
 
 **Phase 2 (working core) - Must have:**
 - Skeleton, config, scope gate, SQLite store, pacing engine, consensus engine, `--mock`.
-- Commands: `doctor`, `install`, `update`, `passive`, `live`, `ports`, `diff`, `status`, `db`, `export`.
+- Commands: `doctor`, `install`, `update`, `passive`, `live`, `ports`, `diff`, `status`; `db list`, `db export`, `export` and `scope import` are explicit Phase 3 stubs (exit 1) in this build, and docs/02 marks them as such.
 - Adapters: crtsh, certspotter, otx, hackertarget, subfinder, assetfinder, dnspython, pyprobe, httpx, pyscan, naabu.
-- Tests passing in WSL and on plain Windows (fixtures).
+- Tests passing on Linux and on plain Windows (fixtures).
 
 **Phase 3 (one adapter or feature per prompt):** remaining tools in `tools.yaml`, `urls`/`tech`/`vulns`/`shots`, `lite`/`run` polish, `monitor` with webhook, `scope import`, URL pattern sorting (xss/sqli/ssrf/lfi/redirect candidate lists), intrusive tier.
 
 ## 9. Success Metrics
 
-- **Primary:** a fresh WSL2 Kali setup reaches a first passive scan within 15 minutes following SETUP.md; `doctor` is green for the Phase 2 tools.
+- **Primary:** a fresh Kali/Ubuntu setup reaches a first passive scan within 15 minutes following SETUP.md; `doctor` is green for the Phase 2 tools.
 - **Secondary:** adding a new adapter takes one file + one registry entry + one test; no scan produces out-of-scope traffic in tests.
 
 ## 10. Constraints
@@ -150,9 +150,7 @@
 
 ## 12. Open Questions
 
-- Exact release asset names per tool (verify when building the installer).
-- Which optional API keys the user will configure first.
-- Whether `run` should include `nuclei` in Phase 2 or Phase 3 (default: Phase 3).
+No blocking questions for Phase 2. Release asset names were verified against real releases during Part 10 (docs/10 §3c); `nuclei` stays Phase 3; key support is limited to the free keys listed in docs/05 §7.
 
 ## 13. Definition of Done
 

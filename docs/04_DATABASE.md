@@ -3,7 +3,7 @@
 ## 1. Engine
 
 - **Database:** SQLite (single file, default `recon.db`, path from `config.yaml` or `--db`)
-- **Hosting:** local file inside the project (`~/reconkit`, never `/mnt/c`)
+- **Hosting:** local file inside the project checkout (never a `/mnt/c` path)
 - **Settings on connect:** `PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`
 - **Access:** only through `core/store.py`. No SQL anywhere else.
 
@@ -191,7 +191,7 @@ CREATE TABLE monitor_changes (            -- Phase 3
 
 ## 8. Soft Delete
 
-No soft delete. `db delete -d X` removes a target and its rows after confirmation.
+No soft delete. This build has no delete command; removing a target's rows is a manual database operation until a delete command is documented in docs/02.
 
 ## 9. Auditing
 

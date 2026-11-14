@@ -34,7 +34,7 @@ reconkit doctor [--fix]            # --fix = offer to install what is missing
 |---|---|---|
 | `github_release` | Query the GitHub Releases API for the latest (or pinned) version, download the asset for linux and the CPU arch, verify checksum, extract the binary to `~/.reconkit/bin` | Preferred: no Go needed, no sudo |
 | `go_install` | `go install <package>@version` with `GOBIN=~/.reconkit/bin` | Fallback; needs Go; slower |
-| `apt` | `sudo apt install -y <package>` after confirmation | For system packages (nmap, whatweb, libpcap-dev, massdns, ...) |
+| `apt` | `sudo apt-get install -y <package>` after confirmation | For system packages (nmap, whatweb, libpcap-dev, massdns, ...) |
 | `pipx` | `pipx install <package>` (installing pipx via apt if needed) | Python tools such as wafw00f |
 | `none` | HTTP/Python adapters, nothing to install | crtsh, dnspython, pyprobe, ... |
 
@@ -135,10 +135,10 @@ A tool's `installed` state comes from its adapter when it has one. Most phase-3 
 ## 7. Output Examples
 
 ```
-reconkit install --all --dry-run
-  subfinder   github_release  projectdiscovery/subfinder  -> ~/.reconkit/bin/subfinder
-  naabu       github_release  projectdiscovery/naabu      -> ~/.reconkit/bin/naabu  (needs apt: libpcap-dev)
-  nmap        apt             nmap                        (sudo required)
+tool               method          result         detail
+subfinder          github_release  would install  subfinder: install to /home/kali/.reconkit/bin/subfinder
+assetfinder        go_install      would install  assetfinder: go install github.com/tomnomnom/assetfinder@latest -> /home/kali/.reconkit/bin/assetfinder
+massdns            apt             would install  massdns: sudo apt-get install -y massdns (sudo required)
 ```
 
 ## 8. Failure Handling

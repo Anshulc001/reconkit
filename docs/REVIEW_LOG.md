@@ -958,3 +958,33 @@ Every restore below was checked with `sha256sum`; the digests before and after e
   (nuclei via `/home/kali/go/bin/nuclei`, v3.11.1). `.env` was not modified.
 - `install --all` exits 5 because `rustscan`'s placeholder asset (`verify-at-implementation`) still fails; that is
   the known, tested exclusion, not a massdns failure.
+
+## Part 11b - docs sync (docs 01-10)
+
+- docs/01: primary platform is a native Linux checkout (Kali/Ubuntu) with a separate Windows checkout; Windows runs
+  mock/passive flows and `doctor`, not recon tools. The Phase 2 command list marks `db list`, `db export`, `export`
+  and `scope import` as Phase 3 stubs, the success metric and test platform no longer say WSL2, and the open
+  questions are closed.
+- docs/02: `-q/--silent` (the docs said `--quiet`, which does not exist); `--json` is documented on the scan
+  commands, `doctor`, `diff` and `status`, not on `install`/`update`/`scope check`/the stubs; `db list` and `db
+  export`/`export` are marked Phase 3 stubs; the status JSON field list now matches `ui.status_document`; the
+  progress line says `--silent`.
+- docs/03: the dead `dns_python.py` name is corrected to `dnspython.py`; 429/5xx are documented as failed results
+  with no retry (only a connection error retries once); `meta/` no longer claims a `reconkit.log`; the platform
+  decision and workflow section describe the native Linux checkout instead of the WSL2-only workflow.
+- docs/04: the DB hosting line no longer hard-codes `~/reconkit`; the nonexistent `db delete -d X` command was
+  removed.
+- docs/05: logging now states that this build has no file logger; data protection no longer names `db delete`.
+- docs/06: `InstallSkipped` is added to the exception list; logging matches the console-only build.
+- docs/07: live tests are documented as manual, with the `live` marker registered but no checked-in test; the test
+  tree is replaced with the real files; the unverified ~85% coverage target was removed.
+- docs/08: setup is not WSL-only; `install` does not rerun `doctor`; the status JSON example matches
+  `ui.status_document`; resume is stage-level (the interrupted stage reruns); export is marked a Phase 3 stub.
+- docs/09: intrusive tools are refused because there is no `--intrusive` flag; 429/5xx are failed without a
+  back-off; the `InstallStatus.version` comment no longer implies the installer's `version_cmd` field.
+- docs/10: the apt row shows `apt-get`; the dry-run example is the real table shape (`tool/method/result/detail`).
+- Deliberately not changed here: `README.md` and `SETUP.md` are still the WSL2 beginner guide (11a is next);
+  docs/10's Windows refusal text still says `Use WSL2 Kali (see SETUP.md)` because that is the code's literal
+  message; stage-table tools without adapters remain Phase 3 by design; `docs/PROGRESS.md` line 101 about the
+  original uv/WSL venv is an environment deviation, not current setup advice.
+- Checks: docs-only change; the pre-commit hook runs the full gate (569 passed, ruff, format, mypy).

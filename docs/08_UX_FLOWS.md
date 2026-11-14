@@ -4,7 +4,7 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 
 ## Flow 1 - First run (setup)
 
-1. User follows SETUP.md (WSL2 Kali, VS Code, venv).
+1. User follows SETUP.md (native Kali/Ubuntu for real tools, or Windows for mock/passive use and `doctor`).
 2. `reconkit doctor`
 3. Output: table of tools (installed/missing + version), per-stage coverage, system packages, Python version, `scope.yaml` found?, API key names set/unset.
 4. Suggestion line: `Missing tools: 14. Run: reconkit install --all`
@@ -17,7 +17,7 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 1. `reconkit install --all --dry-run` lists: tool, method, source, destination.
 2. `reconkit install --all` asks to confirm sudo for apt packages (`libpcap-dev`, `nmap`, ...).
 3. Per tool: download, verify checksum, place in `~/.reconkit/bin`, run version command.
-4. Final: summary table and re-run of doctor checks.
+4. Final: summary table. `doctor` is a separate command; the installer does not re-run it.
 
 - **Loading state:** one progress line per tool.
 - **Error state:** `subfinder: checksum mismatch - not installed` (fails closed), continues with others, exit code 5.
@@ -75,16 +75,17 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 2. Output example:
 
 ```json
-{"target":"example.com","run_id":12,"stage":"live","speed":"slow",
- "current_phase":2,"total_phases":4,"elapsed_s":412,"status":"running"}
+{"type":"status","runs":[{"id":12,"target":"example.com","stage":"live","speed":"slow","status":"running","started_at":"2026-11-12T10:00:00Z","finished_at":null}]}
 ```
 
 ## Flow 9 - Interrupt and resume
 
 1. User presses Ctrl+C. Engine stops launching tools, kills children, marks run `interrupted`, exit 130.
-2. `reconkit run -d example.com --active --resume` continues from the unfinished stage; completed tools are not repeated.
+2. `reconkit run -d example.com --active --resume` continues from the unfinished stage; completed stages are not repeated, and the interrupted stage is rerun from its start.
 
-## Flow 10 - Export
+## Flow 10 - Export (Phase 3 stub in this build)
+
+`export`, `db export`, `db list` and `scope import` exit 1 with a clear "not wired" message; the steps below describe the intended Phase 3 behavior.
 
 1. `reconkit export -d example.com --format md -o report.md`
 2. Formats: `json`, `md`, `html`. HTML content is escaped.

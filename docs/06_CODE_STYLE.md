@@ -43,7 +43,7 @@
 
 ## 6. Error Handling
 
-- Define exceptions in `reconkit/errors.py`: `ScopeError`, `ToolNotInstalled`, `ToolFailed`, `ToolTimeout`, `ParseError`, `ConfigError`, `InstallError`.
+- Define exceptions in `reconkit/errors.py`: `ScopeError`, `ToolNotInstalled`, `ToolFailed`, `ToolTimeout`, `ParseError`, `ConfigError`, `InstallError`, and `InstallSkipped` (an `InstallError` subclass for a declined sudo action).
 - Adapters convert failures into a `ToolResult(status=...)` instead of crashing the stage.
 - The CLI maps exceptions to exit codes (docs/02_CLI_UX.md) and one-line messages.
 - Do not swallow errors silently. Do not expose secrets or full tracebacks unless `-v`.
@@ -55,7 +55,8 @@
 
 ## 8. Logging
 
-- Use the standard `logging` module with Rich handler configured in `ui.py`.
+- This build writes no file log; console output goes through `ui.py` only.
+- If a logger is added, use the standard `logging` module with its handler configured in `ui.py`.
 - Never log secrets (see docs/05_SECURITY.md).
 
 ## 9. Formatting and Tools

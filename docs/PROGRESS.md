@@ -2,7 +2,7 @@
 
 ## RESUME HERE
 
-- Status: Part 10 (installer + doctor) CLOSED on 2026-11-14 by ruling. The sudo-authenticated apt path was proven live: after `sudo apt-get remove -y massdns`, `reconkit install --all --no-color` ran confirmation -> `sudo -n apt-get install -y massdns` -> binary-on-PATH -> version check and reported `installed`, and the idempotent re-run reports `massdns: already installed (1.1.0-0kali2)`. Windows refusal was covered by the existing tests.
+- Status: Part 11 IN PROGRESS. 11b (docs/01-10 sync) is done and logged in REVIEW_LOG; 11a (README/SETUP rewrite) is next, followed by the fresh-eyes audit, the fresh-venv mock run and the final report. Part 11 cannot close without a real authorized-target run on Kali. Part 10 was CLOSED on 2026-11-14. The sudo-authenticated apt path was proven live: after `sudo apt-get remove -y massdns`, `reconkit install --all --no-color` ran confirmation -> `sudo -n apt-get install -y massdns` -> binary-on-PATH -> version check and reported `installed`, and the idempotent re-run reports `massdns: already installed (1.1.0-0kali2)`. Windows refusal was covered by the existing tests.
 - PIT-32 (after Part 10f): an A/B test confirmed that `run_exec`'s `start_new_session=True` hid a valid `sudo -v` ticket from children (sudo `tty_tickets` is session-scoped). `runner.py` now keeps POSIX children in the parent's session and gives each its own process group (`start_new_session=is_windows`, `process_group=0` on POSIX), with two regression tests. This was the prerequisite for the live gate run.
 - Deferred by ruling (not Part 10 blockers): `update` idempotency for `@latest` go_install tools (reporting gap, binaries byte-identical; needs a new version-probe mechanism and its own docs-first pass, docs/10 section 6) and authenticated GitHub release lookups (a Part 11 planning decision).
 - Last code commit: run `git log --oneline -1`
@@ -47,7 +47,7 @@ mypy src/reconkit
 | g | done | 36cd3a4, 6b hash in Part 7 | wildcard, workspace, engine, confidence, host states, resume, exit codes done |
 | h | done | Part 8 hash in Part 9 | `ui.py` + `cli.py`; installer/doctor stubs remain for i |
 | i | done | `9c4319b` (with `5df7e98`, `66b117c`) | `doctor.py` + `installer/`; Part 10 closed 2026-11-14 |
-| j | pending | - | docs sync, README, final check |
+| j | in progress | 11b docs sync (this commit) | README/SETUP, fresh-eyes audit, fresh-venv run and final report pending |
 
 Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTURE.md` section 5. There is no `core/consensus.py`: consensus lives in `engine.py`.
 
