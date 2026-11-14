@@ -50,6 +50,7 @@ select = ["E", "F", "I", "B", "UP", "S"]
 "tests/**" = ["S101"]   # pytest uses asserts
 "tests/fakebin/**" = ["S603"]   # fixtures start their own child process
 "tests/test_runner.py" = ["S603"]   # the kill-tree test must hold a live Popen to call _kill_tree
+"tests/test_binary_adapters.py" = ["S603"]   # the SIGKILL test spawns a python child that kills itself
 "src/reconkit/core/runner.py" = ["S603"]   # argv is validated; sole subprocess entry
 "src/reconkit/core/pacing.py" = ["S311"]   # jitter randomness, not cryptographic
 "tests/test_pacing.py" = ["S311"]   # seeded RNG for deterministic shuffle tests

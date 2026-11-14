@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import ast
 import os
+import subprocess
+import sys
+import tempfile
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -12,15 +16,22 @@ import yaml
 
 from reconkit.adapters import ADAPTERS
 from reconkit.adapters import base as base_module
+from reconkit.adapters import subfinder as subfinder_module
 from reconkit.adapters.assetfinder import AssetfinderAdapter
 from reconkit.adapters.base import BinaryAdapter
 from reconkit.adapters.httpx_tool import HttpxAdapter
 from reconkit.adapters.naabu import NaabuAdapter
 from reconkit.adapters.registry import get_spec, load_tools
-from reconkit.adapters.subfinder import PROVIDERS, SubfinderAdapter
+from reconkit.adapters.subfinder import (
+    PROVIDERS,
+    STALE_AFTER_S,
+    SubfinderAdapter,
+    cleanup_stale_provider_dirs,
+)
 from reconkit.config import load_config, resolve_speed
 from reconkit.core.pacing import Pacer, RateLimiter
 from reconkit.core.runner import ExecResult
+from reconkit.errors import ToolFailed
 from reconkit.models import HostState, PortRecord, RunContext, SubdomainRecord, ToolStatus
 
 REPO = Path(__file__).resolve().parents[1]
@@ -670,6 +681,156 @@ async def test_subfinder_deletes_provider_config_on_timeout(
 def test_subfinder_provider_envs_are_registry_keys() -> None:
     declared = {key.env for key in get_spec("subfinder").keys}
     assert set(PROVIDERS) == declared
+
+
+async def test_provider_config_lives_in_a_0700_per_run_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """12g: the file moved into a per-run 0700 directory, still 0600, still gone after."""
+    seen: dict[str, object] = {}
+
+    def capture(argv: list[str], _kwargs: dict[str, object]) -> None:
+        path = Path(argv[argv.index("-pc") + 1])
+        seen["path"] = path
+        seen["parent"] = path.parent
+        seen["name"] = path.parent.name
+        seen["dir_mode"] = path.parent.stat().st_mode
+        seen["file_mode"] = path.stat().st_mode
+        seen["content"] = path.read_text(encoding="utf-8")
+
+    fake_exec(monkeypatch, outcome("www.example.com\n"), on_call=capture)
+    result = await SubfinderAdapter().run(make_ctx(env={"VT_API_KEY": "vt-secret-value"}))
+    assert result.status is ToolStatus.OK
+    assert str(seen["name"]).startswith(f"reconkit-subfinder-{os.getpid()}-")
+    assert "vt-secret-value" in str(seen["content"])
+    assert Path(str(seen["parent"])).exists() is False
+    if os.name != "nt":
+        assert oct(int(seen["dir_mode"]))[-3:] == "700"
+        assert oct(int(seen["file_mode"]))[-3:] == "600"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="SIGKILL is POSIX-only")
+async def test_a_sigkilled_run_leaves_a_directory_the_next_start_removes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: PIT-45 - a SIGKILL'd run's provider dir is removed by the next run."""
+    root = tmp_path / "provider-root"
+    root.mkdir()
+    script = (
+        "import os, pathlib, sys, tempfile\n"
+        "root = pathlib.Path(sys.argv[1])\n"
+        "prefix = 'reconkit-subfinder-%d-' % os.getpid()\n"
+        "d = pathlib.Path(tempfile.mkdtemp(dir=root, prefix=prefix))\n"
+        "(d / 'provider-config.yaml').write_text('virustotal:\\n  - sk-live\\n')\n"
+        "os.kill(os.getpid(), 9)\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", script, str(root)], check=False)
+    assert proc.returncode != 0
+
+    leftovers = [
+        path
+        for path in root.iterdir()
+        if path.is_dir() and path.name.startswith("reconkit-subfinder-")
+    ]
+    assert len(leftovers) == 1
+    assert (leftovers[0] / "provider-config.yaml").is_file()
+
+    # The next run must clean the stale directory at startup, not just in a unit call.
+    monkeypatch.setattr(subfinder_module.tempfile, "gettempdir", lambda: str(root))
+    fake_exec(monkeypatch, outcome("www.example.com\n"))
+    result = await SubfinderAdapter().run(make_ctx(env={"VT_API_KEY": "vt-secret-value"}))
+    assert result.status is ToolStatus.OK
+    assert [path for path in root.iterdir() if path.name.startswith("reconkit-subfinder-")] == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="SIGKILL is POSIX-only")
+def test_cleanup_reports_the_number_of_removed_directories(tmp_path: Path) -> None:
+    root = tmp_path / "provider-root"
+    root.mkdir()
+    script = (
+        "import os, pathlib, sys, tempfile\n"
+        "root = pathlib.Path(sys.argv[1])\n"
+        "prefix = 'reconkit-subfinder-%d-' % os.getpid()\n"
+        "tempfile.mkdtemp(dir=root, prefix=prefix)\n"
+        "os.kill(os.getpid(), 9)\n"
+    )
+    proc = subprocess.run([sys.executable, "-c", script, str(root)], check=False)
+    assert proc.returncode != 0
+    assert cleanup_stale_provider_dirs(root) == 1
+    assert list(root.iterdir()) == []
+
+
+def test_cleanup_never_touches_its_own_run(tmp_path: Path) -> None:
+    own = tmp_path / f"reconkit-subfinder-{os.getpid()}-own"
+    own.mkdir()
+    (own / "provider-config.yaml").write_text("x", encoding="utf-8")
+    assert cleanup_stale_provider_dirs(tmp_path) == 0
+    assert (own / "provider-config.yaml").is_file()
+
+
+def test_cleanup_leaves_a_concurrent_runs_directory_alone(tmp_path: Path) -> None:
+    """Adversarial: a second live run must not have its key file deleted."""
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        live = tmp_path / f"reconkit-subfinder-{child.pid}-live"
+        live.mkdir()
+        (live / "provider-config.yaml").write_text("x", encoding="utf-8")
+        assert cleanup_stale_provider_dirs(tmp_path) == 0
+        assert (live / "provider-config.yaml").is_file()
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_when_liveness_is_unknown_age_alone_decides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows has no safe liveness probe; the documented fallback is the age rule."""
+    monkeypatch.setattr(subfinder_module, "_pid_alive", lambda _pid: True)
+    fresh = tmp_path / "reconkit-subfinder-424242-fresh"
+    stale = tmp_path / "reconkit-subfinder-424242-stale"
+    fresh.mkdir()
+    stale.mkdir()
+    old = time.time() - STALE_AFTER_S - 1
+    os.utime(stale, (old, old))
+    assert cleanup_stale_provider_dirs(tmp_path) == 1
+    assert fresh.exists() is True
+    assert stale.exists() is False
+
+
+def test_stale_pre_12g_files_are_removed_but_fresh_ones_are_kept(tmp_path: Path) -> None:
+    old = tmp_path / "reconkit-subfinder-old.yaml"
+    new = tmp_path / "reconkit-subfinder-new.yaml"
+    old.write_text("virustotal:\n  - sk-old\n", encoding="utf-8")
+    new.write_text("virustotal:\n  - sk-new\n", encoding="utf-8")
+    stale_time = time.time() - STALE_AFTER_S - 1
+    os.utime(old, (stale_time, stale_time))
+    assert cleanup_stale_provider_dirs(tmp_path) == 1
+    assert old.exists() is False
+    assert new.exists() is True
+
+
+def test_a_write_failure_removes_the_per_run_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Adversarial: crash between mkdir and write must not strand the directory."""
+    real_mkdtemp = tempfile.mkdtemp
+    created: list[Path] = []
+
+    def fake_mkdtemp(*args: object, **kwargs: object) -> str:
+        path = Path(real_mkdtemp(*args, dir=tmp_path, **kwargs))
+        created.append(path)
+        return str(path)
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise yaml.YAMLError("no")
+
+    monkeypatch.setattr(subfinder_module.tempfile, "mkdtemp", fake_mkdtemp)
+    monkeypatch.setattr(subfinder_module.yaml, "safe_dump", boom)
+    with pytest.raises(ToolFailed):
+        SubfinderAdapter()._write_provider_config(make_ctx(env={"VT_API_KEY": "vt-secret-value"}))
+    assert len(created) == 1
+    assert created[0].exists() is False
 
 
 # ------------------------------------------------------------- dependency rule
