@@ -1753,3 +1753,41 @@ duration_s: 0.0
 - **S2 (own diff):** no broad `except` added (`git diff -- src/reconkit | grep '^+.*except'` -> `NONE`); the only new external input is the report of a read-only query, and SQL stays parameterized (four bound parameters in `diff_gone`, three in `diff_pending_gone`, no interpolation); no secret can reach the new fields (they are FQDNs already stored in `subdomains`); no blocking call added inside async code (`Engine.diff` was and stays synchronous, called from the CLI, not from `run`); no new exception path (`diff_pending_gone` cannot raise beyond `sqlite3`, as before); unfinished paths: `state_changes`/ports still use the previous pair only, and `NEW` still means `first_seen_run = latest`, so a host that reappears after a miss is neither `NEW` nor `GONE` (documented in docs/02).
 - **S3 scans:** `\bassert\b` -> `NONE`; `shell\s*=\s*True` -> `NONE`; `TODO|FIXME|XXX|HACK` -> `NONE`; `noqa|type: ignore` in the three changed source files -> `NONE`; broad-`except` grep on the diff -> `NONE`.
 - PIT-39 added. Not verified: no real third discovery run was made for this rule in step 1 (the real `diff` above proves the first-miss half on real data; the second-miss half is proved by the store/engine tests and will be exercised again in the session-2 run).
+
+## Real-tool verification session 2 - testfire.net, post-fix (2026-11-14)
+
+- Command: `reconkit run -d testfire.net --active --speed slow --no-keys --json` (the `run` subcommand, not the bare form), against the existing `recon.db`, one pass. Started `2026-11-14T20:10:59Z`, finished `20:19:24Z` (8m25s), **exit 5**. `stdout` 18,771 bytes (one document), **`stderr` 0 bytes** - the known `--json` progress gap is unchanged and still contradicts docs/02 section 5.
+- Summary object, verbatim from the document:
+  ```
+  {"hosts":36,"alive":8,"dns_only":0,"shut_down":0,"dead":28,"unknown":0,
+   "tools_ok":8,"tools_failed":2,"tools_skipped":31,"tools_timeout":0}
+  ```
+  Stages, their run ids and their executed/skipped counts: `subs` 18 (6 executed, 5 skipped), `dns` 19 (1, 4), `live` 20 (2, 2), `ports` 21 (1, 4), `tech` 22 (0, 5), `urls` 23 (0, 8), `vulns` 24 (0, 3). The 31 skipped are exactly the selection-time skips this build always had; they now appear in `stages[].skipped` and in `tools_skipped` (fix from the previous session), so the run reports what it did **not** do for the first time.
+- Executed tools (`tool_runs` rows, verbatim): `crtsh ok 1 51.7`, `certspotter ok 0 0.83`, `otx failed 0 0.0 'otx: rate limited (HTTP 429)'`, `hackertarget failed 0 0.0 'hackertarget: free quota exceeded'`, `subfinder ok 35 64.02`, `assetfinder ok 3 6.19`, `dnspython ok 36 0.0`, `pyprobe ok 8 0.0 'unreachable=28'`, `httpx ok 8 7.04`, `pyscan ok 0 0.0 'blocked=8'`. Every other pool member is `skipped` with `no adapter yet (phase 3)`, except `naabu` (`blocked: resolves inside the binary, so in_scope_cidrs cannot be enforced (11c-G-7)`).
+- **pyprobe now agrees with httpx on every live host.** `pyprobe`: 8 records, all `ALIVE`, `error='unreachable=28'`; `httpx`: 8 records, all `ALIVE`, `error=None`. No `UNKNOWN` record exists in this run. This is the fix from the previous session working on the real target that produced the 8-of-8 disagreement.
+- **Confidence observed, before and after, and what it actually means.** Session 1 stored `confidence: UNCONFIRMED` for all 8 ALIVE hosts (its log entry quotes them). This run: `demo.testfire.net HIGH`, `www.testfire.net MEDIUM`, the other six ALIVE hosts `LOW`, and **zero `UNCONFIRMED`**. The number is not live-tool agreement: `Engine._write_host` writes `confidence` only when the transition is `UNCONFIRMED` and otherwise keeps the discovery value, so the displayed trust is `subdomains.source_count` from the `subs` stage (docs/04), and the two-tool live agreement lives in `host_status_history.tools_json` (`["pyprobe","httpx"]` on every ALIVE row). So the honest statement is "the disagreement override no longer fires; HIGH/MEDIUM/LOW are discovery-source counts", not "two live tools now set MEDIUM". `altoro.testfire.net` is `LOW` because `hackertarget` failed this run, leaving `subfinder` as its only contributing source, while the JSON `sources` array still lists all-time sources.
+- **`diff` after the run** (latest pair now runs 11 and 18, baseline 4):
+  ```
+  {"type":"diff","target":"testfire.net","baseline_run_id":4,"previous_run_id":11,"latest_run_id":18,"new":[],"gone":[],"pending_gone":[],"state_changes":[],"ports_opened":[],"ports_closed":[]}
+  No changes since run #11.
+  ```
+  The rule's effect on the actual defect, measured directly against the same database (`Store` methods, no hand-edited numbers):
+  ```
+  completed subs run ids (newest first): [18, 11, 4, 2]
+  old rule  (seen in 4, absent in 11):            27 hosts
+  new rule  (seen in 2, absent in 4 AND 11):       0 hosts
+  new rule  (seen in 4, absent in 11 AND 18):      0 hosts
+  pending after run 18 (seen in 11, absent in 18): 0 hosts
+  ```
+  So: on the pair that produced the false GONEs (4 -> 11) the old rule said 27, the new rule says 0 (they were `pending_gone` until run 18), and because `subfinder` came back with 35 names in run 18 the 27 were never confirmed gone. **`subfinder` is still flaky** (35, then 8, then 35 in this run - 64.02 s this time); what changed is that a single flaky run no longer produces a `GONE` report. If a second consecutive run had also missed them, the rule would have confirmed them at that point - that is the designed behaviour, not a gap.
+- Database, raw. Counts before -> after: `scan_runs` 17 -> 24, `tool_runs` 99 -> 140, `subdomains` 36 -> 36, `subdomain_sources` 100 -> 139, `host_status_history` 81 -> 117, `ports` 0 -> 0, `urls` 0 -> 0. Discovery runs now: `2 partial 36`, `4 partial 36`, `11 partial 9`, `18 partial 36` hosts. `scan_runs` 18-24: `subs partial`, then `dns`, `live`, `ports`, `tech`, `urls`, `vulns` all `completed` - note that a stage which executed **zero tools** is still recorded `completed` (the empty-stage exit-code question stays open). One full history row, verbatim:
+  ```
+  {'id': 104, 'subdomain_id': 4, 'run_id': 20, 'state': 'ALIVE', 'status_code': 200,
+   'location': None, 'title': 'Altoro Mutual', 'ips_json': '["65.61.137.117"]',
+   'tech_json': '[]', 'waf': None, 'tools_json': '["pyprobe", "httpx"]',
+   'checked_at': '2026-11-14T20:19:01Z', 'cnames_json': '["testfire.net"]',
+   'dangling_cname': None}
+  ```
+- **A previously unverified fact is now verified live:** `hackertarget` returned its free-quota refusal and the adapter mapped it to a failed result with `hackertarget: free quota exceeded`. The quota-message branch that previous sessions could not exercise has now run for real. `otx` returned 429 again, so its response shape remains unobserved.
+- Still wrong or surprising, stated plainly: (1) `--json` still writes nothing to stderr (docs/02 promises progress there); (2) `tech`/`urls`/`vulns` ran zero tools and are recorded and reported `completed` - their skips are now visible, but the run's exit 5 comes from `otx` and `hackertarget`, not from the three empty stages; (3) `ports` is still `blocked=8` with zero port rows (no `in_scope_cidrs`, `naabu` blocked) - unchanged by design; (4) `duration_s` is `0.0` for `dnspython` and `pyprobe` (11d-findings-c); (5) `pyprobe` reports `unreachable=28`, which counts the 28 hosts that do not answer HTTP at all, not errors; (6) `crtsh` took 51.7 s and `subfinder` 64.02 s at `--speed slow`, which is pacing, not a defect.
+- Not verified, unchanged: no tech/urls/vulns tool has ever run; no open port has ever been observed; no keyed provider ran (`--no-keys`); `killpg`, the sudo-authenticated installer path and every Windows path remain untested; `libpcap-dev` is still absent.
