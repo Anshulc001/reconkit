@@ -29,7 +29,7 @@
 | `passive` | subs + dns (+ passive ports/CDN info) | no | 2 |
 | `subs` / `dns` | single passive stage | no | 2 |
 | `live` | ALIVE / DNS_ONLY / SHUT_DOWN / DEAD | yes | 2 |
-| `ports` | open ports, services | yes | 2 |
+| `ports` | open ports, services (`pyscan` only; LOW is the ceiling - accepted permanently, docs/09 section 5) | yes | 2 |
 | `tech` | tech, WAF, CDN | yes | 3 |
 | `urls` | URLs, params, JS | yes (crawling) | 3 |
 | `vulns` | takeover and exposure checks | yes | 3 |
@@ -43,6 +43,8 @@
 `passive` is the stage command: it runs the subs and dns stages (plus passive port/CDN info) for one target. `lite` is the workflow shortcut for exactly that passive pipeline and nothing active; adapters, flags, pacing and exit codes are the same. Only `run` includes active stages.
 
 `--active` is a usage error (exit `2`) on every passive-only command - the bare form, `lite`, `passive`, `subs` and `dns` - because none of them runs an active stage and accepting the flag would promise work the command cannot do. The message names `run` as the active workflow. Use `run -d X --active`, or an active stage command (`live`, `ports`, `tech`, `urls`, `vulns`), for active stages.
+
+**The ports ceiling is permanent, not a pending decision.** `pyscan` is the only selectable ports adapter in this build, `naabu` is skipped at selection time (its resolver runs inside the child, so docs/05 rule 6 cannot filter the address it connects to), and every other ports tool is phase 3 with no adapter. Ports confidence therefore cannot exceed `LOW`, and the open/closed disagreement rule cannot fire. The owner accepted this as the permanent shape of the ports stage on 2026-11-14 (12i, option c): no pre-resolve redesign and no second IP-connecting adapter is planned. The stage still does its job; what it cannot do is cross-tool confirmation.
 
 ### State and output
 | Command | Purpose |
