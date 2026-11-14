@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from reconkit.adapters.base import BaseToolAdapter
+from reconkit.adapters.dnspython import DnsOutcome, DnsResult
 from reconkit.adapters.registry import ToolKey, ToolSpec
 from reconkit.config import load_config
 from reconkit.core.store import REDACTED, Store
@@ -60,11 +61,20 @@ async def no_sleep(_seconds: float) -> None:
 
 
 class SilentRng:
+    def __init__(self) -> None:
+        self._next = 0
+
     def uniform(self, low: float, _high: float) -> float:
         return low
 
     def shuffle(self, items: list[object]) -> None:
         return None
+
+    def choice(self, seq: str) -> str:
+        # Deterministic but varying, so random labels stay unique (PIT-13).
+        value = seq[self._next % len(seq)]
+        self._next += 1
+        return value
 
 
 class Recorder:
@@ -953,3 +963,107 @@ async def test_min_sources_hides_low_source_results(tmp_path: Path) -> None:
         ("www.example.com",),
     ).fetchone()
     assert (row["confidence"], row["source_count"]) == ("MEDIUM", 2)
+
+
+# ----------------------------------------------------------------- wildcard
+
+
+def dns_tool(
+    rec: Recorder,
+    *,
+    records: list[Record],
+    answer: DnsResult,
+    probes: list[str],
+) -> type[BaseToolAdapter]:
+    """dnspython stand-in: fixed stage records plus one scripted probe answer."""
+
+    class FakeDns(BaseToolAdapter):
+        async def run(self, ctx: RunContext) -> ToolResult:
+            rec.names.append(self.name)
+            return ToolResult(tool=self.name, status=ToolStatus.OK, records=records)
+
+        async def resolve_host(self, ctx: RunContext, host: str) -> DnsResult:
+            probes.append(host)
+            return answer
+
+        def parse_output(self, raw: str) -> list[Record]:
+            return []
+
+    FakeDns.name = "dnspython"
+    FakeDns.stage = Stage.DNS
+    return FakeDns
+
+
+def wildcard_setup(
+    tmp_path: Path,
+    answer: DnsResult,
+) -> tuple[Engine, list[str]]:
+    rec = Recorder()
+    probes: list[str] = []
+    specs = {"dnspython": tool("dnspython", Stage.DNS)}
+    adapters = {
+        "dnspython": dns_tool(
+            rec,
+            records=[
+                SubdomainRecord(fqdn="www.example.com", source="dnspython", ips=["1.2.3.4"]),
+                SubdomainRecord(fqdn="own.example.com", source="dnspython", ips=["9.9.9.9"]),
+            ],
+            answer=answer,
+            probes=probes,
+        )
+    }
+    return make_engine(tmp_path, specs, adapters), probes
+
+
+def stored_wildcard(engine: Engine) -> dict[str, int]:
+    return {
+        str(row["fqdn"]): int(row["is_wildcard"])
+        for row in engine.store._conn.execute("SELECT fqdn, is_wildcard FROM subdomains")
+    }
+
+
+async def test_wildcard_present_marks_matching_hosts(tmp_path: Path) -> None:
+    engine, probes = wildcard_setup(tmp_path, DnsResult(DnsOutcome.RESOLVED, ips=["1.2.3.4"]))
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.DNS,), speed="fast"))
+    assert len(probes) == 3
+    assert all(probe.endswith(".example.com") and probe != "example.com" for probe in probes)
+    assert summary.warnings == []
+    assert stored_wildcard(engine) == {"www.example.com": 1, "own.example.com": 0}
+
+
+async def test_wildcard_none_marks_nothing(tmp_path: Path) -> None:
+    engine, probes = wildcard_setup(tmp_path, DnsResult(DnsOutcome.NXDOMAIN))
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.DNS,), speed="fast"))
+    assert len(probes) == 3
+    assert summary.warnings == []
+    assert stored_wildcard(engine) == {"www.example.com": 0, "own.example.com": 0}
+
+
+async def test_wildcard_unknown_warns_and_marks_nothing(tmp_path: Path) -> None:
+    engine, probes = wildcard_setup(tmp_path, DnsResult(DnsOutcome.TIMEOUT))
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.DNS,), speed="fast"))
+    assert len(probes) == 3
+    assert any("wildcard check inconclusive" in warning for warning in summary.warnings), (
+        summary.warnings
+    )
+    assert stored_wildcard(engine) == {"www.example.com": 0, "own.example.com": 0}
+
+
+async def test_wildcard_mark_reaches_the_subdomains_table(tmp_path: Path) -> None:
+    engine, _probes = wildcard_setup(tmp_path, DnsResult(DnsOutcome.RESOLVED, ips=["1.2.3.4"]))
+    await engine.run("example.com", ScanOptions(stages=(Stage.DNS,), speed="fast"))
+    rows = {
+        str(row["fqdn"]): int(row["is_wildcard"])
+        for row in engine.store._conn.execute(
+            "SELECT fqdn, is_wildcard FROM subdomains WHERE fqdn IN (?, ?)",
+            ("www.example.com", "own.example.com"),
+        )
+    }
+    assert rows == {"www.example.com": 1, "own.example.com": 0}
+
+
+async def test_wildcard_never_probes_under_mock(tmp_path: Path) -> None:
+    engine, probes = wildcard_setup(tmp_path, DnsResult(DnsOutcome.RESOLVED, ips=["1.2.3.4"]))
+    await engine.run("example.com", ScanOptions(stages=(Stage.DNS,), mock=True, speed="fast"))
+    assert probes == []
+    assert stored_wildcard(engine) == {"www.example.com": 0, "own.example.com": 0}

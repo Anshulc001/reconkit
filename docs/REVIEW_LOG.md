@@ -1018,3 +1018,63 @@ Every restore below was checked with `sha256sum`; the digests before and after e
   printed `No changes since run #1.` A fresh DB printed `No completed discovery run for this target.`
 - Remaining by design: docs/10's Windows refusal message still matches the code's literal `Use WSL2 Kali` string;
   port IP/service data is stored but not rendered; stage-table tools without adapters remain Phase 3.
+
+## Wildcard filter wiring in the engine (2026-11-14)
+
+- Docs read / goal: docs/03 section 8 (wildcard filter and API bullets), docs/09:166 (`matches` rule), docs/04
+  (`subdomains.is_wildcard`), docs/PROGRESS "Part 9 triage: wildcard detection is still not wired". Goal: make the
+  existing `core/wildcard.py` detector run per scan and store `is_wildcard`.
+- Decisions and assumptions:
+  - The two docs bullets were already ahead of the code, so only one gap needed a docs change: `wildcard_check.enabled`
+    was modeled and set `true` but named by no document. It now means "filter off when false"; the same sentence
+    records the `--mock` rule that docs/03's engine API already implies.
+  - The detector is constructed in `Engine.run` right after `_run_tools` returns the `dns` stage's `RunContext`.
+    That is the one place where the stage's limiter and resolver context exist, and a run has at most one `dns`
+    stage, so this is one detector per run in practice.
+  - The probe uses a fresh `DnsPythonAdapter()` bound to that context: the stage's own adapter instance is created
+    inside `_run_one` and is not retained, so "reuse that resolver" means the same adapter code path and the same
+    stage limiter, not the same resolver object.
+  - `is_wildcard` is written only in `_persist_dns`'s `RESOLVED` loop, the first point where a host is known to have
+    resolved. `PRESENT` passes `matches()`; `NONE` and `UNKNOWN` pass `None` (no mark, no clearing of an older mark).
+- Decisions for user review:
+  - `wildcard_check.enabled` is honored as a switch. The docs previously said nothing about it; if it was meant to
+    control something else (for example whether wildcard hosts are hidden), say so and the docs/code change again.
+  - docs/09's "exclude them from counts by default" was **not** implemented: no doc defines which count (host table,
+    JSON summary, confidence) and no code path filters it. It is now an open item in PROGRESS rather than a guess.
+- Docs changed first: `docs/03_ARCHITECTURE.md` section 8 (switch + mock clause), commit `aa3cd6b`.
+- Deviations: none from the agreed spec. The `enabled` switch is the one behavior added beyond the two bullets.
+- Files touched: `docs/03_ARCHITECTURE.md`, `docs/PROGRESS.md` (docs commit); `src/reconkit/engine.py`,
+  `tests/test_engine.py`, `docs/PROGRESS.md`, this file (code commit).
+- Requirement -> test table:
+  - PRESENT marks matching hosts: `test_wildcard_present_marks_matching_hosts`.
+  - NONE leaves hosts at 0: `test_wildcard_none_marks_nothing`.
+  - UNKNOWN warns and marks nothing: `test_wildcard_unknown_warns_and_marks_nothing`.
+  - `is_wildcard` reaches the `subdomains` table: `test_wildcard_mark_reaches_the_subdomains_table`.
+  - `--mock` never probes: `test_wildcard_never_probes_under_mock`.
+  - Probes stay under the target: asserted inside the PRESENT test (`<label>.example.com`, three calls).
+- Self-review findings (S2 lists, S3 raw output): no new dependencies, no `assert` in `src/`, no new suppressions, no
+  adapter imports added to `core/`; `engine` already imported `cast`/`Any`, so the probe binding adds no new import
+  surface beyond `functools.partial` and `core.wildcard`.
+- Bugs found: none beyond the already-logged "built but never wired" gap this change closes.
+- Mutation/red proof: with the old `engine.py` restored and the new tests kept, `4 failed, 1 passed, 36 deselected`,
+  exit 1 (`assert 0 == 3` for the probe count; `{'www.example.com': 0} != {'www.example.com': 1}` for the table).
+  The mock test passes in both states by design. Restored with `git stash pop`; green run `5 passed`.
+- Raw check output (`.venv`, Python 3.14.8): `585 passed in 12.96s` -> `pytest=PASS`; `ruff check .` ->
+  `All checks passed!` -> `ruff=PASS`; `ruff format --check .` -> `69 files already formatted` -> `format=PASS`;
+  `mypy src/reconkit` -> `Success: no issues found in 37 source files` -> `mypy=PASS`.
+- Real run (v4) `/tmp/rk_testfire_v4.db`, `reconkit passive -d testfire.net --db /tmp/rk_testfire_v4.db -v
+  --no-color`: 2 `scan_runs` (`subs` partial 15:11:17-15:13:58Z, `dns` completed 15:13:58-15:14:56Z), 16
+  `tool_runs`, 36 `subdomains`, `0` non-zero `is_wildcard`, no wildcard warning, exit 5 (`otx` 429 only).
+  `PRAGMA integrity_check` = `ok`, `PRAGMA foreign_key_check` empty. v1/v2/v3 sha256 values are unchanged before and
+  after (`f1832f...`, `f90227...`, `61f748...`), so the first three artifacts were not touched.
+- What `detect()` returned for testfire.net: `none`. Confirmed two ways: the v4 run printed no inconclusive warning,
+  and an observer run (a wrapper around `WildcardDetector.detect` with no `src/` change) recorded exactly one call,
+  `{'target': 'testfire.net', 'status': 'none', 'probes': 3, 'resolved': 0, 'ips': [], 'cnames': []}`. Before
+  interpreting it, three random `A` labels under `testfire.net` were resolved directly with the venv's dnspython and
+  all returned `nxdomain`, so `none` is the expected status and no wildcard answer exists to match.
+- Not verified (needs network/tools): nothing new. The `live`/`ports` marking path was not exercised because it is
+  the `dns` stage that owns resolution; `_write_host` passes no `is_wildcard`, so an earlier mark is preserved. That
+  preservation is covered by the store's `COALESCE` tests, not by a new end-to-end live run.
+- Next part must know: `is_wildcard` is a mark only (docs/09's "exclude from counts" is unimplemented and undefined);
+  11d-findings-b and (c) remain open; `certspotter` still returns `ok` with 0 items on every real run and needs a
+  one-line hypothesis before Part 11 closes.

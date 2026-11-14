@@ -2,11 +2,11 @@
 
 ## RESUME HERE
 
-- Status: Part 11 IN PROGRESS. 11b (docs/01-10 sync) is done and logged in REVIEW_LOG; 11a (README/SETUP rewrite) is next, followed by the fresh-eyes audit, the fresh-venv mock run and the final report. Part 11 cannot close without a real authorized-target run on Kali. Part 10 was CLOSED on 2026-11-14. The sudo-authenticated apt path was proven live: after `sudo apt-get remove -y massdns`, `reconkit install --all --no-color` ran confirmation -> `sudo -n apt-get install -y massdns` -> binary-on-PATH -> version check and reported `installed`, and the idempotent re-run reports `massdns: already installed (1.1.0-0kali2)`. Windows refusal was covered by the existing tests.
+- Status: Part 11 IN PROGRESS. 11b (docs/01-10 sync) is done and logged in REVIEW_LOG; the wildcard filter is now wired (docs `aa3cd6b` + the code commit); 11a (README/SETUP rewrite) is next, followed by the fresh-eyes audit, the fresh-venv mock run and the final report. Part 11 cannot close without a real authorized-target run on Kali. Part 10 was CLOSED on 2026-11-14. The sudo-authenticated apt path was proven live: after `sudo apt-get remove -y massdns`, `reconkit install --all --no-color` ran confirmation -> `sudo -n apt-get install -y massdns` -> binary-on-PATH -> version check and reported `installed`, and the idempotent re-run reports `massdns: already installed (1.1.0-0kali2)`. Windows refusal was covered by the existing tests.
 - PIT-32 (after Part 10f): an A/B test confirmed that `run_exec`'s `start_new_session=True` hid a valid `sudo -v` ticket from children (sudo `tty_tickets` is session-scoped). `runner.py` now keeps POSIX children in the parent's session and gives each its own process group (`start_new_session=is_windows`, `process_group=0` on POSIX), with two regression tests. This was the prerequisite for the live gate run.
 - Deferred by ruling (not Part 10 blockers): `update` idempotency for `@latest` go_install tools (reporting gap, binaries byte-identical; needs a new version-probe mechanism and its own docs-first pass, docs/10 section 6) and authenticated GitHub release lookups (a Part 11 planning decision).
 - Last code commit: run `git log --oneline -1`
-- Baseline: 580 passed, 0 skipped on Linux (Python 3.14.8 here); ruff, ruff format and mypy clean
+- Baseline: 585 passed, 0 skipped on Linux (Python 3.14.8 here); ruff, ruff format and mypy clean
 - Next action: Part 11 (docs sync, README/SETUP rewrite, fresh-eyes audit, final report) may begin once the user says so. Part 11 cannot close without at least one real run against an authorized target on real Kali; mock-only is insufficient.
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
@@ -282,6 +282,15 @@ Artifact checks (raw, from the file): `PRAGMA integrity_check` = `ok`; `PRAGMA f
 
 - No `src/` or `tests/` change in this entry; no `live`/`ports`/`--active` run until (a) is fixed, tested and committed. (a) has since been fixed in the block above; that run is still not done.
 - 11d-findings-d stays open pending the maintainer.
+
+## Wildcard filter wiring (2026-11-14)
+
+- Docs first: `aa3cd6b` states that `wildcard_check.enabled: false` skips the filter and that it never runs under `--mock`; the code commit follows it.
+- The detector is built once per run in the `dns` stage, immediately after `_run_tools` returns that stage's `RunContext` (the only place the run limiter exists). Probe is `DnsPythonAdapter().resolve_host` bound to that context, `rng` is the engine's injected RNG, `probes` comes from `config.wildcard_check.probes`. `detect(target)` is awaited before `_persist_stage`, so no resolved host is accepted first.
+- `is_wildcard` is written only in `_persist_dns`'s `RESOLVED` loop: `PRESENT` passes `result.matches(ips=..., cnames=...)` (true or false), `NONE` and `UNKNOWN` pass `None`, so they never mark and never clear an earlier mark. `UNKNOWN` appends `wildcard check inconclusive for <target>; nothing marked wildcard` to `summary.warnings`, which `ui.render` prints as `warning: ...`.
+- Evidence: red check with the old `engine.py` -> `4 failed, 1 passed` (the mock test passes by design); green -> `5 passed`; full suite 585; ruff, format and mypy clean. v1/v2/v3 sha256 unchanged before and after; v4 (`/tmp/rk_testfire_v4.db`) has 36 hosts, 0 non-zero `is_wildcard`, no wildcard warning, exit 5 (only `otx` 429). An observer run that wrapped `WildcardDetector.detect` recorded one call: `{'target': 'testfire.net', 'status': 'none', 'probes': 3, 'resolved': 0}`.
+- Independent confirmation before interpreting: three random `A` labels under `testfire.net` returned NXDOMAIN with the venv's dnspython, so `none` was the expected status.
+- Still unspecified, not implemented: docs/09's "exclude them from counts by default" - no document defines which count and no code path filters it, so `is_wildcard` is a mark only. 11d-findings-b and (c) are untouched; `certspotter`'s repeated 0-item `ok` still needs the hypothesis promised for Part 11 close-out.
 
 ## Fix backlog
 

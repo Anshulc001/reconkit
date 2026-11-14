@@ -16,6 +16,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import IntEnum, StrEnum
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -30,6 +31,7 @@ from reconkit.core.pacing import Clock, Pacer, RateLimiter
 from reconkit.core.runner import validate_host, validate_target
 from reconkit.core.scope import load_scope, require_active
 from reconkit.core.store import Store, redact, utc_now
+from reconkit.core.wildcard import WildcardDetector, WildcardResult, WildcardStatus
 from reconkit.core.workspace import Workspace
 from reconkit.errors import ConfigError, ScopeError
 from reconkit.models import (
@@ -515,8 +517,9 @@ class Engine:
             timeout = opts.phase_timeout or self._stage_timeout(stage)
             results: list[ToolResult] = []
             done: set[str] = set()
+            ctx: RunContext | None = None
             try:
-                await asyncio.wait_for(
+                ctx = await asyncio.wait_for(
                     self._run_tools(
                         run_id,
                         target,
@@ -540,6 +543,10 @@ class Engine:
                 self.store.finish_scan_run(run_id, "interrupted", finished_at=self._now())
                 raise
 
+            wildcard: WildcardResult | None = None
+            if stage is Stage.DNS and ctx is not None and selected and not opts.mock:
+                wildcard = await self._detect_wildcard(target, ctx)
+
             try:
                 with self.store.transaction():
                     self._persist_stage(
@@ -553,6 +560,7 @@ class Engine:
                         hosts,
                         discovered,
                         alive,
+                        wildcard=wildcard,
                     )
             except Exception:
                 self.store.finish_scan_run(run_id, "failed", finished_at=self._now())
@@ -736,6 +744,21 @@ class Engine:
             return self._installed(adapter)
         return adapter().check_installed().installed
 
+    async def _detect_wildcard(self, target: str, ctx: RunContext) -> WildcardResult | None:
+        """Probe random labels with the dns stage's resolver context (docs/03 section 8)."""
+        if not self.config.wildcard_check.enabled:
+            return None
+        adapter = self.adapters.get("dnspython")
+        if adapter is None:
+            return None
+        resolver = cast(Any, adapter())
+        detector = WildcardDetector(
+            probe=partial(resolver.resolve_host, ctx),
+            rng=self._rng,
+            probes=self.config.wildcard_check.probes,
+        )
+        return await detector.detect(target)
+
     async def _run_tools(
         self,
         run_id: int,
@@ -748,7 +771,7 @@ class Engine:
         opts: ScanOptions,
         results: list[ToolResult],
         done: set[str],
-    ) -> None:
+    ) -> RunContext:
         mode = (
             Mode.ACTIVE if any(spec.mode is Mode.ACTIVE for spec, _ in selected) else Mode.PASSIVE
         )
@@ -784,8 +807,9 @@ class Engine:
         if opts.speed == "slow":
             for spec, adapter in selected:
                 await one(spec, adapter)
-            return
+            return ctx
         await asyncio.gather(*(one(spec, adapter) for spec, adapter in selected))
+        return ctx
 
     async def _run_one(
         self,
@@ -892,6 +916,8 @@ class Engine:
         hosts: list[str],
         discovered: set[str],
         alive: set[str],
+        *,
+        wildcard: WildcardResult | None = None,
     ) -> None:
         if stage is Stage.SUBS:
             self._persist_discovery(target_id, run_id, results, opts)
@@ -902,6 +928,7 @@ class Engine:
                 results,
                 target,
                 defer=Stage.LIVE in opts.stages,
+                wildcard=wildcard,
             )
         elif stage is Stage.LIVE:
             self._persist_live(target_id, run_id, results, dns_results, target, hosts, opts, alive)
@@ -1000,11 +1027,22 @@ class Engine:
         target: str,
         *,
         defer: bool,
+        wildcard: WildcardResult | None = None,
     ) -> None:
         signals, tools, cnames, ips, disagree = self._dns_facts(results, target)
+        if wildcard is not None and wildcard.status is WildcardStatus.UNKNOWN:
+            warning = f"wildcard check inconclusive for {target}; nothing marked wildcard"
+            if warning not in self._warnings:
+                self._warnings.append(warning)
         for host, signal in signals.items():
             if signal is DnsSignal.RESOLVED:
-                self.store.upsert_subdomain(target_id, host, run_id=run_id)
+                # NONE and UNKNOWN never mark (PIT-21); UNKNOWN is warned above.
+                marked = (
+                    wildcard.matches(ips=ips.get(host, ()), cnames=cnames.get(host, ()))
+                    if wildcard is not None and wildcard.status is WildcardStatus.PRESENT
+                    else None
+                )
+                self.store.upsert_subdomain(target_id, host, run_id=run_id, is_wildcard=marked)
         if defer:
             return
         for host, signal in signals.items():
