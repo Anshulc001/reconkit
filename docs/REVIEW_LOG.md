@@ -1371,8 +1371,8 @@ exit=1
 |---|---|---|---|
 | crtsh | `?q=%.<domain>&output=json`, fields `name_value`, `common_name` | live 200, 28,454 bytes | none; unencoded `%` in `q` 404s, httpx encodes |
 | certspotter | `/v1/issuances` + `domain`/`include_subdomains`/`expand=dns_names`, field `dns_names`, Bearer auth | official APIv1 reference + live 200 (17 entries) | none |
-| otx | `/api/v1/indicators/domain/{d}/passive_dns`, `passive_dns[].hostname` | official external-API page; live anonymous call 429 | shape not re-verified live |
-| hackertarget | `?q=<domain>`, text `host,ip` | live 200 `www.example.com,172.66.147.243` | quota string unverified |
+| otx | `/api/v1/indicators/domain/{d}/passive_dns`, `passive_dns[].hostname` | official external-API page; two live anonymous calls 429 | shape still not observed live |
+| hackertarget | `?q=<domain>`, text `host,ip` | two live 200s `www.example.com,172.66.147.243` | quota string still unobserved |
 | subfinder | `-d -silent -nc -duc -pc -rl -version` | installed v2.17.0 `-h`; official README | none |
 | assetfinder | `--subs-only <domain>`, domain positional; `-h` identity probe | official README + `main.go` | binary not installed; probe inferred |
 | httpx | `-u -json -silent -no-stdin -duc -nc -sc -title -location -td -cdn -rl`; keys `input url status_code title location tech cdn_name` | installed v1.12.0 `-h`, `-ldv`, two localhost probes | none |
@@ -1533,3 +1533,22 @@ Two defects found, both outside the adapter contract and fixed/ticketed separate
 - **Red before green:** `pytest -v tests/test_install_cli.py -k "masscan_version_counts or nonzero_version_probe"` -> `1 failed, 1 passed` (`assert None == 'Masscan version 1.3.2 ( https://github.com/robertdavidgraham/masscan )'`). After the fix -> `2 passed in 0.20s`.
 - **Verified on the real binary, not only the fake runner:** `reconkit doctor` now prints `│ masscan │ ports │ opt_in │ yes │ Masscan │ /usr/bin… │ ok │` and no masscan warning.
 - **Not fixed (ticketed to Part 12):** the same function returns `text.splitlines()[0]`, so `katana` shows `__` and `nuclei` shows `[I…` in the version column, which also defeats `_same_version()` for update reporting. Recorded in PROGRESS Open risks.
+
+## Open-risk retry - OTX and HackerTarget (2026-11-14, one request each)
+
+- **Why:** the Part B audit left OTX's response shape and HackerTarget's quota text unobserved. The owner asked for one polite retry each, or to leave them named. Both were retried once, with the honest UA `reconkit/0.1`, no key.
+- **OTX:** still refused.
+  ```
+  $ curl -s -m 30 -A "reconkit/0.1" "https://otx.alienvault.com/api/v1/indicators/domain/example.com/passive_dns" -w "http=%{http_code} bytes=%{size_download}\n"
+  http=429 bytes=80
+  {"detail": "Anonymous access to this endpoint is limited. Please authenticate."}
+  ```
+  The exact 429 body is now known, but the `passive_dns` shape is still not observed from this box. No code reads the body: the HTTP adapter maps 429 to a `failed` result with the status and no retry, which the fixture tests pin. Open risk unchanged except that the refusal text is now recorded.
+- **HackerTarget:** succeeded, quota not hit, so the quota message is still unobserved.
+  ```
+  $ curl -s -m 30 -A "reconkit/0.1" "https://api.hackertarget.com/hostsearch/?q=example.com" -w "http=%{http_code} bytes=%{size_download}\n"
+  http=200 bytes=31
+  www.example.com,172.66.147.243
+  ```
+  The `host,ip` format is confirmed twice; the adapter's `api count exceeded` branch remains unexercised and is named in Open risks rather than guessed.
+- **Not done, deliberately:** no key was used, no rate-limit window was waited out, and nothing was installed to make a probe possible. `assetfinder`/`rustscan` and the Windows acceptance criteria remain named Open risks per the owner's ruling.
