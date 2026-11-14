@@ -228,16 +228,15 @@ PART 11: docs sync, README, final audit (commit `docs:`)
 =====================================================
 PART 12: evidence, secrets and loop hygiene (commit `fix:`/`docs:` per item)
 =====================================================
-Status: **PLANNED 2026-11-14, NOT STARTED.** This section was written at the
-owner's request after Part 11 and the two post-Part-11 fix sessions. It is a
-planning artifact: no `src/` or `tests/` change may start until the owner
-approves or amends this text. The owner may reorder, drop or re-scope any item;
-nothing here is a licence to implement an item the owner has not approved.
+Status: **PLANNED 2026-11-14, RULINGS RECORDED, NO ITEM STARTED.** The owner
+approved this section and ruled on its seven decision items on 2026-11-14 (each
+item now carries a `DECIDED` line); implementation starts with 12a and is not
+part of this commit. The owner may still reorder, drop or re-scope any item.
 
-Goal: close the evidence and hygiene backlog that Part 11 deferred, and settle
-the three product questions that block a ports-stage capability (12i) and the
-exit-code semantics of an empty stage (12k). Every item already has a written
-ticket in `docs/PROGRESS.md` ("Open risks", "11c consolidated findings",
+Goal: close the evidence and hygiene backlog that Part 11 deferred, and record
+the owner's rulings on the product questions around the ports-stage capability
+(12i) and the exit-code semantics of an empty stage (12k). Every item already
+has a written ticket in `docs/PROGRESS.md` ("Open risks", "11c consolidated findings",
 "11d-findings-*"); this part is the order in which they get fixed, plus the
 decisions that must be taken before any of that code is written.
 
@@ -252,17 +251,18 @@ exit codes), `docs/10_TOOL_INSTALLER.md` (section 5a - doctor/version display),
 audit", "Part 11 close-out - rulings", "Bug-fix session", "Rule decision - diff
 GONE needs two consecutive misses" and "Real-tool verification session 2".
 
-Order: decisions first (12i, 12a, 12c, 12d, 12f, 12g, 12k each need an owner
-ruling or a docs decision before their code), then the small code fixes
-(12e, 12j), then the two cross-cutting ones (12b, 12h). One item per commit;
-each item runs the full self-review loop (S1-S7) before the next starts. A
+Order: **12a first** (owner ruling 2026-11-14: raw-output-on-disk makes every
+later item easier to debug and verify), then the remaining items in the order
+the implementer chooses, respecting the dependency notes below (items that touch
+the same files). One item per commit; each item runs the full self-review loop
+(S1-S7) before the next starts, and the owner is told after each item. A
 renumbering is not allowed: reference these IDs in REVIEW_LOG.
 
 DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
-- 12i (ports capability) is a **decision item**, not a code item. Do not assume
-  either "fund the redesign" or "add a second adapter".
-- 12a, 12c, 12d, 12f, 12g and 12k each need one explicit choice recorded in
-  docs before code; the plan states the options and the recommended default.
+- 12i (ports capability) is **decided**: option (c), an accepted permanent
+  ceiling. Do not pursue (a) or (b).
+- 12a, 12c, 12d, 12f, 12g and 12k are **decided** by the owner on 2026-11-14;
+  their `DECIDED` lines are the specification for the code.
 - Assumed: no new dependencies (G3), no scope-bypass path, adapters stay free of
   store/scope/ui/cli imports, and a schema change means docs/04 plus a migration
   and a `schema_version` bump in the same commit.
@@ -276,13 +276,9 @@ DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
   3 promise a raw output file per tool. Every parse bug so far (pyprobe TLS,
   certspotter empties, HackerTarget quota) had to be reproduced with a scratch
   script because the run kept no bytes.
-  Decision needed: **wire it** (adapter contract returns raw text or a path, the
-  engine writes it through `Workspace.write` with redaction, `raw_path` set on
-  the result and printed/JSON-visible) **or delete the promise** (remove the
-  docs lines and the dead method). Recommended: wire it, because the code exists
-  and every real-tool session has wanted it. Decide what is stored: stdout only
-  or stdout+stderr, and whether a failed tool's output is written too (recommend
-  yes, capped by the existing `max_output_bytes`).
+  DECIDED (owner, 2026-11-14): **wire it.** Capture stdout+stderr for every
+  adapter run, including failed tools, write to the existing raw-output files,
+  capped by the existing `max_output_bytes` limit. No new flags, no new config.
   Size: cross-cutting - `models.ToolResult`, `adapters/base.py` (both base
   classes), the four python adapters, `engine._run_one`, `core/workspace.py`,
   docs/03, and `ui` only if `raw_path` becomes visible.
@@ -322,9 +318,10 @@ DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
   `Engine._run_one` discards its own measurement on the success path. Observed
   again in session 2: `dnspython ok 36 0.0`, `pyprobe ok 8 0.0`, `otx failed 0.0`
   next to a real 429.
-  Decision needed: which measurement is authoritative. Recommended: the adapter
-  measures its own work and `_run_one` fills it only when the result did not
-  provide one, with docs/04 saying so for the column.
+  DECIDED (owner, 2026-11-14): the adapter measures its own work and reports
+  `duration_s` when it can; `_run_one` only fills in a measured value when the
+  adapter did not provide one. Adapter-reported time takes priority over
+  harness-measured time.
   Size: small - `adapters/base.py`, `adapters/dnspython.py`,
   `engine._run_one`, docs/04.
   Tests: a 429 stores `> 0`; a parse error stores `> 0`; a successful
@@ -342,11 +339,9 @@ DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
   "expired certificate / untrusted CA / handshake rejected / incomplete CA
   store" cannot be told apart without probing again. The TLS text is classified
   by substring and discarded.
-  Decision needed: where the reason lives - a new `host_status_history` column
-  (docs/04 migration, redacted, bounded length) or a `tool_runs.detail` field
-  (docs/04, no new column on history). Recommended: a bounded, redacted detail
-  on the status row, because the reason belongs to the host state, not the tool
-  run. Decide whether it is shown in the human table or only in the DB/JSON.
+  DECIDED (owner, 2026-11-14): store a bounded, redacted detail string on
+  `host_status_history` (not a new field on `tool_runs`). Visible via `--json`
+  and direct DB query. Not required to show in the default human-readable table.
   Size: cross-cutting - `models.HostStatusRecord`, `pyprobe`, `engine`
   (`_persist`/`_write_host`), `store` (migration), docs/04, optionally `ui`.
   Tests: a TLS-only failure stores the reason; a plain connect failure stores
@@ -382,12 +377,9 @@ DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
   escaping exception could print a key if one ever appeared in an exception
   message. No reachable leak has been demonstrated (keys travel in headers, not
   URLs).
-  Decision needed (architecture, docs/03): give the CLI a redaction source
-  (constructor-injected secrets, or an engine/`ui` redaction call) or make the
-  CLI a pass-through that can never format exception text except through
-  `redact()`. Recommended: a small `configure_redaction()` set by the CLI from
-  the same env it already loads, applied in `_report_error` and the `-v`
-  traceback.
+  DECIDED (owner, 2026-11-14): add `configure_redaction()`, sourced from the
+  already-loaded env (same source as existing redaction config), applied in both
+  the `_report_error` path and the `-v` traceback path. No new env vars invented.
   Size: small code, but it is an architecture decision; touches `cli.py`,
   `core/store.redact` (or a new helper in an existing module - no new file),
   docs/03 and docs/05.
@@ -403,12 +395,9 @@ DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
   What: the adapter writes `provider-config.yaml` with `mkstemp` in the system
   temp dir (0600) and deletes it in `finally`; a `SIGKILL` in between leaves a
   key file. `finally` is the mitigation today.
-  Decision needed (docs/09): choose a SIGKILL-resistant shape - an anonymous
-  `memfd`/`O_TMPFILE` file passed via `/proc/self/fd` (Linux-only, needs a
-  documented fallback), a per-run 0700 directory that a later run cleans up, or
-  accept the risk with the current text and a doctor warning. Recommended: the
-  per-run 0700 directory with startup cleanup, because it works on both
-  platforms and is testable without root.
+  DECIDED (owner, 2026-11-14): per-run directory created with mode 0700, plus
+  startup cleanup of stale directories from prior killed runs. Do not use
+  memfd/O_TMPFILE. Do not accept-the-risk.
   Size: small (one adapter + docs/09 + a cleanup step), no schema change.
   Tests: a run leaves no provider file; a stale file from a previous run is
   removed on the next start; Windows path behaves as documented; the file is
@@ -437,23 +426,16 @@ DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
   Mutation targets: move the transaction back onto the loop (ordering test must
   catch it) - or, if the transaction stays, remove the documented reason.
 
-12i. Ports capability: `naabu` is permanently blocked and confidence cannot pass LOW (medium capability gap, DECISION ITEM, large)
+12i. Ports capability: `naabu` is permanently blocked and confidence cannot pass LOW (medium capability gap, DECIDED - accepted ceiling, docs only)
   What: `naabu` is skipped at selection time because it resolves hostnames
   inside its own process, so docs/05 rule 6 cannot filter the address it
   connects to; every other ports adapter except `pyscan` is phase 3 with no
   adapter. With one selectable tool, ports confidence can only ever be LOW, and
   the open/closed disagreement rule needs two scanners.
-  **This is a decision item. Do not assume an answer.** Options: (a) fund the
-  pre-resolve redesign - the engine resolves, applies `ip_allowed`, and passes
-  `naabu` explicit IPs, which changes what `PortRecord.fqdn` means for every
-  consumer and needs a re-verification of naabu's real output; (b) add a second
-  port adapter (`nmap`, `rustscan` or `smap` are already in `tools.yaml` as
-  phase 3, so this is implementation, not registry work); (c) leave ports as a
-  LOW-only, `pyscan`-only stage and document the ceiling as accepted for this
-  build. Owner must choose before any code. If (a): docs/05 rule 6 and docs/09
-  selection rules first, then a pre-resolve step, then adapter changes, then a
-  real run against an authorized target with `in_scope_cidrs` set. If (b):
-  docs/09 stage table first, then the adapter, then a real binary check.
+  DECIDED (owner, 2026-11-14): Option (c) - leave ports stage permanently
+  LOW-only / pyscan-only for this build. Do not pursue (a) pre-resolve redesign
+  or (b) a second IP-connecting adapter. This is accepted as a permanent
+  ceiling, not a temporary gap.
   Size: (a) large and cross-cutting; (b) one adapter; (c) docs only.
   Tests: (a) an IP outside `in_scope_cidrs` is never connected to by any port
   adapter and the hostname is never re-resolved inside the child (must be
@@ -487,11 +469,9 @@ DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
   run's exit code. Session 2: `tech`/`urls`/`vulns` ran zero tools, `scan_runs`
   says `completed`, and exit 5 came from `otx` + `hackertarget`; a clean passive
   stage in the same shape would exit 0.
-  Decision needed (docs/02): does a requested stage with zero executed tools
-  make the run partial (5), keep today's behaviour (0/4 per stage), or emit a
-  warning and stay 0? Recommended: exit 5 with a warning naming the stage, since
-  the user requested work that no tool performed; the alternative is a warning
-  only, to avoid failing a run for a build gap.
+  DECIDED (owner, 2026-11-14): exit 5, with a warning that names the empty stage
+  explicitly. Not silent 0, not the existing exit 4, not warning-only with exit
+  0.
   Size: small - `engine._exit_code`, `ScanSummary.warnings`, docs/02 section 6.
   Tests: `run --active` with only passive adapters installed and a clean passive
   stage exits per the ruling and names the empty stages; a stage with a failed
