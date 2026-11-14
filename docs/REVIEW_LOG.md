@@ -53,6 +53,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-38 | A stage whose whole pool had no adapter reported `results: []` and `tools_skipped: 0`, indistinguishable from "ran and found nothing" | The summary counted only executed `ToolResult`s and `StageOutcome` dropped the selection-time skip list | Selection-time skips belong to the stage outcome and the totals (`stages[].skipped`, `summary.tools_skipped`), not only to `tool_runs` | `test_a_stage_with_no_adapter_reports_its_skips` |
 
 | PIT-39 | `diff` reported 27 hosts as `GONE` after a single flaky discovery run (`subfinder` 35 names, then 8), none of them re-probed | `diff_gone` compared one run against the next and treated any absence as a removal, so passive-source variance became infrastructure change | `GONE` requires two consecutive misses plus a sighting in the run before them; a single miss is `pending_gone`, never a change; fewer than three discovery runs confirm nothing | `test_regression_diff_gone_needs_two_consecutive_misses`, `test_diff_gone_needs_the_miss_to_be_consecutive`, `test_diff_gone_needs_the_baseline_run_not_just_two_empty_ones`, `test_diff_gone_is_not_confirmed_when_the_host_reappears`, `test_diff_with_two_runs_reports_pending_and_no_gone` |
+| PIT-40 | A requested stage whose whole pool was skipped at selection (`tech`/`urls`/`vulns` with no adapter) was recorded `completed` and contributed nothing to the exit code, so a clean run looked fully successful while three requested stages did nothing (session 2) | `_exit_code()` looked only at selected/failed totals; the selection-time skips PIT-38 exposed in `StageOutcome` were never consumed by the exit decision, so "built nothing" and "succeeded" were the same code | A requested stage that executed zero tools adds one warning naming it and makes the run partial (5); precedence 3 > 4 > 5 > 0, an all-empty run stays 4, `--tools`-filtered and no-host stages are not empty (docs/02 section 6) | `test_an_empty_stage_warns_by_name_and_makes_the_run_partial` (`Regression: PIT-40`), `test_one_empty_stage_plus_a_tool_failure_stays_partial`, `test_every_requested_stage_empty_is_no_tool_not_partial` |
 
 
 ## Commit map
@@ -1993,16 +1994,18 @@ duration_s: 0.0
 - **Requirement -> test table:**
   | Requirement (12k `DECIDED` / owner instructions) | Test |
   |---|---|
-  | a stage with zero executed tools causes exit 5 **and** a warning naming that stage | `test_an_empty_stage_warns_by_name_and_makes_the_run_partial` (asserts `"tech" in` the note and the skipped tool/reason) |
+  | a stage with zero executed tools causes exit 5 **and** a warning naming that stage | `test_an_empty_stage_warns_by_name_and_makes_the_run_partial` (`Regression: PIT-40`; asserts `"tech" in` the note and the skipped tool/reason) |
   | a stage with executed tools that all failed keeps its previous code (regression) | `test_exit_code_all_tools_failed_is_no_tool` (existing, still 4), `test_all_tools_failed_still_outranks_an_empty_stage` |
   | a run where every requested stage is empty follows the documented decision | `test_every_requested_stage_empty_is_no_tool_not_partial` (4, two warnings) |
   | one empty stage + a real tool failure is still 5 and both warnings survive | `test_empty_stages_and_a_partial_failure_together_are_still_partial` (two empty stages + a failed tool -> 5, both names) |
+  | exactly one empty stage next to exactly one failed tool is still 5, the failure stays visible and the warning names the empty stage | `test_one_empty_stage_plus_a_tool_failure_stays_partial` |
   | a clean run with no empty stages and no failures still exits 0 | `test_two_stages_that_ran_tools_still_exit_zero`, `test_exit_code_clean_is_success` (existing) |
   | the warning text names the stage | the core test and `test_every_requested_stage_empty_is_no_tool_not_partial` (set of names) |
   | both output surfaces carry the warning and the code | `test_an_empty_stage_warning_reaches_the_table_and_the_json` |
   | a `--tools`-filtered stage is not an empty stage | `test_a_stage_filtered_out_by_tools_is_not_an_empty_stage` (0, no warning, no outcome) |
   | a resumed run does not double-count completed stages | `test_a_resumed_run_does_not_warn_about_completed_stages` |
   | scope (3) outranks the empty-stage partial | `test_scope_denial_keeps_code_3_even_with_an_empty_stage` |
+- **PIT compliance (closed in a follow-up commit at the owner's request):** 12k is a bug fix, so it carries **PIT-40** in the Known pitfalls table (symptom, root cause, rule, guarding tests), and the guarding test's docstring starts `Regression: PIT-40` so R1/R2 hold. The row and the marker were added after the fix commit `c519bae` (the fix commit was made before this row existed, which is why it is called out here); the row's Guarding test column names all three empty-stage tests, and `test_one_empty_stage_plus_a_tool_failure_stays_partial` was added in the same follow-up to cover the owner's exact one-empty-plus-one-failure wording, with its own red run against `c519bae~1`.
 - **Red before green (raw):** tests written first, `engine.py` restored to HEAD (`git checkout -- src/reconkit/engine.py`), core test:
   ```
   >       assert summary.exit_code is ExitCode.PARTIAL
@@ -2037,7 +2040,7 @@ duration_s: 0.0
   --- mypy src/reconkit ---
   Success: no issues found in 36 source files
   ```
-  Suite 650 -> 659 (nine new: eight engine, one UI). Second pass and the pre-commit run match (see the chat report for the raw second-pass block).
+  Suite 650 -> 659 at the fix commit (eight engine, one UI); the PIT follow-up adds `test_one_empty_stage_plus_a_tool_failure_stays_partial`, so the tree now runs 660 with the four checks still clean (raw output in the follow-up chat report).
 - **End-to-end runs of the changed path:** `reconkit run -d example.com --mock --no-keys --db /tmp/12k.db` (passive-only command, both requested stages have adapters) -> exit 0, only the pre-existing scope warning, no empty-stage warning. `reconkit run -d testfire.net --mock --active --no-keys --db /tmp/12k2.db --speed slow --json` -> **exit 5**, `warnings` exactly `tech stage executed no tools: 5 tool(s) skipped (no adapter yet (phase 3))`, `urls ... 8 tool(s) ...`, `vulns ... 3 tool(s) ...`; the same command without `--json` printed the three `warning:` lines and exited 5. This is the ruling reproduced on the real CLI, both surfaces, no UI code change.
 - **Deviations / owner awareness:** the all-empty decision is **4, not 5**, documented in docs/02 section 6 and tested; `docs/03` and `docs/08` were touched in addition to the named docs/02 (both describe exit codes/warnings); the warning text format is new (`"<stage> stage executed no tools: N tool(s) skipped (<reasons>)"`) and is named in docs/02 so the wording is documented rather than incidental.
 - **Not verified:** no real (non-mock) run this session; Windows untested; no UI snapshot of a run where the only output is the empty-stage warning.

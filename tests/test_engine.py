@@ -1076,7 +1076,7 @@ def empty_stage_warnings(summary: ScanSummary) -> list[str]:
 
 
 async def test_an_empty_stage_warns_by_name_and_makes_the_run_partial(tmp_path: Path) -> None:
-    """12k: a requested stage that executed zero tools is exit 5, never a silent 0."""
+    """Regression: PIT-40 - zero executed tools means exit 5 and a warning."""
     rec = Recorder()
     specs = {"alpha": tool("alpha", Stage.SUBS), "ghost": tool("ghost", Stage.TECH)}
     adapters = {"alpha": adapter("alpha", Stage.SUBS, rec, records=[sub("www.example.com")])}
@@ -1130,6 +1130,33 @@ async def test_empty_stages_and_a_partial_failure_together_are_still_partial(
     assert any(result.status is ToolStatus.FAILED for result in summary.results)
     notes = empty_stage_warnings(summary)
     assert {note.split(" ", 1)[0] for note in notes} == {"tech", "urls"}
+
+
+async def test_one_empty_stage_plus_a_tool_failure_stays_partial(tmp_path: Path) -> None:
+    """Exactly one empty stage next to one failed tool: still 5, and the warning names it.
+
+    Regression: PIT-40 - the two causes are independent, so neither may mask the other.
+    """
+    rec = Recorder()
+    specs = {
+        "alpha": tool("alpha", Stage.SUBS),
+        "beta": tool("beta", Stage.SUBS),
+        "ghost": tool("ghost", Stage.TECH),
+    }
+    adapters = {
+        "alpha": adapter("alpha", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "beta": adapter("beta", Stage.SUBS, rec, error=RuntimeError("boom")),
+    }
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.TECH), mock=True)
+    )
+
+    assert summary.exit_code is ExitCode.PARTIAL
+    failed = [result.tool for result in summary.results if result.status is ToolStatus.FAILED]
+    assert failed == ["beta"]
+    notes = empty_stage_warnings(summary)
+    assert len(notes) == 1
+    assert notes[0].startswith("tech ")
 
 
 async def test_all_tools_failed_still_outranks_an_empty_stage(tmp_path: Path) -> None:
