@@ -208,6 +208,8 @@ class BinaryAdapter(BaseToolAdapter):
     binary: ClassVar[str] = ""
     version_args: ClassVar[list[str]] = ["-version"]
     identity_markers: ClassVar[tuple[str, ...]] = ()
+    # Every marker must appear unless an adapter opts out (docs/09 contract).
+    identity_require_all: ClassVar[bool] = True
     needs_home: ClassVar[bool] = False
 
     def __init__(self, *, finder: Finder | None = None, fixtures_dir: Path | None = None) -> None:
@@ -252,8 +254,11 @@ class BinaryAdapter(BaseToolAdapter):
         if outcome.timed_out or outcome.returncode is None:
             return InstallStatus(installed=False, path=Path(path))
         lowered = text.lower()
-        if self.identity_markers and not any(marker in lowered for marker in self.identity_markers):
-            return InstallStatus(installed=False, path=Path(path))
+        if self.identity_markers:
+            matched = [marker in lowered for marker in self.identity_markers]
+            passed = all(matched) if self.identity_require_all else any(matched)
+            if not passed:
+                return InstallStatus(installed=False, path=Path(path))
         match = _VERSION.search(text)
         return InstallStatus(
             installed=True,

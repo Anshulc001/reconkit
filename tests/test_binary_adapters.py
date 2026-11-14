@@ -202,6 +202,52 @@ def test_assetfinder_usage_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     assert status.installed is True
 
 
+@pytest.mark.parametrize(
+    "banner",
+    [
+        "projectdiscovery.io\n",
+        "[INF] Current Version: v1.0.0\n",
+    ],
+)
+@pytest.mark.parametrize("cls", [HttpxAdapter, NaabuAdapter])
+def test_projectdiscovery_identity_requires_every_marker(
+    monkeypatch: pytest.MonkeyPatch, cls: type[BinaryAdapter], banner: str
+) -> None:
+    """One marker alone is not identity (docs/09: every marker must appear).
+
+    Both banners are printed by other ProjectDiscovery tools too, so accepting
+    either one alone is how the namesake check decays into a version-string
+    check. Fix the marker list, never this assertion.
+    """
+    fake_exec(monkeypatch, outcome(banner))
+    status = cls(finder=lambda _name: f"/usr/bin/{cls.binary}").check_installed()
+    assert status.installed is False
+    assert status.path is not None
+
+
+def test_naabu_identity_accepts_real_version_banner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The positive path had no test at all before identity became strict."""
+    fake_exec(monkeypatch, outcome("projectdiscovery.io\n\n[INF] Current Version: 2.7.0\n"))
+    status = NaabuAdapter(finder=lambda _name: "/usr/bin/naabu").check_installed()
+    assert status.installed is True
+    assert status.version == "2.7.0"
+
+
+def test_subfinder_identity_accepts_pre_264_version_only_banner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: subfinder < v2.6.4 prints no name-bearing line.
+
+    Upstream commit c175790 (2023-10-30) added "Subfinder Config Directory" to
+    -version; the first release containing it is v2.6.4. Requiring every marker
+    would make a working v2.6.3 install invisible to doctor and scans.
+    """
+    fake_exec(monkeypatch, outcome("[INF] Current Version: v2.6.3\n"))
+    status = SubfinderAdapter(finder=lambda _name: "/usr/bin/subfinder").check_installed()
+    assert status.installed is True
+    assert status.version == "v2.6.3"
+
+
 def test_identity_runner_error_is_not_installed(monkeypatch: pytest.MonkeyPatch) -> None:
     def explode(*_args: object, **_kwargs: object) -> ExecResult:
         raise RuntimeError("pipes")

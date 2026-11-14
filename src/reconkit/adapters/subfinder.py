@@ -34,6 +34,12 @@ class SubfinderAdapter(BinaryAdapter):
     binary = "subfinder"
     version_args = ["-version"]
     identity_markers = ("current version", "subfinder")
+    # subfinder < v2.6.4 prints only "[INF] Current Version: vX.Y.Z" and never
+    # names itself (upstream commit c1757901af2fa61c4deb805e17a3e5b9aa7bd5d5,
+    # 2023-10-30; first released in v2.6.4). Requiring both markers would report
+    # a working pre-2024 install as "not installed", so this adapter keeps
+    # any-match; the binary is already identified by its filename.
+    identity_require_all = False
     needs_home = True
 
     def __init__(self, *, finder: Finder | None = None, fixtures_dir: Path | None = None) -> None:
