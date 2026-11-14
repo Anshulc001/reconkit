@@ -2,16 +2,20 @@
 
 ## RESUME HERE
 
-- Status: Part 11 IN PROGRESS. 11b (docs/01-10 sync) is done and logged in REVIEW_LOG; 11a (README/SETUP rewrite) is CLOSED in `cc70b15` and was unlogged until the Part 11 findings backfill entry; the wildcard filter is wired (docs `581a556` + code `1dd63e5`). Still open before Part 11 can close: the 11c fresh-eyes audit has NOT been performed (no `src/` pass, and no REVIEW_LOG entry until the backfill), the ten S3 scans have not been re-run, 11c-bis ran on 2026-11-14: help, doctor and the mock scan passed and the suite also passes in the same fresh venv (585), with two low tickets opened (11c-bis-1, 11c-bis-2). The 11f final report is unwritten. Part 11 cannot close without a real authorized-target run on Kali. Part 10 was CLOSED on 2026-11-14. The sudo-authenticated apt path was proven live: after `sudo apt-get remove -y massdns`, `reconkit install --all --no-color` ran confirmation -> `sudo -n apt-get install -y massdns` -> binary-on-PATH -> version check and reported `installed`, and the idempotent re-run reports `massdns: already installed (1.1.0-0kali2)`. Windows refusal was covered by the existing tests.
-- PIT-32 (after Part 10f): an A/B test confirmed that `run_exec`'s `start_new_session=True` hid a valid `sudo -v` ticket from children (sudo `tty_tickets` is session-scoped). `runner.py` now keeps POSIX children in the parent's session and gives each its own process group (`start_new_session=is_windows`, `process_group=0` on POSIX), with two regression tests. This was the prerequisite for the live gate run.
+- Status: **PART 11 CLOSED (2026-11-14).** No part is in progress. **Part 12 is named in "Part 11 close-out rulings" but is NOT in `MASTER_PLAN.md`**; starting it is the owner's decision. Nothing is pushed: local `main` is ahead, `reconkit/main` is still `5fd1d9a`.
+- Close-out commits: `30c368e` (block IP-connecting adapters with a load-bearing test), `86022e7` (wire `in_scope_cidrs` into `pyscan`, keep `naabu` blocked, PIT-34), `18e7462` (G-3 passive warning, G-4 dead exit code, ruling for every open item).
+- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8): `597 passed`, `ruff check .` clean, `ruff format --check .` 68 files, `mypy src/reconkit` clean.
+- Verified this session: the docs/05 rule 6 IP check is enforced in `pyscan` (every resolved address filtered, `blocked=` counted, hostname fallback removed) with two mutation proofs; `naabu` is skipped at selection time with a stated reason; the out-of-scope passive warning prints once per run; `ExitCode` matches docs/02; the ten S3 scans re-ran in `grep` form (one justified exception, C-1); a real active `pyprobe` run against `testfire.net` executed exactly once (exit 0, `UNKNOWN`, root-caused to a discarded TLS `ConnectError`).
+- NOT verified, by environment: no real installed binary was executed (7 tools missing, `masscan` resolves to the wrong program, no libpcap, no API keys), so `live`/`ports`/`tech`/`urls`/`vulns` have never run with real tools; the `killpg` path and Windows `Popen` arguments remain unverified. Owner commands are in "Kali verification commands" below.
+- Open items are **ruled, not silent**: 11d-findings-b/f/g, G-1, C-1, C-2 and E-1..E-3 are deferred to Part 12 with reasons in the ruling table; `naabu` stays unavailable until a pre-resolve design exists.
+- PIT-32 (after Part 10f): `run_exec` keeps POSIX children in the parent's session with their own process group (`start_new_session=is_windows`, `process_group=0`), so a cached `sudo -v` ticket is visible; two regression tests.
 - Deferred by ruling (not Part 10 blockers): `update` idempotency for `@latest` go_install tools (reporting gap, binaries byte-identical; needs a new version-probe mechanism and its own docs-first pass, docs/10 section 6) and authenticated GitHub release lookups (a Part 11 planning decision).
-- Last code commit: run `git log --oneline -1`
-- Baseline: 585 passed, 0 skipped on Linux (Python 3.14.8 here); ruff, ruff format and mypy clean
-- Next action: 11c fresh-eyes audit of `src/` -> re-run the ten S3 scans -> 11c-bis fresh-venv `--mock` run -> 11f final report. Part 11 cannot close without at least one real run against an authorized target on real Kali; mock-only is insufficient.
+- Last code commit: `18e7462` (`git log --oneline -1` confirms)
+- Next action: none inside Part 11. The 11f report was delivered in chat; the next part needs the owner's decision on Part 12.
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
-- Known open bugs: 11d-findings-**a, d and e are fixed** 2026-11-14 (a: consensus clobber; d: docs wording only; e: binary adapters launched a bare `argv[0]`); 11d-findings-b and 11d-findings-c remain open with scoped tickets. (a) no longer blocks a `live`/`ports`/`--active` run, but none has been run yet.
-- 11c audit question (open, named, not investigated): does any escaping exception reaching `cli.py:226` carry a secret into unredacted terminal output, given keys travel in headers and not URLs? `cli.py` imports no `redact`/`_secrets`, and that branch formats its message from raw `str(exc)`. Raised by the 2026-11-14 S3-8 scan; the other eight broad-`except` sites are justified in REVIEW_LOG.
+- Known open bugs, all ruled (none blocking): 11d-findings-**a, d and e are fixed** 2026-11-14; **b, c, f, g are deferred to Part 12**, as are G-1, C-1, C-2 and E-1..E-3. G-3 and G-4 are closed here. Nothing sits as "ticketed, no code" any more.
+- 11c audit question C-1 (now ruled, deferred to Part 12): does an escaping exception reaching `cli.py:226` carry a secret into unredacted output, given keys travel in headers, not URLs? No reachable leak has been shown; the other eight broad-`except` sites are justified in REVIEW_LOG.
 - Read first: AGENTS.md, this block, last 3 REVIEW_LOG entries, current part in docs/MASTER_PLAN.md
 
 Read this after `AGENTS.md`, before touching code. Update it in every commit.
@@ -305,6 +309,7 @@ Part 11 cannot close with items merely ticketed, so every open 11c/11d item now 
 | Item | Ruling |
 |---|---|
 | 11d-findings-b | deferred to Part 12; the product decision is made now (keep the dns-only row, mark its provenance `dns`, exclude it from `diff_new` and discovery counts) |
+| 11d-findings-c | deferred to Part 12: three writers disagree on `duration_s`, so the fix needs a decision on which measurement is authoritative (docs/04 records it per column) |
 | 11d-findings-f | deferred to Part 12 (UNKNOWN carries no cause) |
 | 11d-findings-g | deferred to Part 12 (inconclusive pass writes no history row) |
 | G-1 | deferred to Part 12: needs an adapter-contract change (raw text per adapter, `raw_path` set, one write per tool), not a Part 11 edit |
@@ -313,6 +318,30 @@ Part 11 cannot close with items merely ticketed, so every open 11c/11d item now 
 | C-1 | deferred to Part 12: the fix needs a secret source in the CLI layer, which is an architecture decision (docs/03), and no reachable leak has been shown |
 | C-2 | deferred to Part 12: a SIGKILL-safe provider file needs its own design; 0600 + `finally` remains the mitigation |
 | E-1, E-2, E-3 | deferred to Part 12: moving the SQLite transaction, the scope read and the workspace mkdir off the event loop is a concurrency refactor with ordering risk, and none causes a wrong result |
+
+### Kali verification commands (11e, for the owner)
+
+Run these in `/home/kali/Desktop/reconkit` with `.venv` active. They are the checks this session could not perform; nothing here is a claim that they passed.
+
+```bash
+cd /home/kali/Desktop/reconkit && source .venv/bin/activate
+python --version                          # expect 3.11+
+reconkit doctor                           # baseline: 7 missing, masscan "wrong program"
+reconkit install --all --no-color         # needs sudo for apt; installs the registry tools
+reconkit doctor --json | python -m json.tool   # every tool ready; Keys rows reflect your .env
+
+# Real active run. Fill in_scope_cidrs in scope.yaml first, or pyscan will
+# (correctly) block every host:
+reconkit run -d <authorized-host> --active --speed slow --tools pyprobe,pyscan --db /tmp/verify.db -v
+#   expect: pyprobe rows from real HTTP/TLS; pyscan rows only for addresses inside
+#   in_scope_cidrs; with no CIDRs, a pyscan row reading blocked=<n> and no ports.
+#   naabu must appear as skipped: "blocked: resolves inside the binary, so
+#   in_scope_cidrs cannot be enforced (11c-G-7)".
+
+# killpg / Ctrl+C path (PIT-32, still UNTESTED on a real signal):
+reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/verify.db -v &
+# then Ctrl+C, and check `ps -ef | grep httpx` for an orphan process group
+```
 
 ## Wildcard filter wiring (2026-11-14)
 

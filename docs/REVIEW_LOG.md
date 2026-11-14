@@ -1222,6 +1222,7 @@ Every restore below was checked with `sha256sum`; the digests before and after e
 | Item | Ruling | Why | What a fix needs |
 |---|---|---|---|
 | 11d-findings-b | **deferred to Part 12**, product decision made now | no traffic or scope impact, but the choice changes inventory semantics and `diff_new` | decision: keep the dns-only row, mark provenance `dns`, exclude from `diff_new` and discovery counts; then `_persist_dns` / `_previous_facts`, docs/04 section 5, migration if a column is added |
+| 11d-findings-c | **deferred to Part 12** | metadata only: three writers disagree (`HttpAdapter` omits `duration_s` on two branches, `DnsPythonAdapter` never sets it, `_run_one` discards its own measurement on success), so the fix starts with which measurement is authoritative | decide adapter-measured vs engine-measured (docs/04 states it for the column), then fill all three sites, then test a 429, a parse error and a successful DNS run each store `> 0` |
 | G-1 | **deferred to Part 12** | docs/03 promises raw output files; writing them needs per-adapter raw text, so it is an adapter-contract change, not a one-line call to `Workspace.write` | a `raw_path` per result, one write per adapter branch, redaction before write (PIT-22), tests per adapter |
 | G-3 | **fixed now** | one caller away from the documented behaviour; no design decision needed | `Engine._note_passive_warning` calls `scope.passive_warning()` for a non-active run and splits/strips the `warning:` prefix so the UI does not print it twice |
 | G-4 | **closed, not a defect** | docs/02 section 6 gives code 6 to install/update only, so a scan whose tools all failed returning 4 is correct; the member was dead weight that implied a scan outcome | removed `ExitCode.ALL_FAILED`; the enum test now pins the scan set {0,1,2,3,4,5,130}. The installer's numeric 6 is untouched |
@@ -1239,3 +1240,112 @@ Every restore below was checked with `sha256sum`; the digests before and after e
 - **Tests:** `test_passive_run_outside_scope_warns` (outside target warns with both lines; in-scope target warns nothing) and the extended `test_exit_code_constants_match_docs`.
 - **Checks:** `pytest -q` -> `597 passed`; `ruff check .` -> `All checks passed!`; `ruff format --check .` -> `68 files already formatted`; `mypy src/reconkit` -> `Success: no issues found in 36 source files`.
 - **Decisions for user review:** (1) Part 12's name and scope are proposed here, not plan-approved; (2) `naabu` remains unavailable in this build (see the G-7 entry) - overrule if a pre-resolve design is preferred; (3) 11d-findings-b's product decision is mine under A1 (keep + label provenance) and can be overruled before implementation.
+
+## Part 11 close-out - fresh S3 scans (2026-11-14)
+
+- **Form, disclosed:** the plan lists PowerShell `Select-String`. This checkout is Kali (`/home/kali/Desktop/reconkit`), where `Get-ChildItem`/`Select-String` are unavailable, so the scans ran in `grep` form - the same substitution PIT-08 records ("`Select-String` in PowerShell, `grep` in Git Bash"). Each command and its raw output is below, run at `18e7462` with a clean tree.
+
+```
+$ grep -rn --include=*.py -E '\bassert\b' src/
+exit=1
+$ grep -rn --include=*.py -E 'shell\s*=\s*True' src/
+exit=1
+$ grep -rn --include=*.py -E 'TODO|FIXME|XXX|HACK' src/
+exit=1
+```
+
+- S3-1, S3-2, S3-3: no hits (`exit=1` is grep's "no match"). No `assert` in `src/`, no `shell=True`, no TODO markers.
+
+```
+$ grep -rn --include=*.py -E 'print\(' src/
+src/reconkit/ui.py:208:    console.print(Text(message, style="yellow"))
+src/reconkit/ui.py:232:    target_console.print(Text(line), soft_wrap=True)
+src/reconkit/ui.py:256:        target.print(Text(hint, style="yellow"))
+src/reconkit/ui.py:268:    target.print(Text(message))
+src/reconkit/ui.py:275:    target.print(Text(message, style="red"))
+src/reconkit/ui.py:320:        target.print(Text("No completed discovery run for this target.", style="yellow"))
+src/reconkit/ui.py:323:        target.print(
+src/reconkit/ui.py:335:    target.print(Text(f"No changes since run #{report.previous_run_id}."))
+src/reconkit/ui.py:351:    target.print(table)
+src/reconkit/ui.py:399:        target.print(Text("No runs yet.", style="yellow"))
+src/reconkit/ui.py:419:    target.print(table)
+src/reconkit/ui.py:447:            target.print(_host_table(rows))
+src/reconkit/ui.py:449:            target.print(Text("No hosts found.", style="yellow"))
+src/reconkit/ui.py:451:            target.print(_tool_table(summary))
+src/reconkit/ui.py:461:        target.print(Text(summary_line))
+src/reconkit/ui.py:463:        target.print(Text(f"warning: {warning}", style="yellow"))
+src/reconkit/ui.py:551:    out.print(table)
+src/reconkit/ui.py:552:    out.print(
+src/reconkit/ui.py:561:    out.print(
+src/reconkit/ui.py:573:    out.print(Text(environment), soft_wrap=True)
+src/reconkit/ui.py:589:        out.print(keys)
+src/reconkit/ui.py:591:        out.print(
+src/reconkit/ui.py:595:        out.print(Text(f"warning: {warning}", style="yellow"))
+src/reconkit/ui.py:640:    target.print(table)
+src/reconkit/ui.py:660:    target.print(table)
+```
+
+- S3-4: 25 hits, all in `ui.py`, the single rendering module. No `print(` anywhere else in `src/`.
+
+```
+$ grep -rn --include=*.py 'subprocess' src/
+src/reconkit/core/runner.py:1:"""The only subprocess entry point: argv lists, timeouts, process groups."""
+src/reconkit/core/runner.py:8:import subprocess
+src/reconkit/core/runner.py:105:        process = subprocess.Popen(
+src/reconkit/core/runner.py:107:            stdin=subprocess.DEVNULL,
+src/reconkit/core/runner.py:108:            stdout=subprocess.PIPE,
+src/reconkit/core/runner.py:109:            stderr=subprocess.PIPE,
+src/reconkit/core/runner.py:132:        raise RuntimeError("subprocess pipes were not created")
+src/reconkit/core/runner.py:161:    except subprocess.TimeoutExpired:
+src/reconkit/core/runner.py:191:def _kill_tree(process: subprocess.Popen[bytes]) -> None:
+src/reconkit/adapters/base.py:3:Adapters return data only: no database, scope gate, UI or subprocess of their
+$ grep -rn --include=*.py 'sqlite3' src/
+src/reconkit/core/store.py:3:Only this module imports sqlite3. It stores and queries; the engine decides
+src/reconkit/core/store.py:11:import sqlite3
+src/reconkit/core/store.py:206:        self._conn = sqlite3.connect(str(self.path))
+src/reconkit/core/store.py:207:        self._conn.row_factory = sqlite3.Row
+```
+
+- S3-5: only `runner.py` imports and uses `subprocess`; the `base.py` hit is prose in the module docstring stating that adapters own no subprocess. S3-6: only `store.py` mentions `sqlite3` (its own docstring plus the import and connection).
+
+```
+$ grep -rn --include=*.py 'os\.environ' src/
+src/reconkit/ui.py:145                                        # NO_COLOR (docs/02 color rule)
+src/reconkit/installer/go_install.py:22                       # PATH for the child env
+src/reconkit/installer/pipx.py:31                             # PATH for the child env
+src/reconkit/installer/github_release.py:537                  # HOME + PATH for the authenticated lookup
+```
+
+- S3-7: four hits, each justified in place: `NO_COLOR` is a documented output rule; the other three are the installer's documented "child gets PATH (and HOME)" exception in docs/10 section 3d. No adapter reads `os.environ`; keys reach adapters through `ctx.env` only.
+
+```
+$ grep -rn --include=*.py -E 'except\s*:|except Exception|except BaseException' src/
+src/reconkit/core/store.py:214        # close the connection when migration fails, then re-raise
+src/reconkit/core/store.py:249        # rollback on any exception, then re-raise
+src/reconkit/core/workspace.py:135    # close fd / unlink the temp file on any exception, then re-raise
+src/reconkit/core/wildcard.py:90      # a failed probe is "cannot tell" (None), never NONE (PIT-21)
+src/reconkit/cli.py:226               # last-resort handler; the known C-1 question (unredacted str(exc))
+src/reconkit/engine.py:389            # close the store when Engine construction fails, then re-raise
+src/reconkit/engine.py:578            # mark the stage run "failed", then re-raise
+src/reconkit/engine.py:878            # adapter exception -> ToolResult(FAILED) with redacted text (PIT-16)
+src/reconkit/adapters/dnspython.py:130 # unexpected resolver error -> structured ERROR, never DEAD (PIT-01)
+```
+
+- S3-8: nine hits. Eight either re-raise immediately after cleanup or convert the failure into a structured result on purpose, with the in-code comment naming the reason. One remains the known C-1 item (`cli.py:226`), which is deferred to Part 12 by the ruling above, so this scan is "justified with one open ruling", not "clean".
+
+```
+$ grep -rn --include=*.py -E 'noqa|type:\s*ignore' src/ tests/
+tests/test_scope.py:266:        return {name.lower() for name in inspect.signature(func).parameters}  # type: ignore[call-overload]
+tests/test_runner.py:82:        run_exec("echo", timeout=1)  # type: ignore[arg-type]
+tests/test_runner.py:86:        run_exec([sys.executable, 1], timeout=1)  # type: ignore[list-item]
+```
+
+- S3-9: no `noqa` and no `type: ignore` in `src/`; the three test-only ignores are the Part 0 baseline (signature introspection and two deliberate bad-argument cases). No new suppression was added by this part.
+
+```
+$ grep -rn -E 'import (store|scope|ui|cli)|from reconkit\.(core\.store|core\.scope|ui|cli)' src/reconkit/adapters/
+exit=1
+```
+
+- S3-10: no adapter imports `store`, `scope`, `ui` or `cli`. The new `ip_allowed` field keeps that rule intact: the adapter receives a callable, it does not import the gate.
+- **What the scans cannot see:** they are pattern checks, not a review. The `docs/09` "exclude from counts" gap, the C-1 reachability question and the two new live-run findings are judgement calls, not pattern hits, and they are covered by the ruling table above.
