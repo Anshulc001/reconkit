@@ -24,8 +24,8 @@ Implemented in `core/scope.py`. Rules:
 
 - Default `--speed slow`. All network activity goes through the Pacer.
 - `--speed fast` on active stages requires typing `I AM AUTHORIZED`.
-- `opt_in` tools (nikto, masscan, ffuf, gowitness) run only with `--tools <name>` or `--include-noisy`. Their rates are hard-capped from config (`masscan_max_rate`, `nmap_timing`).
-- `intrusive` tier (Phase 3): requires `--intrusive`, `allow_intrusive: true` in scope, and a typed confirmation. Disabled until built.
+- `opt_in` tools (nikto, masscan, ffuf, gowitness) are Phase 3 adapters in this build; none is selectable yet. When built they run only with `--tools <name>` or `--include-noisy`, and their rates are hard-capped from config (`masscan_max_rate`, `nmap_timing`).
+- `intrusive` tier: not selectable in this build. There is no `--intrusive` flag; no adapter runs intrusive tools.
 - Our own requests use the honest User-Agent `reconkit/<version>`. No User-Agent or IP rotation.
 
 ## 4. Subprocess Safety
@@ -58,7 +58,7 @@ This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 fla
 1. **Free mode is the default.** Every `core` tool must produce useful results with zero keys. Enhanced mode turns on per tool as soon as that tool's key is set.
 2. **Keys come only from `.env`** (loaded at startup). Never from CLI flags, never logged, never in URLs or query strings; `redact()` covers them in errors, logs and `tool_runs.error`.
 3. **Only keys that are free to obtain are supported.** A tool whose only key is paid gets no key support at all (it runs free or is skipped).
-4. **`doctor` always shows a Keys table** (tool, set/missing, what it adds, sign-up URL). `--no-keys` forces free mode and ignores `.env` (flag list in `docs/02_CLI_UX.md`, implemented in task h). `install` on an interactive TTY asks once: "Free only, or add keys?". Choosing keys copies `.env.example` to `.env` (never overwrites) and prints the path plus the Keys table; when `.env` already exists it is kept, the message says so, and the table still prints. Declining the prompt prints nothing and leaves `.env` alone. If `.env.example` is missing, the message says nothing was copied, no table is printed, and no `.env` is created. With no TTY on stdin it never prompts and defaults to free (implemented in Part 10).
+4. **`doctor` always shows a Keys table** (tool, set/missing, what it adds, sign-up URL). On the scan commands, `--no-keys` forces free mode and ignores `.env` (flag list in `docs/02_CLI_UX.md`). `install` on an interactive TTY asks once: "Free only, or add keys?". Choosing keys copies `.env.example` to `.env` (never overwrites) and prints the path plus the Keys table; when `.env` already exists it is kept, the message says so, and the table still prints. Declining the prompt prints nothing and leaves `.env` alone. If `.env.example` is missing, the message says nothing was copied, no table is printed, and no `.env` is created. With no TTY on stdin it never prompts and defaults to free (implemented in Part 10).
 5. **`tools.yaml` schema:** an optional `keys:` list per tool, each entry `{env, url, adds}`. A tool without keys has no `keys` entry. `keys` is the single source of truth for a tool's key environment variables: there is no separate `needs_key` field, and `registry` rejects an entry that still carries one. Tools that read keys from their own config file (`subfinder` reads `$HOME/.config/subfinder/provider-config.yaml`) still list `keys`; the adapter writes the values from the allowed env names into a temporary provider-config file (mode 0600, deleted in a `finally` block) and never puts the value in argv or a log.
 
 ## 7. Environment Variables

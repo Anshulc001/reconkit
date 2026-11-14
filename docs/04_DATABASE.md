@@ -116,7 +116,7 @@ CREATE TABLE port_sources (
 );
 CREATE INDEX idx_port_sources_run ON port_sources(run_id);
 
-CREATE TABLE urls (                       -- Phase 3
+CREATE TABLE urls (                       -- created now; populated only by the Phase 3 urls stage
   id            INTEGER PRIMARY KEY,
   target_id     INTEGER NOT NULL REFERENCES targets(id),
   url           TEXT NOT NULL,
@@ -128,7 +128,7 @@ CREATE TABLE urls (                       -- Phase 3
   UNIQUE (target_id, url)
 );
 
-CREATE TABLE findings (                   -- Phase 3
+CREATE TABLE findings (                   -- Phase 3: not created in this build
   id            INTEGER PRIMARY KEY,
   target_id     INTEGER NOT NULL REFERENCES targets(id),
   subdomain_id  INTEGER REFERENCES subdomains(id),
@@ -142,7 +142,7 @@ CREATE TABLE findings (                   -- Phase 3
   last_seen_run  INTEGER NOT NULL REFERENCES scan_runs(id)
 );
 
-CREATE TABLE monitor_changes (            -- Phase 3
+CREATE TABLE monitor_changes (            -- Phase 3: not created in this build
   id         INTEGER PRIMARY KEY,
   target_id  INTEGER NOT NULL REFERENCES targets(id),
   run_id     INTEGER NOT NULL REFERENCES scan_runs(id),

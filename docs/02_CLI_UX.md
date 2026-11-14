@@ -18,7 +18,7 @@
 | Command | Purpose | Phase |
 |---|---|---|
 | `doctor [--fix]` | Tools, versions, system packages, API key names + Keys table, per-stage coverage | 2 |
-| `install [TOOL...\|--all] [--dry-run]` | Install missing tools into `~/.reconkit/bin`; interactive TTY asks once about API keys (docs/05 §6.1, task i) | 2 |
+| `install [TOOL...\|--all] [--dry-run]` | Install missing tools into `~/.reconkit/bin`; interactive TTY asks once about API keys (docs/05 §6.1) | 2 |
 | `update [TOOL...\|--all] [--dry-run]` | Update tools (and nuclei templates) | 2 |
 | `scope check -d DOMAIN` | Show whether a target is allowed by `scope.yaml` | 2 |
 | `scope import` | Build `scope.yaml` from a bug bounty program | 3 |
@@ -50,7 +50,7 @@
 | `db list\|export -d X [--new-only]` | **Phase 3 stub** in this build: exits 1 with a clear message; no data is read |
 | `export -d X --format json\|md\|html` | **Phase 3 stub** in this build: exits 1 with a clear message; no report is written |
 
-## 3. Global Flags
+## 3. Flags
 
 | Flag | Meaning |
 |---|---|
@@ -64,10 +64,12 @@
 | `--phase-timeout SEC` | Stage time limit. `--timeout-<stage>` is deferred; `--phase-timeout` is the only stage-timeout control in this build. |
 | `--mock` | Use fixtures instead of real tools/network |
 | `--resume` | Continue the latest unfinished run for the target; completed stages are not repeated |
-| `--no-keys` | Force free mode: ignore API keys from `.env` (task h; policy in docs/05 §6.1) |
+| `--no-keys` | Force free mode on the scan commands: ignore API keys from `.env` (policy in docs/05 §6.1) |
 | `--json` | One JSON document on stdout, no colors or progress |
 | `--no-color`, `-v/--verbose`, `-q/--silent` | Output control |
 | `--config PATH`, `--scope PATH`, `--db PATH` | Override file locations |
+
+`install` and `update` are the exception: their only options are `--all`, `--dry-run`, `--config` and `--no-color` (verified from `--help`). None of the target, pacing, key or JSON flags above apply to them.
 
 Not provided (by design): any flag that skips the scope gate.
 

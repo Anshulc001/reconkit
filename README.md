@@ -68,6 +68,9 @@ In Git Bash, use `./scripts/bootstrap.sh` and `source .venv/Scripts/activate` in
 | `doctor` | Tool, version, path, per-stage coverage, system packages, key names |
 | `install`, `update` | Install/update tools from `tools.yaml`; `--all` selects core tools |
 | `scope check -d X` | Show whether a target is allowed by `scope.yaml` |
+| `db list`, `db export` | **Phase 3 stub**: exits `1`; no data is read |
+| `export -d X --format json\|md\|html` | **Phase 3 stub**: exits `1`; no report is written |
+| `scope import` | **Phase 3 stub**: exits `1` |
 
 Scan flags include `--speed slow|normal|fast` (default `slow`), `--delay MIN-MAX`, `--tools`, `--exclude`, `--include-noisy`, `--min-sources`, `--phase-timeout`, `--mock`, `--resume`, `--no-keys`, `--json`, `--no-color`, `-q/--silent`, `-v/--verbose`, and `--config/--scope/--db`. `--json` is available on the scan commands, `doctor`, `diff` and `status`, not on `install`/`update` or the Phase 3 stubs. There is no flag that skips the scope gate.
 

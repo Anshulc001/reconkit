@@ -104,7 +104,8 @@
 - **Acceptance criteria:**
   - `diff` shows only new, gone, state-changed and port-changed items vs the previous run.
   - `status --json` reports phase, counts and elapsed time of running or finished scans.
-  - `export` writes json, md or html; `--json` works on every command.
+  - `db list`, `db export` and `export` are Phase 3 stubs in this build: they exit 1 and write nothing (docs/02).
+  - `--json` is supported on the scan commands, `doctor`, `diff` and `status`; it is not accepted by `install`, `update` or the stubs.
 
 ### Feature 9 - Workflows (`lite`, `run`)
 - `lite` = passive pipeline. `run` = passive, live, ports, then selected checks, with per-phase timeouts and resume of an interrupted run.
@@ -153,6 +154,8 @@
 No blocking product questions. Release asset names were verified against real releases during Part 10 (docs/10 §3c) and `nuclei` stays Phase 3. Which optional keys a user configures first remains a deployment preference, not a product decision; free mode needs none.
 
 ## 13. Definition of Done
+
+**This checklist is the full-product target.** The implemented Phase 2 subset is listed in §8 and tracked in `docs/PROGRESS.md`; the unchecked boxes below are not a statement that Phase 2 is unfinished.
 
 - [ ] Requirements implemented
 - [ ] Critical user flows (docs/08_UX_FLOWS.md) work

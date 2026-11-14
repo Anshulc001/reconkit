@@ -71,7 +71,7 @@ Expected: `admin.example.com` never probed; summary counts it as out of scope.
 
 **Flow: diff after second run**
 1. Run twice with fixtures A then B (B adds one host, removes one, one goes down)
-Expected: `[NEW]`, `[GONE]`, `[WENT DOWN]` shown correctly.
+Expected: `NEW`, `GONE` and `STATE` (`old -> new`) shown correctly; port changes use `PORT OPEN` / `PORT CLOSED`.
 
 **Flow: tool failure**
 1. One adapter fixture raises timeout
