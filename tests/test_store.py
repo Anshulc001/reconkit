@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from reconkit.core.store import SCHEMA_VERSION, Store, redact
+from reconkit.core.store import SCHEMA_VERSION, Store, configure_redaction, redact
 from reconkit.errors import ConfigError
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "reconkit"
@@ -583,6 +583,21 @@ def test_redact_cases(raw: str, expected: str) -> None:
 
 def test_redact_env_secret() -> None:
     assert redact("failed with sk-live-123", ["sk-live-123"]) == "failed with ***"
+
+
+def test_configure_redaction_replaces_values_and_ignores_short_ones() -> None:
+    """12f: one process-wide value set, replaced - never a growing second list."""
+    try:
+        configure_redaction(["first-value"])
+        assert redact("a first-value b") == "a *** b"
+        configure_redaction(["second-value", "xy"])
+        assert redact("a second-value xy") == "a *** xy"
+        assert redact("a first-value b") == "a first-value b"
+        # An explicit iterable still masks exactly that iterable, never the
+        # configured set, so engine/workspace callers keep their per-run values.
+        assert redact("a second-value b", ()) == "a second-value b"
+    finally:
+        configure_redaction(())
 
 
 def test_transaction_commits_once_and_rolls_back(store: Store) -> None:

@@ -182,11 +182,39 @@ def _mask_secret_flag(match: re.Match[str]) -> str:
     return f"{match.group(1)}{match.group(2)}{REDACTED}"
 
 
-def redact(text: str, secrets: Iterable[str] = ()) -> str:
-    """Mask credentials and secret values before text is stored (docs/04 section 10)."""
+def _secret_values(secrets: Iterable[str]) -> tuple[str, ...]:
+    """Deduplicate secret values, longest first, ignoring chips under 3 chars."""
+    return tuple(sorted({value for value in secrets if len(value) >= 3}, key=len, reverse=True))
+
+
+# The process-wide value set the CLI fills once at startup (docs/03 section 5).
+_configured_secrets: tuple[str, ...] = ()
+
+
+def configure_redaction(secrets: Iterable[str]) -> None:
+    """Replace the process-wide secret values `redact()` masks (docs/03 section 5).
+
+    The CLI calls this once, at startup, with the values from `.env` - the same
+    source that feeds `Engine._secrets` and therefore `Workspace.write` (12a).
+    It replaces the set instead of appending, so a second call cannot grow a
+    parallel list, and it adds no pattern list and no environment variable.
+    """
+    global _configured_secrets
+    _configured_secrets = _secret_values(secrets)
+
+
+def redact(text: str, secrets: Iterable[str] | None = None) -> str:
+    """Mask credentials and secret values before text is stored or printed.
+
+    `secrets=None` masks the process-wide values set by
+    `configure_redaction()` (the CLI console path). An explicit iterable, even
+    an empty one, masks exactly those values plus the shared patterns, so the
+    engine/workspace callers keep their per-run set (docs/04 section 10).
+    """
     result = text
-    for secret in sorted({value for value in secrets if len(value) >= 3}, key=len, reverse=True):
-        result = result.replace(secret, REDACTED)
+    values = _configured_secrets if secrets is None else _secret_values(secrets)
+    for value in values:
+        result = result.replace(value, REDACTED)
     result = _AUTH_HEADER.sub(lambda match: f"{match.group(1)}{match.group(2)}{REDACTED}", result)
     result = _COOKIE_HEADER.sub(lambda match: f"{match.group(1)}{match.group(2)}{REDACTED}", result)
     result = _BEARER.sub(f"Bearer {REDACTED}", result)

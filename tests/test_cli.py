@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,8 @@ from typer.main import get_command
 from typer.testing import CliRunner
 
 from reconkit.cli import app
+from reconkit.core.store import configure_redaction
+from reconkit.engine import Engine
 
 REPO = Path(__file__).resolve().parents[1]
 CLI = REPO / "src" / "reconkit" / "cli.py"
@@ -92,8 +95,22 @@ def test_cli_imports_only_the_allowed_layers() -> None:
     assert "reconkit.ui" in imported
     assert "reconkit.config" in imported
     assert "reconkit.core.scope" in imported
-    assert not any(name == "reconkit.core.store" for name in imported)
     assert not any(name.startswith("reconkit.adapters") for name in imported)
+
+    # 12f: the CLI imports the shared redaction helpers from core/store.py and
+    # nothing else from the persistence layer (docs/03 section 9). This is more
+    # precise than the old "no store import at all" rule, not weaker: `Store`
+    # and sqlite3 stay banned from the CLI.
+    store_names = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "reconkit.core.store"
+        for alias in node.names
+    }
+    assert store_names == {"configure_redaction", "redact"}
+    source = CLI.read_text(encoding="utf-8")
+    assert "Store(" not in source
+    assert "sqlite3" not in source
 
 
 def test_cli_never_reads_environment_keys() -> None:
@@ -405,3 +422,122 @@ def test_diff_and_status_after_two_mock_runs(tmp_path: Path) -> None:
     payload = json.loads(status.stdout)
     assert payload["type"] == "status"
     assert payload["runs"]
+
+
+# ------------------------------------------------------- 12f console redaction
+
+LEAK_VALUE = "sk-live-abc123"
+
+
+def _raise_unexpected(message: str):
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError(message)
+
+    return boom
+
+
+def _raise_chained(secret: str):
+    """The secret is only in the nested exception (`__cause__`)."""
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        try:
+            raise ValueError(f"inner {secret}")
+        except ValueError as exc:
+            raise RuntimeError("outer wrapper") from exc
+
+    return boom
+
+
+@pytest.fixture()
+def dotenv_secret(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Feed the CLI a fake `.env`, never the developer's real one."""
+    monkeypatch.setattr("reconkit.cli.dotenv_values", lambda: {"PROVIDER_API_KEY": LEAK_VALUE})
+    yield
+    configure_redaction(())
+
+
+def test_report_error_redacts_a_secret_in_the_message(
+    dotenv_secret: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config(tmp_path)
+    monkeypatch.setattr(Engine, "open", _raise_unexpected(f"boom {LEAK_VALUE}"))
+    result = CliRunner().invoke(app, scan_args(config))
+    assert result.exit_code == 1
+    assert LEAK_VALUE not in result.stderr
+    assert LEAK_VALUE not in result.stdout
+    assert "unexpected error: RuntimeError: boom ***" in result.stderr
+
+
+def test_verbose_traceback_redacts_the_same_secret(
+    dotenv_secret: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `-v` branch is a second code path: a traceback, not one line."""
+    config = make_config(tmp_path)
+    monkeypatch.setattr(Engine, "open", _raise_unexpected(f"boom {LEAK_VALUE}"))
+    result = CliRunner().invoke(app, [*scan_args(config), "-v"])
+    assert result.exit_code == 1
+    assert LEAK_VALUE not in result.stderr
+    assert LEAK_VALUE not in result.stdout
+    assert "Traceback (most recent call last)" in result.stderr
+    assert "boom ***" in result.stderr
+
+
+def test_report_error_leaves_a_message_without_a_secret_unchanged(
+    dotenv_secret: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config(tmp_path)
+    monkeypatch.setattr(Engine, "open", _raise_unexpected("boom without a key"))
+    result = CliRunner().invoke(app, scan_args(config))
+    assert result.exit_code == 1
+    assert "unexpected error: RuntimeError: boom without a key" in result.stderr
+    assert "***" not in result.stderr
+
+
+def test_verbose_traceback_redacts_a_secret_in_a_chained_exception(
+    dotenv_secret: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tracebacks print `__cause__` chains; the nested message is masked too."""
+    config = make_config(tmp_path)
+    monkeypatch.setattr(Engine, "open", _raise_chained(LEAK_VALUE))
+    result = CliRunner().invoke(app, [*scan_args(config), "-v"])
+    assert result.exit_code == 1
+    assert LEAK_VALUE not in result.stderr
+    assert "inner ***" in result.stderr
+    assert "ValueError: inner" in result.stderr
+
+
+def test_json_error_path_keeps_stdout_clean_and_redacts_stderr(
+    dotenv_secret: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config(tmp_path)
+    monkeypatch.setattr(Engine, "open", _raise_unexpected(f"boom {LEAK_VALUE}"))
+    result = CliRunner().invoke(app, [*scan_args(config, "passive", "--json")])
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert LEAK_VALUE not in result.stderr
+    assert "***" in result.stderr
+
+
+def test_console_redaction_uses_the_shared_patterns_without_a_dotenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `key=value` shape is masked by the pattern list alone (no configured key)."""
+    config = make_config(tmp_path)
+    monkeypatch.setattr("reconkit.cli.dotenv_values", lambda: {})
+    monkeypatch.setattr(Engine, "open", _raise_unexpected("api_key=abcd1234efgh"))
+    result = CliRunner().invoke(app, scan_args(config))
+    assert result.exit_code == 1
+    assert "api_key=***" in result.stderr
+    assert "abcd1234efgh" not in result.stderr
+
+
+def test_an_unreadable_dotenv_does_not_break_the_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def explode() -> dict[str, str]:
+        raise OSError(".env is a directory")
+
+    config = make_config(tmp_path)
+    monkeypatch.setattr("reconkit.cli.dotenv_values", explode)
+    result = CliRunner().invoke(app, scan_args(config))
+    assert result.exit_code == 0, result.stderr

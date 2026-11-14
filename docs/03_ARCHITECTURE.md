@@ -34,7 +34,7 @@ Adapters (per tool)    check_installed / build_command / run / parse_output -> n
 Core services          scope gate, runner (subprocess), pacer, store (SQLite), workspace, installer, doctor
 ```
 
-- **CLI:** no business logic. Validates input, calls the engine, prints results.
+- **CLI:** no business logic. Validates input, calls the engine, prints results. It configures console redaction once per process (`configure_redaction()` from `core/store.py`, seeded from `.env` the same way `Engine.open` loads it) and prints every error line through `redact()`, including the `-v` traceback (section 5, "Redaction API").
 - **Engine:** picks adapters for a stage, asks the Pacer when to start each, collects `ToolResult`s, merges and scores, writes through the store.
 - **Adapters:** know only one tool or source. They never touch the DB, the scope gate, or the UI.
 - **Core:** shared, tested utilities.
@@ -60,7 +60,7 @@ reconkit/
       runner.py       # run_exec(argv, timeout, ...) - the only subprocess entry
       pacing.py       # Pacer: delays, jitter, shuffling, parallel limits
       scope.py        # scope.yaml loader + gate
-      store.py        # SQLite access + diff queries
+      store.py        # SQLite access + diff queries + redact()/configure_redaction()
       workspace.py    # workspaces/<target>/... raw files
       wildcard.py     # wildcard DNS detection
     adapters/
@@ -107,7 +107,15 @@ workspaces/<domain>/
 - Active tools run only when `--active` is set **and** `require_active()` passes. Discovered hosts are revalidated and re-checked against scope before they reach an active `RunContext`; dropped hosts are reported, never probed. A missing/unsafe scope skips the active tools instead of raising out of the stage.
 - Each tool's `RunContext.env` contains only the env names in that tool's `keys` (none with `--no-keys`). One fresh `RateLimiter` is built per stage; `Pacer.reset()` runs at stage start; `slow` runs tools one at a time, other speeds use `pacer.parallel_limit()`.
 - `--mock` reads only the fixtures, never calls `check_installed()`, the network or a subprocess. Stage asset writes are batched with `store.transaction()`; tool runs are recorded individually.
+
 - `_run_one` writes the raw-output file for every executed tool, whatever its status: it takes the adapter's `ToolResult.raw_text` (docs/09 section 3), writes it through `Workspace.write` - redacted with the run's secrets, capped at `MAX_OUTPUT_BYTES`, into the stage's directory - and sets `raw_path` on the result only after the write returns. An empty capture still produces an empty file, so "one executed tool = one file" holds for a crash, a timeout and a quiet tool alike. A workspace write that raises (disk full, permissions, a rejected filename) is contained: the tool result and its `tool_runs` row are recorded unchanged and `raw_path` stays `None`. Raw capture is a diagnostic side channel; it never changes a status, an error or an exit code.
+
+### Redaction API (`core/store.py`)
+
+- There is exactly one redaction implementation: `core/store.py` owns `REDACTED`, the compiled pattern list (`Authorization`/`Cookie` headers, `Bearer`, URL credentials, secret-looking flags and `key=value` pairs) and `redact(text, secrets=None)`. `secrets=None` masks the process-wide values set by `configure_redaction()`; an explicit iterable (even `()`) masks exactly those values plus the same patterns. No module builds a second pattern list.
+- `configure_redaction(secrets)` **replaces** the process-wide secret value set (deduplicated, values shorter than three characters ignored, longest first). It replaces rather than appends, so a second call cannot grow a parallel list, and it invents no environment variable: its input is the `.env` value set the engine already uses.
+- **Startup order matters.** `Engine.open` loads `.env` (its `dotenv_values()` call) inside a command, which is too late for errors raised before it - `_targets()`, `load_config()` and the usage refusals all run first. The CLI therefore reads `.env` itself at the top of the Typer callback (`main`), with the same `dotenv_values()` call and no `os.environ` read, and calls `configure_redaction()` there. Click runs the callback before any subcommand body, so the values are set before `_report_error()` can fire; an unreadable `.env` is ignored here and left for the engine to report properly.
+- Both console error paths go through it: `_report_error()` formats `traceback.format_exc()` for `-v` and then prints `redact(message)`, and the non-verbose branch is the same call, so a chained exception (`__cause__`/`__context__`) is rendered into the string before redaction. `--json` does not move errors to stdout; the redacted message still goes to stderr.
 
 ## 6. Data Flow (example: `reconkit live -d example.com --active`)
 
@@ -165,6 +173,7 @@ workspaces/<domain>/
 - Adapters must not import `store`, `scope`, `ui`, or `cli`.
 - Only `core/runner.py` imports `subprocess`.
 - Only `core/store.py` imports `sqlite3`.
+- Redaction has one implementation and one value source (`core/store.py`). `cli.py` imports exactly the helpers `configure_redaction` and `redact` from `core.store` - never `Store`, never `sqlite3` - so console output and stored text are masked identically. A second pattern list or a second secret source is a bug.
 - Only `ui.py` prints to the terminal (adapters and engine return data or raise).
 - Registry (`tools.yaml`) is the only source of tool names, install sources and tiers.
 

@@ -50,6 +50,7 @@ Implemented in `core/scope.py`. Rules:
 - Keys come from environment or `.env` (loaded at startup). `.env.example` lists names only.
 - `doctor` shows key **names** and set/unset, never values (not even partial).
 - Redact secrets in logs, errors, stored `tool_runs.error` and every workspace file (`store.redact()` runs before the write).
+- **Console exception text gets the same guarantee as stored text.** `redact()` masks the message the last-resort error handler prints and the `-v` traceback, using the pattern list plus the values from `.env` seeded once at startup by `configure_redaction()` (docs/03 section 5, "Redaction API"). A chained exception (`__cause__`/`__context__`) is formatted into the traceback string before redaction, so a key in a nested exception is masked too; printed text is never held to a weaker standard than what is written to the DB or the workspace.
 
 ### 6.1 API Keys: Free Mode by Default
 
@@ -70,7 +71,7 @@ This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 fla
 ## 8. Logging
 
 - Never log: API keys, tokens, passwords, full webhook URLs, cookies.
-- This build has no file logger; diagnostics and tool status go to the console (Rich), with `-v`/`-q` controlling detail. A `workspaces/<target>/meta/reconkit.log` file is deferred; `meta/` currently holds run metadata and summaries only.
+- This build has no file logger; diagnostics and tool status go to the console (Rich), with `-v`/`-q` controlling detail. Console error text - including a `-v` traceback - passes through `store.redact()` before it is printed. A `workspaces/<target>/meta/reconkit.log` file is deferred; `meta/` currently holds run metadata and summaries only.
 
 ## 9. Data Protection
 

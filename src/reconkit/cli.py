@@ -12,10 +12,12 @@ from typing import Annotated
 
 import httpx
 import typer
+from dotenv import dotenv_values
 
 from reconkit.config import AppConfig, load_config
 from reconkit.core.runner import validate_target
 from reconkit.core.scope import check_target
+from reconkit.core.store import configure_redaction, redact
 from reconkit.doctor import collect_report, key_checks
 from reconkit.engine import Engine, ExitCode, ScanOptions
 from reconkit.errors import ConfigError, ScopeError
@@ -121,10 +123,30 @@ def _stages(command: str, active: bool) -> tuple[Stage, ...]:
     raise ConfigError(f"unknown command {command!r}")
 
 
+def _configure_redaction() -> None:
+    """Seed the shared redactor from `.env` before any command body runs (12f).
+
+    `Engine.open` loads the same file, but only inside the command, which is too
+    late for `_targets()`, `load_config()` and the usage refusals. Calling
+    `dotenv_values()` from this module resolves the same checkout-level `.env`
+    it resolves from `engine.py`, because python-dotenv searches from the calling
+    file and both modules live in `src/reconkit`; this is not a second source and
+    no process environment is read directly. An unreadable `.env` is ignored
+    here - the engine reports it properly when it loads it.
+    """
+    try:
+        values = dotenv_values()
+    except OSError:
+        return
+    configure_redaction(value for value in values.values() if value is not None)
+
+
 def _report_error(message: str, code: int, *, no_color: bool, verbose: bool = False) -> int:
     if verbose:
+        # A chained exception (`__cause__`/`__context__`) is rendered into this
+        # string before redaction, so a key in a nested message is masked too.
         message = traceback.format_exc()
-    render_error(message, no_color=no_color)
+    render_error(redact(message), no_color=no_color)
     return code
 
 
@@ -376,6 +398,9 @@ def main(
     scope_path: Annotated[Path | None, typer.Option("--scope", help="Scope file path.")] = None,
     db_path: Annotated[Path | None, typer.Option("--db", help="SQLite database path.")] = None,
 ) -> None:
+    # 12f: before any command body, because Engine.open loads `.env` too late
+    # for errors raised by _targets()/load_config()/the usage refusals.
+    _configure_redaction()
     if ctx.invoked_subcommand is not None:
         return
     raise typer.Exit(
