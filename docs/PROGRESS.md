@@ -219,7 +219,7 @@ Artifact checks (raw, from the file): `PRAGMA integrity_check` = `ok`; `PRAGMA f
 - **Still open, and re-observed in the new run** (so none was a one-off): (b) the apex row is created by the `dns` stage; (c) `otx` stores `duration_s=0.0` on 429 and `dnspython` `0.0` with 4 items; (d) `subfinder`/`assetfinder` still record `failed` with `not installed or not executable`. None of the three was changed by the fix.
 - **Reporting note.** Four queries in that session used column names guessed from memory (`stage_set`, `stage` on `tool_runs`, `items`, a nonexistent `meta` table) and failed; two of those failures were masked by a batched shell reporting the last command's exit status. Every number quoted in this entry comes from a query re-run with the real columns. The rule it broke is AGENTS.md's "field names from real `--help`/output, never memory". Separately, one reproduction command ran the real `subfinder` with `env={}`, and it created a `subfinder/` config directory in the repo root (the PIT-30 cwd fallback with no `HOME`); it was untracked, created by that command, and removed. The engine's own path is unaffected because `BinaryAdapter.child_env` supplies `HOME` for `needs_home` adapters.
 
-### 11d-findings-b (medium; open, ticket below) - the DNS stage creates subdomain rows
+### 11d-findings-b (medium; deferred to Part 12 by the close-out ruling) - the DNS stage creates subdomain rows
 
 - `_persist_dns` (engine.py 1015-1018) and `_previous_facts` (engine.py 1115-1122) both call `upsert_subdomain(target_id, host, run_id=run_id)` with no `confidence`/`source_count`, so a host with no row is INSERTed with the schema defaults (`source_count=0`, `confidence='LOW'`) and `first_seen_run=<dns run id>`.
 - Observed: the apex `testfire.net` has no `subdomain_sources` row in any run, `first_seen_run=2` (a `dns` run) and `source_count=1` (set afterwards by `_write_host`). The other three hosts point at `subs` runs.
@@ -287,6 +287,33 @@ Artifact checks (raw, from the file): `PRAGMA integrity_check` = `ok`; `PRAGMA f
 - No `src/` or `tests/` change in this entry; no `live`/`ports`/`--active` run until (a) is fixed, tested and committed. (a) has since been fixed in the block above; that run is still not done.
 - 11d-findings-d stays open pending the maintainer.
 
+### 11d-findings-f (new, 2026-11-14) - `pyprobe` discards the reason a host is UNKNOWN
+
+- The first real active run (`pyprobe`, testfire.net root, exit 0) stored `testfire.net UNKNOWN LOW`, and the DB cannot say why. `tool_runs` is `pyprobe|ok|1|0.0|NULL`; `host_status_history` has zero rows; `subdomains` carries only the schema defaults.
+- `pyprobe` produces an UNKNOWN record on exactly one live path: `httpx.ConnectError` whose message contains `ssl` or `certificate` (`_is_tls_error`). It classifies by substring and then discards `str(exc)`, and because the branch returns a record rather than `None`, `unreachable=` stays 0 and `ToolResult.error` stays `None`. No column, log line or result field carries the cause. The `duration_s=0.0` is the `ToolResult` default, not a measurement (the engine only fills it on timeout/exception), so it is not evidence of an instant failure either.
+- Consequence: "expired certificate / untrusted CA / handshake rejected / incomplete CA store" cannot be separated without probing again. Ruling: **deferred to Part 12**, with a diagnostic detail field for UNKNOWN records.
+
+### 11d-findings-g (new, 2026-11-14) - an inconclusive live pass persists no status row
+
+- `decide_host_state` sets `persist = previous is not None` for inconclusive evidence, and `Engine._persist` skips `_write_host` when `persist` is false. With no previous state (a first run), the pass writes no `host_status_history` row at all, so a run that did contact a host is indistinguishable in the DB from one that never did.
+- docs/04 section 5 says `host_status_history` gains one row per host per status pass, and writes an exemption only for the `dns` stage's SERVFAIL/timeout/no-answer/error. A live pass with inconclusive evidence has no documented exemption. Ruling: **deferred to Part 12** (persisting the UNKNOWN transition, or recording probe outcome per host, needs a docs/04 decision about state-change semantics first).
+
+## Part 11 close-out rulings (2026-11-14)
+
+Part 11 cannot close with items merely ticketed, so every open 11c/11d item now has an explicit ruling. Evidence and reasoning: REVIEW_LOG "Part 11 close-out - rulings". The named future part for everything deferred is **Part 12 - evidence, secrets and loop hygiene**; it is not in `MASTER_PLAN.md` yet, and adding it is the owner's call, not this session's.
+
+| Item | Ruling |
+|---|---|
+| 11d-findings-b | deferred to Part 12; the product decision is made now (keep the dns-only row, mark its provenance `dns`, exclude it from `diff_new` and discovery counts) |
+| 11d-findings-f | deferred to Part 12 (UNKNOWN carries no cause) |
+| 11d-findings-g | deferred to Part 12 (inconclusive pass writes no history row) |
+| G-1 | deferred to Part 12: needs an adapter-contract change (raw text per adapter, `raw_path` set, one write per tool), not a Part 11 edit |
+| G-3 | **fixed in this part** (`Engine._note_passive_warning`, docs/05 rule 1) |
+| G-4 | closed, not a defect: docs/02 assigns code 6 to install/update only, so `_exit_code` returning 4 is correct; the dead `ALL_FAILED` member is removed |
+| C-1 | deferred to Part 12: the fix needs a secret source in the CLI layer, which is an architecture decision (docs/03), and no reachable leak has been shown |
+| C-2 | deferred to Part 12: a SIGKILL-safe provider file needs its own design; 0600 + `finally` remains the mitigation |
+| E-1, E-2, E-3 | deferred to Part 12: moving the SQLite transaction, the scope read and the workspace mkdir off the event loop is a concurrency refactor with ordering risk, and none causes a wrong result |
+
 ## Wildcard filter wiring (2026-11-14)
 
 - Docs first: `581a556` states that `wildcard_check.enabled: false` skips the filter and that it never runs under `--mock`; the code commit follows it.
@@ -349,13 +376,13 @@ No open items from Part 9. Part 9 fixed the dangling-CNAME persistence gap with 
 | A-1 | high | `httpx_tool.py:48`, `naabu.py:41` launch bare `argv[0]`; child env has no `PATH` (`engine.py:867-870`, `base.py:213-219`), so `live`/`ports` fail while `doctor` says installed - 11d-e unfixed in two adapters | **fixed in this commit** |
 | G-1 | high | `Workspace.write` (`workspace.py:104`) has no callers and `raw_path` (`models.py:112`) is never set, while docs/03:120 step 9 and docs/03:83 promise raw output files | ticketed, no code |
 | G-2 | high | `Pacer.before_host()` (`pacing.py:73`) was never called; docs/03:125 documents it and `config.yaml` sets `active.host_delay` [1,5]/[0,2], so inter-host pacing never applied | **fixed, Option B (docs `0ced491`, code below)** |
-| G-3 | medium | `scope.passive_warning()` (`scope.py:325`) has no callers, so the documented out-of-scope passive warning never prints | ticketed, no code |
-| C-1 | medium (known) | `cli.py:227` unredacted `str(exc)`; `-v` traceback; reachability still unproven (keys travel in headers) | known question |
-| E-1 | low | synchronous SQLite transaction + `_persist_stage` on the event loop (`engine.py:551-556`) | ticketed, no code |
-| E-2 | low | `load_scope()` file read + YAML parse inside async `_active_hosts` (`engine.py:687`) | ticketed, no code |
-| E-3 | low | `Workspace.create` mkdir/chmod inside `async def run` (`engine.py:463`) | ticketed, no code |
-| C-2 | low | subfinder's provider file is `mkstemp` in the system temp dir (`subfinder.py:76-79`, 0600, removed in `finally`); a `SIGKILL` in between leaves a key file | ticketed, no code |
-| G-4 | low | `ExitCode.ALL_FAILED = 6` (`engine.py:83`) is unreachable; `_exit_code` (`engine.py:592-604`) returns `NO_TOOL` when every tool failed | ticketed, no code |
+| G-3 | medium | `scope.passive_warning()` (`scope.py:325`) has no callers, so the documented out-of-scope passive warning never prints | **fixed 2026-11-14** (`Engine._note_passive_warning`) |
+| C-1 | medium (known) | `cli.py:227` unredacted `str(exc)`; `-v` traceback; reachability still unproven (keys travel in headers) | **deferred to Part 12** (needs a secret source in the CLI layer) |
+| E-1 | low | synchronous SQLite transaction + `_persist_stage` on the event loop (`engine.py:551-556`) | **deferred to Part 12** (concurrency refactor, no wrong-result defect) |
+| E-2 | low | `load_scope()` file read + YAML parse inside async `_active_hosts` (`engine.py:687`) | **deferred to Part 12**, with E-1/E-3 |
+| E-3 | low | `Workspace.create` mkdir/chmod inside `async def run` (`engine.py:463`) | **deferred to Part 12**, with E-1/E-2 |
+| C-2 | low | subfinder's provider file is `mkstemp` in the system temp dir (`subfinder.py:76-79`, 0600, removed in `finally`); a `SIGKILL` in between leaves a key file | **deferred to Part 12** (SIGKILL-safe temp file needs its own design) |
+| G-4 | low | `ExitCode.ALL_FAILED = 6` (`engine.py:83`) is unreachable; `_exit_code` (`engine.py:592-604`) returns `NO_TOOL` when every tool failed | **closed 2026-11-14**: not a defect in `_exit_code` (docs/02 gives code 6 to install/update only); the dead member is removed |
 | G-6 | docs | the 11d-e blast-radius claim ("only two `build_command` implementations") is false; corrected in place above | corrected |
 | G-7 | high | `scope.ip_allowed()` (`scope.py:296`, `ScopeGate.ip_allowed` `:110`) has zero call sites in `src/`; docs/05 rule 6 requires skipping resolved IPs when no `in_scope_cidrs` are defined, so the documented rule is unenforced. `pyscan.py:75-81` resolves each host and probes `addresses[0]` unchecked | **fixed 2026-11-14 for `pyscan` (filters every resolved address); `naabu` stays blocked by ruling (see below)** |
 

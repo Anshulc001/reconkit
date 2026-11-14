@@ -393,6 +393,27 @@ async def test_active_ports_stage_receives_the_cidr_predicate(tmp_path: Path) ->
     assert predicate("198.51.100.5") is False
 
 
+async def test_passive_run_outside_scope_warns(tmp_path: Path) -> None:
+    """Regression: 11c-G-3.
+
+    docs/05 rule 1: a passive run needs no scope file, but when one exists and the
+    target is outside it, the run warns instead of staying silent.
+    """
+    rec = Recorder()
+    specs = {"subs-fake": tool("subs-fake", Stage.SUBS)}
+    adapters = {"subs-fake": adapter("subs-fake", Stage.SUBS, rec, records=[])}
+    engine = make_engine(tmp_path, specs, adapters)
+    summary = await engine.run("other.test", ScanOptions(stages=(Stage.SUBS,), mock=True))
+    assert summary.warnings == [
+        "other.test is outside scope.yaml",
+        "continuing with passive stages only",
+    ]
+
+    engine = make_engine(tmp_path / "in_scope", specs, adapters)
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
+    assert summary.warnings == []
+
+
 async def test_env_filtering_and_no_keys(tmp_path: Path) -> None:
     rec = Recorder()
     keys = (ToolKey(env="ONLY_ME", url="https://example.com/key", adds="test"),)
@@ -939,9 +960,16 @@ async def test_resume_skips_completed_stages_and_continues(tmp_path: Path) -> No
 
 
 def test_exit_code_constants_match_docs() -> None:
+    """Regression: 11c-G-4.
+
+    docs/02 section 6 gives code 6 to install/update only; a scan with every tool
+    failed is code 4 (no usable tool). The engine enum must not offer a sixth
+    scan outcome that nothing can return.
+    """
     assert ExitCode.ERROR == 1
     assert ExitCode.USAGE == 2
     assert ExitCode.INTERRUPTED == 130
+    assert {int(code) for code in ExitCode} == {0, 1, 2, 3, 4, 5, 130}
 
 
 async def test_exit_code_clean_is_success(tmp_path: Path) -> None:

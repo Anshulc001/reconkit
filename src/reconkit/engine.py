@@ -29,7 +29,7 @@ from reconkit.adapters.registry import ToolSpec, load_tools
 from reconkit.config import AppConfig, SpeedName, resolve_speed
 from reconkit.core.pacing import Clock, Pacer, RateLimiter
 from reconkit.core.runner import validate_host, validate_target
-from reconkit.core.scope import load_scope, require_active
+from reconkit.core.scope import load_scope, passive_warning, require_active
 from reconkit.core.store import Store, redact, utc_now
 from reconkit.core.wildcard import WildcardDetector, WildcardResult, WildcardStatus
 from reconkit.core.workspace import Workspace
@@ -85,7 +85,6 @@ class ExitCode(IntEnum):
     SCOPE = 3
     NO_TOOL = 4
     PARTIAL = 5
-    ALL_FAILED = 6
     INTERRUPTED = 130
 
 
@@ -471,6 +470,8 @@ class Engine:
         workspace = Workspace.create(self.workspace_root, target, secrets=self._secrets)
         target_id = self.store.create_target(target, created_at=self._now())
         self._warnings = []
+        if not opts.active:
+            self._note_passive_warning(target)
 
         scan_key, completed, resumed = self._resume_plan(target_id, opts)
         summary = ScanSummary(target=target, target_id=target_id, resumed=resumed)
@@ -703,6 +704,23 @@ class Engine:
         except ScopeError as exc:
             return hosts, [], str(exc)
         return check.hosts, dropped, None
+
+    def _note_passive_warning(self, target: str) -> None:
+        """docs/05 rule 1: warn when a passive run targets outside an existing scope file.
+
+        `scope.passive_warning()` returns one or two `warning:`-prefixed lines; the
+        UI prefixes each entry itself, so the prefix is stripped here to avoid a
+        doubled `warning: warning:`.
+        """
+        text = passive_warning(target, path=self.scope_path)
+        if text is None:
+            return
+        for line in text.splitlines():
+            note = line.strip()
+            if note.startswith("warning:"):
+                note = note[len("warning:") :].strip()
+            if note and note not in self._warnings:
+                self._warnings.append(note)
 
     def _ip_allowed(self) -> Callable[[str], bool] | None:
         """docs/05 rule 6 predicate, from the same scope file the active gate read.
