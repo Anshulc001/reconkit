@@ -1041,7 +1041,7 @@ Every restore below was checked with `sha256sum`; the digests before and after e
     control something else (for example whether wildcard hosts are hidden), say so and the docs/code change again.
   - docs/09's "exclude them from counts by default" was **not** implemented: no doc defines which count (host table,
     JSON summary, confidence) and no code path filters it. It is now an open item in PROGRESS rather than a guess.
-- Docs changed first: `docs/03_ARCHITECTURE.md` section 8 (switch + mock clause), commit `aa3cd6b`.
+- Docs changed first: `docs/03_ARCHITECTURE.md` section 8 (switch + mock clause), commit `581a556`.
 - Deviations: none from the agreed spec. The `enabled` switch is the one behavior added beyond the two bullets.
 - Files touched: `docs/03_ARCHITECTURE.md`, `docs/PROGRESS.md` (docs commit); `src/reconkit/engine.py`,
   `tests/test_engine.py`, `docs/PROGRESS.md`, this file (code commit).
