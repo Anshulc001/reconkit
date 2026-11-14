@@ -3,9 +3,10 @@
 ## RESUME HERE
 
 - Status: 10f code is done and accepted (2026-11-13). The real non-dry `install --all`, `doctor` and `update --all` have run on Kali and every defect they found is fixed (non-TTY abort, `member`, `verify_checksums`, doctor plan probe, `dnsreaper`/`puredns`/`findomain`/`chaos` registry values). Part 10's gate is open on exactly one item: the sudo-authenticated apt install. That needs a human terminal where `sudo -v` succeeds; this box has no sudo password reachable by the agent, so the apt path has only ever been exercised as `skipped`.
+- PIT-32 (new, after Part 10f): an A/B test confirmed that `run_exec`'s `start_new_session=True` hid a valid `sudo -v` ticket from children (sudo `tty_tickets` is session-scoped). `runner.py` now keeps POSIX children in the parent's session and gives each its own process group (`start_new_session=is_windows`, `process_group=0` on POSIX), with two regression tests. This does not close the gate; it is the prerequisite for the gate run.
 - Deferred by ruling (not Part 10 blockers): `update` idempotency for `@latest` go_install tools (reporting gap, binaries byte-identical; needs a new version-probe mechanism and its own docs-first pass, docs/10 section 6) and authenticated GitHub release lookups (a Part 11 planning decision).
 - Last code commit: run `git log --oneline -1`
-- Baseline: 565 passed, 0 skipped on Linux (Kali, Python 3.14.8); ruff, ruff format and mypy clean
+- Baseline: 567 passed, 0 skipped on Linux (Python 3.14.8 here); ruff, ruff format and mypy clean
 - Next action: the user runs `sudo -v` in a real terminal, then `reconkit install --all --no-color` is run and its output recorded, showing at least one real `apt-get install` end to end (confirmation -> sudo -> apt-get -> binary-on-PATH check -> version check passing). Then close the Part 10 gate and start Part 11. Hold here: do not start Part 11 before that output is recorded.
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in engine.py; adapters never import store/scope/ui/cli; subjack replaced by subzy + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from .env; no push unless the user says so
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in src/; new lint/type suppressions; shell=True; whole environment to a child; adapters importing store/scope/ui/cli; consensus outside engine.py; pushing
@@ -55,7 +56,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `errors.py`: `ScopeError` (3), `ConfigError` (2), `ParseError` (1), `ToolNotInstalled` (4), `ToolFailed`/`ToolTimeout`/`InstallError` (5). Each has `exit_code`.
 - `models.py`: enums (`Stage`, `Tier`, `Mode`, `HostState`, `Confidence`, `ToolStatus`), records (`SubdomainRecord`, `HostStatusRecord`, `PortRecord`, `UrlRecord`, `FindingRecord`), `Record`, `ToolResult`, `InstallStatus`, `RunContext`.
 - `config.py`: `load_config(path, speed=, delay=)`, `resolve_speed`, `parse_delay`, `SpeedPreset`; `_StrictModel` forbids unknown keys; `Webhook` model.
-- `core/runner.py`: `run_exec(argv, timeout=, env=, max_output_bytes=, cwd=)` (only `subprocess` user), `validate_target` (root, strict RFC-1123), `validate_host` (discovered: allows `_`, strips `*.`), `ExecResult`; timeout kills the process group, output capped, env values redacted.
+- `core/runner.py`: `run_exec(argv, timeout=, env=, max_output_bytes=, cwd=)` (only `subprocess` user), `validate_target` (root, strict RFC-1123), `validate_host` (discovered: allows `_`, strips `*.`), `ExecResult`; POSIX children stay in the parent's session but lead their own process group (PIT-32), timeout kills that group, output capped, env values redacted.
 - `core/scope.py`: `load_scope`, `require_active` -> `ActiveCheck(scope, match, hosts, dropped)`, `check_target`, `ip_allowed`, `passive_warning`, `ScopeGate`; `out_of_scope` always wins.
 - `core/store.py`: `Store(path)` (context manager, `close()`), `redact(text, secrets)`; writes `create_target`, `create_scan_run`, `finish_scan_run`, `record_tool_run`, `upsert_subdomain`, `add_subdomain_source`, `append_host_status`, `upsert_port`, `add_port_source`, `upsert_url`; reads `previous_state`, `diff_new`, `diff_gone`, `diff_state_changed`, `diff_ports_opened`, `diff_ports_closed`; pragmas FK/WAL/5000 ms, parameterized SQL only.
 - `adapters/base.py`: `managed_bin_dir()` (lazy import of `installer.registry.bin_dir`, one definition of the path)
@@ -98,7 +99,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - Enums use `StrEnum` (ruff UP042) instead of the docs' `(str, Enum)`; same values.
 - `--delay` applies to both passive and active `tool_delay` (not `host_delay`).
 - Bootstrap prefers `uv`; venv is Python 3.11 because WSL `python3` is 3.14.
-- Ruff excludes `docs/`; per-file ignores: `tests/**` S101, `tests/fakebin/**` S603, `src/reconkit/core/runner.py` S603 (argv is passed as a list).
+- Ruff excludes `docs/`; per-file ignores: `tests/**` S101, `tests/fakebin/**` S603, `tests/test_runner.py` S603 (the kill-tree test must hold a live `Popen` to call `_kill_tree`), `src/reconkit/core/runner.py` S603 (argv is passed as a list).
 - `host_status_history.waf` added for the CDN/WAF marker; port scans require a stored `live` result and skip hosts with `waf` set.
 - Exit codes: Scope 3, ToolNotInstalled 4, ToolFailed/Timeout/Install 5, Parse 1, Config 2.
 - `scope.yaml` defaults: missing `expires` = never expires; missing `max_speed` = `slow`.

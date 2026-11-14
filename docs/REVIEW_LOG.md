@@ -43,6 +43,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-28 | A resumed `live` stage saw only the target, not hosts persisted by completed stages | Resume skipped stages but the in-memory discovered/alive sets were not reseeded from SQLite | Seed both sets from `Store.subdomains()` on resume | `test_resume_skips_completed_stages_and_continues` |
 | PIT-30 | `doctor`/scans moved subfinder and naabu config dirs from `~/.config` into the current directory | `BinaryAdapter.check_installed()` ran the version probe with `env={}`, so the child had no `HOME` and the tools wrote their config beside the CWD | Pass `HOME` to the identity probe | `test_identity_probe_passes_home` |
 | PIT-31 | The `nuclei -ut` template refresh reported `templates not refreshed` on a working install, because nuclei lives under `$HOME/go/bin` | `_refresh_templates` passed `env={"HOME"}`; `Popen`/`execvpe` resolves a bare program name with the `PATH` inside the env it is given, falling back to `os.defpath` (`/bin:/usr/bin`) | A `runner(...)` call with a custom `env=` that names a bare binary must pass `PATH` too (the documented exception in docs/10 section 3d); where the caller already has an absolute path, pass the absolute path instead | `test_regression_custom_env_without_path_cannot_resolve_binary`, `test_nuclei_templates_are_refreshed_after_a_change` |
+| PIT-32 | `sudo -n` fails inside reconkit (`sudo: a password is required`, exit 1) despite a valid `sudo -v` ticket in the same shell; a direct subprocess call succeeds | `run_exec` passed `start_new_session=True`, so the child called `setsid()` and sudo's `tty_tickets` scoping could not see the ticket cached against the parent's controlling terminal | POSIX children must stay in the parent's session: use `process_group=0` to give the timeout kill its own group, never `start_new_session=True` on POSIX. Windows keeps its old path (both arguments are ignored there) | `test_regression_child_shares_parent_session_but_not_pgid`, `test_regression_kill_tree_kills_only_the_child_group` |
 | PIT-29 | A dangling-CNAME warning disappeared after restart | `host_status_history` had no CNAME columns and DNS-only resolved hosts were not persisted | Store `cnames_json` plus `dangling_cname`; reuse `Store.latest_cnames()` on a later NXDOMAIN | `test_regression_dangling_cname_survives_restart`, `test_dns_resolved_then_two_nxdomain_is_shut_down_then_dead`; migration tests in `test_store.py` |
 
 ## Commit map
@@ -889,3 +890,42 @@ Every restore below was checked with `sha256sum`; the digests before and after e
   `InstallSkipped` mapping) that `massdns` exercises live, so a separate live `libpcap-dev` run is not required to
   close the Part 10 gate: `massdns` alone is the accepted live proof. Forcing it would need either a destructive
   `apt-get remove naabu` or waiting for a natural not-current state.
+
+## Part 10f follow-up - sudo ticket invisible to detached children (code, PIT-32)
+
+- Symptom, isolated by the user's A/B test in one shell with a fresh `sudo -v` ticket: the direct
+  `subprocess.Popen([...])` call succeeds under `sudo -n true`, and the identical call with only
+  `start_new_session=True` added fails with `sudo: a password is required` and exit 1. Nothing else changed.
+- Root cause confirmed: `start_new_session=True` calls `setsid()`; sudo's `tty_tickets` caches the ticket against
+  the parent's controlling terminal/session, so the detached child cannot see it.
+- Docs check (step 8) before touching code: `grep -rn "session\|setsid\|start_new_session\|process group\|pgid\|subprocess"
+  docs/03_ARCHITECTURE.md docs/10_TOOL_INSTALLER.md` finds only docs/03:5,34,60,108,117,161,193 and docs/10:83, none of
+  which describes session membership. docs/03:193 says "Kill process group" and stays true after the fix, so no doc
+  text needed changing; only this log and the PIT row were updated. No adapter, installer or test assumes detachment:
+  `grep -rn "getsid\|setsid\|start_new_session\|process_group\|preexec_fn" src/reconkit/ tests/` matched only
+  `src/reconkit/core/runner.py:112`, and a daemon/double-fork/orphan/survive grep matched only the runner's drain
+  threads and `spawn_child.py`, which is used solely by the timeout-kill test.
+- Fix (`src/reconkit/core/runner.py`): `start_new_session=is_windows`,
+  `process_group=None if is_windows else 0`. Verified against the CPython 3.11 source that Windows accepts and
+  ignores both arguments (`_execute_child(..., unused_start_new_session, unused_process_group)`).
+- Tests added (`tests/test_runner.py`, fake child `tests/fakebin/session_child.py`):
+  `test_regression_child_shares_parent_session_but_not_pgid` and
+  `test_regression_kill_tree_kills_only_the_child_group`. PIT rule followed: the first failed before the fix with
+  `AssertionError: child sid=8034 parent sid=8011; child pgid=8034 parent pgid=8011` / `assert 8034 == 8011`
+  (getsid; pgid already passed) and passed after (`1 passed`). The kill test starts a child with `process_group=0`
+  plus a sibling in the parent's group, calls `_kill_tree`, and asserts the child exits by `SIGKILL`, the sibling is
+  still alive, and the parent's pgid is unchanged.
+- Mutation proof: reverting only `process_group=0` to `start_new_session=True` (the old line) reproduces the PIT-32
+  assertion failure above; restoring the fix passes. The pre-fix run of the same test is that proof; no separate
+  mutant was needed.
+- Residual risk (named): every adapter and every installer backend now runs its child in the parent's session
+  instead of a fresh one. Consequences: (a) a child can now open `/dev/tty` where `setsid()` previously detached it;
+  stdin is `DEVNULL` and the apt path uses `sudo -n` with `DEBIAN_FRONTEND=noninteractive`, so no known tool prompts;
+  (b) terminal-generated signals are sent to the foreground process group, and children are still in their own
+  process group (`process_group=0`), so Ctrl-C still does not reach them, while a session-wide teardown such as a
+  terminal hangup can now reach them where it previously could not. Scans and installs are run to completion in the
+  foreground under a live terminal, and `_kill_tree` still owns timeout cleanup, so this is accepted; it is recorded
+  rather than silently ignored. (c) tools that daemonize themselves (none in the registry today) would still
+  `setsid()` on their own and detach. `_kill_tree` is unchanged and still targets only `os.getpgid(process.pid)`.
+- Check output: `tests/test_runner.py` 34 passed; full gate recorded in PROGRESS. The real sudo-authenticated
+  `install --all` proof is still outstanding and is the only open Part 10 gate item.

@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 import os
+import signal
+import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
-from reconkit.core.runner import ExecResult, run_exec, validate_host, validate_target
+from reconkit.core.runner import (
+    ExecResult,
+    _kill_tree,
+    run_exec,
+    validate_host,
+    validate_target,
+)
 
 FAKEBIN = Path(__file__).parent / "fakebin"
 
@@ -87,6 +96,57 @@ def test_rejects_non_positive_limits() -> None:
 
 
 @pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-only")
+def _wait_for_pid(pid_file: Path, timeout: float = 10.0) -> int:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pid_file.exists():
+            text = pid_file.read_text(encoding="utf-8").strip()
+            if text:
+                return int(text)
+        time.sleep(0.02)
+    pytest.fail("child did not report its pid")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="sessions and process groups are POSIX-only")
+def test_regression_child_shares_parent_session_but_not_pgid(tmp_path: Path) -> None:
+    """Regression: PIT-32 tty-scoped sudo tickets are per session.
+
+    A child must stay in the parent's session, or sudo cannot see a ticket
+    cached against the parent's controlling terminal. It must still lead its
+    own process group so a timeout kill cannot reach the parent.
+    """
+    pid_file = tmp_path / "session-child.pid"
+    outcome: dict[str, ExecResult] = {}
+
+    def run() -> None:
+        outcome["result"] = run_script("session_child.py", str(pid_file), timeout=20)
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    pid = _wait_for_pid(pid_file)
+    try:
+        child_sid = os.getsid(pid)
+        child_pgid = os.getpgid(pid)
+        parent_sid = os.getsid(0)
+        parent_pgid = os.getpgid(0)
+        report = (
+            f"child sid={child_sid} parent sid={parent_sid}; "
+            f"child pgid={child_pgid} parent pgid={parent_pgid}"
+        )
+        assert child_sid == parent_sid, report
+        assert child_pgid != parent_pgid, report
+        assert child_pgid == pid, report
+    finally:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        worker.join(timeout=10)
+    assert not worker.is_alive()
+    assert outcome["result"].returncode == -signal.SIGKILL
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-only")
 def test_timeout_kills_child(tmp_path: Path) -> None:
     """Regression: PIT-06 POSIX-only killpg path; skipped and UNTESTED on Windows."""
     pid_file = tmp_path / "child.pid"
@@ -101,6 +161,43 @@ def test_timeout_kills_child(tmp_path: Path) -> None:
             return
         time.sleep(0.05)
     pytest.fail("child process survived the timeout kill")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-only")
+def test_regression_kill_tree_kills_only_the_child_group() -> None:
+    """Regression: PIT-32 process_group=0 must keep killpg out of our group."""
+    parent_pgid = os.getpgid(0)
+    sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
+    sibling = subprocess.Popen(
+        sleeper,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    child = subprocess.Popen(
+        sleeper,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=False,
+        process_group=0,
+    )
+    try:
+        deadline = time.monotonic() + 5.0
+        while os.getpgid(child.pid) != child.pid and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert os.getpgid(child.pid) == child.pid
+        assert os.getpgid(child.pid) != parent_pgid
+
+        _kill_tree(child)
+
+        assert child.wait(timeout=5) == -signal.SIGKILL
+        assert sibling.poll() is None, "a process in the parent's group was killed"
+        assert os.getpgid(0) == parent_pgid
+        os.kill(os.getpid(), 0)
+    finally:
+        sibling.kill()
+        sibling.wait(timeout=5)
 
 
 @pytest.mark.parametrize(

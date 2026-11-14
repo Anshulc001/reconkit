@@ -100,6 +100,7 @@ def run_exec(
 
     child_env = dict(env or {})
     started = time.monotonic()
+    is_windows = sys.platform == "win32"
     try:
         process = subprocess.Popen(
             argv,
@@ -109,7 +110,12 @@ def run_exec(
             env=child_env,
             cwd=None if cwd is None else str(cwd),
             shell=False,
-            start_new_session=True,
+            # POSIX: stay in the parent's session so a sudo ticket cached by
+            # tty_tickets stays visible (PIT-32), but lead a new process group
+            # so a timeout kill cannot reach reconkit. Windows ignores both
+            # arguments; it kills the child with process.kill() instead.
+            start_new_session=is_windows,
+            process_group=None if is_windows else 0,
         )
     except OSError as exc:
         return ExecResult(
