@@ -136,6 +136,8 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 
 ## Open risks
 
+- Windows subprocess arguments (PIT-32) are unverified: `run_exec` now passes `start_new_session=is_windows` and `process_group=None if is_windows else 0`, and CPython 3.11 accepts and ignores both on Windows (they reach the Windows `_execute_child` as `unused_start_new_session`/`unused_process_group`), but that was only read in the CPython source, not executed. On this Linux box `inspect.getsource(Popen._execute_child)` returns only the POSIX branch. A native Windows run of the runner/doctor must confirm the arguments are accepted before Part 11's Windows-refusal re-check closes. Not a Part 10 blocker.
+
 - `SUDO_DENIAL_MARKERS` contains two substrings (`"no tty present"`, `"askpass"`) that were never reproduced against a live sudo; only `"a password is required"` was confirmed here. A different sudo/PAM wording would surface as `InstallError` instead of the friendlier `InstallSkipped` (low severity, but it will look like a failure rather than a skip).
 
 - `_fetch_text`'s default 64 KiB cap has no dedicated test; the cap is only exercised through an explicit `max_bytes=64` argument in the test, so a regression in the default would pass the suite.
