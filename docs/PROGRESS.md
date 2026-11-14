@@ -109,6 +109,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `.gitattributes` forces LF for `*.sh`, `.githooks/*`, `*.py`, `*.md`, `*.yaml`, `*.toml`; existing files were not renormalized.
 - `Pacer.order()` takes an optional `kind="host"|"port"` because config has separate shuffle flags. Scoped S311 ignores in `pyproject.toml` cover the pacer's jitter RNG and the seeded test RNG.
 - Commits are authored by `Anshul <anshulc4444@gmail.com>`; no attribution trailers are added, by anyone or any tool.
+- Deviation (2026-11-14, at the user's request): the last five commits before this one were re-created to strip an attribution trailer from two of the messages. No file content changed, only messages and therefore hashes. Current hashes: `581a556` (docs, wildcard switch), `1dd63e5` (wildcard engine wiring), `b24f39b` (stub removal), `430aa1d` (certspotter line), `996cff1` (citation fix). The pre-rewrite objects were expired, so the old hashes no longer resolve; anything citing them in an older session is stale.
 - `needs_key` was removed from `tools.yaml`; the loader now raises `ConfigError` for it so `keys` stays the single source of truth (docs/05 §6.1 updated first).
 - Cert Spotter's `adds` text was corrected: the API docs do not promise 100 queries/hour to a key; that figure was the unauthenticated limit.
 - Chaos's key env name was corrected from `CHAOS_API_KEY` to `PDCP_API_KEY` (chaos-client README). `urlscan` and `github_subdomains` migrated from `needs_key` to `keys` with verified URLs.
