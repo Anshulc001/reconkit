@@ -174,6 +174,10 @@ def decide_host_state(
 ) -> HostTransition:
     """Apply docs/09's state rule. Agreeing tools affect confidence, not state."""
     alive_tools = tuple(tool for tool, state in evidence.web if state is HostState.ALIVE)
+    # docs/04 section 5: a probe was attempted when a live tool returned a record
+    # for this host, ambiguous or not. It decides whether an inconclusive pass
+    # with no previous state writes an `UNKNOWN` row (12e) instead of skipping.
+    attempted = bool(evidence.web)
     if alive_tools:
         sources = alive_tools
         disagree = evidence.dns is DnsSignal.NXDOMAIN or any(
@@ -247,7 +251,7 @@ def decide_host_state(
             None if previous is not None else Confidence.LOW,
             sources,
             (warning,),
-            previous is not None,
+            previous is not None or attempted,
         )
 
     if evidence.web:
@@ -263,7 +267,7 @@ def decide_host_state(
             None if previous is not None else Confidence.LOW,
             sources,
             (warning,),
-            previous is not None,
+            previous is not None or attempted,
         )
 
     return HostTransition(previous or HostState.UNKNOWN, None, (), (), False)

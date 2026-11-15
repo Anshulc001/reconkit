@@ -727,9 +727,9 @@ async def test_subfinder_raw_file_never_contains_the_provider_key(
 def seed_unknown_state(engine: Engine, host_name: str) -> int:
     """Give a host a stored `UNKNOWN` state so the next pass persists a row.
 
-    A first-run inconclusive `live` pass writes no history row at all (12e, still
-    undecided), so a stored `UNKNOWN` state is the pre-existing shape this test
-    starts from - the same shape an older build or a hand-seeded database has.
+    Since 12e a first-run inconclusive `live` pass with a record writes its own
+    row, so this seeded shape models what older builds and hand-seeded databases
+    hold, and what a pass that already had a previous state starts from.
     """
     target_id = engine.store.create_target("example.com")
     run_id = engine.store.create_scan_run(target_id, "live", "fast")
@@ -868,6 +868,118 @@ async def test_a_later_alive_pass_does_not_resurrect_the_reason(tmp_path: Path) 
     assert second.host_rows(summary.target_id)[0].detail is None
 
 
+# --------------------------- an attempted probe leaves a row (12e, PIT-47)
+
+
+async def test_a_first_inconclusive_live_pass_writes_an_unknown_row(tmp_path: Path) -> None:
+    """Regression: PIT-47 docs/04 - a first pass that probed is not invisible."""
+    rec = Recorder()
+    specs = {"live": tool("live", Stage.LIVE, mode=Mode.ACTIVE)}
+    adapters = {
+        "live": adapter(
+            "live", Stage.LIVE, rec, records=[unknown("example.com", "tls: untrusted CA")]
+        )
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True)
+    )
+
+    stored = rows(engine.store, "SELECT state, detail, tools_json FROM host_status_history")
+    assert len(stored) == 1
+    assert (stored[0]["state"], stored[0]["detail"]) == ("UNKNOWN", "tls: untrusted CA")
+    assert json.loads(stored[0]["tools_json"]) == ["live"]
+    assert engine.host_rows(summary.target_id)[0].detail == "tls: untrusted CA"
+
+
+async def test_only_the_host_a_tool_reported_gets_the_unknown_row(tmp_path: Path) -> None:
+    """docs/04: attempted is per host, not per stage."""
+    rec = Recorder()
+    specs = {
+        "subs": tool("subs", Stage.SUBS),
+        "live": tool("live", Stage.LIVE, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "subs": adapter(
+            "subs", Stage.SUBS, rec, records=[sub("www.example.com"), sub("api.example.com")]
+        ),
+        "live": adapter(
+            "live", Stage.LIVE, rec, records=[unknown("www.example.com", "tls: expired")]
+        ),
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+
+    await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE), active=True, mock=True),
+    )
+
+    stored = rows(
+        engine.store,
+        "SELECT subdomains.fqdn AS fqdn, host_status_history.state AS state "
+        "FROM host_status_history JOIN subdomains "
+        "ON subdomains.id = host_status_history.subdomain_id",
+    )
+    assert [(row["fqdn"], row["state"]) for row in stored] == [("www.example.com", "UNKNOWN")]
+
+
+async def test_a_host_without_a_record_gets_no_row_even_when_another_did(
+    tmp_path: Path,
+) -> None:
+    """docs/04: the skip stays per host, not per stage (12e).
+
+    The live tool answered for `www` only; the apex was never answered, so the
+    inconclusive pass there must stay invisible even though the stage succeeded.
+    """
+    rec = Recorder()
+    specs = {
+        "subs": tool("subs", Stage.SUBS),
+        "dns": tool("dns", Stage.DNS),
+        "live": tool("live", Stage.LIVE, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "subs": adapter("subs", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "dns": adapter(
+            "dns",
+            Stage.DNS,
+            rec,
+            records=[SubdomainRecord(fqdn="www.example.com", source="fake", ips=["1.2.3.4"])],
+        ),
+        "live": adapter(
+            "live", Stage.LIVE, rec, records=[unknown("www.example.com", "tls: expired")]
+        ),
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+
+    await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS, Stage.DNS, Stage.LIVE), active=True, mock=True),
+    )
+
+    stored = rows(
+        engine.store,
+        "SELECT subdomains.fqdn AS fqdn, host_status_history.state AS state "
+        "FROM host_status_history JOIN subdomains "
+        "ON subdomains.id = host_status_history.subdomain_id",
+    )
+    assert [(row["fqdn"], row["state"]) for row in stored] == [("www.example.com", "DNS_ONLY")]
+
+
+async def test_a_failed_live_tool_attempted_nothing_and_writes_no_row(tmp_path: Path) -> None:
+    """docs/04: a tool that failed returned no record, so nothing was attempted."""
+    rec = Recorder()
+    specs = {"live": tool("live", Stage.LIVE, mode=Mode.ACTIVE)}
+    adapters = {
+        "live": adapter("live", Stage.LIVE, rec, records=[], status=ToolStatus.FAILED),
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+
+    await engine.run("example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True))
+
+    assert rows(engine.store, "SELECT COUNT(*) AS n FROM host_status_history")[0]["n"] == 0
+
+
 # ------------------------------------------------------------ host transitions
 
 
@@ -889,6 +1001,28 @@ def test_regression_dns_servfail_not_dead() -> None:
     )
     assert result.state is HostState.UNKNOWN
     assert result.state is not HostState.DEAD
+
+
+def test_regression_an_attempted_probe_persists_with_no_previous_state() -> None:
+    """Regression: PIT-47 the persist rule is "a record came back", not "decided".
+
+    docs/04 section 5: an inconclusive first pass writes `UNKNOWN`/LOW when a
+    live tool returned a record, and writes nothing when no record came back.
+    """
+    attempted = transition(
+        None,
+        HostEvidence(dns=DnsSignal.UNCERTAIN, web=(("pyprobe", HostState.UNKNOWN),)),
+    )
+    assert attempted.persist is True
+    assert (attempted.state, attempted.confidence) == (HostState.UNKNOWN, Confidence.LOW)
+    assert attempted.sources == ("pyprobe",)
+
+    nothing = transition(
+        None,
+        HostEvidence(dns=DnsSignal.UNCERTAIN, dns_tools=("dnspython",)),
+    )
+    assert nothing.persist is False
+    assert nothing.state is HostState.UNKNOWN
 
 
 def test_regression_dns_timeout_not_dead() -> None:

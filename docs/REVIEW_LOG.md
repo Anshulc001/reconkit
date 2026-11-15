@@ -61,6 +61,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-46 | A host that could not be probed carried no reason: `UNKNOWN` looked identical whether the certificate had expired, the CA was untrusted or the handshake was rejected, and the only way to tell them apart was to probe the host again (11d-findings-f remainder) | `pyprobe` classified the TLS failure text by substring (`"ssl"`/`"certificate"`) and discarded the string, and `host_status_history` had no column to hold a reason even if it had been kept | The adapter keeps the failure text on the `UNKNOWN` record (`HostStatusRecord.detail`); the engine passes it to `Store.append_host_status`, which is the **only** place it is redacted and bounded: `redact()` with the run's secrets first, whitespace collapsed to one line, then cut to `DETAIL_MAX_CHARS` (200). Redacting before the cut means a truncated value can never leave a partial secret. `NULL` means no reason, a conclusive pass writes its own `NULL` row, and the value is exposed in `--json` (`hosts[].detail`), never in the human table | `test_host_detail_is_redacted_bounded_and_one_line` (`Regression: PIT-46`), `test_unknown_tls_failure_stores_a_redacted_bounded_reason`, `test_an_inconclusive_pass_keeps_the_previous_state_and_records_the_reason`, `test_a_plain_connect_failure_stores_no_reason`, `test_a_later_alive_pass_does_not_resurrect_the_reason`, `test_pyprobe_tls_failure_keeps_the_reason_on_the_unknown_record`, `test_v3_database_migrates_the_additive_detail_column`, `test_json_host_row_carries_the_stored_detail`, `test_json_run_exposes_the_stored_host_detail` |
 | PIT-45 | A `SIGKILL` between writing the subfinder `provider-config.yaml` and the `finally` unlink left a provider-key file in the shared system temp dir indefinitely; `finally` was the only mitigation (C-2) | the adapter wrote a bare `mkstemp` file in the shared temp dir, so nothing recorded which run owned it, nothing bounded its lifetime, and a later run could not tell a stranded key file from a live one | provider keys live in a per-run directory named `reconkit-subfinder-<pid>-<random>` with mode 0700 (file 0600), created explicitly and removed with `rmtree` in `finally`. Every run first removes stale directories: a dead pid is removed at once, a live pid only once its mtime is older than `STALE_AFTER_S` (900 s, and the only rule on Windows where no safe liveness probe exists); stale pre-12g `*.yaml` files are removed by the same age rule. Cleanup never raises and never touches the current run's own directory (docs/09) | `test_a_sigkilled_run_leaves_a_directory_the_next_start_removes` (`Regression: PIT-45`), `test_provider_config_lives_in_a_0700_per_run_directory`, `test_cleanup_leaves_a_concurrent_runs_directory_alone`, `test_when_liveness_is_unknown_age_alone_decides` |
 
+| PIT-47 | A first `live` pass that contacted a host but could not decide wrote no `host_status_history` row, so "probed and inconclusive" was indistinguishable from "never touched the host", and the reason 12d stores was dropped in exactly the first-run case (11d-findings-g) | `decide_host_state` tied `persist` to `previous is not None`, so the write only started at the second pass; the pass's own evidence (a returned record) was never consulted, although docs/04 section 5 promises one row per host per status pass with a `dns`-stage exemption only | `persist` in the two inconclusive branches is `previous is not None or attempted`, where `attempted = bool(evidence.web)` - a live tool returned a record for that host, ambiguous or not, per the owner ruling and docs/04 section 5. A pass with no record (failed or timed-out tool, or no tool) still writes nothing, and the `dns` stage's SERVFAIL/timeout/no-answer skip is untouched because its evidence never carries web records | `test_regression_an_attempted_probe_persists_with_no_previous_state` (`Regression: PIT-47`), `test_a_first_inconclusive_live_pass_writes_an_unknown_row`, `test_only_the_host_a_tool_reported_gets_the_unknown_row`, `test_a_host_without_a_record_gets_no_row_even_when_another_did`, `test_a_failed_live_tool_attempted_nothing_and_writes_no_row` |
 
 ## Commit map
 
@@ -2348,6 +2349,61 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
   not touch the network); the echo is the worst case constructed by hand, not an observed subfinder
   debug format; only subfinder was probed, though the redaction is in the shared writer, so any binary
   adapter inherits it.
+
+## Part 12e: an attempted probe leaves a row (11d-findings-g, PIT-47)  (commit subject `fix: write an UNKNOWN row when a first live pass probed a host`; hash filled by the next commit)
+
+- **Owner ruling being implemented (2026-11-15, final):** "Persist the row with state UNKNOWN when a probe was attempted; keep the existing 'no evidence' skip when nothing was attempted. Define 'a probe was attempted' as: a live-stage tool returned a record for that host (success or inconclusive), even if the result itself is ambiguous. docs/04 must state this explicitly, including that exact definition, before any code changes."
+- **Docs read / goal:** `MASTER_PLAN.md` 12e, the ruling above, docs/04 sections 3, 5 and 6, docs/09 section 3 (`pyprobe`'s `UNKNOWN` rule and `HostStatusRecord.detail`), `engine.decide_host_state`/`_persist_live`/`_persist_dns`, and the 12d entry (PIT-46) that built the reason column. Goal: make "probed, inconclusive, first sighting" distinguishable from "never touched", without touching the `dns` stage's skip or inventing a state.
+- **Docs changed first (before the code, as ruled):** docs/04 section 5 gains two rules: the **exact definition** of "a probe was attempted" (a `live`-stage tool returned a record for that host, successful or inconclusive, ambiguous records included; per host, not per stage; a failed/timed-out tool returned no record and attempted nothing) and the persist rule (no previous state + attempted -> one row, state `UNKNOWN`, confidence `LOW`, the reporting tool(s) as sources, the adapter's reason in `detail`; no record -> nothing persisted, the same skip the `dns` stage keeps; with a previous state the state is kept and the row is written either way). `git diff -- docs/04_DATABASE.md` is exactly +2 lines.
+- **Code change (minimal, one decision site):** `engine.decide_host_state` computes `attempted = bool(evidence.web)` once, next to `alive_tools`, and the two inconclusive branches return `previous is not None or attempted` as `persist`. Nothing else moved: no new field on `HostEvidence`, no new flag, config, module or dependency. The `dns` path is unchanged by construction - `_persist_dns` builds `HostEvidence` without web records, so `attempted` is always `False` there and its skip stays exactly as documented. `tests/test_engine.py`'s `seed_unknown_state` docstring no longer says 12e is undecided.
+- **Files touched:** `src/reconkit/engine.py` (+5/-2), `tests/test_engine.py` (+140/-2), `docs/04_DATABASE.md` (+2), this log, `docs/PROGRESS.md`.
+- **Requirement -> test table:**
+  | Requirement (owner ruling) | Test |
+  |---|---|
+  | a first inconclusive `live` pass that probed persists one `UNKNOWN` row | `test_a_first_inconclusive_live_pass_writes_an_unknown_row` (one row, `state='UNKNOWN'`, `detail` kept, `tools_json == ["live"]`, `host_rows[].detail` set) |
+  | ...with confidence `LOW` and the reporting tool as source | `test_regression_an_attempted_probe_persists_with_no_previous_state` (`state UNKNOWN`, `confidence LOW`, `sources == ("pyprobe",)`) |
+  | "attempted" = a live tool returned a record for **that host** | `test_only_the_host_a_tool_reported_gets_the_unknown_row` (two discovered hosts, one record -> exactly one row) |
+  | a host with no record gets no row even when the stage succeeded | `test_a_host_without_a_record_gets_no_row_even_when_another_did` (apex unanswered, `www` resolved -> only `www`'s `DNS_ONLY` row) |
+  | a failed/timed-out tool attempted nothing | `test_a_failed_live_tool_attempted_nothing_and_writes_no_row` (`status=FAILED`, zero rows) |
+  | the "no evidence" skip is kept (the ruling's second half) | `test_regression_an_attempted_probe_persists_with_no_previous_state` (second half: `persist is False`) |
+  | the `dns` stage's SERVFAIL/timeout/no-answer skip is untouched | `test_a_host_without_a_record_gets_no_row_even_when_another_did` (dns stage output, `attempted` structurally `False`); all PIT-01/PIT-29 transition tests still pass unchanged |
+  | 12d's reason is reachable on a first run | `test_a_first_inconclusive_live_pass_writes_an_unknown_row` (`detail` in the row and in `host_rows`) |
+- **Red-before-green (raw):** with the five new tests kept and the engine reverted to `previous is not None` (the pre-12e line, 2 occurrences):
+  ```
+  tests/test_engine.py FFF                                                 [100%]
+  E       assert 0 == 1
+  E        +  where 0 = len([])
+  FAILED tests/test_engine.py::test_a_first_inconclusive_live_pass_writes_an_unknown_row
+  E       AssertionError: assert [] == [('www.exampl...', 'UNKNOWN')]
+  FAILED tests/test_engine.py::test_only_the_host_a_tool_reported_gets_the_unknown_row
+  E       AssertionError: assert False is True
+  FAILED tests/test_engine.py::test_regression_an_attempted_probe_persists_with_no_previous_state
+  3 failed, 74 deselected in 0.23s
+  ```
+  Restore: `cp /tmp/12e/engine.py src/reconkit/engine.py && sha256sum -c` -> `src/reconkit/engine.py: OK`, then `77 passed in 0.77s`.
+- **Mutation proofs (both restored, hash confirmed):**
+  - **M1 - persist unconditionally** (`previous is not None or True`): caught by three tests, including the engine-level skip guards:
+    ```
+    FAILED tests/test_engine.py::test_a_host_without_a_record_gets_no_row_even_when_another_did
+    FAILED tests/test_engine.py::test_a_failed_live_tool_attempted_nothing_and_writes_no_row
+    FAILED tests/test_engine.py::test_regression_an_attempted_probe_persists_with_no_previous_state
+    3 failed, 2 passed, 74 deselected in 0.22s
+    src/reconkit/engine.py: OK
+    ```
+  - **M2 - stage-level instead of per-host** (`attempted = evidence.web_ok`):
+    ```
+    E       AssertionError: assert True is False
+    E        +  where True = HostTransition(state=<HostState.UNKNOWN: 'UNKNOWN'>, confidence=<Confidence.LOW: 'LOW'>, sources=(), warnings=('DNS/probe inconclusive; state UNKNOWN',), persist=True, dangling_cname=None).persist
+    FAILED tests/test_engine.py::test_a_host_without_a_record_gets_no_row_even_when_another_did
+    FAILED tests/test_engine.py::test_regression_an_attempted_probe_persists_with_no_previous_state
+    2 failed, 3 passed, 74 deselected in 0.19s
+    src/reconkit/engine.py: OK
+    ```
+  Pre-mutation hash: `9dc3d665e28009d400685c7bf5c1d598fb5c9daa3380f8aaa4f0347cb19097e8  src/reconkit/engine.py` (recorded before the red-before-green revert; every restore was verified with `sha256sum -c`).
+- **Self-review (S1-S7) findings:** S1 no `assert` in `src`; no `shell=True`/`os.system`; `import subprocess` only in `core/runner.py`; `import sqlite3` only in `core/store.py`; adapters import none of `store`/`scope`/`ui`/`cli`; no `TODO`/`FIXME`; no `print(` outside `ui.py`; the three pre-existing `# type: ignore` lines in `tests/test_scope.py`/`tests/test_runner.py` are unchanged and none was added; `git diff --check` clean. S2 external input: the only new input is the adapter's record list, which is typed (`HostStatusRecord`) and never becomes a path, SQL, argv or shell string. S3 secrets: nothing new is stored - the reason still goes through `Store.append_host_status(..., secrets=)`; no key is printed. S4 async: no blocking call added. S5 ordering: the new rows carry the run's `run_id` and `checked_at` like every other row, and `previous_state()` now reads the `UNKNOWN` row - the NXDOMAIN branch maps `UNKNOWN` to `DEAD` exactly as it mapped `None` before, so the PIT-29/PIT-01 tests stay green. S6 no new dependency/flag/config/module. S7 docs match code line for line (including the "attempted" definition).
+- **Gate (run twice, one command at a time, no pipes):** pass 1 - `692 passed in 14.00s`, `ruff check .` All checks passed, `ruff format --check .` 68 files already formatted, `mypy src/reconkit` Success: no issues found in 36 source files. Pass 2 (after the docs edits) - same four results, `692 passed`. Suite 687 -> 692 (five new tests).
+- **Deviations:** none from the ruling. Two decisions worth recording: (a) `attempted` is derived from `evidence.web` instead of a new `HostEvidence` field, because that tuple *is* "records a live tool returned for this host" and the `dns` path builds it empty - a new field would be a second source of the same fact; (b) the "no evidence" skip lives in the final `HostTransition(..., False)` fallback as well as in the two branches, and both are covered (the engine-level tests exercise the fallback, the unit test exercises the branch).
+- **Next part must know (12h/12j):** a first inconclusive `live` pass with a record now writes `UNKNOWN`/LOW with the reason, so any later consumer that treated "no row" as "not probed" must read the state instead; `history`: every row now carries `tools_json` (the reporting tools) for this case, which 12d's tests did not assert before.
 
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 

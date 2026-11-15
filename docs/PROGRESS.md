@@ -4,9 +4,9 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status: **PART 12 COMPLETE EXCEPT 12e/12h/12j, WHICH ARE UNDECIDED; THE PROGRESS.md TRIM IS DONE (2026-11-15).** 12a, 12b, 12c, 12d, 12f, 12g, 12i and 12k are implemented, tested and committed, one item per commit, each with a full S1-S7 self-review. Part 11 is closed and the 11f report was delivered.
-- Nothing is queued. **Do not start 12e, 12h or 12j without an owner ruling**; their `Decision needed` text in `MASTER_PLAN.md` is still the only statement about them.
-- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 4): `687 passed`, `ruff check .` clean, `ruff format --check .` 68 files, `mypy src/reconkit` clean.
+- Status: **THE OWNER'S 2026-11-15 QUEUE IS 12e -> 12h -> 12j; 12e IS DONE, 12h AND 12j ARE NEXT IN THAT ORDER.** 12a, 12b, 12c, 12d, 12e, 12f, 12g, 12i and 12k are implemented, tested and committed, one item per commit, each with a full S1-S7 self-review. Part 11 is closed and the 11f report was delivered.
+- Queued and owner-ruled (2026-11-15, no further go-ahead needed): 12h - move the scope read and the workspace mkdir to `asyncio.to_thread`, keep the SQLite block on the loop with a docs/03 note; then 12j - per-tool `version_regex` in `tools.yaml` for katana/nuclei, falling back to `splitlines()[0]`.
+- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 4): `692 passed`, `ruff check .` clean, `ruff format --check .` 68 files, `mypy src/reconkit` clean.
 - The 12a raw file is now guarded against provider-key leakage by `tests/test_engine.py::test_subfinder_raw_file_never_contains_the_provider_key` (2026-11-15): the real `SubfinderAdapter` under the real registry, a fake child that echoes its `-pc` config - the key is absent from the file on disk, `***` takes its place. No code change was needed (redaction was already in `Workspace.write`); the test plus two mutation proofs are in REVIEW_LOG "Adversarial check: a key echoed by subfinder never reaches the raw file".
 - Nothing is pushed: local `main` is ahead of `reconkit/main`, which is still `5fd1d9a`. Push only if the owner asks (`git push reconkit main`).
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in `engine.py`; adapters never import `store`/`scope`/`ui`/`cli`; `subjack` replaced by `subzy` + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from `.env`; the ports ceiling is permanent (12i).
@@ -45,7 +45,7 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 | h | Part 8 commit | done - `ui.py` + `cli.py` |
 | i | `9c4319b`, `5df7e98`, `66b117c` | done - `doctor.py` + `installer/` |
 | j / 11 | `cc70b15` ... close-out | done - audit, fixes, report delivered |
-| 12 | one commit per item | 12a, 12b, 12c, 12d, 12f, 12g, 12i, 12k done; 12e/12h/12j undecided |
+| 12 | one commit per item | 12a, 12b, 12c, 12d, 12e, 12f, 12g, 12i, 12k done; 12h, 12j queued (owner-ruled 2026-11-15) |
 
 There is no `core/consensus.py`: consensus lives in `engine.py`. Order and module names follow docs/01 section 8 and docs/03 section 5. Per-part hashes and full evidence are in `REVIEW_LOG`; the old table is in its archive.
 
@@ -62,14 +62,14 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
 - 12a: `dns` raw files go to `meta/` because the workspace keeps exactly six directories; `Workspace.write` caps every caller at `runner.MAX_OUTPUT_BYTES`.
 - 12b: `subdomains.provenance` defaults to `dns` and the `subs` upgrade is sticky; NEW is first-discovery-sighting, not `first_seen_run`. `status --json` does not expose `provenance`.
 - 12c: `duration_s` is adapter-reported; `0.0` means "not measured"; `_run_one` fills its own clock only then.
-- 12d: the task text asked for a plain connect failure to store "a different, distinguishable reason", but `MASTER_PLAN.md` 12d and docs/09 say it stores none (no record at all); the documents won. The row rule covers the kept-previous-state case, and a first-run inconclusive `live` pass still writes no row (that is 12e), so the reason lands only for hosts that already have a history row.
+- 12d: the task text asked for a plain connect failure to store "a different, distinguishable reason", but `MASTER_PLAN.md` 12d and docs/09 say it stores none (no record at all); the documents won. The row rule covers the kept-previous-state case. 12e has since closed the other half: a first-run inconclusive `live` pass that got a record now writes its own `UNKNOWN` row, so the reason lands there too.
 - 12f: `cli.py` imports only `configure_redaction` and `redact` from `core.store` (docs/03 section 9); six typed `render_error(str(exc))` sites stay outside its ruled scope.
 - 12g: `STALE_AFTER_S = 900` and 12d's `DETAIL_MAX_CHARS = 200` are module constants, not config keys, because the rulings allowed no new config.
 - 12k: `scan_runs.status` for an empty stage still reads `completed`; only the warning and the exit code changed.
 
 ## Open risks
 
-- **12e (inconclusive live pass writes no history row), 12h and 12j are undecided** and explicitly out of scope until the owner rules. 12e is what would make a first-run `UNKNOWN` reason storable (12d stores it only when a row exists).
+- **12e is closed (PIT-47, 2026-11-15)**: a first `live` pass that got a record writes `UNKNOWN`/LOW with the reason, and a pass with no record still writes nothing. A later consumer that read "no row" as "not probed" must read the state instead.
 - `--json` writes no progress at all (0 bytes of stderr on an 8m25s real run) while docs/02 section 5 says tables and progress stay on stderr: either the doc or the CLI needs to change, docs first.
 - Six typed `render_error(str(exc))` sites in `cli.py` (scope check, `diff`, `status`, `doctor`, `install`) still bypass `redact()`; every message is built from our own values today, so no leak is known. Needs its own ruling.
 - `libpcap-dev` is absent and `sudo` needs a password here, so the apt prerequisite step has never run live; `naabu` is already installed, which also means `install --all` does not attempt it.
