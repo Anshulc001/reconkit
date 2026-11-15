@@ -325,6 +325,25 @@ async def test_pyprobe_tls_error_is_a_result() -> None:
     assert record.state is HostState.UNKNOWN
 
 
+async def test_pyprobe_tls_failure_keeps_the_reason_on_the_unknown_record() -> None:
+    """12d: the TLS text is kept as `detail` instead of being classified away."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(
+            "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: certificate has expired",
+            request=request,
+        )
+
+    adapter = PyprobeAdapter(transport=httpx.MockTransport(handler))
+    result = await adapter.run(make_ctx(hosts=["bad.example.com"]))
+    record = result.records[0]
+    assert isinstance(record, HostStatusRecord)
+    assert record.state is HostState.UNKNOWN
+    assert record.detail is not None
+    assert "CERTIFICATE_VERIFY_FAILED" in record.detail
+    assert "expired" in record.detail
+
+
 async def test_pyprobe_tls_failure_still_tries_http() -> None:
     """Regression: 11d-findings-f (real testfire.net run, 2026-11-14).
 

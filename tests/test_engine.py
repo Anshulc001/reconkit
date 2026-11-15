@@ -164,6 +164,10 @@ def host(fqdn: str, state: HostState, source: str = "fake") -> HostStatusRecord:
     return HostStatusRecord(fqdn=fqdn, source=source, state=state)
 
 
+def unknown(fqdn: str, detail: str, source: str = "fake") -> HostStatusRecord:
+    return HostStatusRecord(fqdn=fqdn, source=source, state=HostState.UNKNOWN, detail=detail)
+
+
 def make_engine(
     tmp_path: Path,
     specs: Mapping[str, ToolSpec],
@@ -649,6 +653,153 @@ async def test_engine_disagreement_is_unconfirmed(tmp_path: Path) -> None:
         "SELECT state, confidence FROM subdomains WHERE fqdn = ?", ("example.com",)
     ).fetchone()
     assert (row["state"], row["confidence"]) == ("ALIVE", "UNCONFIRMED")
+
+
+# --------------------------------------------------- host_status_history.detail
+
+
+def seed_unknown_state(engine: Engine, host_name: str) -> int:
+    """Give a host a stored `UNKNOWN` state so the next pass persists a row.
+
+    A first-run inconclusive `live` pass writes no history row at all (12e, still
+    undecided), so a stored `UNKNOWN` state is the pre-existing shape this test
+    starts from - the same shape an older build or a hand-seeded database has.
+    """
+    target_id = engine.store.create_target("example.com")
+    run_id = engine.store.create_scan_run(target_id, "live", "fast")
+    sub_id = engine.store.upsert_subdomain(target_id, host_name, run_id=run_id)
+    engine.store.append_host_status(sub_id, run_id, "UNKNOWN")
+    engine.store.finish_scan_run(run_id, "completed")
+    return target_id
+
+
+async def test_unknown_tls_failure_stores_a_redacted_bounded_reason(tmp_path: Path) -> None:
+    """12d: an UNKNOWN host keeps why it could not be decided (PIT-46).
+
+    The TLS text was classified by substring and thrown away, so two very
+    different failures were indistinguishable afterwards.
+    """
+    rec = Recorder()
+    # Bare, no `key=value` shape, so only the value-based redaction can mask it.
+    key_value = "provider-secret-value"
+    raw = (
+        "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
+        f"{key_value}\nhostname mismatch " + "y" * 400
+    )
+    specs = {"live": tool("live", Stage.LIVE, mode=Mode.ACTIVE)}
+    adapters = {"live": adapter("live", Stage.LIVE, rec, records=[unknown("example.com", raw)])}
+    engine = make_engine(tmp_path, specs, adapters, env={"PROVIDER_KEY": key_value})
+    seed_unknown_state(engine, "example.com")
+
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True)
+    )
+
+    row = engine.store._conn.execute(
+        "SELECT state, detail FROM host_status_history ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert row["state"] == "UNKNOWN"
+    detail = str(row["detail"])
+    assert key_value not in detail
+    assert REDACTED in detail
+    assert "\n" not in detail
+    assert len(detail) <= 200
+    assert detail.startswith("[SSL: CERTIFICATE_VERIFY_FAILED]")
+    hosts = engine.host_rows(summary.target_id)
+    assert hosts[0].detail == detail
+
+
+async def test_an_inconclusive_pass_keeps_the_previous_state_and_records_the_reason(
+    tmp_path: Path,
+) -> None:
+    """docs/04 section 5: the kept state is the old one; the reason explains why."""
+    rec = Recorder()
+    specs = {"live": tool("live", Stage.LIVE, mode=Mode.ACTIVE)}
+    engine = make_engine(
+        tmp_path,
+        specs,
+        {
+            "live": adapter(
+                "live",
+                Stage.LIVE,
+                rec,
+                records=[unknown("example.com", "tls: untrusted CA")],
+            )
+        },
+    )
+    target_id = engine.store.create_target("example.com")
+    run_id = engine.store.create_scan_run(target_id, "dns", "fast")
+    sub_id = engine.store.upsert_subdomain(target_id, "example.com", run_id=run_id)
+    engine.store.append_host_status(sub_id, run_id, "DNS_ONLY")
+    engine.store.finish_scan_run(run_id, "completed")
+
+    await engine.run("example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True))
+
+    row = engine.store._conn.execute(
+        "SELECT state, detail FROM host_status_history ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert (row["state"], row["detail"]) == ("DNS_ONLY", "tls: untrusted CA")
+
+
+async def test_a_plain_connect_failure_stores_no_reason(tmp_path: Path) -> None:
+    """A plain connect failure is `unreachable=`, never a row with a reason.
+
+    docs/09: `pyprobe` emits no record for it, so no status row exists to carry
+    a detail - the opposite of the TLS case, and distinguishable by that alone.
+    """
+    rec = Recorder()
+    specs = {"live": tool("live", Stage.LIVE, mode=Mode.ACTIVE)}
+    adapters = {
+        "live": adapter("live", Stage.LIVE, rec, records=[], error=None),
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True)
+    )
+
+    assert rows(engine.store, "SELECT COUNT(*) AS n FROM host_status_history")[0]["n"] == 0
+    assert engine.host_rows(summary.target_id)[0].detail is None
+
+
+async def test_a_later_alive_pass_does_not_resurrect_the_reason(tmp_path: Path) -> None:
+    """12d: the reason belongs to the row that recorded it, not to the host."""
+    rec = Recorder()
+    specs = {"live": tool("live", Stage.LIVE, mode=Mode.ACTIVE)}
+    first = make_engine(
+        tmp_path,
+        specs,
+        {
+            "live": adapter(
+                "live",
+                Stage.LIVE,
+                rec,
+                records=[unknown("example.com", "certificate has expired")],
+            )
+        },
+    )
+    seed_unknown_state(first, "example.com")
+    await first.run("example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True))
+    stored = first.store._conn.execute(
+        "SELECT detail FROM host_status_history ORDER BY id DESC LIMIT 1"
+    ).fetchone()["detail"]
+    assert stored == "certificate has expired"
+
+    second = make_engine(
+        tmp_path,
+        specs,
+        {"live": adapter("live", Stage.LIVE, rec, records=[alive("example.com")])},
+        store=first.store,
+    )
+    summary = await second.run(
+        "example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True)
+    )
+
+    latest = second.store._conn.execute(
+        "SELECT state, detail FROM host_status_history ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert (latest["state"], latest["detail"]) == ("ALIVE", None)
+    assert second.host_rows(summary.target_id)[0].detail is None
 
 
 # ------------------------------------------------------------ host transitions

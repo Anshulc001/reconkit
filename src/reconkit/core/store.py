@@ -16,8 +16,10 @@ from pathlib import Path
 
 from reconkit.errors import ConfigError
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 REDACTED = "***"
+# docs/04 section 5: the stored reason is one line of at most this many characters.
+DETAIL_MAX_CHARS = 200
 
 _SCHEMA_V1 = """
 CREATE TABLE targets (
@@ -139,7 +141,16 @@ UPDATE subdomains SET provenance = 'subs'
   WHERE id IN (SELECT subdomain_id FROM subdomain_sources);
 """
 
-_MIGRATIONS: tuple[tuple[int, str], ...] = ((1, _SCHEMA_V1), (2, _SCHEMA_V2), (3, _SCHEMA_V3))
+_SCHEMA_V4 = """
+ALTER TABLE host_status_history ADD COLUMN detail TEXT;
+"""
+
+_MIGRATIONS: tuple[tuple[int, str], ...] = (
+    (1, _SCHEMA_V1),
+    (2, _SCHEMA_V2),
+    (3, _SCHEMA_V3),
+    (4, _SCHEMA_V4),
+)
 
 _COUNT_SQL: dict[str, str] = {
     "targets": "SELECT COUNT(*) FROM targets",
@@ -231,6 +242,20 @@ def redact(text: str, secrets: Iterable[str] | None = None) -> str:
         lambda match: f"{match.group(1)}{match.group(2)}{match.group(3)}{REDACTED}", result
     )
     return result
+
+
+def _detail_value(detail: str | None, secrets: Iterable[str]) -> str | None:
+    """One redacted, bounded line for `host_status_history.detail`.
+
+    docs/04 section 5: redact first with the same helper as every other stored
+    text, collapse whitespace so the value stays a single line, then cut to
+    `DETAIL_MAX_CHARS`. Redacting before the cut means a truncated value can
+    never leave a partial secret behind. An empty result is stored as NULL.
+    """
+    if detail is None:
+        return None
+    text = " ".join(redact(detail, secrets).split())
+    return text[:DETAIL_MAX_CHARS] or None
 
 
 class Store:
@@ -350,6 +375,8 @@ class Store:
             "SELECT s.fqdn, s.state, s.confidence,"
             " (SELECT h.status_code FROM host_status_history h"
             "  WHERE h.subdomain_id = s.id ORDER BY h.id DESC LIMIT 1) AS status_code,"
+            " (SELECT h.detail FROM host_status_history h"
+            "  WHERE h.subdomain_id = s.id ORDER BY h.id DESC LIMIT 1) AS detail,"
             " COALESCE((SELECT GROUP_CONCAT(DISTINCT x.tool) FROM subdomain_sources x"
             "  WHERE x.subdomain_id = s.id), '') AS sources,"
             " COALESCE((SELECT GROUP_CONCAT(DISTINCT p.port) FROM ports p"
@@ -367,6 +394,7 @@ class Store:
                     "state": str(row["state"]),
                     "confidence": str(row["confidence"]),
                     "status_code": None if row["status_code"] is None else int(row["status_code"]),
+                    "detail": None if row["detail"] is None else str(row["detail"]),
                     "sources": tuple(sorted(part for part in sources.split(",") if part)),
                     "ports": tuple(sorted(int(part) for part in ports.split(",") if part)),
                 }
@@ -503,17 +531,19 @@ class Store:
         location: str | None = None,
         cnames: Sequence[str] = (),
         dangling_cname: str | None = None,
+        detail: str | None = None,
         ips: Sequence[str] = (),
         tech: Sequence[str] = (),
         waf: str | None = None,
         tools: Sequence[str] = (),
         checked_at: str | None = None,
+        secrets: Sequence[str] = (),
     ) -> int:
         cursor = self._conn.execute(
             "INSERT INTO host_status_history"
             " (subdomain_id, run_id, state, status_code, title, location, cnames_json,"
-            "  dangling_cname, ips_json, tech_json, waf, tools_json, checked_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  dangling_cname, detail, ips_json, tech_json, waf, tools_json, checked_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 subdomain_id,
                 run_id,
@@ -523,6 +553,7 @@ class Store:
                 location,
                 json.dumps(list(cnames)),
                 dangling_cname,
+                _detail_value(detail, secrets),
                 json.dumps(list(ips)),
                 json.dumps(list(tech)),
                 waf,

@@ -133,7 +133,9 @@ def test_json_output_is_one_valid_document_with_documented_schema() -> None:
         "sources",
         "status_code",
         "ports",
+        "detail",
     }
+    assert document["hosts"][0]["detail"] is None
     assert document["stages"][0]["stage"] == "subs"
     assert document["stages"][0]["results"][0]["tool"] == "crtsh"
     assert document["stages"][0]["results"][0]["status"] == "ok"
@@ -152,6 +154,21 @@ def test_json_output_is_one_valid_document_with_documented_schema() -> None:
     assert document["summary"]["hosts"] == 5
     assert document["summary"]["tools_ok"] == 1
     assert document["summary"]["tools_failed"] == 1
+
+
+def test_json_host_row_carries_the_stored_detail() -> None:
+    """12d: the bounded reason is visible through --json (docs/02 section 5)."""
+    row = ui.HostRow(
+        "mystery.example.com",
+        HostState.UNKNOWN,
+        Confidence.LOW,
+        ("pyprobe",),
+        detail="tls: certificate has expired",
+    )
+    document = ui.summary_document(sample_summary(), [row])
+    hosts = document["hosts"]
+    assert isinstance(hosts, list)
+    assert hosts[0]["detail"] == "tls: certificate has expired"
 
 
 def test_json_hosts_carry_confidence_state_and_sources() -> None:

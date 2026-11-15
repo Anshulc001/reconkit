@@ -84,6 +84,7 @@ CREATE TABLE host_status_history (
   title        TEXT,
   cnames_json  TEXT NOT NULL DEFAULT '[]',     -- CNAMEs observed in this pass
   dangling_cname TEXT,                         -- first outside-target CNAME on SHUT_DOWN
+  detail       TEXT,                           -- bounded, redacted reason; see section 5
   ips_json     TEXT NOT NULL DEFAULT '[]',
   tech_json    TEXT NOT NULL DEFAULT '[]',
   waf          TEXT,                           -- CDN/WAF marker from httpx (Phase 2)
@@ -179,6 +180,7 @@ CREATE TABLE monitor_changes (            -- Phase 3: not created in this build
 - `Store.scan_runs(target_id)` and `Store.subdomains(target_id)` are read queries used by engine resume; both return plain dictionaries and never expose the connection.
 - `Store.host_rows(target_id)` returns the latest host state/confidence, latest status code, distinct source tools and open ports for the UI. `Store.recent_scan_runs(limit)` returns recent stage runs joined to target domains for `status`. `Store.completed_run_ids(target_id, stage)` returns completed/partial run ids newest-first for `diff`; `Store.latest_cnames(subdomain_id)` returns the CNAMEs from the latest status row; all four are read-only and never expose the connection.
 - `host_status_history.cnames_json` is written for every persisted status row and is never NULL. `dangling_cname` is NULL unless the row is `SHUT_DOWN` and the stored CNAME points outside the target. When a later NXDOMAIN pass has no CNAME of its own, the engine reuses `Store.latest_cnames()` so the takeover-relevant warning survives the process restart.
+- `host_status_history.detail` is the short, human-readable reason a pass could not reach a conclusive web answer: it carries the adapter's own error text (today `pyprobe`'s TLS failure text), so "expired certificate", "untrusted CA" and "handshake rejected" can be told apart later without probing again. It is written only when the pass's web evidence was an `UNKNOWN` record and the pass persisted a row; that row's state is either `UNKNOWN` or the previously established state the state rule kept, because an inconclusive pass never invents a new state. It is bounded to `DETAIL_MAX_CHARS` (200) characters, whitespace-collapsed to one line, and passed through the same `redact()` helper as `tool_runs.error` with the run's secret values before it is stored - storage never receives the raw string. `NULL` means no reason was reported; a later conclusive pass writes its own row with `NULL`, so an old reason never reappears on a newer row. It is read with the latest status row only (`Store.host_rows`) and is not part of the default human table.
 - `host_status_history` gains one row per host per status pass, not one row per NXDOMAIN. From the `dns` stage, `RESOLVED` writes `DNS_ONLY` and `NXDOMAIN` writes `SHUT_DOWN`/`DEAD`; SERVFAIL, timeout, no answer and error write no `dns` row. `previous_state()` therefore always reads the outcome of the immediately preceding pass, including a `DNS_ONLY` pass, which is what keeps the two-consecutive-NXDOMAIN rule intact.
 
 ## 6. Diff Queries (core of `diff`)
@@ -208,7 +210,7 @@ No soft delete. This build has no delete command; removing a target's rows is a 
 ## 10. Sensitive Data
 
 - Never stored: API keys, tokens, passwords, cookies.
-- `tool_runs.error` must be redacted (strip tokens and URLs with secrets) before saving.
+- `tool_runs.error` and `host_status_history.detail` must be redacted (strip tokens and URLs with secrets) before saving; both go through `store.redact()` inside the store, never through a second implementation.
 - Bulk writes use `with store.transaction():`, which commits once at the end and rolls back the whole block on any exception. Per-row methods join the outer transaction instead of committing individually; nested `transaction()` blocks join the outermost one.
 - DB and workspace may contain target info: both are git-ignored.
 
@@ -216,6 +218,7 @@ No soft delete. This build has no delete command; removing a target's rows is a 
 
 - `schema_version` table + ordered migration scripts in `core/store.py`.
 - Schema version 2 adds `host_status_history.cnames_json` (`NOT NULL DEFAULT '[]'`) and `dangling_cname` (`NULL`). Existing rows therefore get an empty list and no dangling value, never NULL for the list.
+- Schema version 4 adds `host_status_history.detail` (`TEXT`, nullable, no default), the bounded redacted reason described in section 5. It is additive: every existing row gets `NULL`, and nothing is rewritten.
 - Schema version 3 adds `subdomains.provenance` (`TEXT NOT NULL DEFAULT 'dns'`, `CHECK (provenance IN ('subs','dns'))`) and back-fills existing rows: any row with a `subdomain_sources` entry becomes `subs`, every other row stays `dns`. Nothing is destroyed; `first_seen_run` is untouched.
 - Every schema change: documented here, has a migration, has a test, never destroys existing data.
 

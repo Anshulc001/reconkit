@@ -70,6 +70,9 @@ class HostStatusRecord(BaseModel):
     status_code: int | None = None
     title: str | None = None
     location: str | None = None
+    # Why the pass could not decide a better state (UNKNOWN only). The store
+    # bounds and redacts it before it reaches the database (docs/04 section 5).
+    detail: str | None = None
     ips: list[str] = []
     tech: list[str] = []
     waf: str | None = None

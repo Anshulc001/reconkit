@@ -14,7 +14,8 @@ from typer.testing import CliRunner
 
 from reconkit.cli import app
 from reconkit.core.store import configure_redaction
-from reconkit.engine import Engine
+from reconkit.engine import Engine, HostSnapshot
+from reconkit.models import Confidence, HostState
 
 REPO = Path(__file__).resolve().parents[1]
 CLI = REPO / "src" / "reconkit" / "cli.py"
@@ -176,6 +177,27 @@ def test_mock_json_is_one_valid_document_and_exit_zero(tmp_path: Path) -> None:
     assert document["exit_code"] == 0
     assert document["hosts"]
     assert {"fqdn", "state", "confidence", "sources"} <= set(document["hosts"][0])
+
+
+def test_json_run_exposes_the_stored_host_detail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """12d: the CLI maps the stored detail into the documented `--json` field."""
+    config = make_config(tmp_path)
+    snapshot = HostSnapshot(
+        fqdn="mystery.example.com",
+        state=HostState.UNKNOWN,
+        confidence=Confidence.LOW,
+        sources=("pyprobe",),
+        status_code=None,
+        ports=(),
+        detail="tls: certificate has expired",
+    )
+    monkeypatch.setattr(Engine, "host_rows", lambda _self, _target_id: [snapshot])
+    result = CliRunner().invoke(app, scan_args(config, "passive", "--json"))
+    assert result.exit_code == 0
+    document = json.loads(result.stdout)
+    assert document["hosts"][0]["detail"] == "tls: certificate has expired"
 
 
 def test_mock_human_output_uses_rich_tables_on_stderr(tmp_path: Path) -> None:

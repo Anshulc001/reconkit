@@ -333,6 +333,7 @@ class HostSnapshot:
     sources: tuple[str, ...]
     status_code: int | None
     ports: tuple[int, ...]
+    detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -433,6 +434,7 @@ class Engine:
             raw_sources = cast(tuple[str, ...], row["sources"])
             raw_ports = cast(tuple[int, ...], row["ports"])
             raw_status = row["status_code"]
+            raw_detail = row["detail"]
             rows.append(
                 HostSnapshot(
                     fqdn=str(row["fqdn"]),
@@ -441,6 +443,7 @@ class Engine:
                     sources=tuple(str(value) for value in raw_sources),
                     status_code=raw_status if isinstance(raw_status, int) else None,
                     ports=tuple(int(value) for value in raw_ports),
+                    detail=raw_detail if isinstance(raw_detail, str) else None,
                 )
             )
         return rows
@@ -1338,11 +1341,17 @@ class Engine:
             location=None if best is None else best.location,
             cnames=cnames,
             dangling_cname=transition.dangling_cname,
+            # Only the adapter's own reason, and only for the row it describes: a
+            # later ALIVE pass supplies its own record (no detail), so an old
+            # reason never reappears (docs/04 section 5). The store redacts and
+            # bounds it with the run's secrets.
+            detail=None if best is None else best.detail,
             ips=ips,
             tech=() if best is None else best.tech,
             waf=None if best is None else best.waf,
             tools=transition.sources,
             checked_at=self._now(),
+            secrets=self._secrets,
         )
 
     def _persist_ports(

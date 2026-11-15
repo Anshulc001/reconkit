@@ -124,6 +124,7 @@ class PyprobeAdapter(BaseToolAdapter):
         except (TypeError, ValueError):
             return None
         tls_error = False
+        tls_detail: str | None = None
         async with semaphore:
             for scheme in SCHEMES:
                 await ctx.limiter.wait()
@@ -145,11 +146,16 @@ class PyprobeAdapter(BaseToolAdapter):
                     # TLS error with no working scheme is evidence of UNKNOWN.
                     if self._is_tls_error(exc):
                         tls_error = True
+                        # Keep the reason for the UNKNOWN record: the store bounds
+                        # and redacts it (docs/04 section 5, part 12d).
+                        tls_detail = str(exc)
                     continue
                 except (httpx.TimeoutException, httpx.HTTPError):
                     continue
         if tls_error:
-            return HostStatusRecord(fqdn=host, source=self.name, state=HostState.UNKNOWN)
+            return HostStatusRecord(
+                fqdn=host, source=self.name, state=HostState.UNKNOWN, detail=tls_detail
+            )
         return None
 
     @staticmethod

@@ -230,6 +230,7 @@ def _run_scan(
                     sources=item.sources,
                     status_code=item.status_code,
                     ports=item.ports,
+                    detail=item.detail,
                 )
                 for item in engine.host_rows(summary.target_id)
             ]

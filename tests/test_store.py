@@ -8,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from reconkit.core.store import SCHEMA_VERSION, Store, configure_redaction, redact
+from reconkit.core.store import (
+    DETAIL_MAX_CHARS,
+    REDACTED,
+    SCHEMA_VERSION,
+    Store,
+    configure_redaction,
+    redact,
+)
 from reconkit.errors import ConfigError
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "reconkit"
@@ -134,14 +141,16 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 3
+        assert migrated.schema_version == SCHEMA_VERSION == 4
         assert "cnames_json" in columns
         assert "dangling_cname" in columns
+        assert "detail" in columns
         row = migrated._conn.execute(
-            "SELECT cnames_json, dangling_cname FROM host_status_history"
+            "SELECT cnames_json, dangling_cname, detail FROM host_status_history"
         ).fetchone()
         assert row["cnames_json"] == "[]"
         assert row["dangling_cname"] is None
+        assert row["detail"] is None
     finally:
         migrated.close()
 
@@ -164,6 +173,86 @@ def test_host_status_persists_cnames_and_latest_cnames(store: Store) -> None:
         '["old.appspot.com"]',
         "old.appspot.com",
     )
+
+
+def test_host_detail_is_redacted_bounded_and_one_line(store: Store) -> None:
+    """12d: a raw reason never reaches the column as written.
+
+    Regression: PIT-46 - the reason was discarded, and any reason that does get
+    stored must be redacted with the same helper as every other stored text.
+    """
+    target_id, run_id = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "mystery.example.com", run_id=run_id)
+    raw = (
+        "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
+        "provider-secret-value\nsecond line " + "x" * 400
+    )
+    store.append_host_status(
+        sub_id, run_id, "UNKNOWN", detail=raw, secrets=("provider-secret-value",)
+    )
+    detail = str(store._conn.execute("SELECT detail FROM host_status_history").fetchone()[0])
+    assert "provider-secret-value" not in detail
+    assert REDACTED in detail
+    assert "\n" not in detail
+    assert "  " not in detail
+    assert len(detail) == DETAIL_MAX_CHARS
+    assert detail.startswith("[SSL: CERTIFICATE_VERIFY_FAILED]")
+
+
+def test_blank_host_detail_is_stored_as_null(store: Store) -> None:
+    target_id, run_id = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "mystery.example.com", run_id=run_id)
+    store.append_host_status(sub_id, run_id, "UNKNOWN", detail="   \n\t ")
+    assert store._conn.execute("SELECT detail FROM host_status_history").fetchone()[0] is None
+
+
+def test_v3_database_migrates_the_additive_detail_column(tmp_path: Path) -> None:
+    """An existing v3 database opens cleanly and gains a NULL detail column."""
+    db_path = tmp_path / "v3.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE schema_version (version INTEGER NOT NULL);
+        INSERT INTO schema_version (version) VALUES (3);
+        CREATE TABLE host_status_history (
+          id           INTEGER PRIMARY KEY,
+          subdomain_id INTEGER NOT NULL,
+          run_id       INTEGER NOT NULL,
+          state        TEXT NOT NULL,
+          status_code  INTEGER,
+          location     TEXT,
+          title        TEXT,
+          ips_json     TEXT NOT NULL DEFAULT '[]',
+          tech_json    TEXT NOT NULL DEFAULT '[]',
+          waf          TEXT,
+          tools_json   TEXT NOT NULL DEFAULT '[]',
+          checked_at   TEXT NOT NULL,
+          cnames_json  TEXT NOT NULL DEFAULT '[]',
+          dangling_cname TEXT
+        );
+        INSERT INTO host_status_history (subdomain_id, run_id, state, checked_at)
+          VALUES (1, 1, 'ALIVE', '2026-11-14T10:00:00Z');
+        """
+    )
+    conn.close()
+
+    migrated = Store(db_path)
+    try:
+        assert migrated.schema_version == SCHEMA_VERSION == 4
+        columns = {
+            str(row["name"])
+            for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
+        }
+        assert "detail" in columns
+        existing = migrated._conn.execute("SELECT detail FROM host_status_history").fetchone()
+        assert existing["detail"] is None
+        migrated.append_host_status(1, 1, "UNKNOWN", detail="tls: handshake rejected")
+        newest = migrated._conn.execute(
+            "SELECT detail FROM host_status_history ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert newest["detail"] == "tls: handshake rejected"
+    finally:
+        migrated.close()
 
 
 def test_newer_schema_is_refused(tmp_path: Path) -> None:
@@ -539,6 +628,22 @@ def test_v2_database_migrates_provenance_with_backfill(tmp_path: Path) -> None:
           tool TEXT NOT NULL,
           PRIMARY KEY (subdomain_id, run_id, tool)
         );
+        CREATE TABLE host_status_history (
+          id           INTEGER PRIMARY KEY,
+          subdomain_id INTEGER NOT NULL,
+          run_id       INTEGER NOT NULL,
+          state        TEXT NOT NULL,
+          status_code  INTEGER,
+          location     TEXT,
+          title        TEXT,
+          ips_json     TEXT NOT NULL DEFAULT '[]',
+          tech_json    TEXT NOT NULL DEFAULT '[]',
+          waf          TEXT,
+          tools_json   TEXT NOT NULL DEFAULT '[]',
+          checked_at   TEXT NOT NULL,
+          cnames_json  TEXT NOT NULL DEFAULT '[]',
+          dangling_cname TEXT
+        );
         INSERT INTO subdomains (id, target_id, fqdn, first_seen_run, last_seen_run)
           VALUES (1, 1, 'www.example.com', 1, 1), (2, 1, 'alias.example.com', 1, 1);
         INSERT INTO subdomain_sources (subdomain_id, run_id, tool) VALUES (1, 1, 'crtsh');
@@ -551,7 +656,7 @@ def test_v2_database_migrates_provenance_with_backfill(tmp_path: Path) -> None:
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(subdomains)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 3
+        assert migrated.schema_version == SCHEMA_VERSION == 4
         assert "provenance" in columns
         rows = {
             str(row["fqdn"]): str(row["provenance"])

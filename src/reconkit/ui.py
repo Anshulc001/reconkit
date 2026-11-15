@@ -50,6 +50,7 @@ class HostRow:
     sources: tuple[str, ...] = ()
     status_code: int | None = None
     ports: tuple[int, ...] = ()
+    detail: str | None = None
 
 
 def format_state(state: HostState) -> str:
@@ -79,6 +80,7 @@ def _host_document(row: HostRow) -> dict[str, object]:
         "sources": list(row.sources),
         "status_code": row.status_code,
         "ports": sorted(set(row.ports)),
+        "detail": row.detail,
     }
 
 
