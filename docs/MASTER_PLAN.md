@@ -358,10 +358,10 @@ DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
   contact a host leaves no `host_status_history` row, which is indistinguishable
   from a run that never touched it. docs/04 section 5 promises one row per host
   per status pass with a `dns`-stage exemption only.
-  Decision needed (docs/04 first): persist the UNKNOWN transition, or record a
-  per-host probe outcome; recommended: persist the row with the UNKNOWN state
-  when a probe was attempted, and keep the existing "no evidence" skip when
-  nothing was attempted.
+  DECIDED (owner, 2026-11-15): persist the row with state `UNKNOWN` when a probe
+  was attempted - a live-stage tool returned a record for that host - and keep
+  the existing "no evidence" skip when nothing was attempted. Implemented and
+  committed (`3a20679`).
   Size: small - `engine.decide_host_state`/`_persist`, docs/04.
   Tests: an inconclusive first pass writes one UNKNOWN row; the second
   consecutive NXDOMAIN rule still holds; a host with no probe attempt writes
@@ -411,11 +411,10 @@ DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
   (`engine.py`), `load_scope()` reads and parses YAML inside async
   `_active_hosts`, and `Workspace.create` mkdirs/chmods inside `async def run`.
   None causes a wrong result; together they can stall other stages' I/O.
-  Decision needed (docs/03): move them behind `asyncio.to_thread`, or accept
-  them with a documented bound. Recommended: `to_thread` for the scope read and
-  the workspace mkdir, and for the persistence block keep it on the loop but
-  document why (single-writer SQLite ordering) unless the owner wants the
-  transaction moved as well.
+  DECIDED (owner, 2026-11-15): move the `scope.yaml` read and the workspace
+  mkdir/chmod behind `asyncio.to_thread`; leave the SQLite persistence block on
+  the event loop with the reason written down in docs/03 (single-writer SQLite
+  ordering, `check_same_thread` safety). Implemented and committed (`77fd36d`).
   Size: medium - `engine.run`/`_active_hosts`/`_persist_stage`, plus tests that
   assert ordering did not change.
   Tests: a scope file read that sleeps does not block a concurrent heartbeat
@@ -450,9 +449,10 @@ DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
   `__` and `nuclei` shows `[I...` in the doctor table, which also defeats
   `_same_version()` and makes `update` unable to call them up to date. The
   masscan half of the same audit is already fixed (PIT-35).
-  Decision needed: per-tool version regex in `tools.yaml` (a `version_regex`
-  field, docs/10 section 3c) or a parsing rule in the installer. Recommended:
-  the registry field, because the banner text is a property of the tool.
+  DECIDED (owner, 2026-11-15): a per-tool `version_regex` field in `tools.yaml`
+  (docs/10 section 3c); used when the tool defines one, with the existing
+  `splitlines()[0]` behaviour kept as the fallback when the field is absent or
+  finds no match. Implemented and committed (`b035a04`).
   Size: small - `installer/registry.py`, `installer/github_release.py`, docs/10,
   `tools.yaml` rows for the banner-first tools.
   Tests: katana and nuclei parse a real captured banner; masscan's nonzero-exit
