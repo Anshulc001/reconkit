@@ -128,6 +128,78 @@ def test_a_nonzero_version_probe_with_unrelated_text_is_not_installed(tmp_path: 
     assert state is None
 
 
+KATANA_BANNER = (
+    "\n"
+    "   __        __                \n"
+    "  / /_____ _/ /____ ____  ___ _\n"
+    " /  '_/ _  / __/ _  / _ \\/ _  /\n"
+    "/_/\\_\\\\_,_/\\__/\\_,_/_//_/\\_,_/\t\t\t\t\t\t\t \n"
+    "\n"
+    "\t\tprojectdiscovery.io\n"
+    "\n"
+    "[\x1b[34mINF\x1b[0m] Current version: v1.8.0\n"
+)
+NUCLEI_BANNER = (
+    "[\x1b[34mINF\x1b[0m] Nuclei Engine Version: v3.11.1\n"
+    "[\x1b[34mINF\x1b[0m] Nuclei Config Directory: /home/kali/.config/nuclei\n"
+)
+
+
+def probe(
+    tmp_path: Path, name: str, *, stdout: str = "", stderr: str = "", returncode: int = 0
+) -> str | None:
+    binary = bin_dir(tmp_path) / name
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_bytes(b"#!/bin/sh\n")
+
+    def runner(
+        argv: list[str], timeout: float | None = None, env: dict[str, str] | None = None
+    ) -> ExecResult:
+        return ExecResult(
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+            timed_out=False,
+            truncated=False,
+        )
+
+    return github_release.installed_version(plan_for(name), bin_dir(tmp_path), runner=runner)
+
+
+def test_katana_version_ignores_the_ascii_banner(tmp_path: Path) -> None:
+    """Regression: PIT-48 katana printed a logo, so doctor showed `__`.
+
+    The captured banner is the real `katana -version` output on Kali (v1.8.0,
+    stderr); the version sits on line 8 after ANSI-coloured log lines.
+    """
+    state = probe(tmp_path, "katana", stderr=KATANA_BANNER)
+    assert state == "v1.8.0"
+    assert github_release._same_version("v1.8.0", state or "") is True
+
+
+def test_nuclei_version_drops_the_ansi_log_prefix(tmp_path: Path) -> None:
+    """Regression: PIT-48 nuclei's version line was shown raw, colour codes and all."""
+    state = probe(tmp_path, "nuclei", stdout=NUCLEI_BANNER)
+    assert state == "v3.11.1"
+    assert "\x1b" not in (state or "")
+    assert github_release._same_version("v3.11.1", state or "") is True
+
+
+def test_a_regex_with_no_match_falls_back_to_the_first_line(tmp_path: Path) -> None:
+    """12j: a banner the pattern does not know must not become a failure."""
+    state = probe(tmp_path, "katana", stdout="katana 9.9.9\n")
+    assert state == "katana 9.9.9"
+
+
+def test_a_version_regex_without_a_group_returns_the_match(tmp_path: Path) -> None:
+    plan = replace(plan_for("katana"), version_regex=r"v\d+\.\d+\.\d+")
+    binary = bin_dir(tmp_path) / "katana"
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_bytes(b"#!/bin/sh\n")
+    runner, _calls = fake_runner(version_text="noise v2.0.1 noise")
+    assert github_release.installed_version(plan, bin_dir(tmp_path), runner=runner) == "v2.0.1"
+
+
 def test_install_skips_a_tool_that_is_already_usable(tmp_path: Path) -> None:
     binary = bin_dir(tmp_path) / "assetfinder"
     binary.parent.mkdir(parents=True)

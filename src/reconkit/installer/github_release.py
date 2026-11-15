@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
 import tempfile
 from collections.abc import Callable, Iterable
@@ -506,6 +507,10 @@ def installed_version(
     # with a nonzero exit stays "not usable" (Part B audit, 2026-11-14).
     if outcome.returncode != 0 and plan.binary.lower() not in text.lower():
         return None
+    if plan.version_regex is not None:
+        match = re.search(plan.version_regex, text)
+        if match is not None:
+            return match.group(1) if match.groups() else match.group(0)
     return text.splitlines()[0] if text else str(copy)
 
 

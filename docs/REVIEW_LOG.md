@@ -62,6 +62,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-45 | A `SIGKILL` between writing the subfinder `provider-config.yaml` and the `finally` unlink left a provider-key file in the shared system temp dir indefinitely; `finally` was the only mitigation (C-2) | the adapter wrote a bare `mkstemp` file in the shared temp dir, so nothing recorded which run owned it, nothing bounded its lifetime, and a later run could not tell a stranded key file from a live one | provider keys live in a per-run directory named `reconkit-subfinder-<pid>-<random>` with mode 0700 (file 0600), created explicitly and removed with `rmtree` in `finally`. Every run first removes stale directories: a dead pid is removed at once, a live pid only once its mtime is older than `STALE_AFTER_S` (900 s, and the only rule on Windows where no safe liveness probe exists); stale pre-12g `*.yaml` files are removed by the same age rule. Cleanup never raises and never touches the current run's own directory (docs/09) | `test_a_sigkilled_run_leaves_a_directory_the_next_start_removes` (`Regression: PIT-45`), `test_provider_config_lives_in_a_0700_per_run_directory`, `test_cleanup_leaves_a_concurrent_runs_directory_alone`, `test_when_liveness_is_unknown_age_alone_decides` |
 
 | PIT-47 | A first `live` pass that contacted a host but could not decide wrote no `host_status_history` row, so "probed and inconclusive" was indistinguishable from "never touched the host", and the reason 12d stores was dropped in exactly the first-run case (11d-findings-g) | `decide_host_state` tied `persist` to `previous is not None`, so the write only started at the second pass; the pass's own evidence (a returned record) was never consulted, although docs/04 section 5 promises one row per host per status pass with a `dns`-stage exemption only | `persist` in the two inconclusive branches is `previous is not None or attempted`, where `attempted = bool(evidence.web)` - a live tool returned a record for that host, ambiguous or not, per the owner ruling and docs/04 section 5. A pass with no record (failed or timed-out tool, or no tool) still writes nothing, and the `dns` stage's SERVFAIL/timeout/no-answer skip is untouched because its evidence never carries web records | `test_regression_an_attempted_probe_persists_with_no_previous_state` (`Regression: PIT-47`), `test_a_first_inconclusive_live_pass_writes_an_unknown_row`, `test_only_the_host_a_tool_reported_gets_the_unknown_row`, `test_a_host_without_a_record_gets_no_row_even_when_another_did`, `test_a_failed_live_tool_attempted_nothing_and_writes_no_row` |
+| PIT-48 | `doctor` showed junk for two installed tools (`katana` -> `__`, `nuclei` -> `[I…` plus ANSI escapes), and `update` could not call `katana` up to date, so an already-current binary would be downloaded again on every run (12j) | `installed_version()` returned `text.splitlines()[0]` for every tool, but `katana -version` prints four lines of ASCII art (the real version is on line 8, on stderr) and `nuclei -version` prints a coloured `[INF]` line first, so `_same_version()` compared a release tag against a logo | A tool may carry a top-level `version_regex` in `tools.yaml`; `installed_version()` searches the whole `version_cmd` output, returns the first capture group (or the whole match when the pattern has no group), and falls back to `splitlines()[0]` when the field is absent or nothing matches. A pattern that does not compile is a `ConfigError` at registry load, before any command runs | `test_katana_version_ignores_the_ascii_banner` (`Regression: PIT-48`), `test_nuclei_version_drops_the_ansi_log_prefix` (`Regression: PIT-48`), `test_a_regex_with_no_match_falls_back_to_the_first_line`, `test_a_version_regex_without_a_group_returns_the_match`, `test_version_regex_is_parsed_from_the_registry`, `test_a_broken_version_regex_is_a_config_error`, `test_version_regex_survives_the_plan_copy` |
 
 ## Commit map
 
@@ -2450,6 +2451,76 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **No PIT row, and why:** PIT records a bug the code shipped with and now defends against. 12h is a latent hazard - `MASTER_PLAN.md` calls it `low`, and no wrong result, crash or measured stall has ever been attributed to it; the code was correct, only its placement on the loop was not ideal. The named tests are the permanent guard, and the mutation is the proof that the docs' reason is real. PIT-48 stays free for 12j.
 - **Deviations / interpretation to flag:** the ruling says "the scope.yaml read" (singular), but the engine reads `scope.yaml` in **two** places - `_active_hosts` (the active gate) and `_ip_allowed` (the `in_scope_cidrs` predicate handed to `pyscan`). Both were moved, because leaving one would make docs/03's "file I/O never runs on the event loop" false and would keep the slow-filesystem stall on the ports path. Same mechanism, same thread, no behaviour change; if the owner intended only the gate, the second hop is trivially removable.
 - **Next part must know (12j):** the engine now has five `to_thread` sites (`Workspace.create`, `_active_hosts`, `_ip_allowed`, `_is_installed`, and adapter child processes); anything else added to `run` that touches a file must justify itself against docs/03 section 11. The SQLite connection must stay on the thread that created it.
+
+## Part 12j: a banner-first tool reports its real version (PIT-48)  (commit subject `fix: parse katana and nuclei versions with a registry pattern`; hash filled by the next commit)
+
+- **Owner ruling being implemented (2026-11-15, final):** "Add a per-tool version_regex field to tools.yaml (docs/10 section 3c). installed_version() uses it when the tool has one defined, and falls back to today's splitlines()[0] behavior when the field is absent or the regex finds no match. Add real version_regex rows for katana and nuclei based on their actual captured banners - verify against the real binaries on this machine, not from memory."
+- **Real binaries, before the change (this machine, `/home/kali/go/bin`):** `katana -version` prints a blank line, four lines of ASCII art (`   __        __` / `  / /_____ _/ /____ ____  ___ _` / ` /  '_/ _  / __/ _  / _ \/ _  /` / `/_/\_\\_,_/\__/\_,_/_//_/\_,_/`), `projectdiscovery.io`, then `[<ANSI>INF</>] Current version: v1.8.0` - on **stderr**. `nuclei -version` prints `[<ANSI>34m INF] Nuclei Engine Version: v3.11.1` first, also on stderr. `installed_version()` already preferred stderr when stdout was empty, so it read the text; it just kept the wrong line.
+- **Docs read / goal:** `MASTER_PLAN.md` 12j, the ruling above, docs/10 sections 1 (idempotency), 3c (install plans and the version probe), 6 (update comparison) and 10 (`doctor`), docs/09 section 9 (the Part B audit that found it), the PIT-35 fix (masscan's banner), `installer/registry.py` and `installer/github_release.py`. Goal: doctor shows a version and `update` can call both tools current, with no per-tool code paths.
+- **Docs changed first (before the code):** docs/10 section 3c gains `version_regex` in the `InstallPlan` field list and a rule paragraph: the pattern is searched in the **whole** `version_cmd` output, the first capture group is the version (the whole match when there is no group), the fallback is unchanged (first non-empty line) when the field is absent or nothing matches, an uncompilable pattern is a `ConfigError` at registry load, and the field lives in `tools.yaml` because the banner is a property of the tool. `git diff -- docs/10_TOOL_INSTALLER.md` is exactly +2 lines.
+- **Code change:** `tools.yaml` rows for `katana` and `nuclei` gain `version_regex` (single-quoted so the backslashes survive YAML); `InstallPlan.version_regex: str | None = None`; `registry._pattern()` validates the value (a non-string or a pattern `re.compile` rejects is a `ConfigError`) and is threaded through `_plan` and through the plan copy in `load_plans`; `installed_version()` searches with `re.search` after the existing nonzero-exit identity check and before the `splitlines()[0]` fallback. `import re` in both files (stdlib, no new dependency).
+- **Patterns, and why they are safe:** `'Current version: (v?\d+\.\d+\.\d+)'` and `'Nuclei Engine Version: (v?\d+\.\d+\.\d+)'`. The ANSI codes sit before the matched text, so no colour stripping is needed; the anchored phrase keeps a stray date or a compiler version from being picked up; `v?` accepts both ProjectDiscovery's `v1.8.0` form and a future bare `1.8.0`.
+- **Files touched:** `src/reconkit/installer/registry.py` (+20/-0), `src/reconkit/installer/github_release.py` (+5/-0), `tools.yaml` (2 rows), `tests/test_installer_registry.py` (+35), `tests/test_install_cli.py` (+66), `docs/10_TOOL_INSTALLER.md` (+2), this log, `docs/PROGRESS.md`.
+- **Requirement -> test table:**
+  | Requirement (owner ruling) | Test |
+  |---|---|
+  | a per-tool `version_regex` field exists in `tools.yaml` and reaches `InstallPlan` | `test_version_regex_is_parsed_from_the_registry` (katana/nuclei exact patterns, assetfinder `None`), `test_version_regex_survives_the_plan_copy` (a temp registry, so the `load_plans` rebuild cannot silently drop it) |
+  | real rows for katana and nuclei, from the real banners | the exact patterns asserted above; the captured banners are in `test_katana_version_ignores_the_ascii_banner` / `test_nuclei_version_drops_the_ansi_log_prefix`, and the live check below ran against the installed v1.8.0/v3.11.1 |
+  | `installed_version()` uses the pattern when defined | `test_katana_version_ignores_the_ascii_banner` (`v1.8.0`), `test_nuclei_version_drops_the_ansi_log_prefix` (`v3.11.1`, no `\x1b`), `test_a_version_regex_without_a_group_returns_the_match` (`v2.0.1`) |
+  | fallback is today's `splitlines()[0]` when absent or unmatched | `test_a_regex_with_no_match_falls_back_to_the_first_line` (`katana 9.9.9`), `test_installed_version_uses_the_managed_copy_first` (no pattern), `test_massdns_version_cmd_reports_dpkg_version` (no pattern) |
+  | `update` can call them up to date | both banner tests assert `_same_version("v1.8.0", parsed) is True` / `_same_version("v3.11.1", parsed) is True` |
+  | PIT-35's masscan case still passes | `test_masscan_version_counts_even_though_its_exit_code_is_1` and `test_a_nonzero_version_probe_with_unrelated_text_is_not_installed` unchanged and green |
+  | a bad pattern fails early, not inside doctor | `test_a_broken_version_regex_is_a_config_error` (`ConfigError` naming `version_regex`) |
+- **Live check against the installed binaries (not a test; run by hand on this machine):**
+  ```
+  katana:
+    before (no version_regex): '__        __                '
+    after  (version_regex)   : 'v1.8.0'
+    _same_version('v1.8.0', after) -> True
+    _same_version('v1.8.0', before) -> False
+  nuclei:
+    before (no version_regex): '[\x1b[34mINF\x1b[0m] Nuclei Engine Version: v3.11.1'
+    after  (version_regex)   : 'v3.11.1'
+    _same_version('v3.11.1', after) -> True
+    _same_version('v3.11.1', before) -> True
+  ```
+  and `reconkit doctor --no-color` now prints `katana | urls | core | yes | v1.8.0 | ... | ok` and `nuclei | vulns | core | yes | v3.11.1 | ... | ok` (was `__` and `[I…`). nuclei was always `_same_version`-compatible, so its half was cosmetic; katana's was functional.
+- **Red-before-green (raw):** with the `version_regex` block removed from `installed_version()` (tests kept):
+  ```
+  >       assert state == "v1.8.0"
+  E       AssertionError: assert '__        __                ' == 'v1.8.0'
+  >       assert state == "v3.11.1"
+  E       AssertionError: assert '[\x1b[34mINF...sion: v3.11.1' == 'v3.11.1'
+  >       assert github_release.installed_version(plan, bin_dir(tmp_path), runner=runner) == "v2.0.1"
+  E         - v2.0.1
+  E         + noise v2.0.1 noise
+  FAILED tests/test_install_cli.py::test_katana_version_ignores_the_ascii_banner
+  FAILED tests/test_install_cli.py::test_nuclei_version_drops_the_ansi_log_prefix
+  FAILED tests/test_install_cli.py::test_a_version_regex_without_a_group_returns_the_match
+  3 failed, 2 passed, 34 deselected in 0.34s
+  ```
+  Restore: `cp /tmp/12j/github_release.py ... && sha256sum -c` -> `OK`, `57 passed in 3.19s`.
+- **Mutation proofs (both restored, hash confirmed):**
+  - **M1 - return the whole match instead of the capture group** (`return match.group(0)`):
+    ```
+    E       AssertionError: assert 'Current version: v1.8.0' == 'v1.8.0'
+    E       AssertionError: assert 'Nuclei Engin...sion: v3.11.1' == 'v3.11.1'
+    FAILED tests/test_install_cli.py::test_katana_version_ignores_the_ascii_banner
+    FAILED tests/test_install_cli.py::test_nuclei_version_drops_the_ansi_log_prefix
+    src/reconkit/installer/github_release.py: OK
+    ```
+  - **M2 - no fallback when the pattern finds nothing** (`return None` before the fallback):
+    ```
+    E       AssertionError: assert None == 'katana 9.9.9'
+    FAILED tests/test_install_cli.py::test_a_regex_with_no_match_falls_back_to_the_first_line
+    1 failed, 38 deselected in 0.19s
+    src/reconkit/installer/github_release.py: OK
+    ```
+  Pre-mutation hash: `0421dc3244b6bd5ffdb9577bda5ce96205d50e17aeb69f6e3ca850710562ad24  src/reconkit/installer/github_release.py`.
+- **Self-review (S1-S7) findings:** S1 no `assert` in `src`; no `shell=True`/`os.system`; `import subprocess` only in `core/runner.py`; `import sqlite3` only in `core/store.py`; adapters import none of `store`/`scope`/`ui`/`cli`; no `TODO`/`FIXME`; no `print(` outside `ui.py`; no new `noqa`/`type: ignore`; `git diff --check` clean. S2 external input: the pattern comes from `tools.yaml`, is compiled and rejected at load if invalid, and is only ever used with `re.search` on the probe's own output - it never becomes a path, argv or SQL. S3 secrets: nothing new is read, stored or printed; the probe env is still `{"HOME": ...}` only. S4 async: no change (the version probe is synchronous and runs from `doctor`/`update`, both CLI paths). S5 PIT-35 preserved: the identity check runs before the pattern, so a nonzero exit with unrelated text still returns `None`. S6 no new dependency/flag/config module: `re` is stdlib, the field lives in the existing registry file, and `config.yaml` is untouched. S7 docs match code, including the group/whole-match rule and the load-time `ConfigError`.
+- **Gate (run twice, one command at a time, no pipes):** pass 1 - `702 passed in 14.87s`, `ruff check .` All checks passed, `ruff format --check .` 68 files already formatted, `mypy src/reconkit` Success: no issues found in 36 source files. Pass 2 (after the docs edits) - same four results, `702 passed`. Suite 695 -> 702 (seven new tests).
+- **Deviations:** none from the ruling. Two notes: (a) the ruling names the fallback as `splitlines()[0]`, and that is exactly what remains - the `str(copy)` fallback for an empty probe output is untouched; (b) the pattern is validated at registry load (`re.compile`), which the ruling did not ask for but which keeps a typo from raising `re.error` inside `doctor`; it is one small function and docs/10 states it.
+- **What this closes:** Part 12 is complete - 12a, 12b, 12c, 12d, 12e, 12f, 12g, 12h, 12i, 12j and 12k are all implemented, tested and committed.
 
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 

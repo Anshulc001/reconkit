@@ -88,6 +88,41 @@ def test_version_pin_applies_to_a_plain_go_package(tmp_path: Path) -> None:
     assert plan.package == "example.com/beta/cmd/beta@1.2.3"
 
 
+def test_version_regex_is_parsed_from_the_registry() -> None:
+    """12j: the pattern is per tool, from tools.yaml, and absent for the rest."""
+    plans = load_plans()
+    assert plans["katana"].version_regex == r"Current version: (v?\d+\.\d+\.\d+)"
+    assert plans["nuclei"].version_regex == r"Nuclei Engine Version: (v?\d+\.\d+\.\d+)"
+    assert plans["assetfinder"].version_regex is None
+
+
+def test_a_broken_version_regex_is_a_config_error(tmp_path: Path) -> None:
+    """A pattern that cannot compile fails at load, not inside doctor."""
+    tools = tmp_path / "tools.yaml"
+    tools.write_text(
+        "tools:\n"
+        "  beta: {stage: dns, kind: binary, tier: core, mode: passive, phase: 2,"
+        " binary: beta, version_regex: '(unclosed',"
+        " install: {method: apt, package: beta}}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="version_regex"):
+        load_plans(tools)
+
+
+def test_version_regex_survives_the_plan_copy(tmp_path: Path) -> None:
+    """`load_plans` rebuilds each plan; the pattern must not be dropped there."""
+    tools = tmp_path / "tools.yaml"
+    tools.write_text(
+        "tools:\n"
+        "  beta: {stage: dns, kind: binary, tier: core, mode: passive, phase: 2,"
+        " binary: beta, version_cmd: [beta, -version], version_regex: 'v\\d+',"
+        " install: {method: apt, package: beta}}\n",
+        encoding="utf-8",
+    )
+    assert load_plans(tools)["beta"].version_regex == r"v\d+"
+
+
 def test_unknown_method_is_a_config_error(tmp_path: Path) -> None:
     tools = tmp_path / "tools.yaml"
     tools.write_text(

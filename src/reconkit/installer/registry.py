@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,7 @@ class InstallPlan:
     version: str = "latest"
     version_command: str | None = None
     version_args: tuple[str, ...] = ()
+    version_regex: str | None = None
     fallback: InstallPlan | None = None
     requires_apt: tuple[str, ...] = ()
     requires: tuple[str, ...] = ()
@@ -55,6 +57,19 @@ def _flag(value: Any, field: str, name: str) -> bool | None:
     if not isinstance(value, bool):
         raise ConfigError(f"tool {name!r} in tools.yaml has an invalid install {field!r}")
     return value
+
+
+def _pattern(value: Any, name: str) -> str | None:
+    """An optional version pattern; it must compile or the registry is invalid."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"tool {name!r} in tools.yaml has an invalid version_regex")
+    try:
+        re.compile(value)
+    except re.error:
+        raise ConfigError(f"tool {name!r} in tools.yaml has an invalid version_regex") from None
+    return value.strip()
 
 
 def _names(value: Any, field: str, name: str) -> tuple[str, ...]:
@@ -82,6 +97,7 @@ def _plan(name: str, entry: Mapping[str, Any], version: str) -> InstallPlan:
     requires_apt = _names(entry.get("requires_apt"), "requires_apt", name)
     requires = _names(entry.get("requires"), "requires", name)
     version_cmd = entry.get("version_cmd")
+    version_regex = _pattern(entry.get("version_regex"), name)
     version_command: str | None = None
     version_args: tuple[str, ...] = ()
     if version_cmd is not None:
@@ -102,6 +118,7 @@ def _plan(name: str, entry: Mapping[str, Any], version: str) -> InstallPlan:
             tier=tier,
             version_command=version_command,
             version_args=version_args,
+            version_regex=version_regex,
             requires_apt=requires_apt,
             requires=requires,
         )
@@ -144,6 +161,7 @@ def _plan(name: str, entry: Mapping[str, Any], version: str) -> InstallPlan:
         version=version,
         version_command=version_command,
         version_args=version_args,
+        version_regex=version_regex,
         fallback=fallback,
         requires_apt=requires_apt,
         requires=requires,
@@ -194,6 +212,7 @@ def load_plans(
             version=plan.version,
             version_command=plan.version_command,
             version_args=plan.version_args,
+            version_regex=plan.version_regex,
             fallback=plan.fallback,
             requires_apt=specs[name].requires_apt,
             requires=plan.requires,

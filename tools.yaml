@@ -161,7 +161,7 @@ tools:
   # ---------------- urls ----------------
   gau:          {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: gau, version_cmd: [gau, --version], install: {method: go_install, package: "github.com/lc/gau/v2/cmd/gau@latest"}}
   waybackurls:  {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: waybackurls, install: {method: go_install, package: "github.com/tomnomnom/waybackurls@latest"}}
-  katana:       {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: katana, version_cmd: [katana, -version], rate_flag: "-rl", install: {<<: *pd_release, name: katana, repo: projectdiscovery/katana, checksums_pattern: "katana-{version}-checksums.txt"}}
+  katana:       {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: katana, version_cmd: [katana, -version], version_regex: 'Current version: (v?\d+\.\d+\.\d+)', rate_flag: "-rl", install: {<<: *pd_release, name: katana, repo: projectdiscovery/katana, checksums_pattern: "katana-{version}-checksums.txt"}}
   hakrawler:    {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: hakrawler, install: {method: go_install, package: "github.com/hakluke/hakrawler@latest"}}
   gospider:     {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: gospider, install: {method: go_install, package: "github.com/jaeles-project/gospider@latest"}}
   subjs:        {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: subjs, install: {method: go_install, package: "github.com/lc/subjs@latest"}, notes: "JS file discovery."}
@@ -169,7 +169,7 @@ tools:
   urlfinder:    {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: urlfinder, install: {<<: *pd_release, name: urlfinder, repo: projectdiscovery/urlfinder}}
 
   # ---------------- vulns (takeover, exposure) ----------------
-  nuclei:       {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: nuclei, version_cmd: [nuclei, -version], rate_flag: "-rl", install: {<<: *pd_release, name: nuclei, repo: projectdiscovery/nuclei}, notes: "Run safe tags only (takeover, exposure, misconfig). Update templates with 'reconkit update'."}
+  nuclei:       {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: nuclei, version_cmd: [nuclei, -version], version_regex: 'Nuclei Engine Version: (v?\d+\.\d+\.\d+)', rate_flag: "-rl", install: {<<: *pd_release, name: nuclei, repo: projectdiscovery/nuclei}, notes: "Run safe tags only (takeover, exposure, misconfig). Update templates with 'reconkit update'."}
   subzy:        {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: subzy, install: {method: go_install, package: "github.com/PentestPad/subzy@latest"}}
   dnsreaper:    {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: dnsreaper, install: {method: none}, notes: "No supported distribution: the repo has no setup.py/pyproject.toml (pipx refuses it) and no PyPI package (verified 2026-11-13). Install by hand from the repo before the phase-3 adapter lands."}
   nikto:        {stage: vulns, kind: binary, tier: opt_in, mode: active, phase: 3, binary: nikto, version_cmd: [nikto, -Version], install: {method: apt, package: nikto}, notes: "Opt-in only. Very noisy."}
