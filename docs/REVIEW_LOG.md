@@ -2315,6 +2315,40 @@ duration_s: 0.0
 - **Not verified:** no real `pyprobe` run against a genuinely failing certificate this session (the TLS text is synthetic in tests); `--mock` cannot exercise it because no fixture carries a failure text; no manual query of a large production database (only the fresh mock one); Windows untested; the `status`/`diff` JSON shapes are unchanged and were not re-walked.
 - **Next part must know (12e / PROGRESS trim):** (a) `host_status_history.detail` exists and is only written through `Store.append_host_status`; any future writer must pass `secrets=` or the value is stored with pattern redaction only. (b) 12e ("an inconclusive live pass writes no history row") is what makes a *first-run* `UNKNOWN` reason reachable; until it is ruled, the reason only lands for hosts that already have a history row. (c) The `detail` field is on `HostSnapshot`/`HostRow` and in `--json`; it is deliberately absent from the human table, so a UI change that adds it must update docs/02 and docs/03 first.
 
+## Adversarial check: a key echoed by subfinder never reaches the raw file (2026-11-15, test only)
+
+Owner-requested probe before 12e/12h/12j planning: prove the 12a raw-output file cannot contain a
+provider key value, even when the child echoes it. Asked because 12a stores the child's **stderr**
+too, and a verbose or crashing tool is exactly the case where a key can end up in output.
+
+- **What the test does** (`tests/test_engine.py::test_subfinder_raw_file_never_contains_the_provider_key`):
+  a full engine run of the **real** `SubfinderAdapter` and the **real** registry entry
+  (`get_spec("subfinder")`, so `_tool_env` passes `VT_API_KEY` exactly as production does), with
+  `env={"VT_API_KEY": "sk-live-abc123-provider-key"}`. The fake `run_exec` reads the `-pc`
+  `provider-config.yaml` the adapter wrote, returns `stdout="www.example.com\n"` and echoes the whole
+  loaded config to **stderr** (`[DBG] loaded provider config from provider-config.yaml: ...`). The test
+  then reads `summary.stages[0].results[0].raw_path` **from disk** and asserts: status OK; the child
+  really got `-pc` and the config really contained the key (so the assertion is not vacuous); the
+  debug line and the hostname are in the file; the key is **not** in the file; `***` is; the per-run
+  provider directory is gone; the serialized result carries no key.
+- **Result: no gap, nothing to fix.** `pytest -q ...::test_subfinder_raw_file_never_contains_the_provider_key` -> `1 passed in 0.20s`; full gate `687 passed`, `ruff check .` clean, `ruff format --check .` 68 files, `mypy src/reconkit` clean. Why there is no gap: (1) the key never reaches argv - `build_command` passes only `-pc <dir>/provider-config.yaml`, the 12g 0700 directory; (2) every byte that lands on disk goes through `Workspace.write`, whose one redaction line is `values = self.secrets if secrets is None else tuple(secrets)` -> `cap_bytes(redact(text, values), max_bytes)`, and `Engine._write_raw` never overrides `secrets`, so it uses the workspace's set; (3) that set is `Engine._secrets = tuple(value for value in self.env.values() if value)`, the same one `record_tool_run(error=)` redacts with, and it is built from the full `.env`, not only the selected tool's keys; (4) `ToolResult.raw_text` keeps the unredacted text **in memory only** - it is `Field(exclude=True)`, so it cannot appear in `--json` or the DB, and `raw_path` is the only thing that leaves.
+- **Mutation proofs** (both make the test fail on the exact leak assertion, both restored and verified
+  with `sha256sum -c`):
+  - M1, engine stops handing secrets to the writer (`Engine._write_raw` passes `secrets=()`) ->
+    `AssertionError: assert 'sk-live-abc...provider-key' not in 'www.example...ovider-key\n'`,
+    `1 failed in 0.17s`; restore `src/reconkit/engine.py: OK`.
+  - M2, the writer itself ignores its set (`Workspace.write`: `values = ()`) -> the same
+    `1 failed in 0.17s`; restore `src/reconkit/core/workspace.py: OK`.
+  Pre-mutation hashes: `engine.py 85d8fc1f7d47d1f3b35be74b6c99a8b4e9aaa93064724ae125694b9f16467947`,
+  `workspace.py 5e1893042ec15d773368498b8340e3c5447b7bee093392db6e52e5389d12fcd2`.
+- **No PIT row**, deliberately: PIT records pitfalls the code got wrong and now guards against; this
+  behaviour was already correct at `ba24f44` and the test exists so a future edit to `_write_raw` or
+  `Workspace.write` cannot silently drop it. PIT-41/12a and PIT-44/45 already own this path.
+- **Limits, stated plainly:** simulated provider and child (no real subfinder, no real key - tests may
+  not touch the network); the echo is the worst case constructed by hand, not an observed subfinder
+  debug format; only subfinder was probed, though the redaction is in the shared writer, so any binary
+  adapter inherits it.
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

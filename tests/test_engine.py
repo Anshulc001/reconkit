@@ -9,11 +9,14 @@ from pathlib import Path
 
 import pytest
 
+from reconkit.adapters import base as base_module
+from reconkit.adapters import subfinder as subfinder_module
 from reconkit.adapters.base import BaseToolAdapter
 from reconkit.adapters.dnspython import DnsOutcome, DnsResult
-from reconkit.adapters.registry import ToolKey, ToolSpec
+from reconkit.adapters.registry import ToolKey, ToolSpec, get_spec
+from reconkit.adapters.subfinder import SubfinderAdapter
 from reconkit.config import load_config
-from reconkit.core.runner import MAX_OUTPUT_BYTES
+from reconkit.core.runner import MAX_OUTPUT_BYTES, ExecResult
 from reconkit.core.store import REDACTED, Store
 from reconkit.core.workspace import Workspace
 from reconkit.engine import (
@@ -653,6 +656,69 @@ async def test_engine_disagreement_is_unconfirmed(tmp_path: Path) -> None:
         "SELECT state, confidence FROM subdomains WHERE fqdn = ?", ("example.com",)
     ).fetchone()
     assert (row["state"], row["confidence"]) == ("ALIVE", "UNCONFIRMED")
+
+
+# ------------------------------------- provider keys and the raw-output file
+
+
+async def test_subfinder_raw_file_never_contains_the_provider_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 12a raw file must not leak a key even when the tool echoes it.
+
+    Real subfinder gets its keys in a 0600 `provider-config.yaml`, never argv, and
+    does not normally print them - so this simulates the worst case, a verbose
+    child that dumps its loaded config to stderr, and checks the bytes that reach
+    `<workspace>/example.com/subs/<run>-subfinder.txt`. The engine hands
+    `Workspace.write` the same secret set it redacts `tool_runs.error` with, so a
+    key echoed by the tool is masked on the way to disk (12a + 12f's `redact()`).
+    """
+    key_value = "sk-live-abc123-provider-key"
+    provider_root = tmp_path / "provider-root"
+    provider_root.mkdir()
+    monkeypatch.setattr(subfinder_module.tempfile, "gettempdir", lambda: str(provider_root))
+    calls: list[list[str]] = []
+    seen_config: list[str] = []
+
+    def fake_exec(argv: list[str], **_kwargs: object) -> ExecResult:
+        calls.append(argv)
+        config_path = Path(argv[argv.index("-pc") + 1])
+        echoed = config_path.read_text(encoding="utf-8")
+        seen_config.append(echoed)
+        return ExecResult(
+            returncode=0,
+            stdout="www.example.com\n",
+            stderr=f"[DBG] loaded provider config from {config_path.name}:\n{echoed}",
+            timed_out=False,
+            truncated=False,
+        )
+
+    monkeypatch.setattr(base_module, "run_exec", fake_exec)
+    engine = make_engine(
+        tmp_path,
+        # The real registry entry, so `_tool_env` passes the adapter's own keys.
+        {"subfinder": get_spec("subfinder")},
+        {"subfinder": SubfinderAdapter},
+        env={"VT_API_KEY": key_value},
+        installed=lambda _adapter: True,
+    )
+
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), speed="slow"))
+
+    result = summary.stages[0].results[0]
+    assert result.status is ToolStatus.OK
+    assert result.raw_path is not None
+    written = Path(result.raw_path).read_text(encoding="utf-8")
+    # The child really did receive and echo the key, so the assertion is not vacuous.
+    assert "-pc" in calls[0]
+    assert key_value in seen_config[0]
+    assert "[DBG] loaded provider config" in written
+    assert "www.example.com" in written
+    assert key_value not in written
+    assert REDACTED in written
+    # The per-run provider directory is gone, and nothing else in the tree holds it.
+    assert [path for path in provider_root.iterdir()] == []
+    assert key_value not in json.dumps(summary.stages[0].results[0].model_dump(mode="json"))
 
 
 # --------------------------------------------------- host_status_history.detail
