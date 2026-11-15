@@ -4,9 +4,9 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status: **THE OWNER'S 2026-11-15 QUEUE IS 12e -> 12h -> 12j; 12e IS DONE, 12h AND 12j ARE NEXT IN THAT ORDER.** 12a, 12b, 12c, 12d, 12e, 12f, 12g, 12i and 12k are implemented, tested and committed, one item per commit, each with a full S1-S7 self-review. Part 11 is closed and the 11f report was delivered.
-- Queued and owner-ruled (2026-11-15, no further go-ahead needed): 12h - move the scope read and the workspace mkdir to `asyncio.to_thread`, keep the SQLite block on the loop with a docs/03 note; then 12j - per-tool `version_regex` in `tools.yaml` for katana/nuclei, falling back to `splitlines()[0]`.
-- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 4): `692 passed`, `ruff check .` clean, `ruff format --check .` 68 files, `mypy src/reconkit` clean.
+- Status: **THE OWNER'S 2026-11-15 QUEUE IS 12e -> 12h -> 12j; 12e AND 12h ARE DONE, 12j IS NEXT.** 12a, 12b, 12c, 12d, 12e, 12f, 12g, 12h, 12i and 12k are implemented, tested and committed, one item per commit, each with a full S1-S7 self-review. Part 11 is closed and the 11f report was delivered.
+- Queued and owner-ruled (2026-11-15, no further go-ahead needed): 12j only - per-tool `version_regex` in `tools.yaml` for katana/nuclei, falling back to `splitlines()[0]`.
+- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 4): `695 passed`, `ruff check .` clean, `ruff format --check .` 68 files, `mypy src/reconkit` clean.
 - The 12a raw file is now guarded against provider-key leakage by `tests/test_engine.py::test_subfinder_raw_file_never_contains_the_provider_key` (2026-11-15): the real `SubfinderAdapter` under the real registry, a fake child that echoes its `-pc` config - the key is absent from the file on disk, `***` takes its place. No code change was needed (redaction was already in `Workspace.write`); the test plus two mutation proofs are in REVIEW_LOG "Adversarial check: a key echoed by subfinder never reaches the raw file".
 - Nothing is pushed: local `main` is ahead of `reconkit/main`, which is still `5fd1d9a`. Push only if the owner asks (`git push reconkit main`).
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in `engine.py`; adapters never import `store`/`scope`/`ui`/`cli`; `subjack` replaced by `subzy` + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from `.env`; the ports ceiling is permanent (12i).
@@ -45,7 +45,7 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 | h | Part 8 commit | done - `ui.py` + `cli.py` |
 | i | `9c4319b`, `5df7e98`, `66b117c` | done - `doctor.py` + `installer/` |
 | j / 11 | `cc70b15` ... close-out | done - audit, fixes, report delivered |
-| 12 | one commit per item | 12a, 12b, 12c, 12d, 12e, 12f, 12g, 12i, 12k done; 12h, 12j queued (owner-ruled 2026-11-15) |
+| 12 | one commit per item | 12a, 12b, 12c, 12d, 12e, 12f, 12g, 12h, 12i, 12k done; 12j queued (owner-ruled 2026-11-15) |
 
 There is no `core/consensus.py`: consensus lives in `engine.py`. Order and module names follow docs/01 section 8 and docs/03 section 5. Per-part hashes and full evidence are in `REVIEW_LOG`; the old table is in its archive.
 
@@ -66,6 +66,7 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
 - 12f: `cli.py` imports only `configure_redaction` and `redact` from `core.store` (docs/03 section 9); six typed `render_error(str(exc))` sites stay outside its ruled scope.
 - 12g: `STALE_AFTER_S = 900` and 12d's `DETAIL_MAX_CHARS = 200` are module constants, not config keys, because the rulings allowed no new config.
 - 12k: `scan_runs.status` for an empty stage still reads `completed`; only the warning and the exit code changed.
+- 12h: the SQLite persistence block stays on the event loop by ruling; docs/03 section 11 states the reason (single writer, `check_same_thread` on the main-thread connection) and the bound (one transaction per stage). Both `scope.yaml` reads - the active gate and the `ip_allowed` predicate - moved to `to_thread`, not just the gate.
 
 ## Open risks
 

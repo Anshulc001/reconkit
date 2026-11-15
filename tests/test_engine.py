@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable, Mapping
+import threading
+import time
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
 import pytest
 
+from reconkit import engine as engine_module
 from reconkit.adapters import base as base_module
 from reconkit.adapters import subfinder as subfinder_module
 from reconkit.adapters.base import BaseToolAdapter
@@ -17,6 +20,7 @@ from reconkit.adapters.registry import ToolKey, ToolSpec, get_spec
 from reconkit.adapters.subfinder import SubfinderAdapter
 from reconkit.config import load_config
 from reconkit.core.runner import MAX_OUTPUT_BYTES, ExecResult
+from reconkit.core.scope import ScopeGate
 from reconkit.core.store import REDACTED, Store
 from reconkit.core.workspace import Workspace
 from reconkit.engine import (
@@ -978,6 +982,123 @@ async def test_a_failed_live_tool_attempted_nothing_and_writes_no_row(tmp_path: 
     await engine.run("example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True))
 
     assert rows(engine.store, "SELECT COUNT(*) AS n FROM host_status_history")[0]["n"] == 0
+
+
+# ------------------------ blocking file I/O stays off the loop (12h)
+
+
+def active_engine(
+    tmp_path: Path,
+    *,
+    specs: Mapping[str, ToolSpec] | None = None,
+    adapters: Mapping[str, type[BaseToolAdapter]] | None = None,
+) -> Engine:
+    """One active `live` stage, so the scope gate and the workspace both run."""
+    rec = Recorder()
+    return make_engine(
+        tmp_path,
+        specs or {"live": tool("live", Stage.LIVE, mode=Mode.ACTIVE)},
+        adapters or {"live": adapter("live", Stage.LIVE, rec, records=[alive("example.com")])},
+        installed=lambda _adapter: True,
+    )
+
+
+async def test_the_scope_read_and_workspace_create_run_off_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """12h/docs/03 section 11: kernel I/O must not run on the loop thread."""
+    main = threading.main_thread()
+    seen: dict[str, bool] = {}
+    real_load_scope = engine_module.load_scope
+    real_create = Workspace.create
+
+    def recording_scope(path: Path | str | None = None) -> ScopeGate:
+        seen.setdefault("scope", threading.current_thread() is not main)
+        return real_load_scope(path)
+
+    def recording_create(
+        cls: type[Workspace], root: Path | str, target: str, *, secrets: Iterable[str] = ()
+    ) -> Workspace:
+        seen.setdefault("workspace", threading.current_thread() is not main)
+        return real_create(root, target, secrets=secrets)
+
+    monkeypatch.setattr(engine_module, "load_scope", recording_scope)
+    monkeypatch.setattr(Workspace, "create", classmethod(recording_create))
+    engine = active_engine(tmp_path)
+
+    await engine.run("example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True))
+
+    assert seen == {"scope": True, "workspace": True}
+
+
+async def test_a_slow_scope_read_does_not_block_a_heartbeat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """12h: the loop keeps turning while the scope file is being read."""
+    ticks = 0
+    stop = asyncio.Event()
+    real_load_scope = engine_module.load_scope
+
+    def slow_scope(path: Path | str | None = None) -> ScopeGate:
+        time.sleep(0.25)
+        return real_load_scope(path)
+
+    async def heartbeat() -> None:
+        nonlocal ticks
+        while not stop.is_set():
+            ticks += 1
+            await asyncio.sleep(0.005)
+
+    monkeypatch.setattr(engine_module, "load_scope", slow_scope)
+    engine = active_engine(tmp_path)
+    task = asyncio.create_task(heartbeat())
+    await asyncio.sleep(0.01)
+
+    await engine.run("example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True))
+
+    stop.set()
+    await task
+    # Two 0.25 s reads: a blocked loop could only tick before and after them.
+    assert ticks >= 10
+
+
+async def test_the_persistence_block_stays_on_the_loop_in_stage_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """12h: SQLite persistence stays on the loop, deliberately (docs/03)."""
+    main = threading.main_thread()
+    on_loop: list[bool] = []
+    real_persist = Engine._persist_stage
+
+    def recording_persist(self: Engine, *args: object, **kwargs: object) -> None:
+        on_loop.append(threading.current_thread() is main)
+        real_persist(self, *args, **kwargs)
+
+    monkeypatch.setattr(Engine, "_persist_stage", recording_persist)
+    rec = Recorder()
+    specs = {
+        "subs": tool("subs", Stage.SUBS),
+        "live": tool("live", Stage.LIVE, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "subs": adapter("subs", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "live": adapter("live", Stage.LIVE, rec, records=[alive("www.example.com")]),
+    }
+    engine = make_engine(tmp_path, specs, adapters, installed=lambda _adapter: True)
+
+    await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE), active=True, mock=True),
+    )
+
+    assert on_loop == [True, True]
+    stages = [row["stage"] for row in rows(engine.store, "SELECT stage FROM scan_runs ORDER BY id")]
+    assert stages == ["subs", "live"]
+    run_ids = [
+        row["run_id"]
+        for row in rows(engine.store, "SELECT run_id FROM host_status_history ORDER BY id")
+    ]
+    assert run_ids == sorted(run_ids)
 
 
 # ------------------------------------------------------------ host transitions

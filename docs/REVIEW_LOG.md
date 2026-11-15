@@ -2405,6 +2405,52 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Deviations:** none from the ruling. Two decisions worth recording: (a) `attempted` is derived from `evidence.web` instead of a new `HostEvidence` field, because that tuple *is* "records a live tool returned for this host" and the `dns` path builds it empty - a new field would be a second source of the same fact; (b) the "no evidence" skip lives in the final `HostTransition(..., False)` fallback as well as in the two branches, and both are covered (the engine-level tests exercise the fallback, the unit test exercises the branch).
 - **Next part must know (12h/12j):** a first inconclusive `live` pass with a record now writes `UNKNOWN`/LOW with the reason, so any later consumer that treated "no row" as "not probed" must read the state instead; `history`: every row now carries `tools_json` (the reporting tools) for this case, which 12d's tests did not assert before.
 
+## Part 12h: file I/O leaves the event loop (E-1/E-2/E-3)  (commit subject `perf: move the scope read and workspace create off the event loop`; hash filled by the next commit)
+
+- **Owner ruling being implemented (2026-11-15, final):** "Move the scope.yaml read and the workspace mkdir/chmod to asyncio.to_thread. Leave the SQLite persistence block on the event loop and add a short note in docs/03 explaining why (single-writer SQLite ordering, check_same_thread safety) - write that docs paragraph before any code changes."
+- **Docs read / goal:** `MASTER_PLAN.md` 12h, the ruling above, docs/03 sections 5 (Engine API), 6 (data flow) and 11 (Performance), docs/04 section 5 (bulk writes per stage), `engine.run`/`_active_hosts`/`_ip_allowed`, `core/scope.load_scope`/`require_active`, `core/workspace.Workspace.create`, `core/store.Store.__init__`. Goal: no kernel file I/O on the loop, and the one deliberate exception (SQLite) written down with its reason and its bound.
+- **Docs changed first (before the code, as ruled):** docs/03 section 11 gains two bullets. The first says the `scope.yaml` read (`scope.load_scope`, used by the active gate and by the `ip_allowed` predicate) and `Workspace.create`'s mkdir/chmod go through `asyncio.to_thread`, like `check_installed()` and every child process, because a slow filesystem would otherwise freeze the run. The second states the persistence block stays on the loop **deliberately**: one transaction per stage, awaited before the next stage, exactly one writer; moving it would need a second connection or `sqlite3.connect(..., check_same_thread=False)`, and `core/store.py` opens its connection on the main thread with the default `check_same_thread=True`, so SQLite refuses cross-thread use. The bound is stated: one transaction per stage, that stage's records only, milliseconds on a local database (12h). `git diff -- docs/03_ARCHITECTURE.md` is exactly +2 lines.
+- **Code change:** `engine.run` now awaits `asyncio.to_thread(Workspace.create, ...)`; the active-gate call awaits `asyncio.to_thread(self._active_hosts, target, hosts, opts.speed)`; the `ip_allowed` lookup awaits `asyncio.to_thread(self._ip_allowed)`. `_active_hosts` and `_ip_allowed` stay synchronous (they are called from a worker thread now), so their bodies and the scope rules are untouched, and no `asyncio.gather` or new concurrency was introduced - every call is still awaited in the same order, so stage ordering and pacing are unchanged.
+- **Files touched:** `src/reconkit/engine.py` (+10/-4), `tests/test_engine.py` (+134/-1), `docs/03_ARCHITECTURE.md` (+2), this log, `docs/PROGRESS.md`.
+- **Requirement -> test table:**
+  | Requirement (owner ruling) | Test |
+  |---|---|
+  | the `scope.yaml` read runs in a worker thread | `test_the_scope_read_and_workspace_create_run_off_the_event_loop` (patched `engine.load_scope` records the calling thread; asserts it is not `threading.main_thread()`; the real loader still returns the real gate) |
+  | the workspace mkdir/chmod runs in a worker thread | same test, patching `Workspace.create` and asserting the same fact |
+  | the loop keeps turning during a slow read | `test_a_slow_scope_read_does_not_block_a_heartbeat` (two injected 0.25 s scope reads; a 5 ms heartbeat ticks `>= 10` times) |
+  | the SQLite persistence block stays on the loop | `test_the_persistence_block_stays_on_the_loop_in_stage_order` (patched `Engine._persist_stage` records the calling thread; asserts main thread for both stages) |
+  | stage persistence ordering is unchanged | same test: `scan_runs` stages are `["subs", "live"]` in id order and `host_status_history.run_id` is ascending |
+  | resume still seeds before the first stage | existing `test_resume_skips_completed_stages_and_continues` and the resume tests still pass unchanged (695 total) |
+  | the docs reason is true, not decorative | the mutation below reproduces `sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that same thread` |
+- **Red-before-green (raw):** with the three awaits reverted to direct calls (byte-identical to HEAD's engine.py at those lines):
+  ```
+  >       assert seen == {"scope": True, "workspace": True}
+  E       AssertionError: assert {'workspace':...scope': False} == {'scope': Tru...kspace': True}
+  E         Differing items:
+  E         {'scope': False} != {'scope': True}
+  E         {'workspace': False} != {'workspace': True}
+  FAILED tests/test_engine.py::test_the_scope_read_and_workspace_create_run_off_the_event_loop
+  FAILED tests/test_engine.py::test_a_slow_scope_read_does_not_block_a_heartbeat
+  >       assert ticks >= 10
+  E       assert 2 >= 10
+  2 failed, 1 passed, 79 deselected in 0.72s
+  ```
+  (the third test passed on purpose - it pins the SQLite block that stays on the loop). Restore: `cp /tmp/12h/engine.py src/reconkit/engine.py && sha256sum -c` -> `src/reconkit/engine.py: OK`, `82 passed in 1.41s`.
+- **Mutation proof:** moving the persistence block into a worker thread (`await asyncio.to_thread(self._persist_stage, ...)` inside the existing transaction) is caught by the named test **and** fails for exactly the documented reason:
+  ```
+  E       sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that same thread. The object was created in thread id 140080205505088 and this is thread id 140080147166912.
+  src/reconkit/core/store.py:483: ProgrammingError
+  FAILED tests/test_engine.py::test_the_persistence_block_stays_on_the_loop_in_stage_order
+  1 failed, 81 deselected in 0.19s
+  src/reconkit/engine.py: OK
+  ```
+  A first attempt at the mutation left an unmatched parenthesis (a syntax error, not a caught defect); it was discarded, the mutation was rebuilt correctly, and the output above is the corrected run. Pre-mutation hash: `752ed9e33f65c1a166b3117d33cc9495dd114e1321084bf44da50fe1802bface  src/reconkit/engine.py`.
+- **Self-review (S1-S7) findings:** S1 no `assert` in `src`; no `shell=True`/`os.system`; `import subprocess` only in `core/runner.py`; `import sqlite3` only in `core/store.py`; adapters import none of `store`/`scope`/`ui`/`cli`; no `TODO`/`FIXME`; no `print(` outside `ui.py`; no new `noqa`/`type: ignore` (the three pre-existing test ones are unchanged); `git diff --check` clean. S2 external input: none added - the moved calls take the same typed arguments. S3 secrets: `Workspace.create` still receives `self._secrets` and nothing new is printed or logged. S4 async: the two new thread hops are awaited in place, so cancellation still propagates out of `run` (the existing cancellation test passes) and no ordering changed. S5 blocking: `load_scope` and `Workspace.create` are now off the loop; the remaining synchronous work in `run` is the store's `create_target`/`create_scan_run`/`record`/`finish_scan_run` and the raw-file writes, all of which are the same class of local SQLite/disk work the ruling explicitly left alone (documented bound). S6 no new dependency/flag/config/module. S7 docs match code: docs/03 section 11 names both moved calls and the stayed-put block.
+- **Gate (run twice, one command at a time, no pipes):** pass 1 - `695 passed in 14.75s`, `ruff check .` All checks passed, `ruff format --check .` 68 files already formatted, `mypy src/reconkit` Success: no issues found in 36 source files. Pass 2 (after the docs edits) - same four results, `695 passed`. Suite 692 -> 695 (three new tests).
+- **No PIT row, and why:** PIT records a bug the code shipped with and now defends against. 12h is a latent hazard - `MASTER_PLAN.md` calls it `low`, and no wrong result, crash or measured stall has ever been attributed to it; the code was correct, only its placement on the loop was not ideal. The named tests are the permanent guard, and the mutation is the proof that the docs' reason is real. PIT-48 stays free for 12j.
+- **Deviations / interpretation to flag:** the ruling says "the scope.yaml read" (singular), but the engine reads `scope.yaml` in **two** places - `_active_hosts` (the active gate) and `_ip_allowed` (the `in_scope_cidrs` predicate handed to `pyscan`). Both were moved, because leaving one would make docs/03's "file I/O never runs on the event loop" false and would keep the slow-filesystem stall on the ports path. Same mechanism, same thread, no behaviour change; if the owner intended only the gate, the second hop is trivially removable.
+- **Next part must know (12j):** the engine now has five `to_thread` sites (`Workspace.create`, `_active_hosts`, `_ip_allowed`, `_is_installed`, and adapter child processes); anything else added to `run` that touches a file must justify itself against docs/03 section 11. The SQLite connection must stay on the thread that created it.
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

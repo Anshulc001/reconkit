@@ -511,7 +511,11 @@ class Engine:
             name: spec.rate_flag for name, spec in self.specs.items() if spec.rate_flag is not None
         }
         pacer = Pacer(preset, rate_flags=rate_flags, rng=self._rng, sleep=self._sleep)
-        workspace = Workspace.create(self.workspace_root, target, secrets=self._secrets)
+        # docs/03 section 11: file I/O never runs on the loop; the SQLite block
+        # below stays on it on purpose (single writer, thread-bound connection).
+        workspace = await asyncio.to_thread(
+            Workspace.create, self.workspace_root, target, secrets=self._secrets
+        )
         target_id = self.store.create_target(target, created_at=self._now())
         self._warnings = []
         if not opts.active:
@@ -543,12 +547,14 @@ class Engine:
             dropped: list[str] = []
             ip_allowed: Callable[[str], bool] | None = None
             if opts.active and any(spec.mode is Mode.ACTIVE for spec, _ in selected):
-                hosts, dropped, scope_error = self._active_hosts(target, hosts, opts.speed)
+                hosts, dropped, scope_error = await asyncio.to_thread(
+                    self._active_hosts, target, hosts, opts.speed
+                )
                 if scope_error is not None:
                     summary.scope_denied = True
                     selected, skipped = self._skip_active(selected, skipped, scope_error)
                 else:
-                    ip_allowed = self._ip_allowed()
+                    ip_allowed = await asyncio.to_thread(self._ip_allowed)
 
             run_id = self.store.create_scan_run(
                 target_id,
