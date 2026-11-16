@@ -87,6 +87,8 @@ IP_GATE_BLOCKED: dict[str, str] = {
 Sleep = Callable[[float], Awaitable[None]]
 InstalledCheck = Callable[[type[BaseToolAdapter]], bool]
 Now = Callable[[], str]
+# One short progress line for the CLI to render on stderr (docs/03 section 5).
+Progress = Callable[[str], None]
 
 
 class ExitCode(IntEnum):
@@ -329,7 +331,12 @@ class ScanSummary:
 
 @dataclass(frozen=True)
 class HostSnapshot:
-    """One stored host row, already decided by the engine (UI input)."""
+    """One stored host row, already decided by the engine (UI input).
+
+    The first seven fields are the documented table/`--json` shape. The rest are
+    stored values the interactive report menu can include (docs/02 section 5);
+    they default to empty so the table and the JSON document are unchanged.
+    """
 
     fqdn: str
     state: HostState
@@ -338,6 +345,11 @@ class HostSnapshot:
     status_code: int | None
     ports: tuple[int, ...]
     detail: str | None = None
+    source_count: int = 0
+    ips: tuple[str, ...] = ()
+    title: str | None = None
+    location: str | None = None
+    tech: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -387,9 +399,13 @@ class Engine:
         clock: Clock | None = None,
         installed: InstalledCheck | None = None,
         now: Now | None = None,
+        progress: Progress | None = None,
     ) -> None:
         self.config = config
         self.store = store
+        # Injected reporting callback (docs/03 section 5). The engine never prints
+        # and never formats: it hands the CLI one short line, or nothing at all.
+        self._progress_cb = progress
         self.specs = dict(specs) if specs is not None else load_tools()
         self.adapters = dict(adapters) if adapters is not None else dict(ADAPTERS)
         self.scope_path = scope_path
@@ -431,6 +447,11 @@ class Engine:
         """Close the store owned by this engine."""
         self.store.close()
 
+    def _progress(self, message: str) -> None:
+        """Emit one progress line to the injected callback, if any."""
+        if self._progress_cb is not None:
+            self._progress_cb(message)
+
     def host_rows(self, target_id: int) -> list[HostSnapshot]:
         """Read stored host rows for the UI without exposing Store to the CLI."""
         rows: list[HostSnapshot] = []
@@ -439,6 +460,9 @@ class Engine:
             raw_ports = cast(tuple[int, ...], row["ports"])
             raw_status = row["status_code"]
             raw_detail = row["detail"]
+            raw_title = row["title"]
+            raw_location = row["location"]
+            raw_count = row["source_count"]
             rows.append(
                 HostSnapshot(
                     fqdn=str(row["fqdn"]),
@@ -448,6 +472,11 @@ class Engine:
                     status_code=raw_status if isinstance(raw_status, int) else None,
                     ports=tuple(int(value) for value in raw_ports),
                     detail=raw_detail if isinstance(raw_detail, str) else None,
+                    source_count=raw_count if isinstance(raw_count, int) else 0,
+                    ips=tuple(str(value) for value in cast(tuple[str, ...], row["ips"])),
+                    title=raw_title if isinstance(raw_title, str) else None,
+                    location=raw_location if isinstance(raw_location, str) else None,
+                    tech=tuple(str(value) for value in cast(tuple[str, ...], row["tech"])),
                 )
             )
         return rows
@@ -576,6 +605,7 @@ class Engine:
             for spec, reason in skipped:
                 self._record(run_id, spec.name, ToolStatus.SKIPPED, error=reason)
 
+            self._progress(f"{stage.value}: running {len(selected)} tool(s)")
             timeout = opts.phase_timeout or self._stage_timeout(stage)
             results: list[ToolResult] = []
             done: set[str] = set()
@@ -639,6 +669,10 @@ class Engine:
                 run_id, "completed" if all_ok else "partial", finished_at=self._now()
             )
 
+            self._progress(
+                f"{stage.value}: finished {len(results)}/{len(selected)} tool(s), "
+                f"{sum(len(result.records) for result in results)} item(s)"
+            )
             if stage is Stage.DNS:
                 dns_results = list(results)
             self._update_discovered(stage, results, target, discovered, alive)
@@ -974,6 +1008,10 @@ class Engine:
             item_count=len(result.records),
             duration_s=result.duration_s,
             error=result.error,
+        )
+        self._progress(
+            f"{adapter.stage.value}: {adapter.name} {result.status.value} "
+            f"{len(result.records)} item(s)"
         )
         return result
 

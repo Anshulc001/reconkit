@@ -169,7 +169,10 @@ def test_mock_json_is_one_valid_document_and_exit_zero(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     result = CliRunner().invoke(app, scan_args(config, "passive", "--json"))
     assert result.exit_code == 0
-    assert result.stderr == ""
+    # Part 13: `--json` now reports progress on stderr (docs/02 section 5). The
+    # stdout contract is unchanged and still asserted below: exactly one JSON
+    # document and nothing else.
+    assert "subs: running" in result.stderr
     assert result.stdout.count("\n") == 1
     document = json.loads(result.stdout)
     assert document["type"] == "summary"
@@ -225,7 +228,8 @@ def test_mock_scope_denial_returns_three(tmp_path: Path) -> None:
         ),
     )
     assert result.exit_code == 3
-    assert result.stderr == ""
+    # Part 13: progress is on stderr now; stdout still holds only the document.
+    assert "subs: running" in result.stderr
     document = json.loads(result.stdout)
     assert document["scope_denied"] is True
     assert document["exit_code"] == 3

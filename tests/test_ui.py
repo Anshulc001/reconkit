@@ -390,14 +390,21 @@ def test_rate_limit_hint_is_shown_only_when_the_key_is_unset() -> None:
     assert "SUBFINDER_API_KEY" in stream.getvalue()
 
 
-def test_progress_is_suppressed_for_silent_and_json_modes() -> None:
+def test_progress_is_suppressed_only_in_silent_mode() -> None:
+    """Part 13: progress is a stderr concern; `--json` no longer silences it.
+
+    docs/02 section 5 was changed first (the old text said `--json` suppresses
+    progress, which is what made a slow `--json` run print nothing at all for
+    minutes). Only `--silent` suppresses it now, and stdout is never involved.
+    """
     stream = StringIO()
     console = ui.make_console(stream)
-    ui.render_progress("subs", "crtsh", 1, 3, console=console, silent=True)
-    ui.render_progress("subs", "crtsh", 1, 3, console=console, json_output=True)
+    ui.render_progress("subs: running 3 tool(s)", console=console, silent=True)
     assert stream.getvalue() == ""
-    ui.render_progress("subs", "crtsh", 1, 3, console=console)
-    assert "subs: crtsh 1/3" in stream.getvalue()
+    ui.render_progress("subs: running 3 tool(s)", console=console)
+    assert "subs: running 3 tool(s)" in stream.getvalue()
+    ui.render_progress("subs: running 3 tool(s)", console=console, elapsed_s=4.0)
+    assert "(4s)" in stream.getvalue()
 
 
 def test_ui_does_not_import_store_scope_adapters_or_cli() -> None:

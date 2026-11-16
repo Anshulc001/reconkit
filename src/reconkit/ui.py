@@ -4,18 +4,21 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import sys
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import TextIO
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Literal, TextIO
 
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
 from reconkit.doctor import DoctorReport, KeyCheck
-from reconkit.engine import DiffSnapshot, RunSnapshot, ScanSummary
+from reconkit.engine import DiffSnapshot, HostSnapshot, RunSnapshot, ScanSummary
 from reconkit.installer.github_release import InstallOutcome
 from reconkit.models import Confidence, HostState, ToolResult, ToolStatus
 
@@ -51,6 +54,105 @@ class HostRow:
     status_code: int | None = None
     ports: tuple[int, ...] = ()
     detail: str | None = None
+
+
+ReportGate = Literal["always", "alive", "unknown"]
+
+
+@dataclass(frozen=True)
+class ReportField:
+    """One selectable report column, backed by a value `reconkit` stores.
+
+    `gate` says when the value is meaningful: `alive` fields are only populated
+    for a host whose state is `ALIVE`, `unknown` only for `UNKNOWN`, and `always`
+    for every row. A gated field is written as `not applicable`, never guessed.
+    """
+
+    key: str
+    label: str
+    gate: ReportGate = "always"
+
+
+# The interactive report menu (docs/02 section 2b). Every key maps to a stored
+# value in `subdomains`/`host_status_history`: nothing here is computed here.
+REPORT_FIELDS: tuple[ReportField, ...] = (
+    ReportField("hostname", "Hostname"),
+    ReportField("state", "Host state"),
+    ReportField("confidence", "Confidence"),
+    ReportField("sources", "Discovery sources"),
+    ReportField("source_count", "Source count"),
+    ReportField("ips", "IP addresses"),
+    ReportField("status_code", "HTTP status code", "alive"),
+    ReportField("title", "Page title", "alive"),
+    ReportField("location", "Redirect location", "alive"),
+    ReportField("ports", "Open ports", "alive"),
+    ReportField("tech", "Technology", "alive"),
+    ReportField("detail", "Reason (UNKNOWN only)", "unknown"),
+)
+
+NOT_APPLICABLE = "not applicable"
+
+
+def report_fields(numbers: Iterable[int]) -> tuple[ReportField, ...]:
+    """Map 1-based menu numbers to fields, keeping menu order and no duplicates."""
+
+    wanted = {number - 1 for number in numbers}
+    return tuple(field for index, field in enumerate(REPORT_FIELDS) if index in wanted)
+
+
+def _applicable(row: HostSnapshot, field: ReportField) -> bool:
+    if field.gate == "alive":
+        return row.state is HostState.ALIVE
+    if field.gate == "unknown":
+        return row.state is HostState.UNKNOWN
+    return True
+
+
+def _raw_value(row: HostSnapshot, field: ReportField) -> list[str] | list[int] | int | str | None:
+    if field.key == "hostname":
+        return row.fqdn
+    if field.key == "state":
+        return row.state.value
+    if field.key == "confidence":
+        return row.confidence.value
+    if field.key == "sources":
+        return list(row.sources)
+    if field.key == "source_count":
+        return row.source_count
+    if field.key == "ips":
+        return list(row.ips)
+    if field.key == "status_code":
+        return row.status_code
+    if field.key == "title":
+        return row.title
+    if field.key == "location":
+        return row.location
+    if field.key == "ports":
+        return list(row.ports)
+    if field.key == "tech":
+        return list(row.tech)
+    if field.key == "detail":
+        return row.detail
+    raise ValueError(f"unknown report field {field.key!r}")
+
+
+def field_value(row: HostSnapshot, field: ReportField) -> list[str] | list[int] | int | str | None:
+    """The stored value for one field, or `None` when it does not apply."""
+
+    if not _applicable(row, field):
+        return None
+    return _raw_value(row, field)
+
+
+def format_field_value(row: HostSnapshot, field: ReportField) -> str:
+    """Render one field for the text report; gated and empty values stay honest."""
+
+    value = field_value(row, field)
+    if value is None:
+        return NOT_APPLICABLE if not _applicable(row, field) else "-"
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value) if value else "-"
+    return str(value)
 
 
 def format_state(state: HostState) -> str:
@@ -222,27 +324,147 @@ def render_empty(tools: Iterable[str], *, console: Console) -> None:
 
 
 def render_progress(
-    stage: str,
-    tool: str,
-    done: int,
-    total: int,
+    message: str,
     *,
     elapsed_s: float = 0.0,
     eta_s: float | None = None,
     next_pause_s: float | None = None,
     console: Console | None = None,
     silent: bool = False,
-    json_output: bool = False,
 ) -> None:
-    """Render one progress line to stderr, disabled by silent/JSON modes."""
+    """Render one progress line on stderr.
 
-    if silent or json_output:
+    Progress is human output for a human stream, so `--silent` suppresses it and
+    `--json` does not: the JSON document on stdout stays the only thing written
+    there (docs/02 section 5). This never writes to stdout.
+    """
+
+    if silent:
         return
     target_console = console if console is not None else make_console()
-    remaining = f" eta {eta_s:.0f}s" if eta_s is not None else ""
-    pause = f" pause {next_pause_s:.0f}-{next_pause_s:.0f}s" if next_pause_s is not None else ""
-    line = f"{stage}: {tool} {done}/{total} tools {elapsed_s:.0f}s{remaining}{pause}"
-    target_console.print(Text(line), soft_wrap=True)
+    extra: list[str] = []
+    if elapsed_s:
+        extra.append(f"{elapsed_s:.0f}s")
+    if eta_s is not None:
+        extra.append(f"eta {eta_s:.0f}s")
+    if next_pause_s is not None:
+        extra.append(f"pause {next_pause_s:.0f}s")
+    suffix = f" ({' '.join(extra)})" if extra else ""
+    target_console.print(Text(f"{message}{suffix}"), soft_wrap=True)
+
+
+def report_directory(results_root: Path | str, target: str, run_at: datetime) -> Path:
+    """Create and return this run's report folder for one domain.
+
+    One folder per domain per run, named from the run clock in UTC. A name that
+    already exists (two runs in the same second) gets a `-2`, `-3`, ... suffix, so
+    a previous run's folder is never reopened or written into (docs/02 section 5).
+    """
+
+    if not target or target in {".", ".."} or "/" in target or "\\" in target:
+        raise ValueError(f"unsafe report target {target!r}")
+    base = Path(results_root) / target
+    stamp = run_at.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    candidate = base / stamp
+    suffix = 2
+    while candidate.exists():
+        candidate = base / f"{stamp}-{suffix}"
+        suffix += 1
+    candidate.mkdir(parents=True, exist_ok=True)
+    return candidate
+
+
+def _write_atomically(path: Path, text: str) -> None:
+    """Write `text` to `path` through a temporary file, mode 0600."""
+
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
+    with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+
+
+def report_document(
+    target: str,
+    rows: Sequence[HostSnapshot],
+    fields: Sequence[ReportField],
+    *,
+    run_at: datetime,
+) -> dict[str, object]:
+    """Build the report's JSON document from stored values only."""
+
+    return {
+        "type": "report",
+        "target": target,
+        "generated_at": run_at.astimezone(UTC).isoformat(timespec="seconds"),
+        "fields": [field.key for field in fields],
+        "hosts": [{field.key: field_value(row, field) for field in fields} for row in rows],
+    }
+
+
+# One cell of the text table stays readable: a host with twelve IPv6 addresses
+# must not stretch the table past the terminal. The JSON keeps the full value.
+_MAX_CELL = 60
+
+
+def _cell(row: HostSnapshot, field: ReportField) -> str:
+    value = format_field_value(row, field)
+    if len(value) <= _MAX_CELL:
+        return value
+    return value[: _MAX_CELL - 3] + "..."
+
+
+def report_text(
+    target: str,
+    rows: Sequence[HostSnapshot],
+    fields: Sequence[ReportField],
+    *,
+    run_at: datetime,
+) -> str:
+    """Build the report's plain-text table from stored values only."""
+
+    header = [field.label for field in fields]
+    table = [[_cell(row, field) for field in fields] for row in rows]
+    widths = [len(label) for label in header]
+    for line in table:
+        widths = [max(width, len(cell)) for width, cell in zip(widths, line, strict=True)]
+    lines = [
+        "reconkit report",
+        f"target: {target}",
+        f"generated: {run_at.astimezone(UTC).isoformat(timespec='seconds')}",
+        f"hosts: {len(rows)}",
+        "",
+        "  ".join(label.ljust(width) for label, width in zip(header, widths, strict=True)),
+    ]
+    for line in table:
+        lines.append("  ".join(cell.ljust(width) for cell, width in zip(line, widths, strict=True)))
+    if not table:
+        lines.append("(no hosts)")
+    return "\n".join(lines) + "\n"
+
+
+def write_field_report(
+    directory: Path,
+    target: str,
+    rows: Sequence[HostSnapshot],
+    fields: Sequence[ReportField],
+    *,
+    run_at: datetime,
+) -> tuple[Path, Path]:
+    """Write `report.txt` and `report.json` into this run's folder.
+
+    Both files are always written, whatever the field selection was, and both come
+    from the same snapshots, so they cannot disagree.
+    """
+
+    json_path = directory / "report.json"
+    text_path = directory / "report.txt"
+    document = report_document(target, rows, fields, run_at=run_at)
+    _write_atomically(json_path, json.dumps(document, indent=2, sort_keys=False) + "\n")
+    _write_atomically(text_path, report_text(target, rows, fields, run_at=run_at))
+    return text_path, json_path
 
 
 def rate_limit_hint(tool: str, env: str, url: str, *, key_set: bool) -> str | None:

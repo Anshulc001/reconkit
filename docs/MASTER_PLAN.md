@@ -503,6 +503,53 @@ CLI flag or command outside docs/02; (6) PIT rows added for every bug found;
 (7) PROGRESS RESUME, Deviations and Open risks updated; (8) nothing pushed.
 
 =====================================================
+PART 13: interactive scan mode (commit `feat:`)
+=====================================================
+Status: **IMPLEMENTED 2026-11-16** from the owner's task text in this session;
+this section is consecrated in the same commit as the code, docs first
+(docs/02 section 2b, docs/03 sections 5 and 8b). One item, one commit.
+
+Goal: a first-time user can run a scan without knowing a flag, and every scan
+shows what it is doing while it runs. The flag-based surface must not change at
+all: no new flag, no new prompt on a flagged run, no new output on stdout.
+
+13. Interactive scan mode (medium, code + docs, cross-cutting)
+  What: `reconkit passive` with no `-d`/`-l` exits 2 with "provide a target";
+  a slow scan prints nothing until each stage finishes, and `--json` prints
+  nothing at all for the whole run (the documented open risk).
+  DECIDED (owner, 2026-11-16): five questions - target or domain file, scope file
+  yes/no + path, passive/active/full, a numbered report-field menu (multi-select
+  or `all`), and a separate aggressive-scanning yes/no - and one folder per domain
+  per run holding a `.txt` and a `.json` of the selected fields. Progress goes to
+  stderr for every scan, `--json` included, and only `--silent` suppresses it.
+  Hard constraints: the interactive path may only trigger when neither `-d` nor
+  `-l` is present and stdin is a TTY; `-d`/`-l` behaviour, output and files are
+  unchanged; no scope behaviour may change and no bypass may be added; `vulns`
+  stays out of the mode (recon-only build).
+  Size: cross-cutting - `cli.py` (questions and wiring), `engine.py` (progress
+  callback, richer `HostSnapshot`), `core/store.py` (extra read columns),
+  `ui.py` (`render_progress` wiring, `report_directory`, `write_field_report`),
+  `config.py` + `config.yaml` (`results_dir`), docs/02, docs/03.
+  Tests: a flagged run never prompts (every existing CLI test stays untouched);
+  a TTY-less run without a target keeps exit 2; the interactive path with a fake
+  TTY produces the documented folders for one domain and for a file of domains;
+  alive-only fields are `not applicable` for non-`ALIVE` hosts; two runs of the
+  same domain never share a folder; `--json` stdout stays one document while
+  progress appears on stderr; `--silent` stays silent.
+  Adversarial: an empty domain file; a path that is a directory; `0` or an empty
+  field answer; a field number out of range; a scope path that does not exist;
+  aggressive `yes` with `passive` chosen; a target whose report folder already
+  exists; Ctrl-D at a prompt.
+  Mutation targets: drop the `sys.stdin.isatty()` guard; let two runs share a
+  folder name; populate an alive-only field for a `DEAD` host; make `--json`
+  write progress to stdout.
+
+PART 13 GATE: the four checks clean twice; no existing test changed unless the
+TEST POLICY in the task text documents the reason; every new behaviour has a
+regression test; PROGRESS "Deviations" records the new `results_dir` key and the
+new `docs/tool_manuals/` tree from Phase 1; nothing pushed.
+
+=====================================================
 LATER BUG FIXES (any session)
 =====================================================
 Reproduce with a failing test first, fix, run the SELF-REVIEW LOOP on the fix, log it in REVIEW_LOG "Bugs found", update RESUME. Never change behavior without a test.

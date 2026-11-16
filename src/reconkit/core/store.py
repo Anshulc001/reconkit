@@ -258,6 +258,23 @@ def _detail_value(detail: str | None, secrets: Iterable[str]) -> str | None:
     return text[:DETAIL_MAX_CHARS] or None
 
 
+def _text_list(raw: object) -> tuple[str, ...]:
+    """Read one stored JSON string list (`ips_json`/`tech_json`).
+
+    A missing row is `None` and a malformed value is treated the same way: an
+    empty tuple, never an exception, because this feeds a report.
+    """
+    if not isinstance(raw, str) or not raw:
+        return ()
+    try:
+        values = json.loads(raw)
+    except ValueError:
+        return ()
+    if not isinstance(values, list):
+        return ()
+    return tuple(str(value) for value in values if isinstance(value, str))
+
+
 class Store:
     """One SQLite database: schema migrations, writes and read queries."""
 
@@ -370,18 +387,25 @@ class Store:
         return [dict(row) for row in rows]
 
     def host_rows(self, target_id: int) -> list[dict[str, object]]:
-        """Latest host state, confidence, sources, status and open ports for the UI."""
+        """Latest host state, confidence, sources, status and open ports for the UI.
+
+        Part 13 adds the stored title, location, IPs, technology list and the
+        discovery source count from the same latest `host_status_history` row and
+        from `subdomains`. Nothing new is computed here: every value is a stored
+        column, so the report can never show a value the run did not observe.
+        """
         rows = self._conn.execute(
-            "SELECT s.fqdn, s.state, s.confidence,"
-            " (SELECT h.status_code FROM host_status_history h"
-            "  WHERE h.subdomain_id = s.id ORDER BY h.id DESC LIMIT 1) AS status_code,"
-            " (SELECT h.detail FROM host_status_history h"
-            "  WHERE h.subdomain_id = s.id ORDER BY h.id DESC LIMIT 1) AS detail,"
+            "SELECT s.fqdn, s.state, s.confidence, s.source_count,"
+            " h.status_code, h.detail, h.title, h.location, h.ips_json, h.tech_json,"
             " COALESCE((SELECT GROUP_CONCAT(DISTINCT x.tool) FROM subdomain_sources x"
             "  WHERE x.subdomain_id = s.id), '') AS sources,"
             " COALESCE((SELECT GROUP_CONCAT(DISTINCT p.port) FROM ports p"
             "  WHERE p.subdomain_id = s.id AND p.state = 'open'), '') AS ports"
-            " FROM subdomains s WHERE s.target_id = ? ORDER BY s.fqdn",
+            " FROM subdomains s"
+            " LEFT JOIN host_status_history h ON h.id = ("
+            "  SELECT MAX(latest.id) FROM host_status_history latest"
+            "  WHERE latest.subdomain_id = s.id)"
+            " WHERE s.target_id = ? ORDER BY s.fqdn",
             (target_id,),
         ).fetchall()
         result: list[dict[str, object]] = []
@@ -393,8 +417,13 @@ class Store:
                     "fqdn": str(row["fqdn"]),
                     "state": str(row["state"]),
                     "confidence": str(row["confidence"]),
+                    "source_count": int(row["source_count"] or 0),
                     "status_code": None if row["status_code"] is None else int(row["status_code"]),
                     "detail": None if row["detail"] is None else str(row["detail"]),
+                    "title": None if row["title"] is None else str(row["title"]),
+                    "location": None if row["location"] is None else str(row["location"]),
+                    "ips": _text_list(row["ips_json"]),
+                    "tech": _text_list(row["tech_json"]),
                     "sources": tuple(sorted(part for part in sources.split(",") if part)),
                     "ports": tuple(sorted(int(part) for part in ports.split(",") if part)),
                 }

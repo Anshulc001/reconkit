@@ -97,6 +97,9 @@ class Webhook(_StrictModel):
 class AppConfig(_StrictModel):
     workspace_dir: str
     db_path: str
+    # Saved reports for the interactive mode (docs/02 section 5). Defaulted so a
+    # config file written before Part 13 keeps loading unchanged.
+    results_dir: str = "results"
     default_speed: SpeedName
     user_agent: str
     speeds: Speeds

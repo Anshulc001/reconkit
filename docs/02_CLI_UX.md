@@ -12,7 +12,7 @@
 
 ## 2. Command Grammar
 
-`reconkit <command> [target] [flags]`. Target is `-d DOMAIN` or `-l FILE` (one domain per line). With no command, `reconkit -d X` is shorthand for `lite` (the passive pipeline).
+`reconkit <command> [target] [flags]`. Target is `-d DOMAIN` or `-l FILE` (one domain per line). With no command, `reconkit -d X` is shorthand for `lite` (the passive pipeline). A scan command with **neither** `-d` nor `-l` on a terminal asks five questions instead of failing (section 2b); with a target flag present nothing changes and nothing is asked.
 
 ### Setup and health
 | Command | Purpose | Phase |
@@ -56,11 +56,69 @@
 
 **`diff` semantics.** `diff` compares the two latest completed discovery runs for the target: `scan_runs` rows for the `subs` stage whose status is `completed` or `partial`, newest first. Resume does not change which runs these are (a resumed stage produces its own row like any other run); no other stage takes part in the comparison. A host is **`GONE` only after two consecutive misses**: it must have been seen in the run *before* the previous one and be missing from both the previous run and the latest run. One miss is not a change and is never reported as `GONE`, because a single flaky passive source (a CT log timing out, a subfinder run returning fewer names) is indistinguishable from a real removal in one run. Consequences a user will see: a host that is missing from only the latest run is silent in the table and is listed once under `Not reported as GONE yet (needs two consecutive misses)`; a host that comes back after one miss is neither `NEW` (its first sighting is not reset) nor `GONE`; a real removal appears as `GONE` on the run after the second consecutive miss; and with fewer than three completed discovery runs nothing can be confirmed gone, so `gone` is empty and `diff` says so. A host is **`NEW`** when the latest completed discovery run is its first sighting by any discovery tool: a host that the `dns` stage resolved before any discovery tool returned it is stored with `provenance` `dns`, appears in `status` with no sources, and is never reported NEW - the first discovery run that returns it is the run that reports it new.
 
+## 2b. Interactive scan mode (no target flags)
+
+A scan command given **neither `-d` nor `-l`** asks five questions instead of
+failing with "provide a target". This applies to `subs`, `dns`, `live`, `ports`,
+`tech`, `urls`, `vulns`, `passive`, `lite` and `run`. Two hard conditions:
+
+- **Any target flag at all means no questions.** If `-d` or `-l` is present, the
+  command behaves exactly as section 2 describes - no prompt is shown and no
+  input is read. Every scripted invocation, and the whole automated test suite,
+  is in this branch.
+- **Interactive input requires a terminal on stdin.** With stdin redirected from a
+  pipe or `/dev/null` (CI, cron, `ssh host reconkit passive`), the command keeps
+  today's behaviour: `provide a target with -d/--domain or -l/--list` and exit `2`.
+  Nothing ever blocks waiting for input that cannot arrive.
+
+The five questions:
+
+1. **Target.** A single domain, or a path to a file of domains (one per line). A
+   value naming an existing file is read with the same loader as `-l`: blank
+   lines and `#` comments skipped, duplicates removed, every line validated with
+   `validate_target()`. Anything else is treated as one domain. Both paths end in
+   the same `_targets()` handling `-d`/`-l` use, so there is no second target path.
+2. **Scope file.** `yes` asks for a path and uses it exactly as `--scope` does.
+   `no` leaves the scope location at its default (`./scope.yaml`, or nothing if
+   that file is absent). **`no` is not a bypass**: with no usable scope file the
+   passive stages still run exactly as today, and every active stage is refused
+   by the unchanged gate (exit `3`, or `skipped` per host). There is no code path
+   in which answering `no` lets an active tool reach a target.
+3. **Scan mode.** `passive` = `subs` + `dns`; `active` = `subs` + `dns` + `live`
+   (passive plus alive/status-code); `full` = `subs` + `dns` + `live` + `ports` +
+   `tech` + `urls`. `active` and `full` set `--active`, so the scope gate applies
+   unchanged. `vulns` is never requested by this mode (recon-only build). Because
+   `tech` and `urls` have no adapter in this build, a `full` choice requests two
+   stages that will report their skips, warn, and make the run partial (`5`,
+   section 6) - the same rule as a flag-based `run --active`, stated before the
+   run starts.
+4. **Report fields.** A numbered menu built from fields `reconkit` actually
+   stores (host state, confidence, discovery sources, source count, IPs, status
+   code, title, redirect location, open ports, technology, and the `UNKNOWN`
+   reason). The answer is a comma-separated list like `1,3,5` or `all`. Fields
+   that only make sense for a host that answered on the web (status code, title,
+   redirect location, technology, open ports) are written as `not applicable` for
+   every host whose state is not `ALIVE`, and the reason field only for `UNKNOWN`
+   hosts; no value is ever guessed for a host the run did not observe.
+5. **Aggressive scanning.** A separate yes/no asked whatever the answer to 3 was.
+   `yes` adds the active `live` and `ports` stages (and sets `--active`), and it
+   states plainly what that means in this build: `pyscan` only, a TCP connect
+   scan inside `in_scope_cidrs`, confidence capped at `LOW`; **service/version
+   detection is not wired** (`nmap -sV` has no adapter, `naabu` is permanently
+   blocked). `no` changes nothing.
+
+After the last answer the CLI echoes the resolved plan (targets, stages, active
+or not, field numbers) and runs the ordinary engine once per target. Results also
+land on disk, one folder per domain per run (section 5).
+
+The interactive path adds **no flags**: `--help` for a scan command is unchanged,
+and there is no `--interactive` switch. Omitting the target is the whole trigger.
+
 ## 3. Flags
 
 | Flag | Meaning |
 |---|---|
-| `-d, --domain` / `-l, --list` | Target or file of targets |
+| `-d, --domain` / `-l, --list` | Target or file of targets. Omitting both on a scan command starts the interactive mode (section 2b); that is the only trigger and it adds no flag |
 | `--active` | Allow active stages (also requires matching `scope.yaml`) |
 | `--speed slow\|normal\|fast` | Pacing preset. **Default: `slow`** |
 | `--delay MIN-MAX` | Random pause in seconds between tools (example `--delay 5-20`) |
@@ -142,7 +200,40 @@ The `hosts` objects always carry `state`, `confidence` and `sources`; the top-le
 State words are always printed (never color alone). Symbols are ASCII-safe.
 
 ### Progress
-This build has no live progress line; each stage prints its tables when it finishes, and the summary reports counts and tool statuses. `--json`/`--silent` suppress the human output. (`ui.render_progress` exists but is not wired.)
+Every scan writes one progress line per stage and one per finished tool to
+**stderr**, so the user can see which stage and tool is running during a slow
+scan (a real `slow` run is minutes long). The format is
+`<stage>: <tool> <done>/<total> tools <elapsed>s` plus a `running`/`ok`/`failed`
+marker, and a closing line per stage with its item count.
+
+- **`--json` keeps its stdout contract.** Progress goes to stderr only; the one
+  JSON document on stdout is byte-identical to before. This closes the gap
+  recorded in PROGRESS "Open risks" where `--json` wrote nothing at all while a
+  slow run was in flight.
+- **`--silent` suppresses it**, together with tables and warnings text (the exit
+  code still carries the outcome).
+- The lines are plain text, so they are readable with `--no-color` and when stderr
+  is a file.
+
+### Saved reports (interactive mode)
+One folder per domain per run, never reused:
+
+```
+<results_dir>/<domain>/<YYYYmmddTHHMMSSZ>/
+  report.txt    selected fields, one row per host, aligned columns
+  report.json   the same rows as objects, plus target, run time and field keys
+```
+
+- `results_dir` is the `config.yaml` key of that name (default `results`), used
+  by `--config` like every other key.
+- A second run for the same domain gets its own folder; an existing folder is
+  never written into. When two runs start within the same second the later one
+  gets a `-2`, `-3`, ... suffix, so no run can overwrite another.
+- Both files are always written, whatever field selection was made. A field the
+  run could not observe prints `not applicable` (section 2b point 4) rather than
+  a guessed value.
+- Only the interactive mode writes these; a `-d`/`-l` invocation keeps today's
+  behaviour exactly and writes nothing new.
 
 ### Empty, error and success states
 - **Empty:** `No results from 3 tools (crtsh, subfinder, otx). Check 'reconkit doctor'.`

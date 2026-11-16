@@ -4,10 +4,10 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status: **PART 12 IS COMPLETE (2026-11-15).** 12a, 12b, 12c, 12d, 12e, 12f, 12g, 12h, 12i, 12j and 12k are implemented, tested and committed, one item per commit, each with a full S1-S7 self-review. Part 11 is closed and the 11f report was delivered.
-- Nothing is queued. The three rulings the owner issued on 2026-11-15 are closed: 12e persists `UNKNOWN`/LOW when a live tool returned a record (PIT-47), 12h moves the scope reads and the workspace create to `to_thread` with the SQLite block documented on the loop, 12j gives `katana`/`nuclei` a `version_regex` (PIT-48).
-- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 4): `702 passed`, `ruff check .` clean, `ruff format --check .` 68 files, `mypy src/reconkit` clean.
-- The 12a raw file is now guarded against provider-key leakage by `tests/test_engine.py::test_subfinder_raw_file_never_contains_the_provider_key` (2026-11-15): the real `SubfinderAdapter` under the real registry, a fake child that echoes its `-pc` config - the key is absent from the file on disk, `***` takes its place. No code change was needed (redaction was already in `Workspace.write`); the test plus two mutation proofs are in REVIEW_LOG "Adversarial check: a key echoed by subfinder never reaches the raw file".
+- Status: **PART 12 AND PART 13 ARE COMPLETE (2026-11-16).** Part 12 closed on 2026-11-15 (12a-12k). Part 13 - the interactive scan mode, stderr progress and per-domain saved reports - is implemented, tested, self-reviewed (S1-S7) and committed, with docs written first. Phase 1 of the same session (the `docs/tool_manuals/` library) is closed in `8dc2829`.
+- What Part 13 changed, in one line: a scan command with **no** `-d`/`-l` **and** a real terminal asks five questions and then runs the ordinary scan inputs; a domain file becomes the ordinary `-l` path (one full scan and one `results/<domain>/<UTC stamp>/` folder per domain, `report.txt` + `report.json`); progress now goes to stderr for every mode except `--silent`, including `--json`. Every flag-based invocation is unchanged, including no prompts and no report folders (tests `test_a_flagged_run_never_asks_a_question`, `test_a_listed_run_never_asks_a_question`, `test_a_flagged_run_writes_no_report_folder`).
+- Nothing is queued. Part 13's own uncertainties are listed under "Open risks" (pre-existing all-`UNKNOWN` mock active runs, Windows, the pty demo being the only real run).
+- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 4): `734 passed`, `ruff check .` clean, `ruff format --check .` 69 files, `mypy src/reconkit` clean (36 source files).
 - Nothing is pushed: local `main` is ahead of `reconkit/main`, which is still `5fd1d9a`. Push only if the owner asks (`git push reconkit main`).
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in `engine.py`; adapters never import `store`/`scope`/`ui`/`cli`; `subjack` replaced by `subzy` + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from `.env`; the ports ceiling is permanent (12i).
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in `src/`; new lint/type suppressions; `shell=True`; the whole environment to a child; adapters importing store/scope/ui/cli; consensus outside `engine.py`; pushing.
@@ -46,6 +46,7 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 | i | `9c4319b`, `5df7e98`, `66b117c` | done - `doctor.py` + `installer/` |
 | j / 11 | `cc70b15` ... close-out | done - audit, fixes, report delivered |
 | 12 | one commit per item | 12a, 12b, 12c, 12d, 12e, 12f, 12g, 12h, 12i, 12j, 12k done - Part 12 complete |
+| 13 | one commit | interactive scan mode, stderr progress, per-domain saved reports - done 2026-11-16 |
 
 There is no `core/consensus.py`: consensus lives in `engine.py`. Order and module names follow docs/01 section 8 and docs/03 section 5. Per-part hashes and full evidence are in `REVIEW_LOG`; the old table is in its archive.
 
@@ -82,11 +83,46 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   sudo) so the tool could be documented; `rustscan` was attempted and failed on
   the registry placeholder asset name, which is flagged in the manuals README
   instead of being patched. No sudo command was run in either phase.
+- **2026-11-16 (Part 13 / Phase 2), new config key:** `results_dir: results` in
+  `config.yaml` and `AppConfig.results_dir` (with a default, so a config file
+  written before Part 13 still loads). Store directory for the saved reports;
+  `results/` is in `.gitignore`.
+- **2026-11-16 (Part 13), no new module:** the report writer (`REPORT_FIELDS`,
+  `report_fields`, `field_value`, `format_field_value`, `report_directory`,
+  `report_document`, `report_text`, `write_field_report`) lives in the existing
+  `ui.py`, and the five prompts plus `_MODE_STAGES`/`_InteractivePlan` live in the
+  existing `cli.py`, instead of adding `report.py`/`interactive.py` that docs/02-03
+  do not name. Both are documented in docs/02 section 2b/5 and docs/03.
+- **2026-11-16 (Part 13), behaviour change:** `--json` now writes progress to
+  stderr (docs/02 `### Progress` changed before the code). Only `--silent`
+  suppresses it. stdout stays exactly one JSON document.
+- **2026-11-16 (Part 13), three existing tests changed** (none removed), each
+  because of that one documented change: `test_mock_json_is_one_valid_document_and_exit_zero`
+  and `test_mock_scope_denial_returns_three` in `tests/test_cli.py` now assert
+  `"subs: running" in result.stderr` instead of `result.stderr == ""`;
+  `tests/test_ui.py::test_progress_is_suppressed_for_silent_and_json_modes` was
+  renamed `test_progress_is_suppressed_only_in_silent_mode` and asserts the new
+  message shape (`"subs: running 3 tool(s)"`, `"(4s)"`). All other assertions in
+  those tests are unchanged.
+- **2026-11-16 (Part 13), stored fields with defaults:** `HostSnapshot` gained
+  `source_count`/`ips`/`title`/`location`/`tech` (defaulted) and
+  `Store.host_rows()` now LEFT JOINs the latest `host_status_history` row once
+  instead of running two correlated subqueries. The host table and the `--json`
+  host shape are unchanged; the new values are only used by the report.
+- **2026-11-16 (Part 13), a multi-domain file does not use a tool's own list
+  flag:** the interactive file path reuses `-l` (one full scan per domain), even
+  though `subfinder -dL`, `dnsx -l`, `httpx -l`, `tlsx -l`, `naabu -list`,
+  `nmap -iL` etc. exist, because one report folder per domain requires results
+  that are attributable to one domain. Recorded so a later part does not flip it
+  by accident.
 
 ## Open risks
 
 - **12e is closed (PIT-47, 2026-11-15)**: a first `live` pass that got a record writes `UNKNOWN`/LOW with the reason, and a pass with no record still writes nothing. A later consumer that read "no row" as "not probed" must read the state instead.
-- `--json` writes no progress at all (0 bytes of stderr on an 8m25s real run) while docs/02 section 5 says tables and progress stay on stderr: either the doc or the CLI needs to change, docs first.
+- **CLOSED 2026-11-16 by Part 13:** `--json` used to write no progress at all while docs/02 said tables and progress stay on stderr. All scan modes now emit stage/tool progress on stderr; only `--silent` suppresses it, and stdout remains one JSON document.
+- **Part 13, open for the owner:** the pty run (`results/testfire.net/...`, an in-scope domain at `--speed fast`) is the only real-network exercise of the interactive flow, and Windows is still untested, so the interactive prompts and the report folders have no Windows evidence.
+- **Pre-existing, not caused by Part 13 and not fixed:** `reconkit run --active --mock` stores every host as `UNKNOWN` (the mock live adapter returns records the engine reads as inconclusive). Verified on the flag path before Part 13 existed; the interactive `active`/`full` modes inherit it. Needs its own ruling.
+- **Part 13, accepted:** the saved report contains only values already stored in the run's DB (no recomputation), so a stored `title` that happened to contain a provider key would appear in `report.txt`/`report.json` exactly as it already appears in the SQLite file. Files are written 0600 inside `results_dir`.
 - Six typed `render_error(str(exc))` sites in `cli.py` (scope check, `diff`, `status`, `doctor`, `install`) still bypass `redact()`; every message is built from our own values today, so no leak is known. Needs its own ruling.
 - `libpcap-dev` is absent and `sudo` needs a password here, so the apt prerequisite step has never run live; `naabu` is already installed, which also means `install --all` does not attempt it.
 - The sudo-authenticated half of the installer has never run end to end: `massdns`, `amass`, `dig`, `nmap`, `whatweb` and `libpcap-dev` have only ever been exercised as `skipped`.

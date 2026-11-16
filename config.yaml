@@ -3,6 +3,7 @@
 
 workspace_dir: workspaces        # raw outputs: workspaces/<target>/...
 db_path: recon.db                # SQLite state (see docs/04_DATABASE.md)
+results_dir: results             # saved reports: results/<domain>/<run>/ (interactive mode, docs/02 s5)
 default_speed: slow              # slow | normal | fast
 user_agent: "reconkit/{version}" # honest UA, no rotation
 

@@ -7,6 +7,8 @@ import shutil
 import sys
 import traceback
 from contextlib import nullcontext
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -19,13 +21,15 @@ from reconkit.core.runner import validate_target
 from reconkit.core.scope import check_target
 from reconkit.core.store import configure_redaction, redact
 from reconkit.doctor import collect_report, key_checks
-from reconkit.engine import Engine, ExitCode, ScanOptions
+from reconkit.engine import STAGE_ORDER, Engine, ExitCode, ScanOptions
 from reconkit.errors import ConfigError, ScopeError
 from reconkit.installer.github_release import install_selected
 from reconkit.installer.registry import InstallPlan, bin_dir, load_plans
 from reconkit.models import Stage
 from reconkit.ui import (
+    REPORT_FIELDS,
     HostRow,
+    ReportField,
     make_console,
     render,
     render_diff,
@@ -34,7 +38,11 @@ from reconkit.ui import (
     render_install,
     render_keys,
     render_message,
+    render_progress,
     render_status,
+    report_directory,
+    report_fields,
+    write_field_report,
 )
 
 app = typer.Typer(
@@ -141,6 +149,136 @@ def _configure_redaction() -> None:
     configure_redaction(value for value in values.values() if value is not None)
 
 
+# The interactive mode's three scan modes (docs/02 section 2b). `vulns` is never
+# requested: this build is recon-only, so a `vulns` adapter does not exist.
+_MODE_STAGES: dict[str, tuple[Stage, ...]] = {
+    "passive": (Stage.SUBS, Stage.DNS),
+    "active": (Stage.SUBS, Stage.DNS, Stage.LIVE),
+    "full": (Stage.SUBS, Stage.DNS, Stage.LIVE, Stage.PORTS, Stage.TECH, Stage.URLS),
+}
+
+
+@dataclass(frozen=True)
+class _InteractivePlan:
+    """The five answers, already resolved into the ordinary scan inputs."""
+
+    domain: str | None
+    list_file: Path | None
+    scope_path: Path | None
+    stages: tuple[Stage, ...]
+    active: bool
+    fields: tuple[ReportField, ...]
+
+
+def _stdin_is_tty() -> bool:
+    """True only when a real terminal is on stdin (docs/02 section 2b).
+
+    Without a terminal the interactive questions would block on input that can
+    never arrive, so the command keeps the documented "provide a target" error.
+    Tests drive the interactive path by monkeypatching this function.
+    """
+    try:
+        return bool(sys.stdin.isatty())
+    except (AttributeError, ValueError):
+        return False
+
+
+def _ask_target() -> tuple[str | None, Path | None]:
+    """Question 1: one domain, or a path to a file of domains."""
+    answer = ""
+    while not answer:
+        answer = str(
+            typer.prompt("Domain, or path to a file of domains (one per line)", err=True)
+        ).strip()
+    candidate = Path(answer).expanduser()
+    if candidate.is_file():
+        return None, candidate
+    return answer, None
+
+
+def _ask_scope() -> Path | None:
+    """Question 2: an optional scope file, used exactly like `--scope`."""
+    if not typer.confirm("Do you have a scope file?", default=True, err=True):
+        return None
+    raw = str(typer.prompt("Scope file path", err=True)).strip()
+    path = Path(raw).expanduser()
+    if not path.is_file():
+        raise ConfigError(f"scope file {path} does not exist")
+    return path
+
+
+def _ask_mode() -> tuple[tuple[Stage, ...], bool]:
+    """Question 3: passive, active or full."""
+    answer = str(typer.prompt("Scan mode: passive, active or full", default="passive", err=True))
+    mode = answer.strip().lower()
+    if mode not in _MODE_STAGES:
+        raise ConfigError(f"invalid scan mode {answer!r}; expected passive, active or full")
+    return _MODE_STAGES[mode], mode != "passive"
+
+
+def _ask_fields(*, no_color: bool) -> tuple[ReportField, ...]:
+    """Question 4: which stored fields the saved report should contain."""
+    lines = ["Report fields (numbers like 1,3,5, or 'all'):"]
+    for number, field in enumerate(REPORT_FIELDS, start=1):
+        gate = "" if field.gate == "always" else f"  [{field.gate} hosts only]"
+        lines.append(f"  {number}. {field.label}{gate}")
+    render_message("\n".join(lines), no_color=no_color)
+    answer = str(typer.prompt("Fields", default="all", err=True)).strip().lower()
+    if answer in {"all", "*"}:
+        return REPORT_FIELDS
+    numbers: list[int] = []
+    for part in answer.replace(" ", "").split(","):
+        if not part:
+            continue
+        if not part.isdigit():
+            raise ConfigError(f"invalid report field {part!r}; expected a number or 'all'")
+        number = int(part)
+        if not 1 <= number <= len(REPORT_FIELDS):
+            raise ConfigError(f"report field {number} is out of range (1-{len(REPORT_FIELDS)})")
+        numbers.append(number)
+    if not numbers:
+        raise ConfigError("no report fields selected")
+    return report_fields(numbers)
+
+
+def _ask_aggressive(*, no_color: bool) -> bool:
+    """Question 5: port scan + version detection, whatever the mode was."""
+    answer = typer.confirm(
+        "Also run aggressive scanning (port scan + version detection)?",
+        default=False,
+        err=True,
+    )
+    if answer:
+        # docs/02 section 2b: state the real capability, never a guess.
+        render_message(
+            "aggressive: pyscan TCP connect scan inside in_scope_cidrs only; "
+            "confidence is capped at LOW and service/version detection is not wired "
+            "in this build (nmap -sV has no adapter, naabu is permanently blocked).",
+            no_color=no_color,
+        )
+    return answer
+
+
+def _interactive_plan(*, no_color: bool) -> _InteractivePlan:
+    """Ask the five questions and resolve them into ordinary scan inputs."""
+    domain, list_file = _ask_target()
+    scope_path = _ask_scope()
+    stages, active = _ask_mode()
+    fields = _ask_fields(no_color=no_color)
+    aggressive = _ask_aggressive(no_color=no_color)
+    if aggressive:
+        wanted = set(stages) | {Stage.LIVE, Stage.PORTS}
+        stages = tuple(stage for stage in STAGE_ORDER if stage in wanted)
+        active = True
+    label = domain if domain is not None else str(list_file)
+    render_message(
+        f"plan: {label}; stages {', '.join(stage.value for stage in stages)}; "
+        f"active {'yes' if active else 'no'}; fields {len(fields)}",
+        no_color=no_color,
+    )
+    return _InteractivePlan(domain, list_file, scope_path, stages, active, fields)
+
+
 def _report_error(message: str, code: int, *, no_color: bool, verbose: bool = False) -> int:
     if verbose:
         # A chained exception (`__cause__`/`__context__`) is rendered into this
@@ -176,18 +314,30 @@ def _run_scan(
 ) -> int:
     engine: Engine | None = None
     try:
+        # docs/02 section 2b: the questions are asked only when a scan command got
+        # neither -d nor -l and a terminal is on stdin. Any target flag keeps the
+        # flag-based path byte-identical, which is what every script relies on.
+        plan: _InteractivePlan | None = None
+        if domain is None and list_file is None and command in _SCAN_COMMANDS and _stdin_is_tty():
+            try:
+                plan = _interactive_plan(no_color=no_color)
+            except (EOFError, typer.Abort):
+                raise ConfigError("interactive scan cancelled") from None
+            domain, list_file = plan.domain, plan.list_file
+            scope_path = plan.scope_path
         targets = _targets(domain, list_file)
         config: AppConfig = load_config(config_path, speed=speed, delay=delay)
-        if command in _ACTIVE_ONLY and not active:
+        is_active = active if plan is None else (plan.active or active)
+        if command in _ACTIVE_ONLY and not is_active:
             raise ConfigError(f"{command} requires --active and a matching scope.yaml")
         # docs/02 section 2: the passive-only commands run no active stage, so
         # accepting --active would promise work the command cannot do.
-        stages = _stages(command, active)
-        if active and all(stage in _PASSIVE_STAGES for stage in stages):
+        stages = plan.stages if plan is not None else _stages(command, is_active)
+        if is_active and all(stage in _PASSIVE_STAGES for stage in stages):
             raise ConfigError(
                 f"{command!r} is passive-only; --active needs: reconkit run -d X --active"
             )
-        if active and config.default_speed == "fast" and not mock:
+        if is_active and config.default_speed == "fast" and not mock:
             render_message(
                 "warning: active fast mode can be noisy; typed confirmation is required.",
                 no_color=no_color,
@@ -201,7 +351,13 @@ def _run_scan(
                 raise ConfigError("fast active scan cancelled")
         if json_output and len(targets) > 1:
             raise ConfigError("--json accepts one target per invocation; use -d")
-        engine = Engine.open(config, db_path=db_path, scope_path=scope_path)
+        # Progress goes to stderr for every scan, --json included; only --silent
+        # suppresses it (docs/02 section 5).
+        progress_console = make_console(no_color=no_color)
+        progress = (
+            None if silent else (lambda message: render_progress(message, console=progress_console))
+        )
+        engine = Engine.open(config, db_path=db_path, scope_path=scope_path, progress=progress)
         exit_code = int(ExitCode.SUCCESS)
         for target in targets:
             summary = asyncio.run(
@@ -212,7 +368,7 @@ def _run_scan(
                         tools=_csv(tools),
                         exclude=frozenset(_csv(exclude)),
                         include_noisy=include_noisy,
-                        active=active,
+                        active=is_active,
                         no_keys=no_keys,
                         mock=mock,
                         speed=config.default_speed,
@@ -222,6 +378,7 @@ def _run_scan(
                     ),
                 )
             )
+            snapshots = engine.host_rows(summary.target_id)
             rows = [
                 HostRow(
                     fqdn=item.fqdn,
@@ -232,7 +389,7 @@ def _run_scan(
                     ports=item.ports,
                     detail=item.detail,
                 )
-                for item in engine.host_rows(summary.target_id)
+                for item in snapshots
             ]
             exit_code = render(
                 summary,
@@ -241,6 +398,17 @@ def _run_scan(
                 silent=silent,
                 no_color=no_color,
             )
+            if plan is not None:
+                run_at = datetime.now(UTC)
+                directory = report_directory(config.results_dir, target, run_at)
+                report_text_path, report_json_path = write_field_report(
+                    directory, target, snapshots, plan.fields, run_at=run_at
+                )
+                render_progress(
+                    f"report: {report_text_path} and {report_json_path}",
+                    console=progress_console,
+                    silent=silent,
+                )
         return exit_code
     except ConfigError as exc:
         return _report_error(str(exc), exc.exit_code, no_color=no_color)

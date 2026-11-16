@@ -96,11 +96,48 @@ workspaces/<domain>/
 - Raw adapter output is written by the engine as `<stage>/<run_id>-<tool>.txt`: one file per executed tool per stage run (`run_id` is the `scan_runs` id), so two tools in one stage and the same tool in two runs never collide, and a rerun never overwrites an earlier run's evidence. The `dns` stage has no raw directory of its own - the workspace keeps exactly the six documented directories - so its files go to `meta/`, which also holds `vulns`/`shots` output when those phases exist. `write` returns the path and the engine stores it unchanged in `ToolResult.raw_path`, so it is relative while `workspace_dir` is relative (the shipped `config.yaml` value) and absolute when the caller passed an absolute root. The path is not shown in the human tables (docs/02) but does appear in `--json` under `stages[].results`, because that object is the docs/09 `ToolResult` schema.
 - Raw tool output uses `subs`, `live`, `ports`, `urls` or `tech`; run metadata and summaries use `meta`. No other directory is created.
 
+### Saved reports (`results/`, interactive mode only)
+
+```
+<results_dir>/<domain>/<YYYYmmddTHHMMSSZ>/
+  report.txt  report.json
+```
+
+- `results_dir` is an `AppConfig` key (default `results`) read from `config.yaml`
+  and overridden by `--config` like every other key. It is deliberately **not**
+  inside `workspaces/<target>/`: that tree is fixed at six stage directories, and
+  adding a seventh would break the `Workspace` contract above.
+- `ui.report_directory(results_root, domain, run_at)` chooses the folder name from
+  the run clock (UTC, second resolution) and, if that name already exists,
+  appends `-2`, `-3`, ... so a previous run's folder is never reopened. It is the
+  only place that names a report folder.
+- `ui.write_field_report(directory, target, rows, fields, run_at)` writes both
+  files atomically (temporary file plus `os.replace`, mode `0600`) and returns the
+  paths. `rows` are the engine's `HostSnapshot` values already filtered to the
+  selected fields; the writer never computes a state, a confidence or a value.
+  A field the run did not observe is written as `not applicable`, never invented.
+- Both helpers live in `ui.py` because they are output, not orchestration: `ui.py`
+  already owns every rendering of the same snapshot rows and imports only the
+  standard library, Rich and shared output types. A new module would have meant a
+  new file outside docs/03, which G3 forbids.
+- Only the interactive path (docs/02 section 2b) calls them, so a `-d`/`-l` run
+  writes exactly what it wrote before this feature.
+
 ### Engine API (`engine.py`)
 
 - `Engine.open(config, *, db_path=..., scope_path=..., env_file=..., ...)` is the CLI-facing factory: it creates the `Store`, loads optional `.env` values inside the engine, and returns an `Engine`. `close()` closes the store. The constructor remains injectable for tests.
 - `Engine(config, store, now=...).run(target, ScanOptions(...))` runs the selected stages in the fixed order `subs, dns, live, ports, tech, urls, vulns`. `ScanOptions` carries `stages`, `tools`, `exclude`, `include_noisy`, `active`, `no_keys`, `mock`, `speed`, `phase_timeout`, `min_sources` and `resume`.
-- `Engine.host_rows(target_id)` returns typed `HostSnapshot` rows (fqdn, state, confidence, sources, status code, open ports) for the UI; `Engine.diff(target)` returns the latest two same-kind run comparison; `Engine.recent_runs(limit)` returns recent stage runs for `status`.
+- `Engine(..., progress=callable)` is an optional injected reporting callback. The
+  engine calls it with one short string at stage start, once per finished tool and
+  once per finished stage; it never prints, formats or decides anything. `None`
+  (the default, and what every test uses) makes it a no-op, so the engine's
+  behaviour is unchanged when it is absent. `Engine.open(...)` forwards the same
+  argument from the CLI.
+- `Engine.host_rows(target_id)` returns typed `HostSnapshot` rows (fqdn, state, confidence, sources, status code, open ports) for the UI; `HostSnapshot`
+  also carries the extra stored values the interactive report menu needs -
+  `source_count`, `ips`, `title`, `location`, `tech` - read from the existing
+  `subdomains`/`host_status_history` columns. They are additive with defaults, so
+  the human table and the `--json` document stay byte-identical. `Engine.diff(target)` returns the latest two same-kind run comparison; `Engine.recent_runs(limit)` returns recent stage runs for `status`.
 - `now` is an injected timestamp source (default `store.utc_now`) used for `targets.created_at`, `scan_runs.started_at/finished_at` and `host_status_history.checked_at`; tests pass a fixed clock. The engine never calls `datetime.now()` or `time.time()` directly.
 - `ScanSummary.exit_code` is a typed `ExitCode` (`0` success, `1` unexpected, `2` usage, `3` scope, `4` no usable tool, `5` partial, `130` interrupted). The engine never calls `sys.exit()`; the CLI maps the value. `_exit_code()` is the single decision site and treats a requested stage that executed zero tools as one more source of `5`, adding one `ScanSummary.warnings` entry naming the stage (docs/02 section 6 has the precedence order).
 - Tools are selected from `tools.yaml` once per run. A `--tools` name must exist; `intrusive` tools are refused, `opt_in` tools need `--include-noisy` or an explicit `--tools`, and `--exclude` always wins. Every selected or skipped tool gets a `tool_runs` row with its redacted error.
@@ -163,9 +200,15 @@ workspaces/<domain>/
 ## 8b. UI API (`ui.py`)
 
 - `ui.render(summary, hosts, *, json_output=False, silent=False, no_color=False, stdout=None, stderr=None, console=None) -> int` writes the human tables/progress to stderr or the single JSON document to stdout, then returns `int(summary.exit_code)`.
+- `ui.render_progress(stage, tool, done, total, ...)` writes one progress line to
+  stderr. It is wired into every scan (interactive and flag-based, `--json`
+  included) and suppressed only by `--silent`; it never writes to stdout, so the
+  one-document `--json` contract on stdout is untouched (docs/02 section 5).
+  `Engine` receives it as an injected `progress` callback, so the engine still
+  prints nothing itself.
 - `ui.render_message(...)` writes one non-error line; `ui.render_diff(...)` and `ui.render_status(...)` render the `diff`/`status` documents to stderr or stdout JSON.
 - `HostRow` is the plain input for the host table/JSON: `fqdn`, `state`, `confidence`, `sources`, `status_code`, `ports`, `detail`. The engine or CLI supplies these precomputed values; `ui.py` never computes confidence or state. `detail` is the stored, already-redacted reason from the latest status row (docs/04 section 5) and is emitted in `--json` only.
-- `ui.py` imports only Rich, the standard library and shared output types; it never imports `core.store`, `core.scope`, adapters or `cli.py`.
+- `ui.py` imports only Rich, the standard library and shared output types; it never imports `core.store`, `core.scope`, adapters or `cli.py`. It does write the `results/` report files (docs/02 section 5): that is rendering to a file, it uses only `pathlib`/`json`/`os`, and every value comes from the engine's snapshots.
 
 ## 9. Dependency Rules
 

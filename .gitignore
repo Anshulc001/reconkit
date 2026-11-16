@@ -5,6 +5,7 @@ scope.yaml
 recon.db
 recon.db-*
 workspaces/
+results/
 *.log
 
 # python
