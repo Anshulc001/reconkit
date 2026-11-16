@@ -207,6 +207,14 @@ Stored with source `smap` and confidence LOW until an active scan confirms; neve
 
 Every flag and field below was checked against the real binary on this Kali box or against the tool's official source on 2026-11-14 - not from memory. Raw evidence (commands and output) is in the REVIEW_LOG entry "Tool flags and fields verified against the real tools". Anything not verifiable is listed under PROGRESS Open risks instead of being asserted here.
 
+**Per-tool manuals (2026-11-16).** The full reference for every non-`vulns`
+tool - official source URL, install state, the complete real `--help`, one real
+safe test on `testfire.net` with its exit code, and every error hit - lives in
+`docs/tool_manuals/` (one file per stage, index in its `README.md`). The table
+below remains the compact "what the code relies on" contract; the manuals are
+the long form. The `vulns` stage is deliberately undocumented for now (recon-only
+scope, see that README) and this section says nothing about it.
+
 | Tool | What we rely on | How it was verified | Mismatch found |
 |---|---|---|---|
 | `crtsh` | `GET https://crt.sh/?q=%.<domain>&output=json`; response array with `name_value` and `common_name` | Live request with the adapter's exact query: HTTP 200, 28,454 bytes, both fields present. crt.sh publishes no API reference, so the live sample is the primary source | none. Note: crt.sh 404s when `%` is not percent-encoded (`q=%.example.com`), and httpx encodes params, so the adapter is safe |

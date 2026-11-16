@@ -68,6 +68,20 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
 - 12k: `scan_runs.status` for an empty stage still reads `completed`; only the warning and the exit code changed.
 - 12h: the SQLite persistence block stays on the event loop by ruling; docs/03 section 11 states the reason (single writer, `check_same_thread` on the main-thread connection) and the bound (one transaction per stage). Both `scope.yaml` reads - the active gate and the `ip_allowed` predicate - moved to `to_thread`, not just the gate.
 - 12j: `version_regex` is a `tools.yaml` field next to `version_cmd` (not a config key); it is compiled and rejected at registry load, the first capture group is the version, and the old first-line behaviour is the fallback.
+- **2026-11-16 (Phase 1, docs only):** a new documentation tree
+  `docs/tool_manuals/` (8 files: `README.md` plus one per stage) was created
+  outside `docs/02`/`docs/03`. This is the documentation-only exception the
+  owner granted for the tool-manual library. `docs/09` section 9 gained a
+  pointer to it; no `src/` file changed in that phase.
+- **2026-11-16 (Phase 1):** the whole `vulns` stage (nuclei, subzy, dnsreaper,
+  nikto, ffuf, dalfox, crlfuzz, sqlmap) is deferred as "recon-only scope for now,
+  revisit later": no manual, no install, no test. Reading the task's "vulnerability
+  scanning tools" as the stage `tools.yaml` itself calls "Takeover and exposure/
+  misconfiguration checks" is an interpretation the owner may narrow.
+- **2026-11-16 (Phase 1):** `reconkit install gowitness` was run (go_install, no
+  sudo) so the tool could be documented; `rustscan` was attempted and failed on
+  the registry placeholder asset name, which is flagged in the manuals README
+  instead of being patched. No sudo command was run in either phase.
 
 ## Open risks
 
@@ -90,7 +104,13 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
 - 11c-bis-1: `--help` renders switches as value-taking (`--json <bool>`); `typer>=0.12` has no upper bound and no test pins the rendering. 11c-bis-2: `reconkit --json doctor` accepts a global `--json` and silently ignores it.
 - `naabu` is skipped permanently and ports confidence cannot exceed LOW (12i, accepted ceiling - not a defect to fix).
 - Wildcard matches are a mark only: docs/09's "exclude from counts" names no count and no code filters it.
-- `tech`, `urls` and `vulns` have no adapter for any tool in their pools, so no real tool in those stages has ever run; they exit 5 with the 12k warning.
+- `tech`, `urls` and `vulns` have no adapter for any tool in their pools, so no real tool in those stages has ever been driven by `reconkit`; they exit 5 with the 12k warning. (2026-11-16: every phase-3 binary in `tech`/`urls`/`shots` was run by hand for the manuals - the tools work, only the adapters are missing.)
+- 2026-11-16, for the owner: `docs/tool_manuals/README.md` lists six registry
+  discrepancies flagged by the manual verification - `rustscan`'s placeholder
+  asset, seven tools whose version column shows ASCII art (PIT-48 class),
+  path-instead-of-version rows for tools with no version flag, `assetfinder -h`
+  exiting 0, `amass` v5.1.3 versus the v4 registry note, and `webanalyze`
+  needing `-update` first. No code or registry value was changed.
 
 ## Notes for later tasks
 

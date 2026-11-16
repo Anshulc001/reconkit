@@ -2522,6 +2522,124 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Deviations:** none from the ruling. Two notes: (a) the ruling names the fallback as `splitlines()[0]`, and that is exactly what remains - the `str(copy)` fallback for an empty probe output is untouched; (b) the pattern is validated at registry load (`re.compile`), which the ruling did not ask for but which keeps a typo from raising `re.error` inside `doctor`; it is one small function and docs/10 states it.
 - **What this closes:** Part 12 is complete - 12a, 12b, 12c, 12d, 12e, 12f, 12g, 12h, 12i, 12j and 12k are all implemented, tested and committed.
 
+## Phase 1 - tool manual library (docs only, 2026-11-16)
+
+- **Goal:** a real, machine-verified manual for every tool in `tools.yaml` that is
+  not a vulnerability scanner, plus an honest installed-vs-runnable report. No
+  `src/` change was allowed in this phase and none was made.
+- **Docs read first:** `docs/09` (full), `docs/10` (full), `tools.yaml` (full),
+  `docs/02`, `docs/03`, `docs/REVIEW_LOG.md` Known pitfalls, `docs/MASTER_PLAN.md`.
+- **Inventory (authoritative, from the loaded registry, not from prose):**
+  `tools.yaml` lists 48 tools; `adapters.registry.ADAPTERS` has 11 keys, so 11 are
+  built and 37 are not.
+  - subs 11: built crtsh, certspotter, otx, hackertarget, subfinder, assetfinder;
+    unbuilt urlscan, amass, findomain, chaos, github_subdomains
+  - dns 5: built dnspython; unbuilt dnsx, puredns, massdns, dig
+  - live 4: built pyprobe, httpx; unbuilt httprobe, tlsx
+  - ports 6: built pyscan, naabu; unbuilt smap, nmap, rustscan, masscan
+  - tech 5: built none; unbuilt httpx_tech, whatweb, wafw00f, cdncheck, webanalyze
+  - urls 8: built none; unbuilt gau, waybackurls, katana, hakrawler, gospider,
+    subjs, unfurl, urlfinder
+  - vulns 8: built none; unbuilt nuclei, subzy, dnsreaper, nikto, ffuf, dalfox,
+    crlfuzz, sqlmap
+  - shots 1: built none; unbuilt gowitness
+- **Deferred by ruling of the task:** the whole `vulns` stage (8 tools) is
+  "skipped - recon-only scope for now, revisit later". 40 tools documented.
+- **Doc structure:** `docs/tool_manuals/` - one file per stage (`subs.md`,
+  `dns.md`, `live.md`, `ports.md`, `tech.md`, `urls.md`, `shots.md`) plus a
+  `README.md` index. Rationale and the alternative (one file per tool, 40 files)
+  are recorded in that README. Flagged as a docs-only deviation in PROGRESS.
+- **Method:** for each tool, the official source URL was recorded, the binary was
+  located with the registry's own lookup order (`~/.reconkit/bin` first, then
+  `PATH`), the real `--help` was captured to a file, and one safe command was run
+  against `testfire.net` with stdout, stderr and the exit code captured. The
+  markdown was generated from those files (`/tmp/gen_manuals.py`), so no help text
+  or output in the manuals is retyped.
+- **Installed vs runnable:** 39 of the 40 documented tools have a usable
+  entry point. `rustscan` does not (install fails, see below). Six installed tools
+  had no runnable path without something this box does not have: `chaos`
+  (`PDCF_API_KEY`-class key missing: `[FTL] PDCP_API_KEY not specified`, exit 1),
+  `github-subdomains` (`token not found`, exit 255), `otx` (anonymous 429),
+  `certspotter` (anonymous `[]`), `masscan` (root needed for a real scan; only
+  `--echo` was run), `webanalyze` (needs `-update` once: first run exited 1).
+- **`reconkit install` used:** `reconkit install rustscan gowitness`. gowitness
+  installed (`go install ... @latest -> ~/.reconkit/bin/gowitness`); rustscan
+  failed: `rustscan: release 2.4.1 has no asset 'verify-at-implementation'`.
+  No sudo was run in either phase; nothing needed it.
+- **Findings flagged for the owner (no code or registry change):**
+  1. `rustscan`'s `asset_pattern` is the placeholder `verify-at-implementation`, so
+     it cannot be installed; the release is 2.4.1.
+  2. Seven tools still show ASCII art in `doctor`'s Version column because only
+     `katana`/`nuclei` have a `version_regex` (PIT-48 class): observed live with
+     `installed_version()` - `chaos -> '__                    '`,
+     `dnsx -> '_             __  __'`, `httpx -> '__    __  __       _  __'`,
+     `tlsx -> '_____ _    _____  __'`, `naabu -> '__'`, `wafw00f -> '______'`,
+     `cdncheck -> '__           __              __  '`. (`httpx`, `naabu`, `katana`,
+     `nuclei` are fine in `doctor` because their adapters or regex take over.)
+  3. `installed_version()` returns `argv0` when `version_args` is empty, so the
+     Version column is a path for tools with no version flag
+     (`github_subdomains -> '/home/kali/.reconkit/bin/github-subdomains'`, same for
+     smap, webanalyze, gospider, subjs, unfurl, urlfinder, waybackurls, httprobe
+     whose `-h` prints usage).
+  4. `assetfinder -h` exits **0** here, not the 2 that docs/09 section 9 states.
+  5. `amass` is **v5.1.3** with the `assoc|engine|enum|subs|track|viz` tree, while
+     the `tools.yaml` note describes v4 behaviour (`-passive` still exists under
+     `amass enum`; `amass -version` works).
+  6. `webanalyze` needs `technologies.json`; nothing in `tools.yaml` records the
+     preparation step.
+- **Real evidence (per tool, full help and full output in `docs/tool_manuals/`):**
+  `subfinder -d testfire.net -silent -nc -duc` -> 35 hosts, exit 0;
+  `assetfinder --subs-only testfire.net` -> 4, exit 0;
+  `findomain -t testfire.net --quiet` -> 37, exit 0;
+  `printf 'testfire.net\nwww.testfire.net\n' | dnsx -silent -a` -> 2, exit 0;
+  `puredns resolve d.txt -r res.txt -q` -> 2, exit 0;
+  `massdns -r res.txt -t A -o S d.txt` -> 2 records, exit 0;
+  `dig testfire.net A +short` -> `65.61.137.117`, exit 0;
+  `httpx -u testfire.net -silent -sc -title -location -td -cdn -nc -duc` ->
+  `https://testfire.net [200] [] [Altoro Mutual] [Apache Tomcat,Java]`, exit 0;
+  `echo testfire.net | httprobe` -> 2 URLs, exit 0;
+  `tlsx -u testfire.net -silent -nc -duc` -> `testfire.net:443`, exit 0;
+  `naabu -host testfire.net -p 80,443 -scan-type c -silent -nc -duc` -> 2 ports,
+  exit 0 (connect scan, no root, no libpcap-dev);
+  `nmap -sV -p80,443 -T2 --noninteractive testfire.net` -> both ports open with
+  `Apache Tomcat/Coyote JSP engine 1.1`, exit 0;
+  `masscan --echo --max-rate 100 -p1234` -> `rate = 100`, exit 0 (no packets);
+  `smap testfire.net -oJ -` -> JSON with ports 80/443 from Shodan data, exit 0;
+  `whatweb --no-errors testfire.net` -> `[200 OK] Apache, ... Title[Altoro Mutual]`,
+  exit 0; `wafw00f testfire.net` -> `No WAF detected`, exit 0;
+  `cdncheck -i 104.16.0.1 -silent -nc -duc` -> `104.16.0.1`, exit 0;
+  `webanalyze -host testfire.net` -> Java + Apache Tomcat, exit 0 (after -update);
+  `gau --threads 2 testfire.net` -> 485 URLs, exit 0;
+  `waybackurls testfire.net` -> 27, exit 0;
+  `katana -u https://testfire.net -d 1 -silent -nc -duc -rl 5` -> 1132, exit 0;
+  `echo https://testfire.net | hakrawler -d 1` -> 0 URLs, exit 0 (redirects to
+  www, refused to leave scope); `gospider -s https://testfire.net -d 1 -q` -> 1,
+  exit 0; `echo https://testfire.net | subjs` -> 0, exit 0;
+  `echo 'https://testfire.net/login.jsp?uid=1&pw=2' | unfurl keys` -> `pw`,`uid`,
+  exit 0; `urlfinder -d testfire.net -silent -nc -duc` -> 73, exit 0;
+  `gowitness scan single --url https://testfire.net` -> `status-code=200
+  title="Altoro Mutual" have-screenshot=false`, exit 0;
+  HTTP sources: crtsh 200/24 entries, certspotter 200 `[]`, otx 429 anonymous,
+  hackertarget 200/3 rows, urlscan 200/41 results.
+- **Python tools proved in-process:** dnspython 2.9.2 A record;
+  a raw TLS `HEAD /` probe returned `HTTP/1.1 200 OK` (and a real
+  `CERTIFICATE_VERIFY_FAILED: Hostname mismatch` with a verifying context on this
+  target - the exact case PIT-37 wrote the fallback for); one TCP connect to
+  `65.61.137.117:80` through an `in_scope_cidrs` predicate returned OPEN.
+- **Multi-domain flags checked from the real `--help` for every binary** (table in
+  `docs/tool_manuals/README.md`): `subfinder -dL`, `chaos -dL`, `findomain -f`,
+  `dnsx -l`, `httpx -l`, `tlsx -l`, `naabu -list`, `nmap -iL`, `masscan -iL`,
+  `smap -iL`, `whatweb --input-file`, `wafw00f -i`, `katana -u/-list`,
+  `urlfinder -d/-list`, `cdncheck -i`, plus stdin/file input for puredns, massdns,
+  dig (`-f`), gau, waybackurls, httprobe, hakrawler, subjs, unfurl;
+  `assetfinder` and `github-subdomains` have **none**.
+- **No `src/` change:** `git status --short` after Phase 1 showed only
+  `docs/09_TOOL_CONTRACTS.md`, `docs/PROGRESS.md`, `docs/REVIEW_LOG.md` and the new
+  `docs/tool_manuals/` tree.
+- **Not verified:** a real `masscan` scan (root), a real `amass` full run (it did
+  not finish in 150 s), `chaos`/`github-subdomains`/`otx` with a key, and
+  `gowitness` screenshots (no browser found by the tool).
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of
