@@ -2791,6 +2791,97 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Raw check output:** see the commit's pre-commit block; the docs-only run was `714 passed`, `ruff check .` clean, `67 files already formatted`, `mypy src/reconkit` clean (35 source files).
 - **Not verified:** nothing new; there is no new behaviour to verify.
 
+## Verification follow-up F1-F8 (2026-11-17, docs and help text)  (commit subject `docs: fix the eight findings from the 4-task verification`; hash filled by the next commit)
+
+- **Docs read / goal:** `AGENTS.md`, the PROGRESS RESUME block, the four batch
+  entries above and `MASTER_PLAN.md` DATED DEVIATIONS. Goal: close the eight
+  findings of the accepted 4-task batch's V-UNEXPECTED report (F1-F8) in one
+  commit, with no behaviour, flag, schema or test change. Frozen items from the
+  install/doc backlog, the dropped-host DNS verdicts, the `scope.yaml`
+  authorization text and the three runs A-K doc mismatches were not touched.
+- **Decisions and assumptions:** (a) "the help and docs/02 say the same thing"
+  means word-for-word on the `--active` sentence, so the sentence lives in one
+  module constant `_ACTIVE_HELP` used by both call sites and is quoted verbatim
+  in docs/02 line 52 and its flag table line 168 (markdown backticks aside);
+  docs adjusted to code, never the reverse. (b) Historical lines in PROGRESS are
+  marked `removed 2026-11-17, MASTER_PLAN D3`, never deleted. (c) F7 was checked
+  for further occurrences: `grep -rnE -- '--speed|--delay|pacing|pacer|rate_flag|11c-G-7'
+  docs/tool_manuals/` finds the two named lines **plus a third**, `ports.md:418`
+  in the nmap section (`The rate_flag in tools.yaml is -T ...`). That was outside
+  the two references F7 names, so it was reported before the commit instead of
+  being fixed silently; the owner then approved adding it, so **F7 covers three
+  references** and the stop-cost was one round trip, not a redo. `urls.md:484`
+  (`-k, --delay int`, hakrawler's own flag help) is not a reconkit claim and was
+  left alone.
+- **Files touched:** `src/reconkit/cli.py`, `src/reconkit/core/__init__.py`,
+  `pyproject.toml`, `AGENTS.md`, `docs/02_CLI_UX.md`, `docs/PROGRESS.md`,
+  `docs/REVIEW_LOG.md`, `docs/tool_manuals/urls.md`, `docs/tool_manuals/ports.md`.
+- **Test change: none.** `grep -rn "inside scope" tests/ --include=*.py` -> no
+  match, so no test asserted the old help string. Suite stays 714.
+- **Requirement -> evidence table:**
+
+  | Finding | Evidence |
+  |---|---|
+  | F1 help text | `reconkit run --help` and `reconkit --help` both render the new sentence; a script compared the constant, docs/02 line 52 and the row-168 cell: `row 168 == constant: True`, `old text remains anywhere in docs/02: False` |
+  | F2 owner commands | both examples now run without `--speed`; the naabu comment states the D2 branch (hostnames with no file, verified IPs with a file, `blocked: no in-scope IP for any target`) |
+  | F3 historical markers | five PROGRESS lines each carry `removed 2026-11-17, MASTER_PLAN D3` (task-table row d, `--delay` line, S311 clause, Part 13 open risk, module map) |
+  | F4 docstring | `src/reconkit/core/__init__.py` = `Core services: runner, scope, store, workspace, wildcard.` |
+  | F5 pyproject | the two S311 entries are gone; `ruff check .` still passes |
+  | F6 AGENTS row | `| config.yaml | timeouts, thresholds |` |
+  | F7 manuals | three references: `urls.md` `-rl`/`rate_flag` paragraph, `ports.md` naabu paragraph (D2 rule), and `ports.md:418` nmap `rate_flag: -T` (found by the sweep, approved by the owner, fixed in the same commit); `urls.md:484` is hakrawler's own `--delay` help and is unchanged |
+  | F8 D3 counts | the D3 entry now reads 32 deleted + 4 renamed, 44 node ids removed / 12 added, 745 -> 713, then 713 -> 714 |
+
+- **S1 checks (run twice):**
+
+  ```
+  --- pytest -q (run 1) ---        714 passed in 15.57s   PASS
+  --- pytest -q (run 2) ---        714 passed in 15.77s   PASS
+  --- ruff check . ---             All checks passed!     PASS
+  --- ruff format --check . ---    67 files already formatted   PASS
+  --- mypy src/reconkit ---        Success: no issues found in 35 source files   PASS
+  ```
+
+- **Mock run (changed command):** no scope file -> `ports: pyscan ok 2`, `ports:
+  naabu ok 3`, exit 5 (the tech/urls/vulns stages have no adapter); repo
+  `scope.yaml` present -> same stages, exit 5; out-of-scope target -> `scope
+  gate: example.com is not in scope`, exit 3. Identical to the pre-change
+  behaviour recorded in the verification report.
+- **S2 self-diff:** nine files, all listed above. The first edit attempt left
+  `] = False,    active: Annotated[` in the root callback because one
+  `str_replace` pair lost a newline; `ruff format --check .` caught it ("1 file
+  would be reformatted") and `ruff format src/reconkit/cli.py` restored the
+  layout. The final `git diff -- src/reconkit/cli.py` shows exactly two hunk
+  areas (the constant plus the two `--active` options). No broad `except`, no
+  external input, no secret path, no blocking call and no new exception path was
+  added: the executable change is a string constant.
+- **S3 scans (bash equivalents, after the change):** `assert` in `src/` none;
+  `shell=True` none; `TODO|FIXME|XXX|HACK` none; `print(` only `ui.py`;
+  `subprocess` only `core/runner.py` (+ the base-adapter docstring); `sqlite3`
+  only `core/store.py`; `os.environ` only `ui.py` and `installer/*` (pre-existing,
+  documented); broad `except` at the seven pre-existing sites, none new;
+  `noqa|type: ignore` only the three pre-existing ones in `tests/`; adapters
+  importing `store|scope|ui|cli` none. No new suppression was added (`pyproject`
+  lost two).
+- **S5 mutation:** no code path changed, so there is no mutation target; the
+  equivalent check is the rendered-help equality above (old sentence gone from
+  both `--help` outputs and from docs/02) plus the help-output diff.
+- **Bug found (this part, before commit):** the formatter slip described in S2.
+  Symptom: `ruff format --check .` -> `1 file would be reformatted`; root cause:
+  a replace pair that dropped the newline before `active:` in `main()`; fix:
+  `ruff format src/reconkit/cli.py`, then re-ran all four checks; guarding check:
+  the format check itself, which is part of the gate.
+- **F-notes (hits deliberately not fixed):** (1) the REVIEW_LOG archive block
+  `Kali verification commands (11e, for the owner)` still shows `--speed slow`
+  and the 11c-G-7 naabu expectation; it is verbatim archived history whose own
+  heading says it is superseded by the live PROGRESS block, which F2 corrected -
+  left as written. (2) The Task 3 entry above keeps "36 test functions removed,
+  11 added"; it is the historical entry that F8's measured wording in PROGRESS
+  D3 supersedes - left as written. (3) `src/reconkit.egg-info/PKG-INFO` and
+  `SOURCES.txt` still name `pacing.py`; they are generated build metadata, not
+  source.
+- **Not verified:** Windows `--help` rendering (no Windows run in this session,
+  unchanged from the rest of the log).
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

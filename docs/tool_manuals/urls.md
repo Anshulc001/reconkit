@@ -358,7 +358,9 @@ https://testfire.net/status_check.jsp
 ```
 
 This is a real crawl of the authorized target at rate limit 5/s, depth 1. The
-`-rl` flag is the registry's `rate_flag`, so the pacer can drive it.
+`-rl` flag was the registry's `rate_flag` until 2026-11-17; the `rate_flag`
+field and the pacer were removed with all speed control (docs/MASTER_PLAN.md
+D3), so reconkit no longer passes `-rl` and the limit above was typed by hand.
 
 
 ---

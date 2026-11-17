@@ -233,10 +233,15 @@ testfire.net:443
 The connect scan (`-scan-type c`) ran as a normal user with no root and no
 `libpcap-dev` installed here.
 
-**`reconkit` never runs this tool**: it is skipped with
-`blocked: resolves inside the binary, so in_scope_cidrs cannot be enforced
-(11c-G-7)`, permanently (12i). The manual exists so a future session knows the
-tool works and why it is blocked, not so it can be enabled.
+**`reconkit` runs this tool scope-mode dependently** (owner decision
+2026-11-17, docs/MASTER_PLAN.md D2, superseding the 11c-G-7/12i permanent
+block): with no scope file `naabu` runs like any other active tool on the
+discovered hostnames; with a scope file present the engine resolves each target
+itself and passes only the address(es) verified against `in_scope_cidrs`,
+skipping a target whose resolution fails or resolves out of scope, and records
+`blocked: no in-scope IP for any target` when nothing verifies. The manual
+exists so a future session knows what the tool does and which scan reconkit asks
+of it (connect scan, no root).
 
 
 ---
@@ -410,8 +415,10 @@ Output (exit 0, the two port lines):
 ```
 
 `-sV` is the version detection the `ports` stage would use to raise a port's
-confidence by one level. The `rate_flag` in `tools.yaml` is `-T`, which takes a
-digit: an adapter must append `-T4`, never pass a bare `-T`.
+confidence by one level. The `rate_flag` in `tools.yaml` was `-T` until
+2026-11-17; the field was removed with all speed control (docs/MASTER_PLAN.md
+D3), so no adapter passes `-T` any more (a bare `-T` was never valid; it needed
+`-T4`).
 
 
 ---

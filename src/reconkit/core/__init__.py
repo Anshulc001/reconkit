@@ -1,1 +1,1 @@
-"""Core services: runner, pacing, scope, store, workspace, wildcard."""
+"""Core services: runner, scope, store, workspace, wildcard."""

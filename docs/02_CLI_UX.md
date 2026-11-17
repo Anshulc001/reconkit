@@ -49,7 +49,7 @@
 - **No scope file at that path** - active and full scanning run **unrestricted** against the target(s) given with `-d`/`-l` and every host discovered under them. Nothing is derived from the target, no implicit scope is built, and the run is not refused (docs/05 rule 2). "No scope file" means "scan freely, I know what I typed"; exit code 3 is not produced for a missing file.
 - **A scope file is present** - it is enforced exactly as before (`authorization`, `expires`, `allow_active`, `in_scope`, `out_of_scope`); a violation exits 3 and the file is only ever read, never rewritten or deleted.
 
-The interactive mode's scope question and the `--help` text both say this in the same words (section 2b).
+The `--active` `--help` text says this in one sentence: `Allow active stages. A scope.yaml, when present, is enforced; with no scope file, active scanning is unrestricted.` The interactive mode asks the scope question before the mode question, so the same branch applies there (section 2b).
 
 **Ports run `pyscan` and `naabu`; every other ports tool is phase 3 with no adapter.** `naabu` is scope-mode dependent (owner decision 2026-11-17, superseding the 12i permanent block): with **no scope file** it runs unrestricted like any other active tool, receiving the discovered hostnames; with a **scope file present** the engine resolves each in-scope target itself, verifies every address against `in_scope_cidrs`, and passes `naabu` only those verified IPs - never a bare domain - skipping any target whose resolution fails or resolves out of scope (docs/05 rule 6, docs/09 section 4). Because two port adapters can now run, a port both report can reach `MEDIUM` confidence; a single-scanner result stays `LOW` and the open/closed disagreement rule only fires when both report. When `naabu` is absent or its targets cannot be verified, `pyscan` alone is the fallback and the ceiling is `LOW` again.
 
@@ -165,7 +165,7 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | Flag | Meaning |
 |---|---|
 | `-d, --domain` / `-l, --list` | Target or file of targets. Omitting both on a scan command starts the interactive mode (section 2b); that is the only trigger and it adds no flag |
-| `--active` | Allow active stages. A `scope.yaml`, when present, is enforced; with no scope file, active scanning of the given targets is unrestricted (section 2) |
+| `--active` | Allow active stages. A `scope.yaml`, when present, is enforced; with no scope file, active scanning is unrestricted. Full rule: section 2 |
 | `--tools a,b` / `--exclude x,y` | Pick or skip adapters |
 | `--include-noisy` | Allow `opt_in` tier tools |
 | `--min-sources N` | Hide results confirmed by fewer than N tools |

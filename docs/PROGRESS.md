@@ -7,8 +7,9 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 - Status: **PART 12 AND PART 13 ARE COMPLETE (2026-11-16).** Part 12 closed on 2026-11-15 (12a-12k). Part 13 - the interactive scan mode, stderr progress and per-domain saved reports - is implemented, tested, self-reviewed (S1-S7) and committed, with docs written first. Phase 1 of the same session (the `docs/tool_manuals/` library) is closed in `8dc2829`.
 - What Part 13 changed, in one line: a scan command with **no** `-d`/`-l` **and** a real terminal asks five questions and then runs the ordinary scan inputs; a domain file becomes the ordinary `-l` path (one full scan and one `results/<domain>/<UTC stamp>/` folder per domain, `report.txt` + `report.json`); progress now goes to stderr for every mode except `--silent`, including `--json`. Every flag-based invocation is unchanged, including no prompts and no report folders (tests `test_a_flagged_run_never_asks_a_question`, `test_a_listed_run_never_asks_a_question`, `test_a_flagged_run_writes_no_report_folder`).
 - All four owner tasks (2026-11-17) are implemented, tested and committed: D1 `c99eaee`, D2 `6642ee4`, D3 `6a2db4d`, the interactive-mode fix `10b3a48`, Task 4 docs with this entry. Nothing else is queued; Part 13's uncertainties stay under "Open risks".
+- The verification follow-up (2026-11-17) closes the eight findings from the accepted 4-task batch (`F1`-`F8`, report section V-UNEXPECTED) in one commit: `--active` help text, the owner verification commands, five historical pacing markers, the core package docstring, two dead `pyproject` ignores, the AGENTS `config.yaml` row, two tool manuals and the D3 test counts. Documentation and help text only - no behaviour, flag, schema or test change.
 - **Owner-requested behavior changes (2026-11-17):** D1 (no scope file = unrestricted active scanning) is committed (`c99eaee`), D2 (naabu is scope-mode dependent) is committed (`6642ee4`), D3 (all speed/throttle control removed) is committed with this entry, and Task 4 (the end-to-end interactive-flow section in docs/02) is the next action.
-- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 5): `713 passed`, `ruff check .` clean, `ruff format --check .` 67 files, `mypy src/reconkit` clean (35 source files).
+- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 5): `714 passed`, `ruff check .` clean, `ruff format --check .` 67 files, `mypy src/reconkit` clean (35 source files).
 - Nothing is pushed: local `main` is ahead of `reconkit/main`, which is still `5fd1d9a`. Push only if the owner asks (`git push reconkit main`).
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in `engine.py`; adapters never import `store`/`scope`/`ui`/`cli`; `subjack` replaced by `subzy` + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from `.env`; the ports ceiling is permanent (12i).
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in `src/`; new lint/type suppressions; `shell=True`; the whole environment to a child; adapters importing store/scope/ui/cli; consensus outside `engine.py`; pushing.
@@ -39,7 +40,7 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 | a | `f4d81e2` | done - skeleton, pyproject, `config.yaml`, docs |
 | b | `0e39f18`, `9423eaa` | done - `errors`, `models`, `config`, `core/runner` |
 | c | `45b0ba8` | done - `core/scope` gate |
-| d | `0a3010b` | done - `core/pacing.py` |
+| d | `0a3010b` | done - `core/pacing.py` (removed 2026-11-17, MASTER_PLAN D3; the commit stays in history) |
 | e | `1ba2fd8` | done - `core/store.py`, `redact()`, diff queries |
 | f | `89ba34f`, `80ddd93`, `ee06075` | done - all phase-2 adapters |
 | g | `36cd3a4` (+ Part 7) | done - wildcard, workspace, engine, confidence, resume, exit codes |
@@ -56,8 +57,8 @@ There is no `core/consensus.py`: consensus lives in `engine.py`. Order and modul
 Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session, the `diff` two-miss rule) is in the `REVIEW_LOG` archive.
 
 - `types-PyYAML` is a dev dependency for strict mypy. Enums use `StrEnum` (ruff UP042) instead of the docs' `(str, Enum)`; same values.
-- `--delay` applies to both passive and active `tool_delay` (not `host_delay`).
-- Ruff excludes `docs/`; per-file ignores live in `pyproject.toml` with reasons (`tests/**` S101, `tests/fakebin/**` S603, `tests/test_runner.py` S603, `tests/test_binary_adapters.py` S603, `src/reconkit/core/runner.py` S603) plus scoped S311 for the pacer's jitter RNG and the seeded test RNG.
+- `--delay` applied to both passive and active `tool_delay` (not `host_delay`); the flag and the pacer were removed on 2026-11-17 (MASTER_PLAN D3), so this line is history.
+- Ruff excludes `docs/`; per-file ignores live in `pyproject.toml` with reasons (`tests/**` S101, `tests/fakebin/**` S603, `tests/test_runner.py` S603, `tests/test_binary_adapters.py` S603, `src/reconkit/core/runner.py` S603). The two scoped S311 ignores (the pacer's jitter RNG and the seeded test RNG) were removed with the module on 2026-11-17 (MASTER_PLAN D3).
 - Exit codes: Scope 3, ToolNotInstalled 4, ToolFailed/Timeout/Install 5, Parse 1, Config 2, usage 2, "every requested tool failed to install" 6. A requested stage that executed no tools exits 5 with a warning (12k); if every requested stage is empty the run exits 4.
 - `scope.yaml` defaults: missing `expires` = never expires; missing `max_speed` = `slow`. `check_target` reports `out_of_scope` before expiry, and raises `ValueError` on an invalid target.
 - `.env` is the only key source (`Engine.open`); the CLI has no `os.environ`/`getenv`, so shell-exported key variables are ignored.
@@ -170,9 +171,12 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   5 drops `scan_runs.speed`. A `scope.yaml` `max_speed` is still accepted so a
   real scope file loads, and is ignored (there is no speed left to cap). Docs
   02/03/05/06/07/08/09, README, SETUP and AGENTS rule 3 were updated; MASTER_PLAN
-  D3 records the decision. Tests removed (36 functions -> suite 745 -> 713
-  passed; 17 of them were the whole of `tests/test_pacing.py`, which tested the
-  deleted module, so its file went with it): `test_slow_delays_and_parallel_limits`,
+  D3 records the decision. Tests removed (measured on the collected node ids: 32 test functions deleted
+  and 4 renamed, so 44 parametrized node ids disappeared and 12 appeared - suite
+  745 -> 713 passed; 17 of the deleted ones were the whole of
+  `tests/test_pacing.py`, which tested the deleted module, so its file went with
+  it; the interactive-mode fix below then removed one parametrized case and
+  added two tests, 713 -> 714): `test_slow_delays_and_parallel_limits`,
   `test_normal_values`, `test_fast_never_sleeps`, `test_first_tool_and_reset`,
   `test_shuffle_is_deterministic_and_a_permutation`, `test_fast_preserves_order`,
   `test_next_pause_range`, `test_tool_rate_args_slow_passive_vs_active`,
@@ -219,12 +223,59 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   `nmap -iL` etc. exist, because one report folder per domain requires results
   that are attributable to one domain. Recorded so a later part does not flip it
   by accident.
+- **2026-11-17 (verification follow-up F1), the `--active` help text states the
+  real rule.** The two `--active` options in `cli.py` (the shared scan command
+  and the root callback) said `Allow active stages inside scope.`, which stopped
+  being true with D1. They now share one module constant `_ACTIVE_HELP`:
+  `Allow active stages. A scope.yaml, when present, is enforced; with no scope
+  file, active scanning is unrestricted.` docs/02 section 3 quotes the same
+  words, and section 2's sentence now says only that, instead of claiming the
+  scope question says it too. No test asserted the old string (`grep -rn "inside
+  scope" tests/` -> no match), so no test changed.
+- **2026-11-17 (verification follow-up F2), the owner verification commands
+  match the current CLI.** Both `reconkit run` examples in "Owner verification
+  commands" lost `--speed slow` (the flag exits 2 now), and the naabu
+  expectation is the D2 rule - hostnames with no scope file, verified IPs with a
+  scope file, `blocked: no in-scope IP for any target` when nothing verifies -
+  instead of the superseded 11c-G-7 skip.
+- **2026-11-17 (verification follow-up F3), five pacing-era lines are marked
+  historical, not deleted.** In this file: the task-table row d (`core/pacing.py`),
+  the standing `--delay` line, the S311-ignore clause, the Part 13 open risk that
+  cites `--speed fast`, and the "Where things live" map entry for
+  `core/pacing.py`. Each now carries `removed 2026-11-17, MASTER_PLAN D3` so the
+  audit trail stays readable.
+- **2026-11-17 (verification follow-up F4), the core package docstring no
+  longer lists `pacing`.** `src/reconkit/core/__init__.py` now reads `Core
+  services: runner, scope, store, workspace, wildcard.`
+- **2026-11-17 (verification follow-up F5), the two dead `pyproject.toml`
+  per-file ignores are gone.** `src/reconkit/core/pacing.py` and
+  `tests/test_pacing.py` no longer exist, so their scoped S311 entries were
+  removed; no ignore was added or widened.
+- **2026-11-17 (verification follow-up F6), the AGENTS source-of-truth row.**
+  `config.yaml` is now listed as `timeouts, thresholds`; the `speeds` block it
+  named was deleted with D3.
+- **2026-11-17 (verification follow-up F7), three tool-manual references
+  describe current behaviour.** The two F7 named were `docs/tool_manuals/urls.md`
+  (now: `-rl` was the registry's `rate_flag` until 2026-11-17 and reconkit no
+  longer passes it) and `docs/tool_manuals/ports.md`'s naabu paragraph (now: the
+  D2 scope-mode-dependent rule and its `blocked:` reason, replacing "never runs
+  this tool / 11c-G-7 permanently"). The manual sweep found a third of the same
+  class that F7 did not name, `docs/tool_manuals/ports.md:418` in the nmap notes,
+  which still described `rate_flag: -T` as current; the owner approved adding it
+  to the same commit, so it now says the field was removed on 2026-11-17 and no
+  adapter passes `-T` any more. `docs/tool_manuals/urls.md:484` is hakrawler's
+  own `--delay` flag help, not a reconkit claim, and was left alone.
+- **2026-11-17 (verification follow-up F8), the D3 test-count wording uses the
+  measured figures.** The D3 entry above now says 32 test functions deleted and
+  4 renamed (44 collected node ids removed, 12 added, 745 -> 713), then one
+  parametrized case removed and two tests added by the interactive-mode fix
+  (713 -> 714). The disclosed name list is unchanged.
 
 ## Open risks
 
 - **12e is closed (PIT-47, 2026-11-15)**: a first `live` pass that got a record writes `UNKNOWN`/LOW with the reason, and a pass with no record still writes nothing. A later consumer that read "no row" as "not probed" must read the state instead.
 - **CLOSED 2026-11-16 by Part 13:** `--json` used to write no progress at all while docs/02 said tables and progress stay on stderr. All scan modes now emit stage/tool progress on stderr; only `--silent` suppresses it, and stdout remains one JSON document.
-- **Part 13, open for the owner:** the pty run (`results/testfire.net/...`, an in-scope domain at `--speed fast`) is the only real-network exercise of the interactive flow, and Windows is still untested, so the interactive prompts and the report folders have no Windows evidence.
+- **Part 13, open for the owner:** the pty run (`results/testfire.net/...`, an in-scope domain at `--speed fast`, a flag removed on 2026-11-17 by MASTER_PLAN D3 - the historical run is unchanged) is the only real-network exercise of the interactive flow, and Windows is still untested, so the interactive prompts and the report folders have no Windows evidence.
 - **Pre-existing, not caused by Part 13 and not fixed:** `reconkit run --active --mock` stores every host as `UNKNOWN` (the mock live adapter returns records the engine reads as inconclusive). Verified on the flag path before Part 13 existed; the interactive `active`/`full` modes inherit it. Needs its own ruling.
 - **Part 13, accepted:** the saved report contains only values already stored in the run's DB (no recomputation), so a stored `title` that happened to contain a provider key would appear in `report.txt`/`report.json` exactly as it already appears in the SQLite file. Files are written 0600 inside `results_dir`.
 - Six typed `render_error(str(exc))` sites in `cli.py` (scope check, `diff`, `status`, `doctor`, `install`) still bypass `redact()`; every message is built from our own values today, so no leak is known. Needs its own ruling.
@@ -254,7 +305,7 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
 
 ## Notes for later tasks
 
-- Where things live (the detailed per-function map is in the `REVIEW_LOG` archive): `errors.py` exceptions + exit codes; `models.py` enums and records; `config.py` strict loader; `core/runner.py` the only `subprocess` user (`run_exec`, `validate_target`, `validate_host`); `core/scope.py` the gate; `core/store.py` the only `sqlite3` user (schema/migrations, writes, diff reads, `redact`); `core/pacing.py` the `Pacer`/`RateLimiter`; `core/workspace.py` raw files; `core/wildcard.py`; `adapters/` one module per tool plus `base.py`/`registry.py`; `engine.py` the pipeline, state rule and consensus; `ui.py` rendering; `cli.py` Typer wiring; `doctor.py`; `installer/`.
+- Where things live (the detailed per-function map is in the `REVIEW_LOG` archive): `errors.py` exceptions + exit codes; `models.py` enums and records; `config.py` strict loader; `core/runner.py` the only `subprocess` user (`run_exec`, `validate_target`, `validate_host`); `core/scope.py` the gate; `core/store.py` the only `sqlite3` user (schema/migrations, writes, diff reads, `redact`); `core/pacing.py` the `Pacer`/`RateLimiter` (removed 2026-11-17, MASTER_PLAN D3 - no such module now); `core/workspace.py` raw files; `core/wildcard.py`; `adapters/` one module per tool plus `base.py`/`registry.py`; `engine.py` the pipeline, state rule and consensus; `ui.py` rendering; `cli.py` Typer wiring; `doctor.py`; `installer/`.
 - `tool_runs` row-frequency: one per executed or skipped tool. `host_status_history`: one row per host per status pass (Part 9 change; docs/04 section 5).
 - Fixtures are synthetic unless noted, written to the documented shapes, in `tests/fixtures/<tool>/`: `dnspython`, `pyprobe`, `pyscan` (JSON), `subfinder`, `assetfinder` (text), `httpx`, `naabu` (JSONL), plus real trimmed `crtsh`/`certspotter`/`hackertarget` responses and the synthetic `otx` one. No adapter test touches the network or a real binary.
 - Key sources and sign-up URLs live in docs/05 section 6.1, docs/09 and the archived PROGRESS section (subfinder provider config: `docs.projectdiscovery.io/opensource/subfinder/install`, fetched 2026-11-13). Never guess a key name, flag or field; verify it and cite the URL and date (PIT-25).
@@ -272,13 +323,16 @@ reconkit doctor --json | python -m json.tool   # every tool ready; Keys rows ref
 
 # Real active run. Fill in_scope_cidrs in scope.yaml first, or pyscan will
 # (correctly) block every host:
-reconkit run -d <authorized-host> --active --speed slow --tools pyprobe,pyscan --db /tmp/verify.db -v
+reconkit run -d <authorized-host> --active --tools pyprobe,pyscan --db /tmp/verify.db -v
 #   expect: pyprobe rows from real HTTP/TLS; pyscan rows only for addresses inside
 #   in_scope_cidrs; with no CIDRs, a pyscan row reading blocked=<n> and no ports.
-#   naabu must appear as skipped: "blocked: resolves inside the binary, so
-#   in_scope_cidrs cannot be enforced (11c-G-7)".
+#   naabu (2026-11-17, MASTER_PLAN D2): with no scope file it runs like any other
+#   active tool on the discovered hostnames; with a scope file present it runs
+#   only on the IPs reconkit resolved and verified against in_scope_cidrs, so a
+#   target that resolves outside them is skipped and, when nothing verifies, its
+#   row reads "blocked: no in-scope IP for any target".
 
 # killpg / Ctrl+C path (PIT-32, still UNTESTED on a real signal):
-reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/verify.db -v &
+reconkit run -d <authorized-host> --active --tools httpx --db /tmp/verify.db -v &
 # then Ctrl+C, and check `ps -ef | grep httpx` for an orphan process group
 ```

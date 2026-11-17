@@ -70,6 +70,12 @@ _SCAN_COMMANDS = (
 )
 _ACTIVE_ONLY = frozenset({"live", "ports", "tech", "urls", "vulns"})
 _PASSIVE_STAGES = (Stage.SUBS, Stage.DNS)
+# The --active rule in one sentence (docs/05 rule 2, docs/02 section 3). Kept here
+# so the two scan-command call sites and docs/02 quote the same words.
+_ACTIVE_HELP = (
+    "Allow active stages. A scope.yaml, when present, is enforced; "
+    "with no scope file, active scanning is unrestricted."
+)
 
 
 def _targets(domain: str | None, list_file: Path | None) -> list[str]:
@@ -456,7 +462,8 @@ def _scan_command(
         bool, typer.Option("--mock", help="Use fixtures; no network or external processes.")
     ] = False,
     active: Annotated[
-        bool, typer.Option("--active", help="Allow active stages inside scope.")
+        bool,
+        typer.Option("--active", help=_ACTIVE_HELP),
     ] = False,
     no_keys: Annotated[bool, typer.Option("--no-keys", help="Force free mode.")] = False,
     resume: Annotated[
@@ -534,7 +541,8 @@ def main(
         bool, typer.Option("--mock", help="Use fixtures; no network or external processes.")
     ] = False,
     active: Annotated[
-        bool, typer.Option("--active", help="Allow active stages inside scope.")
+        bool,
+        typer.Option("--active", help=_ACTIVE_HELP),
     ] = False,
     no_keys: Annotated[bool, typer.Option("--no-keys", help="Force free mode.")] = False,
     resume: Annotated[

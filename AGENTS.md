@@ -65,7 +65,7 @@ Before any significant change, read the relevant documents:
 | `docs/MASTER_PLAN.md` | the part order, autonomy rules and self-review loop |
 | `docs/REVIEW_LOG.md` | evidence for every part: decisions, tests, mutations, check output |
 | `tools.yaml` | the registry of every tool (the only list of allowed tools) |
-| `config.yaml` | speeds, timeouts, thresholds |
+| `config.yaml` | timeouts, thresholds |
 
 Do not contradict these documents. If code and docs disagree, stop and report the conflict.
 
