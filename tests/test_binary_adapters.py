@@ -19,8 +19,10 @@ from reconkit.adapters import base as base_module
 from reconkit.adapters import subfinder as subfinder_module
 from reconkit.adapters.assetfinder import AssetfinderAdapter
 from reconkit.adapters.base import BinaryAdapter
+from reconkit.adapters.cdncheck import CdncheckAdapter
 from reconkit.adapters.dnsx import DnsxAdapter
 from reconkit.adapters.gau import GauAdapter
+from reconkit.adapters.httprobe import HttprobeAdapter
 from reconkit.adapters.httpx_tool import HttpxAdapter
 from reconkit.adapters.katana import KatanaAdapter
 from reconkit.adapters.naabu import NaabuAdapter
@@ -32,6 +34,8 @@ from reconkit.adapters.subfinder import (
     cleanup_stale_provider_dirs,
 )
 from reconkit.adapters.tlsx import TlsxAdapter
+from reconkit.adapters.waybackurls import WaybackurlsAdapter
+from reconkit.adapters.webanalyze import WebanalyzeAdapter
 from reconkit.core.runner import ExecResult
 from reconkit.errors import ToolFailed
 from reconkit.models import (
@@ -128,6 +132,10 @@ def test_binary_adapters_are_registered() -> None:
     assert ADAPTERS["tlsx"] is TlsxAdapter
     assert ADAPTERS["katana"] is KatanaAdapter
     assert ADAPTERS["gau"] is GauAdapter
+    assert ADAPTERS["httprobe"] is HttprobeAdapter
+    assert ADAPTERS["webanalyze"] is WebanalyzeAdapter
+    assert ADAPTERS["cdncheck"] is CdncheckAdapter
+    assert ADAPTERS["waybackurls"] is WaybackurlsAdapter
 
 
 # Binary tools whose invocation never touches $HOME, so neither the identity
@@ -138,6 +146,14 @@ NO_HOME_NEEDED: dict[str, str] = {
     "assetfinder": (
         "build_command passes only --subs-only <domain>; no config path, and "
         "tools.yaml lists no keys for it"
+    ),
+    "httprobe": (
+        "real `httprobe -h` lists only -c/-p/-s/-t/-v: no config file, no key, "
+        "and hosts arrive on stdin"
+    ),
+    "waybackurls": (
+        "real `waybackurls -h` lists only -dates/-get-versions/-no-subs: no "
+        "config file, no key, and domains arrive on stdin"
     ),
 }
 
@@ -1101,3 +1117,178 @@ def test_gau_identity_accepts_the_real_version_banner(monkeypatch: pytest.Monkey
     status = GauAdapter(finder=lambda _name: "/usr/bin/gau").check_installed()
     assert status.installed is True
     assert status.version == "2.2.4"
+
+
+# ------------------------------------------------------- adapter wave 2 (2026-11-17)
+
+
+def test_httprobe_adapter_parses_plain_urls() -> None:
+    """`httprobe` prints one `scheme://host` per answered probe, no JSON."""
+    records = HttprobeAdapter().parse_output(fixture("adapters", "httprobe.synthetic.txt"))
+    assert [(record.fqdn, record.state) for record in records] == [
+        ("testfire.net", HostState.ALIVE),
+        ("www.testfire.net", HostState.ALIVE),
+    ]
+    # Two probes (http and https) on one host are one host fact, not two rows.
+    assert HttprobeAdapter().parse_output("http://a.testfire.net\nhttps://a.testfire.net\n") == [
+        HostStatusRecord(fqdn="a.testfire.net", source="httprobe", state=HostState.ALIVE)
+    ]
+
+
+def test_httprobe_feeds_hosts_on_stdin_and_never_uses_a_shell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """httprobe has no input flag: the host list travels on stdin (D11)."""
+    calls = fake_exec(monkeypatch, outcome(stdout="http://testfire.net\n"))
+    adapter = HttprobeAdapter(finder=lambda _name: "/usr/bin/httprobe")
+    ctx = make_ctx(hosts=["testfire.net", "www.testfire.net"])
+    command = adapter.build_command(ctx)
+    assert command[:1] == ["/usr/bin/httprobe"]
+    assert "-t" in command
+    assert adapter.stdin_text(ctx) == "testfire.net\nwww.testfire.net\n"
+    assert "www.testfire.net" not in command
+    assert calls == []
+
+
+def test_httprobe_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A namesake that prints some other usage is not httprobe (PIT-14 pattern)."""
+    fake_exec(monkeypatch, outcome("Usage of /usr/bin/httprobe: some other tool\n"))
+    status = HttprobeAdapter(finder=lambda _name: "/usr/bin/httprobe").check_installed()
+    assert status.installed is False
+
+
+def test_httprobe_identity_accepts_the_real_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(
+        monkeypatch,
+        outcome(
+            "Usage of /usr/bin/httprobe:\n  -c int\n\t\tset the concurrency level (default 20)\n"
+            "  -s\tskip the default probes (http:80 and https:443)\n"
+        ),
+    )
+    status = HttprobeAdapter(finder=lambda _name: "/usr/bin/httprobe").check_installed()
+    assert status.installed is True
+
+
+def test_webanalyze_adapter_parses_technologies() -> None:
+    """One JSON document per host, `matches[].app_name` is the technology."""
+    records = WebanalyzeAdapter().parse_output(fixture("adapters", "webanalyze.synthetic.json"))
+    assert [(record.fqdn, record.tech) for record in records] == [
+        ("testfire.net", ["Apache Tomcat", "Java"]),
+        ("www.testfire.net", ["Java"]),
+    ]
+    assert all(record.state is HostState.ALIVE for record in records)
+
+
+def test_webanalyze_takes_its_hosts_from_a_file_it_removes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`-hosts` is a file path, so the adapter writes and deletes one (D11)."""
+    calls = fake_exec(monkeypatch, outcome(stdout=""))
+    adapter = WebanalyzeAdapter(finder=lambda _name: "/usr/bin/webanalyze")
+    ctx = make_ctx(hosts=["testfire.net"]).model_copy(update={"workspace": tmp_path})
+    with adapter.prepare(ctx):
+        command = adapter.build_command(ctx)
+        hosts_file = Path(command[command.index("-hosts") + 1])
+        assert hosts_file.read_text(encoding="utf-8") == "testfire.net\n"
+        assert command[command.index("-output") + 1] == "json"
+        assert "-apps" in command
+    assert not hosts_file.exists()
+    assert calls == []
+
+
+def test_webanalyze_with_no_technology_match_stores_nothing() -> None:
+    """A fetched host with no match carries no technology fact."""
+    raw = '{"hostname": "https://testfire.net", "matches": []}\n'
+    assert WebanalyzeAdapter().parse_output(raw) == []
+
+
+def test_webanalyze_requires_update_documented() -> None:
+    """The one-time `-update` is documented where the operator will look."""
+    tools_yaml = (Path(__file__).resolve().parents[1] / "tools.yaml").read_text(encoding="utf-8")
+    webanalyze_line = next(
+        line for line in tools_yaml.splitlines() if line.strip().startswith("webanalyze:")
+    )
+    assert "webanalyze -update" in webanalyze_line
+    assert "technologies.json" in webanalyze_line
+    manual = (Path(__file__).resolve().parents[1] / "docs" / "10_TOOL_SOURCES.md").read_text(
+        encoding="utf-8"
+    )
+    assert "webanalyze -update" in manual
+
+
+async def test_webanalyze_missing_database_is_a_failed_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_exec(
+        monkeypatch,
+        outcome(
+            stderr="error: can not open apps file : could not find the technologies file: "
+            "technologies.json\n",
+            returncode=1,
+        ),
+    )
+    result = await WebanalyzeAdapter(finder=lambda _name: "/usr/bin/webanalyze").run(
+        make_ctx(hosts=["testfire.net"])
+    )
+    assert result.status is ToolStatus.FAILED
+    assert "can not open apps file" in (result.error or "")
+
+
+def test_webanalyze_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome("Usage of /usr/bin/webanalyze:\n  -x\tother tool\n"))
+    status = WebanalyzeAdapter(finder=lambda _name: "/usr/bin/webanalyze").check_installed()
+    assert status.installed is False
+
+
+def test_cdncheck_adapter_parses_waf_fields() -> None:
+    """WAF goes to `waf`, CDN/cloud become technologies, no liveness claim."""
+    records = CdncheckAdapter().parse_output(fixture("adapters", "cdncheck.synthetic.jsonl"))
+    assert [(record.fqdn, record.waf, record.tech) for record in records] == [
+        ("testfire.net", "cloudflare", ["google"]),
+        ("www.testfire.net", None, ["aws"]),
+    ]
+    assert all(record.state is HostState.UNKNOWN for record in records)
+
+
+def test_cdncheck_repeats_the_input_flag_for_each_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = fake_exec(monkeypatch, outcome(stdout=""))
+    adapter = CdncheckAdapter(finder=lambda _name: "/usr/bin/cdncheck")
+    command = adapter.build_command(make_ctx(hosts=["testfire.net", "www.testfire.net"]))
+    assert command[1:3] == ["-silent", "-jsonl"]
+    assert command[3:] == ["-i", "testfire.net", "-i", "www.testfire.net"]
+    assert calls == []
+
+
+def test_cdncheck_silence_is_no_match_not_failure() -> None:
+    assert CdncheckAdapter().parse_output("") == []
+
+
+def test_cdncheck_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome("cdncheck 1.4.0 by someone else\n"))
+    status = CdncheckAdapter(finder=lambda _name: "/usr/bin/cdncheck").check_installed()
+    assert status.installed is False
+
+
+def test_waybackurls_adapter_parses_plain_urls() -> None:
+    records = WaybackurlsAdapter().parse_output(fixture("adapters", "waybackurls.synthetic.txt"))
+    assert len(records) == 5
+    assert records[1].url == "https://testfire.net/login.jsp"
+    assert all(record.source == "waybackurls" for record in records)
+
+
+def test_waybackurls_feeds_domains_on_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """waybackurls takes no positional domain and has no list flag (D11)."""
+    calls = fake_exec(monkeypatch, outcome(stdout="https://testfire.net/\n"))
+    adapter = WaybackurlsAdapter(finder=lambda _name: "/usr/bin/waybackurls")
+    ctx = make_ctx(hosts=["testfire.net"])
+    assert adapter.build_command(ctx) == ["/usr/bin/waybackurls"]
+    assert adapter.stdin_text(ctx) == "testfire.net\n"
+    assert calls == []
+
+
+def test_waybackurls_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome("Usage of /usr/bin/waybackurls:\n  -other\n"))
+    status = WaybackurlsAdapter(finder=lambda _name: "/usr/bin/waybackurls").check_installed()
+    assert status.installed is False

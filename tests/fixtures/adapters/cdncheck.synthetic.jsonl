@@ -1,0 +1,2 @@
+{"timestamp":"2026-11-17T11:46:26.880665446-05:00","input":"testfire.net","ip":"192.0.2.10","cdn":true,"cdn_name":"google","waf":true,"waf_name":"cloudflare"}
+{"timestamp":"2026-11-17T11:50:44.951110752-05:00","input":"www.testfire.net","ip":"192.0.2.11","cloud":true,"cloud_name":"aws"}

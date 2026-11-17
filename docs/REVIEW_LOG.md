@@ -63,6 +63,8 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 
 | PIT-47 | A first `live` pass that contacted a host but could not decide wrote no `host_status_history` row, so "probed and inconclusive" was indistinguishable from "never touched the host", and the reason 12d stores was dropped in exactly the first-run case (11d-findings-g) | `decide_host_state` tied `persist` to `previous is not None`, so the write only started at the second pass; the pass's own evidence (a returned record) was never consulted, although docs/04 section 5 promises one row per host per status pass with a `dns`-stage exemption only | `persist` in the two inconclusive branches is `previous is not None or attempted`, where `attempted = bool(evidence.web)` - a live tool returned a record for that host, ambiguous or not, per the owner ruling and docs/04 section 5. A pass with no record (failed or timed-out tool, or no tool) still writes nothing, and the `dns` stage's SERVFAIL/timeout/no-answer skip is untouched because its evidence never carries web records | `test_regression_an_attempted_probe_persists_with_no_previous_state` (`Regression: PIT-47`), `test_a_first_inconclusive_live_pass_writes_an_unknown_row`, `test_only_the_host_a_tool_reported_gets_the_unknown_row`, `test_a_host_without_a_record_gets_no_row_even_when_another_did`, `test_a_failed_live_tool_attempted_nothing_and_writes_no_row` |
 | PIT-49 | A host a live-stage adapter discovered while probing (a `tlsx` certificate SAN) entered the in-memory `discovered` set - later stages probed it - but had **no row in `subdomains`**: it vanished from `status`, `diff` and the report, and `--new-only` could never show it | `_persist_live` iterated only its input `hosts` list and only collected `HostStatusRecord`s; `_update_discovered` had already unioned the `SubdomainRecord`s into memory, so the loss was invisible inside the run | A status pass persists the discoveries it made as well as the hosts it was given: `_persist_live_discoveries` writes one `subdomains` row (`provenance='subs'`, its tool in `subdomain_sources`, `source_count` per run, `min_sources` respected) for every live `SubdomainRecord` not already in `hosts` or `subdomains`; existing rows keep their own count (PIT-03), and the host-state path is unchanged | `test_regression_live_discovered_subdomain_reaches_the_subdomains_table` (`Regression: PIT-49`), `test_tlsx_sans_enter_discovered_and_reach_subdomains_table` |
+| PIT-50 | Two tools could not be driven at all: `httprobe` and `waybackurls` read their host list on **stdin**, and `run_exec` opened stdin as `DEVNULL` with no way to feed it - the only alternatives were a shell pipe or a temporary file, and AGENTS rule 1 forbids the first | `run_exec` was written for flag-driven ProjectDiscovery tools, so "input" meant argv | `run_exec(..., stdin_text=...)` feeds the child from its own daemon thread (a lazily-reading child cannot block the timeout clock, an early exit is only a broken pipe) and `None` keeps the documented EOF. The adapter hook is `stdin_text(ctx)`; nothing else changed | `test_stdin_text_reaches_the_child_and_none_keeps_stdin_closed` (`Regression: PIT-50`), `test_stdin_text_survives_a_child_that_never_reads_it`, `test_httprobe_feeds_hosts_on_stdin_and_never_uses_a_shell`, `test_waybackurls_feeds_domains_on_stdin` |
+| PIT-51 | The `tech` stage had no persistence branch at all: `_persist_stage` covered subs/dns/live/ports/urls, so every `HostStatusRecord` a tech adapter returned was dropped - webanalyze and cdncheck would have run, printed `ok N item(s)` and stored nothing | the tech stage never had an adapter, so the missing branch was invisible; `host_status_history.tech_json`/`waf` existed but only a live pass could fill them | `_persist_tech` merges `tech`/`waf` into the host's newest status row through the new `Store.update_host_extras`: no state row is appended and `state` is never touched, so `diff`/`previous_state()` are unchanged; an off-target record is dropped and a host with no status row is not annotated (D11) | `test_tech_stage_annotates_the_latest_host_row` (`Regression: PIT-51`), `test_tech_stage_drops_a_host_outside_the_target` |
 | PIT-48 | `doctor` showed junk for two installed tools (`katana` -> `__`, `nuclei` -> `[I…` plus ANSI escapes), and `update` could not call `katana` up to date, so an already-current binary would be downloaded again on every run (12j) | `installed_version()` returned `text.splitlines()[0]` for every tool, but `katana -version` prints four lines of ASCII art (the real version is on line 8, on stderr) and `nuclei -version` prints a coloured `[INF]` line first, so `_same_version()` compared a release tag against a logo | A tool may carry a top-level `version_regex` in `tools.yaml`; `installed_version()` searches the whole `version_cmd` output, returns the first capture group (or the whole match when the pattern has no group), and falls back to `splitlines()[0]` when the field is absent or nothing matches. A pattern that does not compile is a `ConfigError` at registry load, before any command runs | `test_katana_version_ignores_the_ascii_banner` (`Regression: PIT-48`), `test_nuclei_version_drops_the_ansi_log_prefix` (`Regression: PIT-48`), `test_a_regex_with_no_match_falls_back_to_the_first_line`, `test_a_version_regex_without_a_group_returns_the_match`, `test_version_regex_is_parsed_from_the_registry`, `test_a_broken_version_regex_is_a_config_error`, `test_version_regex_survives_the_plan_copy` |
 
 ## Commit map
@@ -3602,6 +3604,77 @@ install residue. No new feature, no behaviour change, no code-logic change.
   before the commit:
   `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` (unchanged
   from the previous batch; no scope edit was made).
+
+## Adapter wave 2: httprobe, webanalyze, cdncheck, waybackurls + tech persistence (2026-11-17, D11)
+
+- Docs read / goal: `AGENTS.md` (0d item 11 adapter pre-approval), RESUME,
+  PIT-01/14/30/35, docs/09 adapter contract and stage table, docs/04 section 5,
+  docs/10 version contract, `tools.yaml`. Build the four adapters the owner named
+  on top of the Part 1 mode table.
+- Baseline for this part: `691 passed`, ruff/format/mypy clean (the Part 1
+  commit `756af8e`).
+- Real flags, read off the binaries on this box (`~/.reconkit/bin`, not on PATH):
+  `httprobe -h` (`-c`, `-p value`, `-s`, `-t int` ms, `-v`; no `-version`, no
+  `-prefer-https`); `webanalyze -h` (`-apps`, `-crawl`, `-header`, `-host`,
+  `-hosts string` file, `-output stdout|csv|json`, `-redirect`, `-search`,
+  `-silent`, `-update`, `-worker`; `-version` exits 2); `cdncheck -h`/`-version`
+  (`-i, -input string[]`, `-silent`, `-j, -jsonl`; banner `Current version:
+  v1.4.0`); `waybackurls -h` (`-dates`, `-get-versions`, `-no-subs`; `-version`
+  exits 2).
+- One-time provisioning (standing pre-approval 1): `webanalyze -update` in
+  `~/.reconkit` -> `app definition file updated`, `technologies.json`
+  2,122,079 bytes; the adapter points `-apps` there and falls back to
+  `./technologies.json`.
+- Adapters (`src/reconkit/adapters/`, registered in `ADAPTERS`): `httprobe.py`
+  (`-t <ms>`, hosts on stdin, ALIVE per answering host), `webanalyze.py`
+  (`-hosts <workspace file> -output json -apps <db> -silent`, tech from
+  `matches[].app_name`), `cdncheck.py` (`-silent -jsonl -i` per host; `waf_name`
+  -> `waf`, `cdn`/`cloud` -> tech, state UNKNOWN), `waybackurls.py` (no flags,
+  domains on stdin, `UrlRecord` per line).
+- **D11, the deviation this wave forced:** the `tech` stage had no persistence
+  branch (PIT-51), so a technology match would have been discarded. Added
+  `Store.update_host_extras` + `Engine._persist_tech`: the union of the tech
+  tools' `tech`/`waf` is merged into the host's newest `host_status_history` row,
+  no state row is appended, `state` is untouched, off-target records are dropped.
+  Also added `run_exec(stdin_text=...)` + the `stdin_text(ctx)` adapter hook
+  (PIT-50) - without it httprobe/waybackurls cannot be driven without a shell.
+  Both are documented in docs/03 section 5, docs/04 section 5, docs/09 sections
+  3/4a2 before the code change.
+- Evidence (raw in the report): real `run -d testfire.net --active --no-scope
+  --tools httprobe` -> `live: httprobe ok 1 item(s)`; real
+  `--tools pyprobe,webanalyze` -> `tech: webanalyze ok 1 item(s)` and the DB row
+  `testfire.net|ALIVE|["Apache Tomcat", "Java"]|` with exactly one status row;
+  real `--tools pyprobe,cdncheck` -> `tech: cdncheck ok 0 item(s)` (testfire.net
+  is not behind a CDN/WAF, which is the documented no-match shape); real passive
+  `--tools waybackurls` -> `urls: waybackurls ok 0 item(s)` because the archive
+  CDX endpoint timed out from this box (`curl` -> `Operation timed out after
+  25082 ms with 0 bytes received`); `--mock` passive -> `urls: waybackurls ok 5
+  item(s)` and 5 rows in `urls`; `--mock` active with
+  `pyprobe,httprobe,webanalyze,cdncheck` -> live 2/2, tech 2/2, and
+  `testfire.net|ALIVE|["Apache Tomcat", "Java", "google"]|cloudflare`.
+  `reconkit doctor` shows all four `yes` / `ok`.
+- Two owner proof commands cannot work as written and are reported, not coded
+  around: `--tools webanalyze` (or `cdncheck`) alone runs the tech stage with no
+  `live` pass, so the alive-host list is empty and the adapter fails with
+  `no hosts to scan` - the proofs include `pyprobe` to give the stage its input;
+  and `--tools webanalyze` cannot exercise the `-hosts` file without a host.
+- Tests: 21 new (17 adapter, 2 engine, 2 runner), `691 -> 712`; 2 changed:
+  `test_a_stage_with_no_adapter_reports_its_skips` (old: all 5 tech tools
+  skipped; new: `--tools whatweb`; reason: tech has adapters now) and
+  `test_a_full_run_reports_the_gaps_of_stages_with_no_adapter` (old: gaps
+  `tech,vulns`, "2 stage(s)"; new: `vulns`, "1 stage(s)"; reason: tech is
+  adapted). `test_binary_adapters_are_registered` gained 4 assertions and
+  `NO_HOME_NEEDED` gained `httprobe`/`waybackurls` with reasons.
+- Deviations: (1) D11 (tech persistence + stdin), above; (2) real
+  `waybackurls` could not fetch anything in this environment, so its parsing
+  proof is `--mock` and the network failure is recorded here and in its manual;
+  (3) `httprobe` has no `-prefer-https` flag, so the adapter sends none of the
+  owner's suggested flags and keeps the tool's default probes; (4) `webanalyze`
+  `-update` was run once under standing pre-approval 1 into `~/.reconkit`.
+- Next action: none for this wave. Still unadapted: subs `urlscan, amass,
+  findomain, chaos, github_subdomains`; dns `puredns, massdns, dig`; ports
+  `smap, nmap, rustscan, masscan`; tech `httpx_tech, whatweb, wafw00f`; urls
+  `hakrawler, gospider, subjs, unfurl, urlfinder`; vulns all five.
 
 ## Mode table expansion: passive includes passive urls, active includes urls and tech (2026-11-17, D10)
 

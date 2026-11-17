@@ -260,3 +260,32 @@ def test_validate_host_accepts(raw: str, expected: str) -> None:
 def test_validate_host_rejects(raw: str) -> None:
     with pytest.raises(ValueError):
         validate_host(raw)
+
+
+def test_stdin_text_reaches_the_child_and_none_keeps_stdin_closed() -> None:
+    """D11/PIT-50: a tool that reads its input list on stdin gets it without a shell."""
+    fed = run_exec(
+        [sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read().upper())"],
+        timeout=10.0,
+        stdin_text="testfire.net\nwww.testfire.net\n",
+    )
+    assert fed.returncode == 0
+    assert fed.stdout == "TESTFIRE.NET\nWWW.TESTFIRE.NET\n"
+
+    # The default is still EOF: `cat` exits immediately instead of hanging.
+    empty = run_exec(
+        [sys.executable, "-c", "import sys; print(len(sys.stdin.read()))"], timeout=10.0
+    )
+    assert empty.returncode == 0
+    assert empty.stdout.strip() == "0"
+
+
+def test_stdin_text_survives_a_child_that_never_reads_it() -> None:
+    """A child that exits without reading gets a broken pipe, not a hang."""
+    result = run_exec(
+        [sys.executable, "-c", "print('done')"],
+        timeout=10.0,
+        stdin_text="x" * 200_000,
+    )
+    assert result.returncode == 0
+    assert "done" in result.stdout

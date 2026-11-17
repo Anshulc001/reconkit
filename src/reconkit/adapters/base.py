@@ -147,6 +147,14 @@ class BaseToolAdapter(ABC):
         """Environment for the child: only the keys the engine allowed."""
         return dict(ctx.env)
 
+    def stdin_text(self, ctx: RunContext) -> str | None:
+        """Input for a tool that reads its host list on stdin (docs/09 section 3).
+
+        `None` keeps stdin at EOF, which is what every tool that takes flags
+        needs; `httprobe` and `waybackurls` are the only readers so far.
+        """
+        return None
+
     def prepare(self, ctx: RunContext) -> AbstractContextManager[None]:
         """Optional per-run setup (for example a temporary config file)."""
         return nullcontext()
@@ -168,6 +176,7 @@ class BaseToolAdapter(ABC):
                         self.build_command(ctx),
                         timeout=ctx.timeout,
                         env=self.child_env(ctx),
+                        stdin_text=self.stdin_text(ctx),
                     )
                     duration = outcome.duration_s
                     raw_text = capture_output(outcome.stdout, outcome.stderr)

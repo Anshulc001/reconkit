@@ -1,0 +1,2 @@
+{"hostname": "http://testfire.net", "matches": [{"app_name": "Java", "version": "", "matches": [["956A5E579806C0EEDBC8017F40AA4789"]]}, {"app_name": "Apache Tomcat", "version": "", "matches": [["Apache-Coyote"]]}]}
+{"hostname": "https://www.testfire.net", "matches": [{"app_name": "Java", "version": ""}]}

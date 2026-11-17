@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import signal
@@ -89,12 +90,17 @@ def run_exec(
     env: Mapping[str, str] | None = None,
     max_output_bytes: int = MAX_OUTPUT_BYTES,
     cwd: Path | str | None = None,
+    stdin_text: str | None = None,
 ) -> ExecResult:
     """Run one program without a shell and return its captured output.
 
     The child receives only the environment keys passed in `env`; callers must
     add `HOME` for tools that read their config from it. On timeout the whole
     process group is killed; whatever was already read is kept.
+
+    `stdin_text` feeds a tool that takes its input list on stdin (httprobe,
+    waybackurls); `None` (the default) keeps stdin closed, so a program that
+    reads it sees EOF instead of hanging forever.
     """
     _validate_argv(argv)
     if timeout <= 0:
@@ -108,7 +114,7 @@ def run_exec(
     try:
         process = subprocess.Popen(
             argv,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=child_env,
@@ -134,6 +140,20 @@ def run_exec(
     if stdout_pipe is None or stderr_pipe is None:
         process.kill()
         raise RuntimeError("subprocess pipes were not created")
+    if stdin_text is not None and process.stdin is not None:
+        # Fed from its own thread so a child that reads lazily can never block
+        # the timeout clock; a child that exits early gets a broken pipe, which
+        # is not an error (PIT-50).
+        def feed(stream: IO[bytes]) -> None:
+            try:
+                stream.write(stdin_text.encode("utf-8"))
+            except (BrokenPipeError, OSError):
+                return
+            finally:
+                with contextlib.suppress(BrokenPipeError, OSError):
+                    stream.close()
+
+        threading.Thread(target=feed, args=(process.stdin,), daemon=True).start()
     out_chunks: list[bytes] = []
     err_chunks: list[bytes] = []
     truncated = False

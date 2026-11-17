@@ -15,7 +15,7 @@ Tools from the `vulns` stage are deliberately absent - see
 |---|---|---|---|---|---|
 | `pyprobe` | python | core | active | 2 | yes |
 | `httpx` | binary | core | active | 2 | yes |
-| `httprobe` | binary | core | active | 3 | no |
+| `httprobe` | binary | core | active | 3 | yes (wave 2, 2026-11-17) |
 | `tlsx` | binary | core | active | 3 | yes (wave 1, 2026-11-17) |
 
 
@@ -321,7 +321,7 @@ Format: `url [status] [location] [title] [tech]`. The `[]` is the empty
 ## `httprobe`
 
 - **Registry:** binary, core, active, phase 3, `stage: live`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/httprobe.py` (wave 2, 2026-11-17); runs as `-t <milliseconds>` with the host list on **stdin** (`runner.run_exec(..., stdin_text=...)`), parses one `scheme://host` per line into `HostStatusRecord(ALIVE)`, and has no `-prefer-https` flag - the default probes (http:80 and https:443) stay untouched. Identity is `-h` + two markers, because `-version` exits 2
 - **Official source used:** https://github.com/tomnomnom/httprobe
 - **Installed on this box:** `/home/kali/.reconkit/bin/httprobe` (no version flag; `-h` prints usage)
 - **Where it comes from:** github.com/tomnomnom/httprobe - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it

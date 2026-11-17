@@ -708,6 +708,18 @@ D10. 2026-11-17 - Mode table expansion: passive includes passive urls, active
     selection with `tool mode not included in passive mode`. The interactive
     legend is generated from the table, and docs/02 section 1 is the source.
 
+D11. 2026-11-17 - Tech-stage persistence and stdin input (forced by adapter wave 2).
+    The `tech` stage had no persistence branch, so webanalyze/cdncheck records
+    would have been dropped; and `run_exec` had no stdin channel, so httprobe and
+    waybackurls (which read hosts on stdin) could not be driven without a shell,
+    which AGENTS rule 1 forbids. Ruling: `_persist_tech` merges `tech`/`waf` into
+    the host's newest `host_status_history` row (`Store.update_host_extras`) and
+    never appends a state row or touches `state`; `run_exec(..., stdin_text=...)`
+    feeds the child from a thread and `None` keeps the documented EOF. Both are
+    documented in docs/03, docs/04 and docs/09; the alternative (a new tech
+    table or a second persistence path) was rejected as a schema change the
+    columns do not need.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

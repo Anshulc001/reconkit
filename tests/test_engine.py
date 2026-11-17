@@ -2947,3 +2947,83 @@ async def test_scan_writes_no_file_scope_mode_when_no_scope_file(tmp_path: Path)
         "SELECT scope_mode FROM scan_runs ORDER BY id DESC LIMIT 1"
     ).fetchone()
     assert row["scope_mode"] == "no_file"
+
+
+# ------------------------------------------- tech-stage persistence (2026-11-17, D11)
+
+
+async def test_tech_stage_annotates_the_latest_host_row(tmp_path: Path) -> None:
+    """A tech match lands on the row the live pass wrote; no new state row (D11)."""
+    rec = Recorder()
+    specs = {
+        "subs-fake": tool("subs-fake", Stage.SUBS),
+        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
+        "webanalyze-like": tool("webanalyze-like", Stage.TECH, mode=Mode.ACTIVE),
+        "cdncheck-like": tool("cdncheck-like", Stage.TECH),
+    }
+    tech_record = HostStatusRecord(
+        fqdn="www.example.com",
+        source="webanalyze-like",
+        state=HostState.ALIVE,
+        tech=["Apache Tomcat", "Java"],
+    )
+    waf_record = HostStatusRecord(
+        fqdn="www.example.com",
+        source="cdncheck-like",
+        state=HostState.UNKNOWN,
+        tech=["google"],
+        waf="cloudflare",
+    )
+    adapters = {
+        "subs-fake": adapter("subs-fake", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("www.example.com")]),
+        "webanalyze-like": adapter(
+            "webanalyze-like", Stage.TECH, rec, records=[tech_record, waf_record]
+        ),
+        "cdncheck-like": adapter("cdncheck-like", Stage.TECH, rec, records=[]),
+    }
+    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+    store = engine.store
+
+    await engine.run("example.com", ScanOptions(active=True))
+
+    host_rows = store.host_rows(store.get_target("example.com") or 0)
+    row = next(item for item in host_rows if item["fqdn"] == "www.example.com")
+    # The union of both tech tools, and the WAF the cdncheck-style record named.
+    assert row["tech"] == ("Apache Tomcat", "Java", "google")
+    assert row["state"] == "ALIVE"  # the tech pass never re-decides liveness
+    history = rows(store, "SELECT state, tech_json, waf FROM host_status_history ORDER BY id")
+    assert len(history) == 1, "the tech stage must not append a second status row"
+    assert "cloudflare" in str(history[0][2])
+
+
+async def test_tech_stage_drops_a_host_outside_the_target(tmp_path: Path) -> None:
+    """The tech pass keeps the same target rule as every other stage."""
+    rec = Recorder()
+    specs = {
+        "subs-fake": tool("subs-fake", Stage.SUBS),
+        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
+        "webanalyze-like": tool("webanalyze-like", Stage.TECH, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "subs-fake": adapter("subs-fake", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("www.example.com")]),
+        "webanalyze-like": adapter(
+            "webanalyze-like",
+            Stage.TECH,
+            rec,
+            records=[
+                HostStatusRecord(
+                    fqdn="elsewhere.test",
+                    source="webanalyze-like",
+                    state=HostState.ALIVE,
+                    tech=["Java"],
+                )
+            ],
+        ),
+    }
+    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+
+    await engine.run("example.com", ScanOptions(active=True))
+
+    assert "elsewhere.test" not in {item["fqdn"] for item in engine.store.host_rows(1)}

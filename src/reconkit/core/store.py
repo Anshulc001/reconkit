@@ -609,6 +609,41 @@ class Store:
         self._commit()
         return int(cursor.lastrowid or 0)
 
+    def update_host_extras(
+        self,
+        subdomain_id: int,
+        *,
+        tech: Sequence[str] = (),
+        waf: str | None = None,
+    ) -> bool:
+        """Add technologies/WAF to the latest status row; never inserts a row.
+
+        The `tech` stage annotates the newest pass instead of writing a state
+        row of its own: a technology match is not a liveness verdict, so it must
+        not create, replace or re-date one (docs/04 section 5). Returns True when
+        a row was updated, False when the host has no status row yet.
+        """
+        if not tech and waf is None:
+            return False
+        row = self._conn.execute(
+            "SELECT id, tech_json, waf FROM host_status_history"
+            " WHERE subdomain_id = ? ORDER BY id DESC LIMIT 1",
+            (subdomain_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        merged = list(_text_list(row["tech_json"]))
+        for name in tech:
+            if name not in merged:
+                merged.append(name)
+        stored_waf = waf if waf is not None else row["waf"]
+        self._conn.execute(
+            "UPDATE host_status_history SET tech_json = ?, waf = ? WHERE id = ?",
+            (json.dumps(merged), stored_waf, int(row["id"])),
+        )
+        self._commit()
+        return True
+
     def upsert_port(
         self,
         subdomain_id: int,

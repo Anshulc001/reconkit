@@ -144,10 +144,10 @@ Phase 2 = working adapter in the first build. Phase 3 = listed in `tools.yaml`, 
 |---|---|---|---|
 | subs | passive | crtsh, certspotter, otx, hackertarget, urlscan, subfinder, assetfinder, amass, findomain, chaos, github_subdomains | crtsh, certspotter, otx, hackertarget, subfinder, assetfinder |
 | dns | passive | dnspython, dnsx, puredns (+massdns), dig | dnspython, dnsx |
-| live | active | pyprobe, httpx, httprobe, tlsx | pyprobe, httpx, tlsx |
+| live | active | pyprobe, httpx, httprobe, tlsx | pyprobe, httpx, tlsx, httprobe |
 | ports | active (smap passive) | pyscan, naabu, nmap, rustscan, smap; masscan (opt_in) | pyscan, naabu |
-| tech | active | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze | - |
-| urls | passive/active | gau, waybackurls, katana, hakrawler, gospider, subjs, unfurl, urlfinder | gau, katana |
+| tech | active | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze | webanalyze, cdncheck |
+| urls | passive/active | gau, waybackurls, katana, hakrawler, gospider, subjs, unfurl, urlfinder | gau, katana, waybackurls |
 | vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) | - |
 | shots | active | gowitness (opt_in) | - |
 
@@ -178,6 +178,47 @@ flat `<tool>.synthetic.*` lookup in `base._read_fixture` looks).
 before it is placed there. All four are `kind: binary`, `tier: core`, declare
 `needs_home = True` and use both ProjectDiscovery markers (`projectdiscovery`,
 `current version`) except `gau`, which requires the `gau version:` marker.
+
+### 4a2. Adapter wave 2 (2026-11-17): httprobe, webanalyze, cdncheck, waybackurls
+
+| Tool | Stage | Invocation | Records |
+|---|---|---|---|
+| `httprobe` | live | `-t <milliseconds>`, hosts on **stdin** | `HostStatusRecord(ALIVE)` per answering host (both schemes on one host are one record) |
+| `webanalyze` | tech | `-hosts <file> -output json -apps <technologies.json> -silent` | `HostStatusRecord(ALIVE, tech=[app_name...])` |
+| `cdncheck` | tech | `-silent -jsonl -i <host>` (one `-i` per host) | `HostStatusRecord(UNKNOWN, tech=[cdn/cloud], waf=<waf_name>)` |
+| `waybackurls` | urls | no flags, domains on **stdin** | `UrlRecord` per archived URL |
+
+Three of the four have no `-version` flag (`-version` exits 2 with Go's "flag
+provided but not defined"), so their identity probe is `-h` plus markers only
+the real tool prints: `httprobe` = `skip the default probes` + `concurrency
+level`, `webanalyze` = `technologies definition file` + `update technologies
+file`, `waybackurls` = `-no-subs` + `don't include subdomains`. `cdncheck`
+keeps `-version` (its own banner) and the ProjectDiscovery markers.
+
+- **stdin input (D11).** `runner.run_exec(..., stdin_text=...)` is the only way a
+  child receives data on stdin; the adapter hook is `stdin_text(ctx)`, which
+  returns `None` (stdin at EOF) everywhere else. The text is written from its own
+  thread so a child that reads lazily cannot block the timeout clock, and a child
+  that exits early only sees a broken pipe. No shell, no pipe, no temporary
+  input file for these two.
+- **webanalyze's file inputs.** `-hosts` is a path, so the adapter writes the
+  host list into the run workspace (`webanalyze-hosts-<pid>.txt`) inside
+  `prepare()` and deletes it in `finally`. `-apps` points at
+  `~/.reconkit/technologies.json` when it exists (one `webanalyze -update`
+  serves every directory) and falls back to `./technologies.json`; with neither,
+  the tool's own exit 1 (`can not open apps file`) becomes the failed result -
+  the adapter never downloads anything.
+- **cdncheck semantics.** A WAF match becomes `HostStatusRecord.waf` (the field
+  the port pre-check reads), a CDN or cloud match becomes a technology entry.
+  Its state is `UNKNOWN`: cdncheck resolves a name and compares ranges, it does
+  not fetch a page, so it never claims `ALIVE`. A host that matches nothing
+  prints no line at all - an empty output is `ok` with zero records.
+- **Technology persistence (D11).** `tech` records are not a status pass: the
+  engine's `_persist_tech` merges their `tech`/`waf` into the host's **newest**
+  `host_status_history` row (`Store.update_host_extras`), never appending a state
+  row. A host with no status row yet (a `tech` run without `live`) stores
+  nothing, and a record naming a host outside the target is dropped like every
+  other off-target record.
 
 **tlsx cert metadata (Ruling A, 2026-11-17).** Cert metadata (expiry, issuer,
 self-signed) is extracted by tlsx but not persisted - future addition if operator

@@ -322,9 +322,15 @@ def test_passive_only_commands_reject_active(tmp_path: Path, command: str) -> No
 
 
 def test_a_stage_with_no_adapter_reports_its_skips(tmp_path: Path) -> None:
-    """Regression: 11d-findings-f, `tools_skipped: 0` for a stage that built nothing."""
+    """Regression: 11d-findings-f, `tools_skipped: 0` for a stage that built nothing.
+
+    Changed 2026-11-17 (wave 2): `tech` has two adapters now, so the tool is named
+    instead of the stage - `--tools whatweb`, the last tech tool without one.
+    """
     config = make_config(tmp_path)
-    result = CliRunner().invoke(app, scan_args(config, "tech", "--active", "--json"))
+    result = CliRunner().invoke(
+        app, scan_args(config, "tech", "--active", "--json", "--tools", "whatweb")
+    )
     assert result.exit_code == 4  # no usable tool for the stage, unchanged
     document = json.loads(result.stdout)
     (stage,) = document["stages"]
@@ -733,16 +739,16 @@ def test_a_full_run_reports_the_gaps_of_stages_with_no_adapter(
 
     assert result.exit_code == 0, result.stderr
     document = json.loads(result.stdout)
+    # Wave 2 (2026-11-17): `tech` has adapters now, so `vulns` is the only gap.
     assert document["completion"] == {
         "status": "complete_with_gaps",
         "gaps": [
-            {"stage": "tech", "reason": "no adapter yet (phase 3)"},
             {"stage": "vulns", "reason": "no adapter yet (phase 3)"},
         ],
     }
     # The human block is stderr-only: stdout stays one clean document.
     assert result.stdout.count("\n") == 1
-    assert "⚠ full scan completed with gaps — 2 stage(s)" in result.stderr
+    assert "⚠ full scan completed with gaps — 1 stage(s)" in result.stderr
     assert "vulns: 5 tool(s) skipped (no adapter yet (phase 3))" in result.stderr
     assert "this is not a failure" in result.stderr
 

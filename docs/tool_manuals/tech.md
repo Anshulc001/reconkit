@@ -16,8 +16,8 @@ Tools from the `vulns` stage are deliberately absent - see
 | `httpx_tech` | binary | core | active | 3 | no |
 | `whatweb` | binary | core | active | 3 | no |
 | `wafw00f` | binary | core | active | 3 | no |
-| `cdncheck` | binary | core | passive | 3 | no |
-| `webanalyze` | binary | core | active | 3 | no |
+| `cdncheck` | binary | core | passive | 3 | yes (wave 2, 2026-11-17) |
+| `webanalyze` | binary | core | active | 3 | yes (wave 2, 2026-11-17) |
 
 
 
@@ -364,7 +364,7 @@ handful of probe requests, so it belongs to the active side.
 ## `cdncheck`
 
 - **Registry:** binary, core, passive, phase 3, `stage: tech`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/cdncheck.py` (wave 2, 2026-11-17); runs as `-silent -jsonl -i <host>` (one `-i` per host). `waf`/`waf_name` becomes `HostStatusRecord.waf`, `cdn`/`cloud` become technology entries, the state stays `UNKNOWN` (a range match is not a liveness proof), and a host that matches nothing prints no line, which is `ok` with 0 records - see the real runs below (`testfire.net` matched nothing)
 - **Official source used:** https://github.com/projectdiscovery/cdncheck
 - **Installed on this box:** `/home/kali/.reconkit/bin/cdncheck`, `[INF] Current version: v1.4.0`
 - **Where it comes from:** https://github.com/projectdiscovery/cdncheck/releases - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
@@ -463,7 +463,8 @@ for parseable output; without it the banner is the only thing on stdout.
 - **Official source used:** https://github.com/rverton/webanalyze
 - **Installed on this box:** `/home/kali/.reconkit/bin/webanalyze`, `v0.3.9`
 - **Where it comes from:** github.com/rverton/webanalyze - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
-- **Multi-domain input:** not verified - see the note; `-hosts` was not confirmed
+- **Multi-domain input:** **yes** - `-hosts string` (a filename with hosts, one per line); the adapter writes that file into the run workspace and removes it, and feeds `-apps` the managed `~/.reconkit/technologies.json` when it exists
+- **Adapter in this build:** `src/reconkit/adapters/webanalyze.py` (wave 2, 2026-11-17); runs as `-hosts <file> -output json -apps <technologies.json> -silent`, parses one JSON document per host into `HostStatusRecord(ALIVE, tech=[app_name...])`. The technology database needs one `webanalyze -update` (verified 2026-11-17: `app definition file updated`, 2,122,079 bytes written to `~/.reconkit/technologies.json`); without it the tool exits 1 with `can not open apps file` and the adapter reports that as the failed result
 
 #### Real `--help` (raw, full)
 

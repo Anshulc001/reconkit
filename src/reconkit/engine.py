@@ -1364,6 +1364,8 @@ class Engine:
             self._persist_live(target_id, run_id, results, dns_results, target, hosts, opts, alive)
         elif stage is Stage.PORTS:
             self._persist_ports(target_id, run_id, results, opts)
+        elif stage is Stage.TECH:
+            self._persist_tech(target_id, run_id, results, target)
         elif stage is Stage.URLS:
             self._persist_urls(target_id, run_id, results, opts)
 
@@ -1685,6 +1687,43 @@ class Engine:
             checked_at=self._now(),
             secrets=self._secrets,
         )
+
+    def _persist_tech(
+        self, target_id: int, run_id: int, results: list[ToolResult], target: str
+    ) -> None:
+        """Record technologies/WAF on the host's newest status row (D11).
+
+        The tech stage adds facts to the row the live pass wrote: it never
+        creates a status row and never touches `state`, because matching a
+        technology says nothing about whether the host is up. Two tech tools
+        contribute to one row, so the union of their findings is what is stored.
+        """
+        groups: dict[str, dict[str, set[str] | str | None]] = {}
+        for result in results:
+            if result.status is not ToolStatus.OK:
+                continue
+            for record in result.records:
+                if not isinstance(record, HostStatusRecord):
+                    continue
+                group = groups.setdefault(record.fqdn, {"tech": set(), "waf": None})
+                tech = group["tech"]
+                if isinstance(tech, set):
+                    tech.update(record.tech)
+                if group["waf"] is None and record.waf is not None:
+                    group["waf"] = record.waf
+        for fqdn, group in groups.items():
+            # Same target rule as every other stage: a record naming a host the
+            # run did not ask about is dropped, not stored (docs/03 section 9).
+            if not self._clean_hosts([fqdn], target):
+                continue
+            tech = group["tech"]
+            waf = group["waf"]
+            sub_id = self.store.upsert_subdomain(target_id, fqdn, run_id=run_id)
+            self.store.update_host_extras(
+                sub_id,
+                tech=sorted(tech) if isinstance(tech, set) else [],
+                waf=waf if isinstance(waf, str) else None,
+            )
 
     def _persist_ports(
         self, target_id: int, run_id: int, results: list[ToolResult], opts: ScanOptions

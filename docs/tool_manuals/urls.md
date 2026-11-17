@@ -14,7 +14,7 @@ Tools from the `vulns` stage are deliberately absent - see
 | Tool | Kind | Tier | Mode | Phase | Adapter in this build |
 |---|---|---|---|---|---|
 | `gau` | binary | core | passive | 3 | yes (wave 1, 2026-11-17) |
-| `waybackurls` | binary | core | passive | 3 | no |
+| `waybackurls` | binary | core | passive | 3 | yes (wave 2, 2026-11-17) |
 | `katana` | binary | core | active | 3 | yes (wave 1, 2026-11-17) |
 | `hakrawler` | binary | core | active | 3 | no |
 | `gospider` | binary | core | active | 3 | no |
@@ -113,7 +113,7 @@ config`. That is normal, not a failure.
 ## `waybackurls`
 
 - **Registry:** binary, core, passive, phase 3, `stage: urls`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/waybackurls.py` (wave 2, 2026-11-17); runs with no flags and the domain list on **stdin**, parses one URL per line into `UrlRecord`, and passes none of `-dates`/`-get-versions`/`-no-subs` (`-no-subs` would drop the subdomains the pipeline feeds it). Identity is `-h` + two markers, because `-version` exits 2. **Network note (2026-11-17):** the archive CDX endpoint timed out from this box (`curl ... cdx/search/cdx` → `Operation timed out after 25082 milliseconds with 0 bytes received`), so the real run finished `ok 0 item(s)` and the parsing proof is `--mock`
 - **Official source used:** https://github.com/tomnomnom/waybackurls
 - **Installed on this box:** `/home/kali/.reconkit/bin/waybackurls` (no version flag; `-h` prints usage)
 - **Where it comes from:** github.com/tomnomnom/waybackurls - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
