@@ -79,9 +79,12 @@ class PyprobeAdapter(BaseToolAdapter):
                 raw_text=fixture,
             )
 
+        headers = {"User-Agent": USER_AGENT, **ctx.headers}
+        if ctx.user_agent:
+            headers["User-Agent"] = ctx.user_agent
         async with httpx.AsyncClient(
             timeout=ctx.timeout,
-            headers={"User-Agent": USER_AGENT},
+            headers=headers,
             transport=self._transport,
             follow_redirects=False,
         ) as client:

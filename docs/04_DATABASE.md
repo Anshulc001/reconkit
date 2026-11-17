@@ -34,7 +34,8 @@ CREATE TABLE scan_runs (
   status      TEXT NOT NULL CHECK (status IN ('running','completed','partial','failed','interrupted')),
   started_at  TEXT NOT NULL,
   finished_at TEXT,
-  params_json TEXT NOT NULL DEFAULT '{}'
+  params_json TEXT NOT NULL DEFAULT '{}',
+  scope_mode  TEXT NOT NULL DEFAULT 'enforced'  -- enforced|no_file|unrestricted_flag
 );
 CREATE INDEX idx_scan_runs_target ON scan_runs(target_id, id);
 
@@ -220,6 +221,7 @@ No soft delete. This build has no delete command; removing a target's rows is a 
 - `schema_version` table + ordered migration scripts in `core/store.py`.
 - Schema version 2 adds `host_status_history.cnames_json` (`NOT NULL DEFAULT '[]'`) and `dangling_cname` (`NULL`). Existing rows therefore get an empty list and no dangling value, never NULL for the list.
 - Schema version 4 adds `host_status_history.detail` (`TEXT`, nullable, no default), the bounded redacted reason described in section 5. It is additive: every existing row gets `NULL`, and nothing is rewritten.
+- Schema version 6 adds `scan_runs.scope_mode` (`TEXT NOT NULL DEFAULT 'enforced'`), the scope rule the run used: `enforced` (a scope file was found and applied), `no_file` (no scope file existed), `unrestricted_flag` (`--no-scope` ignored any file). It is additive: every existing row reads `enforced`, and every new run passes its own value. Written once per stage row by `create_scan_run`.
 - Schema version 5 drops `scan_runs.speed`. Speed control was removed on 2026-11-17 (docs/MASTER_PLAN.md D3), so the column that recorded the preset is gone; `ALTER TABLE scan_runs DROP COLUMN speed` removes only that column and its `CHECK`. Existing run rows keep every other value (`id`, target, stage, status, timestamps, params).
 - Schema version 3 adds `subdomains.provenance` (`TEXT NOT NULL DEFAULT 'dns'`, `CHECK (provenance IN ('subs','dns'))`) and back-fills existing rows: any row with a `subdomain_sources` entry becomes `subs`, every other row stays `dns`. Nothing is destroyed; `first_seen_run` is untouched.
 - Every schema change: documented here, has a migration, has a test, never destroys existing data.

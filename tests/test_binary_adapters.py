@@ -44,6 +44,8 @@ def make_ctx(
     ports: list[int] | None = None,
     env: dict[str, str] | None = None,
     mock: bool = False,
+    headers: dict[str, str] | None = None,
+    user_agent: str | None = None,
 ) -> RunContext:
     return RunContext(
         target="example.com",
@@ -53,6 +55,8 @@ def make_ctx(
         workspace=REPO / "workspaces" / "example.com",
         mock=mock,
         env=env or {},
+        headers=headers or {},
+        user_agent=user_agent,
     )
 
 
@@ -374,6 +378,22 @@ def test_httpx_command_dedupes_and_lowercases_hosts() -> None:
         "-u",
         "api.example.com",
     ]
+
+
+def test_httpx_command_carries_header_and_user_agent() -> None:
+    """docs/02 section 3: `-H` is the real flag (`httpx -h`: custom http headers)."""
+    argv = HttpxAdapter().build_command(
+        make_ctx(
+            hosts=["www.example.com"],
+            headers={"X-Test": "abc"},
+            user_agent="reconkit-test",
+        )
+    )
+    assert "-H" in argv
+    assert "X-Test: abc" in argv
+    assert "User-Agent: reconkit-test" in argv
+    # headers stay before the first -u host, so they apply to every probe
+    assert argv.index("-H") < argv.index("-u")
 
 
 def test_naabu_command_and_ports() -> None:

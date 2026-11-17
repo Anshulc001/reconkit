@@ -51,6 +51,10 @@ class ToolSpec:
     version_cmd: list[str] | None = None
     version_regex: str | None = None
     source: str | None = None
+    # Exploitation-class tools (sqlmap, dalfox, crlfuzz, ...). Never selected
+    # automatically in any mode, `full` included; only an explicit `--tools`
+    # naming runs one (docs/09, AGENTS "recon only").
+    exploitation: bool = False
 
 
 def _document(file: Path) -> dict[str, Any]:
@@ -145,6 +149,7 @@ def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
         version_cmd=_version_cmd(name, entry),
         version_regex=_version_regex(name, entry),
         source=_optional_text(name, entry, "source"),
+        exploitation=_exploitation(name, entry),
     )
 
 
@@ -179,6 +184,16 @@ def _version_regex(name: str, entry: dict[str, Any]) -> str | None:
     except re.error:
         raise ConfigError(f"tool {name!r} in tools.yaml has an invalid version_regex") from None
     return value.strip()
+
+
+def _exploitation(name: str, entry: dict[str, Any]) -> bool:
+    """Optional boolean `exploitation` marker; anything but a bool is invalid."""
+    value = entry.get("exploitation")
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise ConfigError(f"tool {name!r} in tools.yaml has an invalid exploitation flag")
+    return value
 
 
 def _keys(name: str, entry: dict[str, Any]) -> tuple[ToolKey, ...]:

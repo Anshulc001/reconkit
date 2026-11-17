@@ -359,3 +359,30 @@ def test_a_regex_miss_means_not_installed_for_any_tool(tmp_path: Path) -> None:
     """The rule is general, not special-cased to httpx_tech (chaos here)."""
     namesake = ExecResult(returncode=0, stdout="chaos 0.5.2\n", stderr="")
     assert _probe(tmp_path, "chaos", "chaos", namesake) is None
+
+
+# ------------------------------------------------- exploitation flag (2026-11-17)
+
+EXPLOITATION_TOOLS = {"sqlmap", "dalfox", "crlfuzz"}
+
+
+def test_the_three_exploitation_tools_are_marked_and_intrusive() -> None:
+    """docs/09: `exploitation: true` is what keeps a tool out of automatic runs."""
+    specs = load_tools()
+    for name in EXPLOITATION_TOOLS:
+        assert specs[name].exploitation is True
+        assert specs[name].tier.value == "intrusive"
+    for name, spec in specs.items():
+        if name not in EXPLOITATION_TOOLS:
+            assert spec.exploitation is False
+
+
+def test_an_invalid_exploitation_flag_is_a_config_error(tmp_path: Path) -> None:
+    text = TOOLS.read_text(encoding="utf-8").replace(
+        "binary: sqlmap, exploitation: true",
+        'binary: sqlmap, exploitation: "yes"',
+    )
+    path = tmp_path / "tools.yaml"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ConfigError, match="invalid exploitation flag"):
+        load_tools(path)

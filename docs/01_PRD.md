@@ -39,7 +39,7 @@
 - As a tester, I want every result to show which tools found it so that I can trust or verify it.
 - As a tester, I want to know which hosts are ALIVE, DNS_ONLY, SHUT_DOWN or DEAD, and when that changed.
 - As a tester, I want slow, randomized scanning by default so that I do not get blocked or break program rules.
-- As a tester, I want active scans refused outside `scope.yaml` so that I never test something unauthorized by accident.
+- As a tester, I want active scans refused outside a present `scope.yaml` so that I never test something unauthorized by accident, with an explicit, loudly-warned `--no-scope` opt-out when I deliberately run without one.
 - As a tester, I want `diff` to show only new or changed assets since the last scan.
 
 ## 6. Core Features
@@ -81,7 +81,7 @@
 ### Feature 5 - Port scanning (`ports`)
 - **Purpose:** Find open ports and services on in-scope hosts.
 - **Acceptance criteria:**
-  - Default scan is a connect scan (no root needed) over each adapter's default port set; this build has no `--ports`/`--full` flags (docs/02).
+  - Default scan is a connect scan (no root needed) over each adapter's default port set; `--ports` overrides the list and `--full` runs every stage (docs/02 section 2 is the mode source of truth).
   - If two scanners disagree, the port is stored as `unconfirmed`, not dropped.
   - Only hosts inside `scope.yaml` (including `in_scope_cidrs` for IPs) are scanned.
 - **Edge cases:** filtered ports, rate limiting, IPv6, CDN IPs shared by many hosts.

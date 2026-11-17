@@ -120,7 +120,7 @@ class BaseToolAdapter(ABC):
     def parse_output(self, raw: str) -> list[Record]: ...        # pure function, fully unit-testable
 ```
 
-- `RunContext` (above) carries: `target`, `hosts` (already scope-checked), `ports`, `timeout`, `workspace`, `mock` flag, `env` (allowed keys only) and `ip_allowed` (the loaded scope's `in_scope_cidrs` predicate, or `None`). `ip_allowed` exists so an adapter can apply docs/05 rule 6 without importing `core.scope`; `None` means no permission, never allow-all. **naabu input is scope-mode dependent (2026-11-17):** with no scope file the engine leaves `hosts` as the ordinary names; with a scope file present it resolves each target itself and replaces `hosts` for naabu only with the verified IP addresses. The replacement happens in the engine's per-tool context copy; no other adapter's `hosts` changes. `env` is the entire child environment: the runner passes only these keys, so adapters must add `HOME` explicitly for tools that read config or provider keys from it (confirm per tool from its own `--help`, do not guess).
+- `RunContext` (above) carries: `target`, `hosts` (already scope-checked), `ports`, `timeout`, `workspace`, `mock` flag, `env` (allowed keys only), `ip_allowed` (the loaded scope's `in_scope_cidrs` predicate, or `None`), `headers` (from repeatable `--header "Name: Value"`) and `user_agent` (from `--user-agent`). `headers`/`user_agent` are optional: an adapter that cannot send one ignores them and the engine warns `--header not applied to <tool> (no -H support)` once per executed tool. `ports` is the `--ports` override when given, else empty (each adapter then uses its own default). `ip_allowed` exists so an adapter can apply docs/05 rule 6 without importing `core.scope`; `None` means no permission, never allow-all. **naabu input is scope-mode dependent (2026-11-17):** with no scope file the engine leaves `hosts` as the ordinary names; with a scope file present it resolves each target itself and replaces `hosts` for naabu only with the verified IP addresses. The replacement happens in the engine's per-tool context copy; no other adapter's `hosts` changes. `env` is the entire child environment: the runner passes only these keys, so adapters must add `HOME` explicitly for tools that read config or provider keys from it (confirm per tool from its own `--help`, do not guess).
 - `check_installed()` returns `InstallStatus` (above). For binaries, `installed=False` with a non-null `path` means the program was found but failed its identity check (the `httpx` namesake case), while `installed=False` with `path=None` means it was not found at all. `doctor` reports the first as `wrong program` (a warning that names the path) and the second as `missing`; both count as not ready in per-stage coverage.
 - Adapter failures use the exceptions in `reconkit/errors.py` defined by `docs/06_CODE_STYLE.md` §6 (`ScopeError`, `ToolNotInstalled`, `ToolFailed`, `ToolTimeout`, `ParseError`, `ConfigError`, `InstallError`); no other exception names. They are converted into `ToolResult(status=...)`, never raised out of a stage.
 - Binary adapters usually implement only `build_command` and `parse_output`; the base `run` handles execution, timeout, output saving and error mapping. They subclass `BinaryAdapter` from `adapters/base.py`, which resolves the binary in `~/.reconkit/bin` first and then `PATH`, and whose `check_installed()` runs the adapter's `version_args` and matches the tool's own banner/version text, so the ProjectDiscovery `httpx` is never confused with the Python `httpx` CLI on `PATH`. Identity markers must **all** appear in the probe output by default (`identity_require_all = True`); the single exception is `subfinder`, which sets `identity_require_all = False` because subfinder < v2.6.4 prints only `[INF] Current Version: vX.Y.Z` and never names the tool (upstream commit `c175790`, 2023-10-30), and rejecting a working old install is worse than accepting one marker match for a binary that is already identified by filename. A binary that is absent at selection time is `skipped (not installed)` and never reaches here; a binary that was present at selection but cannot be spawned at run time, a non-zero exit and a timeout are three different `failed`/`timeout` results with different messages; no exception escapes. `build_command` must launch the resolved path from `binary_path()` (managed directory first, then `PATH`) rather than the bare binary name, because the child receives only the env keys that were passed in and therefore has no `PATH` of its own to search.
@@ -151,14 +151,49 @@ Phase 2 = working adapter in the first build. Phase 3 = listed in `tools.yaml`, 
 | vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) | - |
 | shots | active | gowitness (opt_in) | - |
 
-Selection rules: use adapters that are installed (or http/python kind), allowed by tier (`opt_in` needs `--tools` or `--include-noisy`; `intrusive` tools are refused in this build because there is no `--intrusive` flag), allowed by mode (active adapters only when `--active`), and filtered by `--tools` / `--exclude`. Missing tools are reported as `skipped`, never fatal unless no adapter remains (exit 4). Every selection-time skip is recorded in `tool_runs` **and** reported to the caller: `stages[].skipped` in the `--json` document and the Tools table list each tool with its reason, and `summary.tools_skipped` counts them (docs/02 section 5), so a stage whose whole pool has no adapter cannot look like a stage that ran and found nothing. This is the selection-time rule: a binary that was present at selection but cannot be spawned at run time is a `failed` result instead (see the adapter contract in section 3), not a skip. **`naabu` is scope-mode dependent (owner decision 2026-11-17; supersedes the permanent block of 11c-G-7/12i):**
+Selection rules (2026-11-17: the mode tables in docs/02 section 2 and `MODE_STAGES`/`MODE_TOOLS` in `engine.py` are the source): use adapters that are installed (or http/python kind), allowed by tier for the mode (`allowed_tiers`: `opt_in` only with `--include-noisy` or a `full` run; `intrusive` only with `full` or an explicit `--tools` name), allowed by tool mode (an active tool in `passive` mode is skipped with `tool mode not included in passive mode` even when named), never `exploitation: true` unless named with `--tools`, and filtered by `--tools` / `--exclude`. `tools.yaml` may carry `exploitation: true` on an intrusive entry (`sqlmap`, `dalfox`, `crlfuzz`); the registry parses it into `ToolSpec.exploitation` (a non-bool is a `ConfigError`) and the engine skips such a tool automatically in every mode with `exploitation tool requires explicit --tools`. Missing tools are reported as `skipped`, never fatal unless no adapter remains (exit 4). Every selection-time skip is recorded in `tool_runs` **and** reported to the caller: `stages[].skipped` in the `--json` document and the Tools table list each tool with its reason, and `summary.tools_skipped` counts them (docs/02 section 5), so a stage whose whole pool has no adapter cannot look like a stage that ran and found nothing. This is the selection-time rule: a binary that was present at selection but cannot be spawned at run time is a `failed` result instead (see the adapter contract in section 3), not a skip. **`naabu` is scope-mode dependent (owner decision 2026-11-17; supersedes the permanent block of 11c-G-7/12i):**
 
 - **No scope file** - `naabu` is an ordinary active tool. It is selected, installed-checked and run exactly like `pyscan`, receiving the discovered hostnames. No pre-resolution gate, no IP-only restriction, no special-case skip.
 - **Scope file present** - before invoking `naabu`, the engine resolves each already-in-scope target with its own resolver (`adapters.pyscan.default_resolve`, injected in tests), checks every returned address with the same `ip_allowed` predicate `pyscan` uses, and hands `naabu` only the verified IP addresses through `-host` - never a bare domain. A target whose resolution fails or yields no in-scope address is omitted from the list; if no target yields a verified address, `naabu` is removed from the selection with `blocked: no in-scope IP for any target (resolution failed or the address is outside in_scope_cidrs)` and the reason is recorded in `tool_runs`/`stages[].skipped`. When some targets do verify, the run continues and one warning counts the omitted targets.
-- **Passive mode** - `naabu` does not run, like every other active tool (`requires --active`).
+- **Passive mode** - `naabu` does not run, like every other active tool (`tool mode not included in passive mode`).
 - `--mock` skips the resolve step because it connects to nothing.
 
 There is no speed control: every selected adapter of a stage starts together and runs at its own natural pace (2026-11-17, docs/MASTER_PLAN.md D3).
+
+### 4b. Per-tool support for the injected parameters
+
+| Parameter | `httpx` | `pyprobe` | `pyscan` | `naabu` | Every other adapter |
+|---|---|---|---|---|---|
+| `--ports` | - (live stage) | - | yes, `ctx.ports` replaces `DEFAULT_PORTS` | yes, `-p` (verified: `naabu -h` `-port, -p string`) | ignored |
+| `--header` | yes, `-H "Name: Value"` (verified: `httpx -h` `-H, -header string[]`) | yes, request headers | ignored + one warning | ignored + one warning | ignored + one warning |
+| `--user-agent` | yes, `-H "User-Agent: ..."` | yes, client header | ignored + one warning | ignored + one warning | ignored + one warning |
+| `--status-codes` | filter only (hosts whose stored `status_code` matches) | filter only | - | - | - |
+
+The `--status-codes` filter and `--only-alive`/`--only-states` act on the
+already-stored host rows in the CLI, never inside an adapter, so they change
+what is printed and never what is stored.
+
+### Per-tool mode and tier (from `tools.yaml`)
+
+| Tool | Stage | `mode` | `tier` | `exploitation` | Runs in passive / active / full |
+|---|---|---|---|---|---|
+| crtsh, certspotter, otx, hackertarget, urlscan, subfinder, assetfinder, amass, findomain, chaos, github_subdomains | subs | passive | core | no | yes / yes / yes |
+| dnspython, dnsx, puredns, massdns, dig | dns | passive | core | no | yes / yes / yes |
+| pyprobe, httpx, httprobe, tlsx | live | active | core | no | no / yes / yes |
+| smap | ports | passive | core | no | no (stage not in passive) / yes / yes |
+| pyscan, naabu, nmap, rustscan | ports | active | core | no | no / yes / yes |
+| masscan | ports | active | opt_in | no | no / `--include-noisy` only / yes |
+| httpx_tech, whatweb, wafw00f, webanalyze | tech | active | core | no | no / no (stage not in active) / yes |
+| cdncheck | tech | passive | core | no | no / no / yes |
+| gau, waybackurls, unfurl, urlfinder | urls | passive | core | no | no / no / yes |
+| katana, hakrawler, gospider, subjs | urls | active | core | no | no / no / yes |
+| nuclei, subzy, dnsreaper | vulns | active | core | no | no / no / yes |
+| nikto, ffuf | vulns | active | opt_in | no | no / no / yes |
+| gowitness | shots | active | opt_in | no | not a mode stage |
+| dalfox, crlfuzz, sqlmap | vulns | active | intrusive | **yes** | never automatic; `--tools <name>` only |
+
+"Runs in full" means selected; an adapter that does not exist yet still reports
+`no adapter yet (phase 3)`.
 
 ## 5. Consensus and Confidence Rules
 

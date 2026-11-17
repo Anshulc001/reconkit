@@ -151,7 +151,7 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 5
+        assert migrated.schema_version == SCHEMA_VERSION == 6
         assert "cnames_json" in columns
         assert "dangling_cname" in columns
         assert "detail" in columns
@@ -258,7 +258,7 @@ def test_v3_database_migrates_the_additive_detail_column(tmp_path: Path) -> None
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 5
+        assert migrated.schema_version == SCHEMA_VERSION == 6
         columns = {
             str(row["name"])
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
@@ -686,7 +686,7 @@ def test_v2_database_migrates_provenance_with_backfill(tmp_path: Path) -> None:
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(subdomains)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 5
+        assert migrated.schema_version == SCHEMA_VERSION == 6
         assert "provenance" in columns
         rows = {
             str(row["fqdn"]): str(row["provenance"])
@@ -927,7 +927,7 @@ def test_v4_database_migrates_by_removing_the_speed_column(tmp_path: Path) -> No
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 5
+        assert migrated.schema_version == SCHEMA_VERSION == 6
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(scan_runs)")
         }

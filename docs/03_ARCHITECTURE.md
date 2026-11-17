@@ -153,12 +153,36 @@ workspaces/<domain>/
 - **Startup order matters.** `Engine.open` loads `.env` (its `dotenv_values()` call) inside a command, which is too late for errors raised before it - `_targets()`, `load_config()` and the usage refusals all run first. The CLI therefore reads `.env` itself at the top of the Typer callback (`main`), with the same `dotenv_values()` call and no `os.environ` read, and calls `configure_redaction()` there. Click runs the callback before any subcommand body, so the values are set before `_report_error()` can fire; an unreadable `.env` is ignored here and left for the engine to report properly.
 - Both console error paths go through it: `_report_error()` formats `traceback.format_exc()` for `-v` and then prints `redact(message)`, and the non-verbose branch is the same call, so a chained exception (`__cause__`/`__context__`) is rendered into the string before redaction. `--json` does not move errors to stdout; the redacted message still goes to stderr.
 
+## 5b. Scan modes (single source of truth)
+
+The engine owns the mode definition; nothing else restates it. `engine.py` has
+two module-level tables and one helper:
+
+- `MODE_STAGES`: `passive` = `(SUBS, DNS)`; `active` = `(SUBS, DNS, LIVE)`;
+  `full` = all seven stages in `STAGE_ORDER`.
+- `MODE_TOOLS`: a `ModeRules(tool_modes, tiers)` per mode. `passive` =
+  `{PASSIVE}` / `{CORE}`; `active` = `{PASSIVE, ACTIVE}` / `{CORE}`; `full` =
+  `{PASSIVE, ACTIVE}` / `{CORE, OPT_IN, INTRUSIVE}`.
+- `allowed_tiers(mode, include_noisy=...)` adds `OPT_IN` for `--include-noisy`
+  (and always for `full`).
+
+`_select()` applies them in this order: an explicit `--tools <name>` bypasses
+the tier gate; an `exploitation: true` tool is skipped in every mode unless
+named (`exploitation tool requires explicit --tools`); a tier outside
+`allowed_tiers` is skipped (`tier not included in <mode> mode`); a tool whose
+`mode:` is outside `MODE_TOOLS[mode].tool_modes` is skipped (`tool mode not
+included in <mode> mode`, never bypassed); then no-adapter and not-installed
+checks. `ScanOptions.mode` is derived (`full` wins over `active`, else
+`passive`), so no caller can invent a fourth mode. The CLI's `_stages()` and
+both help strings read `MODE_STAGES`; the interactive legend reads the same
+tables, which is why the three surfaces cannot disagree.
+
 ## 6. Data Flow (example: `reconkit live -d example.com --active`)
 
 1. CLI parses flags and loads `config.yaml`.
-2. Scope gate: if `scope.yaml` exists it must not be expired, must allow active and must match `example.com` (exit code 3 otherwise). With no scope file at the resolved path the active stages run unrestricted against the named target (docs/05 rule 2).
+2. Scope gate: with `--no-scope` the file is ignored (`scope_mode` `unrestricted_flag`); otherwise, if `scope.yaml` exists it must not be expired, must allow active and must match `example.com` (exit code 3 otherwise). With no scope file at the resolved path the active stages run unrestricted against the named target (docs/05 rule 2).
 3. Engine reads known subdomains for the target from SQLite; each host is checked against scope again (out-of-scope removed).
-4. Engine selects adapters for stage `live` that are installed and allowed by tier/flags.
+4. Engine selects adapters for stage `live` that are installed and allowed by `MODE_TOOLS` (section 5b) plus the `exploitation` rule.
 5. Every selected adapter for the stage starts together; each one runs at its own natural pace.
 6. Each adapter runs (subprocess via `runner` or Python), returns `ToolResult` with normalized records.
 7. Engine merges records per host, records which tools reported what, computes state and confidence, handles disagreements.
@@ -170,10 +194,10 @@ workspaces/<domain>/
 Speed control was removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN.md D3, reason: "user-requested removal, no throttling desired"). `core/pacing.py`, the `Pacer`, the `RateLimiter`, the speed presets, `--speed`, `--delay`, the per-tool `rate_flag` (`-rl`/`-rate`/`-T`) and the typed `I AM AUTHORIZED` confirmation no longer exist. Leftovers that mention them are stale, not behaviour.
 
 - **Tools.** Every adapter selected for a stage starts at once (`asyncio.gather`). There is no parallel limit, no inter-tool delay, no inter-host delay and no host or port shuffling.
-- **Adapters.** `RunContext` carries `target`, `hosts`, `ports`, `timeout`, `workspace`, `mock`, `env` and `ip_allowed`. It has no `pacer`, `limiter` or `speed` field. HTTP adapters make their request directly; Python adapters dispatch their per-host work directly.
+- **Adapters.** `RunContext` carries `target`, `hosts`, `ports`, `timeout`, `workspace`, `mock`, `env`, `ip_allowed`, `headers` and `user_agent`. It has no `pacer`, `limiter` or `speed` field. `headers`/`user_agent` carry `--header`/`--user-agent`; only `httpx` and `pyprobe` apply them today. HTTP adapters make their request directly; Python adapters dispatch their per-host work directly.
 - **Config.** `config.yaml` has no `speeds` block and no `default_speed`; `AppConfig` rejects those keys as unknown.
 - **Scope.** `scope.yaml` `max_speed` is still accepted so an existing file keeps loading, and is ignored: there is no speed left to cap.
-- **Persistence.** `scan_runs` has no `speed` column (schema version 5; migration 5 drops it), and `status` no longer prints a Speed column or field.
+- **Persistence.** `scan_runs` has no `speed` column (schema version 6; migration 5 dropped it and migration 6 added `scope_mode`), and `status` no longer prints a Speed column or field.
 - **Timeouts are not throttling** and remain: each stage has its phase timeout and each tool its per-tool timeout, both in `config.yaml`.
 - **Randomness** survives only where it is functional: wildcard probe labels (injected RNG), never for scheduling.
 

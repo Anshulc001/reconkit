@@ -38,6 +38,37 @@ plan (5-10 lines, assumptions) -> implement -> tests (normal, empty, malformed, 
 - Adapters never import `store`, `scope`, `ui`, `cli`.
 - Do not create modules, files or CLI commands that are not in `docs/03` and `docs/02`. If one seems needed, change the docs first and tell me.
 
+## 0d. Standing pre-approvals (established 2026-11-17, D7)
+
+These are pre-approved by the owner. Do not stop to ask before proceeding on
+any of them; disclose in the batch report and do not re-litigate.
+
+Pre-approved without asking:
+
+1. Sudo for installs and system operations; record what for. No per-command confirmation.
+2. Doc updates that mirror code changes, in the same batch.
+3. Regression tests for new behavior.
+4. `tools.yaml` `version_cmd` / `version_regex` edits derived from real `--help` / `--version` output (paste the raw output, commit the edit).
+5. Removing "install:" / "reconkit install" / "reconkit update" residue anywhere in the repo (D4).
+6. `config.yaml` `tool_versions` stays removed; do not re-add.
+7. Scope-file writes in interactive mode only, with an explicit `y` (the `[a]` option). Never in non-interactive mode.
+8. The `--no-scope` flag, per the scope-bypass amendment in rule 2.
+9. `--full` narrowing CLI `--active` to subs+dns+live (dated deviation).
+10. Consistency audits across help text, docs and code; fix stale text in the same batch and disclose in the F-map.
+
+Still requires an owner ruling:
+
+1. Any change to the scope-bypass rule beyond the `--no-scope` amendment.
+2. Any change that makes exploitation-category tools fire automatically in any mode (the current rule is the pre-ruling in rule 6: `exploitation: true` tools only run via explicit `--tools`).
+3. Any new CLI flag or command not explicitly named in the current batch prompt.
+4. Any modification to `scope.yaml` outside the interactive `[a]` path.
+5. Any new dependency, module or file outside the batch's stated scope.
+6. Unfreezing F1 (dropped-host DNS verdicts) or F2 (`scope.yaml` authorization text).
+7. Any change that widens active scanning beyond "typed target plus what is discovered in association with it" (D1).
+8. Any change to confidence computation, host-state definitions, or the ALIVE/DNS_ONLY/SHUT_DOWN/DEAD/UNKNOWN criteria.
+
+If a decision is on neither list, stop and ask - one short question, not a paragraph.
+
 ## 1. Project context
 
 - **Project:** reconkit
@@ -73,6 +104,8 @@ Do not contradict these documents. If code and docs disagree, stop and report th
 
 1. **Subprocess:** run external programs only through `reconkit.core.runner.run_exec(argv: list[str], ...)`. Never `shell=True`, `os.system`, string-built commands, or user input inside a shell string.
 2. **Scope gate:** every active stage must call `scope.require_active(target, hosts)` before sending any traffic. Never add a flag, env var, or code path that skips it. No `--i-have-permission` style bypass.
+
+   **Scope bypass amendment (2026-11-17, owner-requested).** No scope-bypass flag has ever existed for the purpose of scanning targets outside a real scope file's declared list. `--no-scope` (added 2026-11-17, owner-requested) is not a bypass - it is an explicit opt-out of the scope file itself, equivalent to running with no scope file present (already documented behaviour since D1). Using `--no-scope` produces a loud warning and is recorded in `scan_runs.scope_mode = 'unrestricted_flag'`. It must NEVER be used to scan targets the operator is not authorized for. Reviewers must refuse any new flag whose effect is "ignore an in-scope/out-of-scope list while still reading that list" - that would be a real bypass.
 3. **No pacing:** speed control was removed on 2026-11-17 (docs/MASTER_PLAN.md D3). There is no pacer, rate limiter, delay or speed flag; tools start together and run at their own pace. Do not reintroduce artificial throttling.
 4. **Registry only:** tools, install sources and download URLs come from `tools.yaml`. Never add `curl | bash`, unverified downloads, or sources not in the registry.
 5. **Secrets:** API keys come from `.env` / environment only. Never print, log, store in SQLite, or put them in command lines that get logged.

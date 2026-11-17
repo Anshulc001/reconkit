@@ -168,10 +168,12 @@ tools:
   # ---------------- shots ----------------
   gowitness:    {stage: shots, kind: binary, tier: opt_in, mode: active, phase: 3, binary: gowitness, source: "go install github.com/sensepost/gowitness@latest"}
 
-  # ---------------- intrusive tier (Phase 3, disabled until built) ----------------
-  # Needs: --intrusive AND scope.yaml allow_intrusive: true AND typed confirmation.
-  dalfox:       {stage: vulns, kind: binary, tier: intrusive, mode: active, phase: 3, binary: dalfox, source: "go install github.com/hahwul/dalfox/v2@latest"}
-  crlfuzz:      {stage: vulns, kind: binary, tier: intrusive, mode: active, phase: 3, binary: crlfuzz, source: "go install github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest"}
-  sqlmap:       {stage: vulns, kind: binary, tier: intrusive, mode: active, phase: 3, binary: sqlmap, source: "apt: sqlmap"}
+  # ---------------- intrusive tier (Phase 3) ----------------
+  # Exploitation-class (`exploitation: true`) tools are never selected
+  # automatically, not even in full mode: only an explicit `--tools <name>` runs
+  # one (docs/09, AGENTS "recon only"). See docs/02 section 2.
+  dalfox:       {stage: vulns, kind: binary, tier: intrusive, mode: active, phase: 3, binary: dalfox, exploitation: true, source: "go install github.com/hahwul/dalfox/v2@latest", notes: "XSS exploitation. Only via explicit --tools."}
+  crlfuzz:      {stage: vulns, kind: binary, tier: intrusive, mode: active, phase: 3, binary: crlfuzz, exploitation: true, source: "go install github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest", notes: "CRLF injection attack. Only via explicit --tools."}
+  sqlmap:       {stage: vulns, kind: binary, tier: intrusive, mode: active, phase: 3, binary: sqlmap, exploitation: true, source: "apt: sqlmap", notes: "SQL injection exploitation. Only via explicit --tools."}
 
 system_packages: [python3, python3-venv, python3-pip, git, golang-go, libpcap-dev, jq, curl]

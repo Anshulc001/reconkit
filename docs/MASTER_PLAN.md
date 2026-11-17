@@ -649,6 +649,41 @@ D6. 2026-11-17 - `doctor` reports installed/not-installed, path and identity,
     replacing the install-advice wording left after D4. This supersedes the
     display half of 12j and D5 only; the probe itself is unchanged.
 
+D7. 2026-11-17 - Standing pre-approvals established.
+    Reason: "user-requested: reduce batch friction by pre-approving settled
+    decisions." Pre-approved without asking: sudo for installs/system steps;
+    doc mirrors code; regression tests; `tools.yaml` version fields from real
+    output; install-residue removal; `tool_versions` stays removed; interactive
+    `scope.yaml` writes with an explicit `y`; `--no-scope`; `--full` narrowing
+    `--active`; consistency audits. Still requires a ruling: AGENTS scope-rule
+    changes beyond `--no-scope`; exploitation-tools-auto-fire; new CLI flags not
+    in a batch prompt; `scope.yaml` edits outside interactive `[a]`; new
+    dependencies; unfreezing F1/F2; widening active scanning; confidence and
+    host-state changes. Full list: AGENTS.md section 0d. Reviewed by owner
+    2026-11-17. Mirrored in docs/PROGRESS.md Deviations.
+
+D8. 2026-11-17 - Scan modes are one table: stages + tool modes + tiers.
+    Reason: "user-requested: unify scan-mode definitions across CLI help, the
+    interactive prompt, all docs and README." The owner's table is the source
+    of truth: `passive` = subs+dns / passive tools / core (+opt_in with
+    `--include-noisy`); `active` = subs+dns+live / passive+active / core
+    (+opt_in); `full` = all seven stages / passive+active / core+opt_in+
+    intrusive. Implemented as `MODE_STAGES` + `MODE_TOOLS` in `engine.py`;
+    `_select()` reads them, and the CLI help strings and interactive legend are
+    generated from them. Two disclosed behaviour changes: (a) CLI `--active`
+    narrows from all stages to subs+dns+live (matching the interactive prompt);
+    (b) `--full` is new and implies `--active` and `--include-noisy`, so the
+    opt_in tier is no longer skipped under it. Safety pre-ruling: a new
+    `tools.yaml` field `exploitation: true` marks sqlmap, dalfox and crlfuzz;
+    the engine skips any such tool in every mode unless it is named with
+    `--tools`, preserving AGENTS "recon only - no exploitation". No intrusive
+    tool has an adapter in this build, so full mode still reports `no adapter
+    yet (phase 3)` for them. Also in this batch: scope pre-flight warning,
+    `--no-scope` + `scan_runs.scope_mode` (schema 6), `--only-alive` /
+    `--only-states` / `--status-codes` filters, `--ports` / `--header` /
+    `--user-agent` / `--redact-headers` injectables, the extended interactive
+    Q&A, and the out-of-scope `[a]/[b]/[c]/[d]` prompt.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

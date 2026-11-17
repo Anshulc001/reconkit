@@ -4,7 +4,8 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status: **PART 12 AND PART 13 ARE COMPLETE (2026-11-16).** Part 12 closed on 2026-11-15 (12a-12k). Part 13 - the interactive scan mode, stderr progress and per-domain saved reports - is implemented, tested, self-reviewed (S1-S7) and committed, with docs written first. Phase 1 of the same session (the `docs/tool_manuals/` library) is closed in `8dc2829`.
+- Status: **MODE UNIFICATION BATCH S1-S7 DONE (2026-11-17).** Scan modes are one table (`MODE_STAGES` + `MODE_TOOLS` in `engine.py`): passive = subs+dns/passive tools/core; active = subs+dns+live/passive+active/core; full = all seven stages/passive+active/core+opt_in+intrusive. `--full` is new (implies `--active` and `--include-noisy`); CLI `--active` narrows to subs+dns+live; `exploitation: true` tools (sqlmap, dalfox, crlfuzz) never auto-run in any mode. Also added: scope pre-flight warning, `--no-scope` + `scan_runs.scope_mode` (schema 6), `--only-alive`/`--only-states`/`--status-codes`, `--ports`/`--header`/`--user-agent`/`--redact-headers`, extended interactive Q&A, out-of-scope `[a/b/c/d]` prompt. Baseline before this batch: 637 passed. Next action: none.
+- Previous status: **PART 12 AND PART 13 ARE COMPLETE (2026-11-16).** Part 12 closed on 2026-11-15 (12a-12k). Part 13 - the interactive scan mode, stderr progress and per-domain saved reports - is implemented, tested, self-reviewed (S1-S7) and committed, with docs written first. Phase 1 of the same session (the `docs/tool_manuals/` library) is closed in `8dc2829`.
 - What Part 13 changed, in one line: a scan command with **no** `-d`/`-l` **and** a real terminal asks five questions and then runs the ordinary scan inputs; a domain file becomes the ordinary `-l` path (one full scan and one `results/<domain>/<UTC stamp>/` folder per domain, `report.txt` + `report.json`); progress now goes to stderr for every mode except `--silent`, including `--json`. Every flag-based invocation is unchanged, including no prompts and no report folders (tests `test_a_flagged_run_never_asks_a_question`, `test_a_listed_run_never_asks_a_question`, `test_a_flagged_run_writes_no_report_folder`).
 - All four owner tasks (2026-11-17) are implemented, tested and committed: D1 `c99eaee`, D2 `6642ee4`, D3 `6a2db4d`, the interactive-mode fix `10b3a48`, Task 4 docs with this entry. Nothing else is queued; Part 13's uncertainties stay under "Open risks".
 - The verification follow-up (2026-11-17) closes the eight findings from the accepted 4-task batch (`F1`-`F8`, report section V-UNEXPECTED) in one commit: `--active` help text, the owner verification commands, five historical pacing markers, the core package docstring, two dead `pyproject` ignores, the AGENTS `config.yaml` row, two tool manuals and the D3 test counts. Documentation and help text only - no behaviour, flag, schema or test change.
@@ -464,6 +465,57 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   footer is reworded (the S1-S7 batch had frozen it pending this ruling), so
   `test_missing_tools_keep_exit_code_zero` and docs/01, docs/02 and docs/08 were
   updated with it.
+
+- **2026-11-17 (S1-S7, D8): scan modes unified.** `MODE_STAGES` and
+  `MODE_TOOLS` in `engine.py` are the only definition of a mode (stages, tool
+  modes, tiers); CLI help, the interactive legend and docs/02 quote them.
+  Deviations disclosed, each owner-approved or pre-approved (D7):
+  (a) **CLI `--active` narrowed** from all seven stages to `subs`, `dns`,
+  `live`, matching the interactive `active` mode; `ports`/`tech`/`urls`/`vulns`
+  now need `--full` or the single-stage commands. Changed test:
+  `test_stage_order_and_tool_rows` (was `ScanOptions(active=True)`, now
+  `full=True`); changed test: `test_full_mode_does_not_request_the_deferred_vulns_stage`
+  became `test_full_mode_requests_every_stage_including_vulns`.
+  (b) **`--full` added** and implies `--active` + `--include-noisy`, so the
+  `opt_in` tier is selectable under it; **exploitation-class tools never fire
+  automatically** in any mode - `tools.yaml` gained `exploitation: true` for
+  `sqlmap`, `dalfox`, `crlfuzz` and the engine skips them unless named with
+  `--tools` (owner pre-ruling, preserves AGENTS "recon only"). Because no
+  intrusive tool has an adapter, full mode records `no adapter yet (phase 3)`
+  for them; no exploitation tool was run. (c) `--no-scope` added as an explicit
+  opt-out of the scope file, not a bypass (AGENTS rule 2 amendment), with a loud
+  warning and `scan_runs.scope_mode = unrestricted_flag`; schema 5 -> 6.
+  (d) Selection-time skip reasons changed: intrusive/opt_in tools are now
+  recorded with `tier not included in <mode> mode` instead of being dropped
+  silently, and an active tool in passive mode reads `tool mode not included in
+  passive mode` instead of `requires --active`. Changed tests:
+  `test_naabu_is_selectable_in_active_mode`,
+  `test_passive_mode_never_runs_naabu_with_or_without_a_scope_file`,
+  `test_tier_gating_and_explicit_intrusive_refusal` (renamed
+  `test_tools_flag_overrides_tier_gating`; it asserted that `--tools intrusive`
+  raised ConfigError, the rule the owner replaced). (e) `--tools` no longer
+  refuses an intrusive name: tier gating is bypassed, the tool-mode gate is not.
+  (f) New flags: `--only-alive`, `--only-states`, `--ports`, `--status-codes`,
+  `--header` (repeatable), `--user-agent`, `--redact-headers/--show-headers`;
+  filters change output only, never the DB. (g) Interactive mode gained the
+  no-scope question, ports, states, status codes, headers, user agent, a
+  two-line plan echo, and the out-of-scope `[a]/[b]/[c]/[d]` prompt; the
+  aggressive question is now skipped for `full` (every stage is already in it).
+  (h) Docs 01/02/03/04/05/08/09, README and AGENTS updated; docs/10 unchanged as
+  instructed. (i) `test_ui` JSON-shape and the four `test_store` migration
+  assertions were updated for `scope_mode` and schema 6 (test-change rule).
+- **2026-11-17 (S1-S7) consistency audit results.** `docs/02` section 2 now
+  carries the "Scan modes (source of truth)" table. Stale text found and fixed
+  in this batch: docs/01 PRD ("this build has no `--ports`/`--full` flags"),
+  docs/02 (stage table said passive includes "passive ports/CDN info"; the
+  `requires --active` skip reason in two places; the `--active` help quote),
+  docs/08 flow 4 step 3 ("no live progress line" - progress has been on stderr
+  since Part 13) and flow 6 step 4 (same `--ports`/`--full` claim), README
+  ("active scans need `--active` **and** a matching `scope.yaml`", and the
+  `live`/`ports`/`run` command-table rows). `grep` for mode rules outside the
+  two dicts finds only `STAGE_ORDER`, `RAW_OUTPUT_DIRS`, single-stage command
+  tuples and the aggressive `{LIVE, PORTS}` addition - all deliberate, none a
+  per-mode rule.
 
 ## Open risks
 

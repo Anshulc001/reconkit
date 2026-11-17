@@ -136,6 +136,10 @@ class RunContext(BaseModel):
     workspace: Path
     mock: bool = False
     env: dict[str, str] = {}
+    # `--header` / `--user-agent` (docs/02 section 3). Adapters that can send a
+    # header apply these; the rest ignore them and the engine warns once.
+    headers: dict[str, str] = {}
+    user_agent: str | None = None
     # docs/05 rule 6: the loaded scope's `in_scope_cidrs` check, handed down by the
     # engine so an adapter can refuse a resolved address without importing `scope`.
     # `None` means "no permission": an adapter that connects to a resolved address

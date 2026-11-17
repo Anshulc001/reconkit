@@ -3,7 +3,7 @@
 A command-line reconnaissance orchestrator for **authorized** security testing. It runs several tools per stage, cross-checks their results, scores confidence by how many tools agree, and tracks what changed between scans in SQLite.
 
 - Natural pace: no speed preset, delay or artificial throttling; tools run at their own rate
-- Passive first: active scans need `--active` **and** a matching `scope.yaml`
+- Passive first: `passive` (subs+dns) by default; `--active` adds `live`; `--full` runs every stage. A `scope.yaml`, when present, is enforced - with no scope file (or with `--no-scope`) active scanning runs unrestricted
 - Multi-tool stages with source attribution (HIGH / MEDIUM / LOW)
 - Host states: ALIVE, DNS_ONLY, SHUT_DOWN, DEAD, tracked across scans
 - Tool inventory, not installation: `reconkit doctor` lists what is installed and what is missing; per-tool sources are in [docs/10_TOOL_SOURCES.md](docs/10_TOOL_SOURCES.md)
@@ -60,10 +60,10 @@ In Git Bash, use `./scripts/bootstrap.sh` and `source .venv/Scripts/activate` in
 |---|---|
 | `passive` / `lite` | Passive subs + dns pipeline for one target; no scope file needed |
 | `subs`, `dns` | Run one passive stage |
-| `live` | ALIVE / DNS_ONLY / SHUT_DOWN / DEAD; needs `--active` + scope |
-| `ports` | Port scan over each adapter's default port set; needs `--active` + scope |
+| `live` | ALIVE / DNS_ONLY / SHUT_DOWN / DEAD; needs `--active` (uses any present scope file) |
+| `ports` | Port scan over each adapter's default port set (`--ports` overrides); needs `--active` |
 | `tech`, `urls`, `vulns` | Stage commands whose adapters are Phase 3; may report no usable tool |
-| `run` | Passive, then active stages; needs `--active` + scope |
+| `run` | `passive` (subs+dns) by default; `--active` = subs+dns+live; `--full` = all seven stages with `opt_in` enabled. The mode table is in [docs/02_CLI_UX.md](docs/02_CLI_UX.md) |
 | `diff` | New, gone, state-changed and port-changed items vs the previous run |
 | `status` | Recent scans (`--json` for scripts) |
 | `doctor` | Tool, version, path, per-stage coverage, system packages, key names |
@@ -72,7 +72,7 @@ In Git Bash, use `./scripts/bootstrap.sh` and `source .venv/Scripts/activate` in
 | `export -d X --format json\|md\|html` | **Phase 3 stub**: exits `1`; no report is written |
 | `scope import` | **Phase 3 stub**: exits `1` |
 
-Scan flags include `--tools`, `--exclude`, `--include-noisy`, `--min-sources`, `--phase-timeout`, `--mock`, `--resume`, `--no-keys`, `--json`, `--no-color`, `-q/--silent`, `-v/--verbose`, and `--config/--scope/--db`. `--json` is available on the scan commands, `doctor`, `diff` and `status`, not on the Phase 3 stubs. There is no flag that skips the scope gate.
+Scan flags include `--active`, `--full`, `--no-scope`, `--tools`, `--exclude`, `--include-noisy`, `--min-sources`, `--phase-timeout`, `--mock`, `--resume`, `--no-keys`, `--only-alive`, `--only-states`, `--ports`, `--status-codes`, `--header`, `--user-agent`, `--redact-headers/--show-headers`, `--json`, `--no-color`, `-q/--silent`, `-v/--verbose`, and `--config/--scope/--db`. `--json` is available on the scan commands, `doctor`, `diff` and `status`, not on the Phase 3 stubs. `--no-scope` does not skip the gate while reading a scope file: it opts out of the file entirely and warns (docs/02 section 3.1). The mode definitions live in one table in [docs/02_CLI_UX.md](docs/02_CLI_UX.md) section 2.
 
 ## Example (real mock run)
 

@@ -332,6 +332,46 @@ def check_target(
     return "BLOCKED (not in scope)"
 
 
+def preflight_warning(target: str, *, path: Path | str | None = None) -> str | None:
+    """The loud block printed before an active scan a present scope file blocks.
+
+    docs/02 section 2: it never stops the run - passive stages still execute and
+    the exit code is decided by the engine - it just says what will happen and
+    how to change it. `None` means the scope file allows this target (or there
+    is no scope file, or `--no-scope` already removed it from the question).
+    """
+    scope_path = _path(path)
+    if not scope_path.exists():
+        return None
+    try:
+        gate = load_scope(scope_path)
+    except (ConfigError, ScopeError) as exc:
+        return f"⚠ scope gate would block active stages for: {target}\n  scope.yaml: {exc}"
+    root = _normalize(target)
+    scope = gate.scope
+    expired = scope.expires is not None and _today(None) > scope.expires
+    blocked = (
+        gate.out_rule(root) is not None
+        or gate.in_rule(root) is None
+        or not scope.allow_active
+        or expired
+    )
+    if not blocked:
+        return None
+    entries = ", ".join(scope.in_scope) or "(empty in_scope)"
+    return "\n".join(
+        [
+            f"⚠ scope gate would block active stages for: {root}",
+            f"  scope.yaml contains: {entries}",
+            "  active stages will be SKIPPED for this target.",
+            "  options:",
+            f"    - add {root} to scope.yaml",
+            "    - pass --no-scope to ignore the scope file and run active stages unrestricted",
+            "    - scan an in-scope target instead",
+        ]
+    )
+
+
 def passive_warning(target: str, *, path: Path | str | None = None) -> str | None:
     """Warn when a passive run targets something outside an existing scope file."""
     scope_path = _path(path)

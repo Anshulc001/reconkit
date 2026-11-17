@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import traceback
 from dataclasses import dataclass
@@ -15,12 +16,19 @@ from dotenv import dotenv_values
 
 from reconkit.config import AppConfig, load_config
 from reconkit.core.runner import validate_target
-from reconkit.core.scope import check_target
+from reconkit.core.scope import (
+    check_target,
+    preflight_warning,
+    scope_present,
+)
+from reconkit.core.scope import (
+    scope_path as resolve_scope_path,
+)
 from reconkit.core.store import configure_redaction, redact
 from reconkit.doctor import collect_report
-from reconkit.engine import STAGE_ORDER, Engine, ExitCode, ScanOptions
+from reconkit.engine import MODE_STAGES, STAGE_ORDER, Engine, ExitCode, ScanOptions
 from reconkit.errors import ConfigError, ScopeError
-from reconkit.models import Stage
+from reconkit.models import HostState, Stage
 from reconkit.ui import (
     REPORT_FIELDS,
     HostRow,
@@ -62,13 +70,54 @@ _SCAN_COMMANDS = (
     "run",
 )
 _ACTIVE_ONLY = frozenset({"live", "ports", "tech", "urls", "vulns"})
-_PASSIVE_STAGES = (Stage.SUBS, Stage.DNS)
-# The --active rule in one sentence (docs/05 rule 2, docs/02 section 3). Kept here
-# so the two scan-command call sites and docs/02 quote the same words.
+# The passive-only stage tuple is the mode table's entry, never a copy.
+_PASSIVE_STAGES = MODE_STAGES["passive"]
+
+
+def _stage_list(mode: str) -> str:
+    """The comma-separated stage list for one mode, straight from the table."""
+    return ", ".join(stage.value for stage in MODE_STAGES[mode])
+
+
+# docs/02 section 2. Each help string states the mode's stages, tool modes and
+# tiers, and is generated from MODE_STAGES so it cannot drift from the engine.
 _ACTIVE_HELP = (
-    "Allow active stages. A scope.yaml, when present, is enforced; "
-    "with no scope file, active scanning is unrestricted."
+    f"Run active stages: {_stage_list('active')}. Passive stages (subs, dns) "
+    "still run. Uses passive and active tools; no intrusive/aggressive tools. "
+    "A scope.yaml, when present, is enforced; with no scope file, active "
+    "scanning is unrestricted."
 )
+_FULL_HELP = (
+    f"Run a full scan: all stages ({_stage_list('full')}). Uses passive, active, "
+    "and intrusive-tier tools (exploitation-class tools still require an "
+    "explicit --tools). Implies --active and --include-noisy."
+)
+_NO_SCOPE_HELP = (
+    "Ignore any scope file and behave as if none existed. Active stages run "
+    "unrestricted; a loud warning is printed and the run records "
+    "scope_mode = unrestricted_flag. scope.yaml is never modified."
+)
+_ONLY_ALIVE_HELP = (
+    'Print only hosts whose state is ALIVE. If none match, print "no ALIVE hosts (N scanned)".'
+)
+_ONLY_STATES_HELP = (
+    "Print only hosts matching one of these comma-separated states: "
+    "ALIVE, DNS_ONLY, SHUT_DOWN, DEAD, UNKNOWN."
+)
+_PORTS_HELP = "Override the default port list for naabu and pyscan. Format: 80,443,8000-8100."
+_STATUS_CODES_HELP = (
+    "Only keep hosts that respond with one of these HTTP status codes. Format: 200,301,302."
+)
+_HEADER_HELP = (
+    "Add an HTTP header to every request made by httpx and pyprobe. Repeatable. "
+    'Format: "Name: Value".'
+)
+_USER_AGENT_HELP = "Override the default User-Agent for httpx and pyprobe."
+_REDACT_HELP = "Hide header values in JSON and UI output (default on)."
+_SHOW_HEADERS_HELP = "Reveal header values in JSON output (overrides --redact-headers)."
+_HEADER_NAME = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
+# The adapters that can carry --header/--user-agent today (docs/09 section 4).
+_HEADER_TOOLS = frozenset({"httpx", "pyprobe"})
 
 
 def _targets(domain: str | None, list_file: Path | None) -> list[str]:
@@ -104,7 +153,7 @@ def _csv(value: str | None) -> tuple[str, ...]:
     return tuple(part.strip() for part in value.split(",") if part.strip())
 
 
-def _stages(command: str, active: bool) -> tuple[Stage, ...]:
+def _stages(command: str, active: bool, full: bool = False) -> tuple[Stage, ...]:
     if command == "subs":
         return (Stage.SUBS,)
     if command == "dns":
@@ -122,12 +171,96 @@ def _stages(command: str, active: bool) -> tuple[Stage, ...]:
     if command == "vulns":
         return (Stage.VULNS,)
     if command == "run":
-        return (
-            (Stage.SUBS, Stage.DNS, Stage.LIVE, Stage.PORTS, Stage.TECH, Stage.URLS, Stage.VULNS)
-            if active
-            else _PASSIVE_STAGES
-        )
+        # The only place `run` decides stages is the mode table (docs/02).
+        mode = "full" if full else ("active" if active else "passive")
+        return MODE_STAGES[mode]
     raise ConfigError(f"unknown command {command!r}")
+
+
+def _ports(value: str | None) -> tuple[int, ...]:
+    """Parse `80,443,8000-8100` into the port tuple `ScanOptions` carries."""
+    if value is None:
+        return ()
+    ports: list[int] = []
+    seen: set[int] = set()
+    for part in value.split(","):
+        item = part.strip()
+        if not item:
+            continue
+        if "-" in item:
+            start_text, _, end_text = item.partition("-")
+            if not start_text.strip().isdigit() or not end_text.strip().isdigit():
+                raise ConfigError(f"invalid port range {item!r}; expected START-END")
+            start, end = int(start_text), int(end_text)
+            if not 1 <= start <= end <= 65535:
+                raise ConfigError(f"port range {item!r} must be within 1-65535")
+            for port in range(start, end + 1):
+                if port not in seen:
+                    seen.add(port)
+                    ports.append(port)
+            continue
+        if not item.isdigit():
+            raise ConfigError(f"invalid port {item!r}")
+        port = int(item)
+        if not 1 <= port <= 65535:
+            raise ConfigError(f"port {port} must be within 1-65535")
+        if port not in seen:
+            seen.add(port)
+            ports.append(port)
+    return tuple(ports)
+
+
+def _states(value: str | None) -> tuple[str, ...]:
+    """Parse `--only-states ALIVE,DNS_ONLY` into validated state names."""
+    if value is None:
+        return ()
+    states: list[str] = []
+    for part in value.split(","):
+        item = part.strip().upper()
+        if not item:
+            continue
+        try:
+            states.append(HostState(item).value)
+        except ValueError:
+            allowed = ", ".join(state.value for state in HostState)
+            raise ConfigError(f"invalid host state {part!r}; expected one of {allowed}") from None
+    return tuple(states)
+
+
+def _status_codes(value: str | None) -> tuple[int, ...]:
+    """Parse `200,301,302`; anything outside 100-599 is a usage error."""
+    if value is None:
+        return ()
+    codes: list[int] = []
+    seen: set[int] = set()
+    for part in value.split(","):
+        item = part.strip()
+        if not item:
+            continue
+        if not item.isdigit():
+            raise ConfigError(f"invalid HTTP status code {item!r}")
+        code = int(item)
+        if not 100 <= code <= 599:
+            raise ConfigError(f"HTTP status code {code} must be within 100-599")
+        if code not in seen:
+            seen.add(code)
+            codes.append(code)
+    return tuple(codes)
+
+
+def _headers(values: list[str] | None) -> tuple[tuple[str, str], ...]:
+    """Parse repeated `--header 'Name: Value'` strings."""
+    pairs: list[tuple[str, str]] = []
+    for raw in values or []:
+        name, sep, value = raw.partition(":")
+        name = name.strip()
+        value = value.strip()
+        if not sep or not _HEADER_NAME.fullmatch(name) or not value:
+            raise ConfigError(f"invalid --header {raw!r}; expected 'Name: Value'")
+        if any(lower == name.lower() for lower, _ in pairs):
+            raise ConfigError(f"duplicate --header {name!r}")
+        pairs.append((name, value))
+    return tuple(pairs)
 
 
 def _configure_redaction() -> None:
@@ -148,18 +281,9 @@ def _configure_redaction() -> None:
     configure_redaction(value for value in values.values() if value is not None)
 
 
-# The interactive mode's three scan modes (docs/02 section 2b). `vulns` is never
-# requested: this build is recon-only, so a `vulns` adapter does not exist.
-_MODE_STAGES: dict[str, tuple[Stage, ...]] = {
-    "passive": (Stage.SUBS, Stage.DNS),
-    "active": (Stage.SUBS, Stage.DNS, Stage.LIVE),
-    "full": (Stage.SUBS, Stage.DNS, Stage.LIVE, Stage.PORTS, Stage.TECH, Stage.URLS),
-}
-
-
 @dataclass(frozen=True)
 class _InteractivePlan:
-    """The five answers, already resolved into the ordinary scan inputs."""
+    """The answers, already resolved into the ordinary scan inputs."""
 
     domain: str | None
     list_file: Path | None
@@ -167,6 +291,21 @@ class _InteractivePlan:
     stages: tuple[Stage, ...]
     active: bool
     fields: tuple[ReportField, ...]
+    full: bool = False
+    no_scope: bool = False
+    ports: tuple[int, ...] = ()
+    status_codes: tuple[int, ...] = ()
+    only_states: tuple[str, ...] = ()
+    headers: tuple[tuple[str, str], ...] = ()
+    user_agent: str | None = None
+
+
+def _tools_label(mode: str) -> str:
+    if mode == "full":
+        return "passive+active+intrusive"
+    if mode == "active":
+        return "passive+active"
+    return "passive only"
 
 
 def _stdin_is_tty() -> bool:
@@ -206,22 +345,104 @@ def _ask_scope() -> Path | None:
     return path
 
 
-def _ask_mode(*, no_color: bool) -> tuple[tuple[Stage, ...], bool]:
-    """Question 3: passive, active or full.
+def _ask_mode(*, no_color: bool) -> tuple[tuple[Stage, ...], bool, str]:
+    """Question 3: passive, active or full (docs/02 section 2b).
 
-    2026-11-17 (owner request): there is no default and no assumed mode. The
-    prompt repeats until one of the three words is typed, so a run can never
-    start on an empty answer with an implicitly chosen mode.
+    The legend is generated from `MODE_STAGES`/`MODE_TOOLS`, so the prompt says
+    exactly what the CLI help and docs/02 say. There is no default and no
+    assumed mode; the prompt repeats until one of the three words is typed.
     """
     while True:
-        answer = str(typer.prompt("Scan mode: passive, active or full", err=True))
+        render_message(
+            "Scan mode:\n"
+            "  passive  — subs + dns stages; passive tools only\n"
+            "  active   — subs + dns + live stages; passive and active tools; "
+            "no intrusive/aggressive tools\n"
+            "  full     — all stages (subs, dns, live, ports, tech, urls, vulns); "
+            "passive, active, and intrusive-tier tools",
+            no_color=no_color,
+        )
+        answer = str(typer.prompt("Choice [passive/active/full]", err=True))
         mode = answer.strip().lower()
-        if mode in _MODE_STAGES:
-            return _MODE_STAGES[mode], mode != "passive"
+        if mode in MODE_STAGES:
+            return MODE_STAGES[mode], mode != "passive", mode
         render_error(
             f"invalid scan mode {answer!r}; expected passive, active or full",
             no_color=no_color,
         )
+
+
+def _ask_no_scope(*, no_color: bool) -> bool:
+    """Ask whether to ignore a scope file, with the loud warning and a confirm (y/N)."""
+    if not typer.confirm("Ignore scope file and run unrestricted?", default=False, err=True):
+        return False
+    render_message(
+        "--no-scope: active stages will run WITHOUT scope enforcement; no scope "
+        "file is read, checked, or enforced. The run records "
+        "scope_mode = unrestricted_flag.",
+        no_color=no_color,
+    )
+    return bool(
+        typer.confirm("This disables scope enforcement. Continue?", default=False, err=True)
+    )
+
+
+def _ask_ports() -> tuple[int, ...]:
+    answer = str(
+        typer.prompt("Ports to scan (comma or ranges, blank = default)", default="", err=True)
+    )
+    return _ports(answer.strip() or None)
+
+
+def _ask_only_states(*, no_color: bool) -> tuple[str, ...]:
+    answer = (
+        str(
+            typer.prompt(
+                "Only show ALIVE, all, or custom states? [alive/all/custom]",
+                default="all",
+                err=True,
+            )
+        )
+        .strip()
+        .lower()
+    )
+    if answer in {"all", ""}:
+        return ()
+    if answer == "alive":
+        return (HostState.ALIVE.value,)
+    raw = str(typer.prompt("States (comma list)", default="ALIVE", err=True))
+    states: list[str] = []
+    for part in raw.split(","):
+        value = part.strip().upper()
+        if not value:
+            continue
+        try:
+            states.append(HostState(value).value)
+        except ValueError:
+            render_error(f"invalid host state {part!r}", no_color=no_color)
+    return tuple(states)
+
+
+def _ask_headers() -> tuple[tuple[str, str], ...]:
+    if not typer.confirm("Extra HTTP headers?", default=False, err=True):
+        return ()
+    pairs: list[tuple[str, str]] = []
+    while True:
+        raw = str(typer.prompt("Header", default="", err=True)).strip()
+        if not raw:
+            break
+        name, sep, value = raw.partition(":")
+        if not sep or not _HEADER_NAME.fullmatch(name.strip()) or not value.strip():
+            raise ConfigError(f"invalid header {raw!r}; expected 'Name: Value'")
+        pairs.append((name.strip(), value.strip()))
+    return tuple(pairs)
+
+
+def _ask_user_agent() -> str | None:
+    if not typer.confirm("Custom User-Agent?", default=False, err=True):
+        return None
+    value = str(typer.prompt("User-Agent", default="", err=True)).strip()
+    return value or None
 
 
 def _ask_fields(*, no_color: bool) -> tuple[ReportField, ...]:
@@ -269,23 +490,78 @@ def _ask_aggressive(*, no_color: bool) -> bool:
 
 
 def _interactive_plan(*, no_color: bool) -> _InteractivePlan:
-    """Ask the five questions and resolve them into ordinary scan inputs."""
+    """Ask the questions and resolve them into ordinary scan inputs (docs/02 2b)."""
     domain, list_file = _ask_target()
     scope_path = _ask_scope()
-    stages, active = _ask_mode(no_color=no_color)
+    stages, active, mode = _ask_mode(no_color=no_color)
     fields = _ask_fields(no_color=no_color)
-    aggressive = _ask_aggressive(no_color=no_color)
+    no_scope = active and _ask_no_scope(no_color=no_color)
+    ports: tuple[int, ...] = ()
+    status_codes: tuple[int, ...] = ()
+    only_states: tuple[str, ...] = ()
+    headers: tuple[tuple[str, str], ...] = ()
+    user_agent: str | None = None
+    if active:
+        ports = _ask_ports()
+        only_states = _ask_only_states(no_color=no_color)
+        status_codes = _status_codes(
+            str(
+                typer.prompt(
+                    "Only keep HTTP status codes? (comma, blank = all)", default="", err=True
+                )
+            )
+            or None
+        )
+        headers = _ask_headers()
+        user_agent = _ask_user_agent()
+    aggressive = False
+    if mode != "full":
+        aggressive = _ask_aggressive(no_color=no_color)
     if aggressive:
         wanted = set(stages) | {Stage.LIVE, Stage.PORTS}
         stages = tuple(stage for stage in STAGE_ORDER if stage in wanted)
         active = True
     label = domain if domain is not None else str(list_file)
+    if no_scope:
+        scope_label = "unrestricted (--no-scope)"
+    elif scope_present(scope_path):
+        scope_label = "enforced (scope file)"
+    else:
+        scope_label = "no scope file"
     render_message(
-        f"plan: {label}; stages {', '.join(stage.value for stage in stages)}; "
-        f"active {'yes' if active else 'no'}; fields {len(fields)}",
+        f"plan: {label}; mode {mode}; scope {scope_label}; "
+        f"stages {', '.join(stage.value for stage in stages)}; "
+        f"tools {_tools_label(mode)}; fields {len(fields)}",
         no_color=no_color,
     )
-    return _InteractivePlan(domain, list_file, scope_path, stages, active, fields)
+    inject: list[str] = []
+    if ports:
+        inject.append("ports " + ",".join(str(port) for port in ports))
+    if status_codes:
+        inject.append("status_codes " + ",".join(str(code) for code in status_codes))
+    if only_states:
+        inject.append("states " + ",".join(only_states))
+    if headers:
+        inject.append(f"headers {len(headers)}")
+    if user_agent:
+        inject.append("user_agent custom")
+    if inject:
+        render_message("inject: " + "; ".join(inject), no_color=no_color)
+    return _InteractivePlan(
+        domain,
+        list_file,
+        scope_path,
+        stages,
+        active,
+        fields,
+        full=mode == "full",
+        no_scope=no_scope,
+        ports=ports,
+        status_codes=status_codes,
+        only_states=only_states,
+        headers=headers,
+        user_agent=user_agent,
+    )
 
 
 def _report_error(message: str, code: int, *, no_color: bool, verbose: bool = False) -> int:
@@ -295,6 +571,72 @@ def _report_error(message: str, code: int, *, no_color: bool, verbose: bool = Fa
         message = traceback.format_exc()
     render_error(redact(message), no_color=no_color)
     return code
+
+
+def _no_scope_warning(targets: list[str]) -> str:
+    """The loud block for an active run with `--no-scope` (docs/05 section 3)."""
+    return "\n".join(
+        [
+            "⚠ --no-scope given: active stages will run WITHOUT scope enforcement.",
+            f"  target(s): {', '.join(targets)}",
+            "  no scope file is being read, checked, or enforced.",
+            '  a scan_runs record will be written with scope_mode = "unrestricted_flag".',
+        ]
+    )
+
+
+def _append_scope_entry(path: Path, target: str) -> None:
+    """Add `target` under `in_scope:` without rewriting the file's other text.
+
+    Line-based on purpose: a YAML round-trip would drop the `authorization`
+    comment block and reorder keys (F2 is frozen). Only reached from the
+    interactive `[a]` path, and only after an explicit `y`.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigError(f"cannot read {path}: {exc}") from None
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip().split("#", 1)[0].strip() != "in_scope:":
+            continue
+        insert_at = index + 1
+        while insert_at < len(lines) and lines[insert_at].lstrip().startswith("- "):
+            insert_at += 1
+        lines.insert(insert_at, f"  - {target}")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return
+    raise ConfigError(f"{path} has no 'in_scope:' list to append to")
+
+
+def _ask_out_of_scope(target: str, scope_path: Path, *, no_color: bool) -> tuple[str, str | None]:
+    """The four interactive choices for a target a present scope file blocks."""
+    render_message(
+        f"{target} is not in scope.yaml. Options:\n"
+        f"  [a] add {target} to scope.yaml (modifies scope.yaml)\n"
+        "  [b] ignore scope and run unrestricted (--no-scope)\n"
+        "  [c] scan an in-scope target instead\n"
+        "  [d] abort",
+        no_color=no_color,
+    )
+    answer = str(typer.prompt("Choice [a/b/c/d]", default="d", err=True)).strip().lower()
+    if answer.startswith("a"):
+        if not typer.confirm("This will modify scope.yaml. Proceed?", default=False, err=True):
+            return "abort", None
+        _append_scope_entry(scope_path, target)
+        render_message(f"added {target} to {scope_path}", no_color=no_color)
+        return "proceed", None
+    if answer.startswith("b"):
+        render_message(_no_scope_warning([target]), no_color=no_color)
+        if not typer.confirm("This disables scope enforcement. Continue?", default=False, err=True):
+            return "abort", None
+        return "noscope", None
+    if answer.startswith("c"):
+        replacement = str(typer.prompt("In-scope domain", default="", err=True)).strip()
+        if not replacement:
+            return "abort", None
+        return "retarget", validate_target(replacement)
+    return "abort", None
 
 
 def _run_scan(
@@ -318,6 +660,15 @@ def _run_scan(
     config_path: Path | None,
     scope_path: Path | None,
     db_path: Path | None,
+    full: bool = False,
+    no_scope: bool = False,
+    only_alive: bool = False,
+    only_states: tuple[str, ...] = (),
+    ports: tuple[int, ...] = (),
+    status_codes: tuple[int, ...] = (),
+    headers: tuple[tuple[str, str], ...] = (),
+    user_agent: str | None = None,
+    redact_headers: bool = True,
 ) -> int:
     engine: Engine | None = None
     try:
@@ -332,6 +683,17 @@ def _run_scan(
                 raise ConfigError("interactive scan cancelled") from None
             domain, list_file = plan.domain, plan.list_file
             scope_path = plan.scope_path
+            full = plan.full or full
+            no_scope = plan.no_scope or no_scope
+            only_states = plan.only_states or only_states
+            ports = plan.ports or ports
+            status_codes = plan.status_codes or status_codes
+            headers = plan.headers or headers
+            user_agent = plan.user_agent or user_agent
+        if full:
+            # docs/02 section 2: full implies both, in that order.
+            active = True
+            include_noisy = True
         targets = _targets(domain, list_file)
         config: AppConfig = load_config(config_path)
         is_active = active if plan is None else (plan.active or active)
@@ -339,7 +701,38 @@ def _run_scan(
             raise ConfigError(f"{command} requires --active")
         # docs/02 section 2: the passive-only commands run no active stage, so
         # accepting --active would promise work the command cannot do.
-        stages = plan.stages if plan is not None else _stages(command, is_active)
+        stages = plan.stages if plan is not None else _stages(command, is_active, full)
+        progress_console = make_console(no_color=no_color)
+        if no_scope and not is_active:
+            render_message(
+                "warning: --no-scope has no effect on a passive run; continuing",
+                console=progress_console,
+                no_color=no_color,
+            )
+        elif no_scope and scope_path is not None:
+            render_message(
+                f"warning: --scope {scope_path} ignored because --no-scope was given",
+                console=progress_console,
+                no_color=no_color,
+            )
+        if no_scope and is_active:
+            render_message(_no_scope_warning(targets), console=progress_console, no_color=no_color)
+        # Item 7: an interactive run that a present scope file blocks asks what
+        # to do instead of just refusing. Never runs for the flag path.
+        if plan is not None and len(targets) == 1 and is_active and not no_scope:
+            if preflight_warning(targets[0], path=scope_path) is not None:
+                try:
+                    action, replacement = _ask_out_of_scope(
+                        targets[0], resolve_scope_path(scope_path), no_color=no_color
+                    )
+                except (EOFError, typer.Abort):
+                    raise ConfigError("interactive scan cancelled") from None
+                if action == "abort":
+                    return int(ExitCode.USAGE)
+                if action == "noscope":
+                    no_scope = True
+                elif action == "retarget" and replacement is not None:
+                    targets = [replacement]
         if is_active and all(stage in _PASSIVE_STAGES for stage in stages):
             raise ConfigError(
                 f"{command!r} is passive-only; --active needs: reconkit run -d X --active"
@@ -348,13 +741,17 @@ def _run_scan(
             raise ConfigError("--json accepts one target per invocation; use -d")
         # Progress goes to stderr for every scan, --json included; only --silent
         # suppresses it (docs/02 section 5).
-        progress_console = make_console(no_color=no_color)
         progress = (
             None if silent else (lambda message: render_progress(message, console=progress_console))
         )
         engine = Engine.open(config, db_path=db_path, scope_path=scope_path, progress=progress)
         exit_code = int(ExitCode.SUCCESS)
         for target in targets:
+            # Item 2: loud pre-flight block, stderr only, and the run never stops.
+            if is_active and not no_scope:
+                block = preflight_warning(target, path=scope_path)
+                if block is not None:
+                    render_message(block, console=progress_console, no_color=no_color)
             summary = asyncio.run(
                 engine.run(
                     target,
@@ -364,11 +761,18 @@ def _run_scan(
                         exclude=frozenset(_csv(exclude)),
                         include_noisy=include_noisy,
                         active=is_active,
+                        full=full,
+                        no_scope=no_scope,
                         no_keys=no_keys,
                         mock=mock,
                         phase_timeout=phase_timeout,
                         min_sources=min_sources,
                         resume=resume,
+                        ports=ports,
+                        status_codes=status_codes,
+                        headers=headers,
+                        user_agent=user_agent,
+                        redact_headers=redact_headers,
                     ),
                 )
             )
@@ -385,12 +789,48 @@ def _run_scan(
                 )
                 for item in snapshots
             ]
+            # docs/02 section 3: filters change what is printed, never what is
+            # stored; the JSON document carries the counts.
+            states = {HostState.ALIVE.value} if only_alive else set(only_states)
+            shown = rows
+            if states:
+                shown = [row for row in shown if row.state.value in states]
+            if status_codes:
+                shown = [row for row in shown if row.status_code in status_codes]
+            filter_info: dict[str, object] | None = None
+            if only_alive or only_states or status_codes:
+                filter_info = {
+                    "only_states": sorted(states),
+                    "matched": len(shown),
+                    "total": len(rows),
+                }
+                if status_codes:
+                    filter_info["status_codes"] = list(status_codes)
+            injections: dict[str, object] | None = None
+            if ports or status_codes or headers or user_agent:
+                injections = {
+                    "ports": list(ports),
+                    "status_codes": list(status_codes),
+                    "headers": {
+                        name: ("***" if redact_headers else value) for name, value in headers
+                    },
+                    "user_agent": user_agent,
+                }
+            for name in sorted({result.tool for result in summary.results}):
+                if headers and name not in _HEADER_TOOLS:
+                    render_message(
+                        f"warning: --header not applied to {name} (no -H support)",
+                        console=progress_console,
+                        no_color=no_color,
+                    )
             exit_code = render(
                 summary,
-                rows,
+                shown,
                 json_output=json_output,
                 silent=silent,
                 no_color=no_color,
+                filter_info=filter_info,
+                injections=injections,
             )
             if plan is not None:
                 run_at = datetime.now(UTC)
@@ -458,6 +898,22 @@ def _scan_command(
         bool,
         typer.Option("--active", help=_ACTIVE_HELP),
     ] = False,
+    full: Annotated[bool, typer.Option("--full", help=_FULL_HELP)] = False,
+    no_scope: Annotated[bool, typer.Option("--no-scope", help=_NO_SCOPE_HELP)] = False,
+    only_alive: Annotated[bool, typer.Option("--only-alive", help=_ONLY_ALIVE_HELP)] = False,
+    only_states: Annotated[
+        str | None, typer.Option("--only-states", help=_ONLY_STATES_HELP)
+    ] = None,
+    ports: Annotated[str | None, typer.Option("--ports", help=_PORTS_HELP)] = None,
+    status_codes: Annotated[
+        str | None, typer.Option("--status-codes", help=_STATUS_CODES_HELP)
+    ] = None,
+    header: Annotated[list[str] | None, typer.Option("--header", help=_HEADER_HELP)] = None,
+    user_agent: Annotated[str | None, typer.Option("--user-agent", help=_USER_AGENT_HELP)] = None,
+    redact_headers: Annotated[
+        bool,
+        typer.Option("--redact-headers/--show-headers", help=_REDACT_HELP),
+    ] = True,
     no_keys: Annotated[bool, typer.Option("--no-keys", help="Force free mode.")] = False,
     resume: Annotated[
         bool, typer.Option("--resume", help="Continue the latest unfinished run.")
@@ -485,6 +941,15 @@ def _scan_command(
             phase_timeout=phase_timeout,
             mock=mock,
             active=active,
+            full=full,
+            no_scope=no_scope,
+            only_alive=only_alive,
+            only_states=_states(only_states),
+            ports=_ports(ports),
+            status_codes=_status_codes(status_codes),
+            headers=_headers(header),
+            user_agent=user_agent,
+            redact_headers=redact_headers,
             no_keys=no_keys,
             resume=resume,
             no_color=no_color,
@@ -537,6 +1002,22 @@ def main(
         bool,
         typer.Option("--active", help=_ACTIVE_HELP),
     ] = False,
+    full: Annotated[bool, typer.Option("--full", help=_FULL_HELP)] = False,
+    no_scope: Annotated[bool, typer.Option("--no-scope", help=_NO_SCOPE_HELP)] = False,
+    only_alive: Annotated[bool, typer.Option("--only-alive", help=_ONLY_ALIVE_HELP)] = False,
+    only_states: Annotated[
+        str | None, typer.Option("--only-states", help=_ONLY_STATES_HELP)
+    ] = None,
+    ports: Annotated[str | None, typer.Option("--ports", help=_PORTS_HELP)] = None,
+    status_codes: Annotated[
+        str | None, typer.Option("--status-codes", help=_STATUS_CODES_HELP)
+    ] = None,
+    header: Annotated[list[str] | None, typer.Option("--header", help=_HEADER_HELP)] = None,
+    user_agent: Annotated[str | None, typer.Option("--user-agent", help=_USER_AGENT_HELP)] = None,
+    redact_headers: Annotated[
+        bool,
+        typer.Option("--redact-headers/--show-headers", help=_REDACT_HELP),
+    ] = True,
     no_keys: Annotated[bool, typer.Option("--no-keys", help="Force free mode.")] = False,
     resume: Annotated[
         bool, typer.Option("--resume", help="Continue the latest unfinished run.")
@@ -568,6 +1049,15 @@ def main(
             phase_timeout=phase_timeout,
             mock=mock,
             active=active,
+            full=full,
+            no_scope=no_scope,
+            only_alive=only_alive,
+            only_states=_states(only_states),
+            ports=_ports(ports),
+            status_codes=_status_codes(status_codes),
+            headers=_headers(header),
+            user_agent=user_agent,
+            redact_headers=redact_headers,
             no_keys=no_keys,
             resume=resume,
             no_color=no_color,

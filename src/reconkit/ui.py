@@ -189,18 +189,25 @@ def _tool_document(result: ToolResult) -> dict[str, object]:
     return result.model_dump(mode="json")
 
 
-def summary_document(summary: ScanSummary, hosts: Iterable[HostRow] = ()) -> dict[str, object]:
+def summary_document(
+    summary: ScanSummary,
+    hosts: Iterable[HostRow] = (),
+    *,
+    filter_info: dict[str, object] | None = None,
+    injections: dict[str, object] | None = None,
+) -> dict[str, object]:
     """Build the one-document JSON shape documented in docs/02 section 5."""
 
     rows = list(hosts)
     state_counts: Counter[HostState] = Counter(row.state for row in rows)
     tool_counts: Counter[ToolStatus] = Counter(result.status for result in summary.results)
-    return {
+    document: dict[str, object] = {
         "type": "summary",
         "target": summary.target,
         "exit_code": int(summary.exit_code),
         "resumed": summary.resumed,
         "scope_denied": summary.scope_denied,
+        "scope_mode": summary.scope_mode,
         "warnings": list(summary.warnings),
         "hosts": [_host_document(row) for row in rows],
         "stages": [
@@ -229,15 +236,25 @@ def summary_document(summary: ScanSummary, hosts: Iterable[HostRow] = ()) -> dic
             "tools_timeout": tool_counts[ToolStatus.TIMEOUT],
         },
     }
+    if filter_info is not None:
+        document["filter"] = filter_info
+    if injections is not None:
+        document["injections"] = injections
+    return document
 
 
 def write_json(
-    summary: ScanSummary, hosts: Iterable[HostRow] = (), *, stream: TextIO | None = None
+    summary: ScanSummary,
+    hosts: Iterable[HostRow] = (),
+    *,
+    stream: TextIO | None = None,
+    filter_info: dict[str, object] | None = None,
+    injections: dict[str, object] | None = None,
 ) -> int:
     """Write exactly one JSON document to stdout (or ``stream``) and return the exit code."""
 
     target = stream if stream is not None else sys.stdout
-    document = summary_document(summary, hosts)
+    document = summary_document(summary, hosts, filter_info=filter_info, injections=injections)
     target.write(json.dumps(document, ensure_ascii=False, separators=(",", ":")) + "\n")
     target.flush()
     return int(summary.exit_code)
@@ -689,12 +706,20 @@ def render(
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
     console: Console | None = None,
+    filter_info: dict[str, object] | None = None,
+    injections: dict[str, object] | None = None,
 ) -> int:
     """Render a scan result and return the documented exit code."""
 
     rows = list(hosts)
     if json_output:
-        return write_json(summary, rows, stream=stdout)
+        return write_json(
+            summary,
+            rows,
+            stream=stdout,
+            filter_info=filter_info,
+            injections=injections,
+        )
     if silent:
         return int(summary.exit_code)
 
@@ -704,6 +729,18 @@ def render(
     else:
         if rows:
             target.print(_host_table(rows))
+        elif filter_info is not None and filter_info.get("only_states"):
+            states = filter_info.get("only_states")
+            label = (
+                ", ".join(str(value) for value in states)
+                if isinstance(states, list)
+                else "matching"
+            )
+            target.print(Text(f"no {label} hosts ({filter_info['total']} scanned)", style="yellow"))
+        elif filter_info is not None:
+            target.print(
+                Text(f"no matching hosts ({filter_info['total']} scanned)", style="yellow")
+            )
         else:
             target.print(Text("No hosts found.", style="yellow"))
         if summary.results or summary.skipped:

@@ -59,6 +59,12 @@ class HttpxAdapter(BinaryAdapter):
             "-td",
             "-cdn",
         ]
+        # docs/02 section 3: `--header` / `--user-agent`. Verified against the
+        # real binary: `-H, -header string[]  custom http headers to send`.
+        for name, value in ctx.headers.items():
+            argv += ["-H", f"{name}: {value}"]
+        if ctx.user_agent:
+            argv += ["-H", f"User-Agent: {ctx.user_agent}"]
         for host in hosts:
             argv += ["-u", host]
         return argv

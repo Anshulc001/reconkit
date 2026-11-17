@@ -61,6 +61,56 @@ STAGE_ORDER: tuple[Stage, ...] = (
     Stage.URLS,
     Stage.VULNS,
 )
+
+
+@dataclass(frozen=True)
+class ModeRules:
+    """What one scan mode includes: tool modes plus tiers (docs/02, docs/03).
+
+    `MODE_TOOLS` is the only place the tier/tool-mode rule lives; the CLI, the
+    interactive prompt and every doc quote this table instead of restating it.
+    """
+
+    tool_modes: frozenset[Mode]
+    tiers: frozenset[Tier]
+
+
+# Scan-mode stages, the first of the two mode tables (docs/02 section 2).
+# Every surface that needs "which stages does mode X run" reads this dict.
+MODE_STAGES: dict[str, tuple[Stage, ...]] = {
+    "passive": (Stage.SUBS, Stage.DNS),
+    "active": (Stage.SUBS, Stage.DNS, Stage.LIVE),
+    "full": (Stage.SUBS, Stage.DNS, Stage.LIVE, Stage.PORTS, Stage.TECH, Stage.URLS, Stage.VULNS),
+}
+
+# Scan-mode tool modes and tiers, the second mode table. `opt_in` is added at
+# selection time for `--include-noisy` (and always for full); it is not listed
+# for passive/active because it is a flag, not a mode property.
+MODE_TOOLS: dict[str, ModeRules] = {
+    "passive": ModeRules(
+        tool_modes=frozenset({Mode.PASSIVE}),
+        tiers=frozenset({Tier.CORE}),
+    ),
+    "active": ModeRules(
+        tool_modes=frozenset({Mode.PASSIVE, Mode.ACTIVE}),
+        tiers=frozenset({Tier.CORE}),
+    ),
+    "full": ModeRules(
+        tool_modes=frozenset({Mode.PASSIVE, Mode.ACTIVE}),
+        tiers=frozenset({Tier.CORE, Tier.OPT_IN, Tier.INTRUSIVE}),
+    ),
+}
+
+
+def allowed_tiers(mode: str, *, include_noisy: bool) -> frozenset[Tier]:
+    """The tiers a mode may select; opt_in joins them for --include-noisy/full."""
+
+    tiers = set(MODE_TOOLS[mode].tiers)
+    if include_noisy or mode == "full":
+        tiers.add(Tier.OPT_IN)
+    return frozenset(tiers)
+
+
 # Raw output goes to the stage's own workspace directory when there is one.
 # `dns` has none - the layout is exactly the six documented directories - so it
 # uses `meta`, like the phase-3 `vulns`/`shots` stages (docs/03 section 5, 12a).
@@ -288,18 +338,39 @@ def decide_host_state(
 
 @dataclass(frozen=True)
 class ScanOptions:
-    """The CLI's per-run switches, already parsed."""
+    """The CLI's per-run switches, already parsed.
+
+    `mode` is derived, never stored: the two tables above are the only place a
+    mode's stages, tool modes and tiers are written down. `full` wins over
+    `active` when a caller sets both.
+    """
 
     stages: tuple[Stage, ...] = STAGE_ORDER
     tools: tuple[str, ...] = ()
     exclude: frozenset[str] = frozenset()
     include_noisy: bool = False
     active: bool = False
+    full: bool = False
+    no_scope: bool = False
     no_keys: bool = False
     mock: bool = False
     phase_timeout: float | None = None
     min_sources: int = 1
     resume: bool = False
+    # Injectable scan parameters (docs/02 section 3). `headers` is a tuple of
+    # (name, value) pairs so this frozen dataclass stays hashable.
+    ports: tuple[int, ...] = ()
+    status_codes: tuple[int, ...] = ()
+    headers: tuple[tuple[str, str], ...] = ()
+    user_agent: str | None = None
+    redact_headers: bool = True
+
+    @property
+    def mode(self) -> str:
+        """The `MODE_STAGES`/`MODE_TOOLS` key for this invocation."""
+        if self.full:
+            return "full"
+        return "active" if self.active else "passive"
 
 
 @dataclass
@@ -329,6 +400,8 @@ class ScanSummary:
     exit_code: ExitCode = ExitCode.SUCCESS
     resumed: bool = False
     scope_denied: bool = False
+    # enforced / no_file / unrestricted_flag (docs/04 section 4, schema 6).
+    scope_mode: str = "no_file"
 
     @property
     def results(self) -> list[ToolResult]:
@@ -548,11 +621,16 @@ class Engine:
         )
         target_id = self.store.create_target(target, created_at=self._now())
         self._warnings = []
-        if not opts.active:
-            self._note_passive_warning(target)
+        if not opts.active or opts.no_scope:
+            self._note_passive_warning(target, opts)
 
         scan_key, completed, resumed = self._resume_plan(target_id, opts)
-        summary = ScanSummary(target=target, target_id=target_id, resumed=resumed)
+        summary = ScanSummary(
+            target=target,
+            target_id=target_id,
+            resumed=resumed,
+            scope_mode=self._scope_mode(opts),
+        )
         discovered: set[str] = set()
         alive: set[str] = set()
         if resumed:
@@ -578,13 +656,14 @@ class Engine:
             ip_allowed: Callable[[str], bool] | None = None
             if opts.active and any(spec.mode is Mode.ACTIVE for spec, _ in selected):
                 hosts, dropped, scope_error = await asyncio.to_thread(
-                    self._active_hosts, target, hosts
+                    self._active_hosts, target, hosts, opts
                 )
                 if scope_error is not None:
                     summary.scope_denied = True
+                    self._note_scope_refusal(target, scope_error)
                     selected, skipped = self._skip_active(selected, skipped, scope_error)
                 else:
-                    ip_allowed = await asyncio.to_thread(self._ip_allowed)
+                    ip_allowed = await asyncio.to_thread(self._ip_allowed, opts)
             # docs/05 rule 6: with a scope file present, naabu receives only
             # addresses the engine resolved and verified; with no scope file it
             # runs unrestricted like every other active tool.
@@ -593,6 +672,7 @@ class Engine:
                 stage is Stage.PORTS
                 and not opts.mock
                 and ip_allowed is not None
+                and not opts.no_scope
                 and scope_present(self.scope_path)
                 and any(spec.name == "naabu" for spec, _ in selected)
             ):
@@ -606,6 +686,7 @@ class Engine:
                 params=json.dumps(
                     {
                         "scan_key": scan_key,
+                        "mode": opts.mode,
                         "tools": [spec.name for spec, _ in selected],
                         "mock": opts.mock,
                         "active": opts.active,
@@ -614,6 +695,7 @@ class Engine:
                     }
                 ),
                 started_at=self._now(),
+                scope_mode=summary.scope_mode,
                 secrets=self._secrets,
             )
             for spec, reason in skipped:
@@ -814,13 +896,32 @@ class Engine:
                 kept.append(host)
         return kept
 
+    def _scope_mode(self, opts: ScanOptions) -> str:
+        """The `scan_runs.scope_mode` value for this invocation (docs/04)."""
+        if opts.no_scope:
+            return "unrestricted_flag"
+        return "enforced" if scope_present(self.scope_path) else "no_file"
+
+    def _note_scope_refusal(self, target: str, reason: str) -> None:
+        """docs/02 section 6: the exit-3 sentence an operator can act on."""
+        if "not in scope" in reason or "out of scope" in reason:
+            note = (
+                f"active scan refused: {target} not in scope.yaml. "
+                f"Re-run with --no-scope or add {target} to scope.yaml."
+            )
+        else:
+            note = f"active scan refused: {reason} (re-run with --no-scope to ignore scope.yaml)"
+        if note not in self._warnings:
+            self._warnings.append(note)
+
     def _active_hosts(
-        self, target: str, hosts: list[str]
+        self, target: str, hosts: list[str], opts: ScanOptions
     ) -> tuple[list[str], list[str], str | None]:
-        if not scope_present(self.scope_path):
+        if opts.no_scope or not scope_present(self.scope_path):
             # docs/05 rule 2 (2026-11-17): no scope file means unrestricted
             # active scanning of the operator's targets and everything
-            # discovered under them. No scope object is loaded or derived.
+            # discovered under them. `--no-scope` behaves exactly as if the file
+            # were absent (docs/05 section 3). No scope object is loaded.
             return hosts, [], None
         try:
             gate = load_scope(self.scope_path)
@@ -896,13 +997,15 @@ class Engine:
         if note not in self._warnings:
             self._warnings.append(note)
 
-    def _note_passive_warning(self, target: str) -> None:
+    def _note_passive_warning(self, target: str, opts: ScanOptions) -> None:
         """docs/05 rule 1: warn when a passive run targets outside an existing scope file.
 
         `scope.passive_warning()` returns one or two `warning:`-prefixed lines; the
         UI prefixes each entry itself, so the prefix is stripped here to avoid a
         doubled `warning: warning:`.
         """
+        if opts.no_scope:
+            return
         text = passive_warning(target, path=self.scope_path)
         if text is None:
             return
@@ -913,14 +1016,14 @@ class Engine:
             if note and note not in self._warnings:
                 self._warnings.append(note)
 
-    def _ip_allowed(self) -> Callable[[str], bool] | None:
+    def _ip_allowed(self, opts: ScanOptions) -> Callable[[str], bool] | None:
         """docs/05 rule 6 predicate, from the same scope file the active gate read.
 
         `None` means "no permission": an adapter that connects to a resolved
         address must treat it as a block, so an unreadable scope can only narrow
         what may be contacted, never widen it.
         """
-        if not scope_present(self.scope_path):
+        if opts.no_scope or not scope_present(self.scope_path):
             return allow_all_ip
         try:
             return load_scope(self.scope_path).ip_allowed
@@ -940,13 +1043,21 @@ class Engine:
         return kept, [*skipped, *extra]
 
     async def _select(self, stage: Stage, opts: ScanOptions) -> tuple[Selected, Skipped]:
+        """Apply the mode tables in one place (docs/03 section 5).
+
+        Order matters and is documented: an explicit `--tools <name>` bypasses
+        the tier gate (never the tool-mode gate), and an `exploitation: true`
+        tool never fires automatically in any mode - not even `full`. That is
+        the AGENTS "recon only" boundary expressed as a registry field.
+        """
         if opts.tools:
             unknown = [name for name in opts.tools if name not in self.specs]
             if unknown:
                 raise ConfigError(f"unknown tool(s): {', '.join(unknown)}")
-            intrusive = [name for name in opts.tools if self.specs[name].tier is Tier.INTRUSIVE]
-            if intrusive:
-                raise ConfigError(f"intrusive tool(s) are not available: {', '.join(intrusive)}")
+
+        mode = opts.mode
+        tiers = allowed_tiers(mode, include_noisy=opts.include_noisy)
+        tool_modes = MODE_TOOLS[mode].tool_modes
 
         selected: Selected = []
         skipped: Skipped = []
@@ -957,16 +1068,20 @@ class Engine:
                 continue
             if name in opts.exclude:
                 continue
-            if spec.tier is Tier.INTRUSIVE:
+            # 2026-11-17 pre-ruling: an exploitation-class tool is never
+            # automatic, whatever the tier allowance says.
+            if spec.exploitation and name not in opts.tools:
+                skipped.append((spec, "exploitation tool requires explicit --tools"))
                 continue
-            if spec.tier is Tier.OPT_IN and not opts.include_noisy and name not in opts.tools:
+            if spec.tier not in tiers and name not in opts.tools:
+                skipped.append((spec, f"tier not included in {mode} mode"))
+                continue
+            if spec.mode not in tool_modes:
+                skipped.append((spec, f"tool mode not included in {mode} mode"))
                 continue
             adapter = self.adapters.get(name)
             if adapter is None:
                 skipped.append((spec, f"no adapter yet (phase {spec.phase})"))
-                continue
-            if spec.mode is Mode.ACTIVE and not opts.active:
-                skipped.append((spec, "requires --active"))
                 continue
             if not opts.mock and not await asyncio.to_thread(self._is_installed, adapter):
                 skipped.append((spec, "not installed"))
@@ -1013,11 +1128,13 @@ class Engine:
         ctx = RunContext(
             target=target,
             hosts=hosts,
-            ports=[],
+            ports=list(opts.ports),
             timeout=self.config.timeouts.per_tool_default,
             workspace=workspace.directory,
             mock=opts.mock,
             ip_allowed=ip_allowed,
+            headers=dict(opts.headers),
+            user_agent=opts.user_agent,
         )
 
         async def one(spec: ToolSpec, adapter: type[BaseToolAdapter]) -> None:

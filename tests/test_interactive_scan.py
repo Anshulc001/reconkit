@@ -29,7 +29,7 @@ from reconkit.models import Confidence, HostState, Stage
 
 REPO = Path(__file__).resolve().parent.parent
 
-# The five answers, in order: target, scope file?, [scope path], mode, fields,
+# The passive answers, in order: target, scope file?, [scope path], mode, fields,
 # aggressive?. `n` on the scope question means "no scope file".
 PASSIVE_ANSWERS = "example.com\nn\npassive\nall\nn\n"
 
@@ -125,7 +125,7 @@ def test_a_prompt_that_hits_end_of_input_is_cancelled(
     assert "Traceback" not in result.stderr
 
 
-# ------------------------------------------------------------ the five questions
+# ------------------------------------------------------------ the question series
 
 
 def test_interactive_passive_writes_one_folder_per_domain(
@@ -134,9 +134,15 @@ def test_interactive_passive_writes_one_folder_per_domain(
     """The whole flow, the report files, and their folder layout."""
     config = make_config(tmp_path)
     as_tty(monkeypatch)
+    # The checkout's own ./scope.yaml would otherwise be found at the default
+    # path; this test is about the report folder, not scope.
+    monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(app, interactive_args(config), input=PASSIVE_ANSWERS)
     assert result.exit_code == 0, result.stderr
-    assert "plan: example.com; stages subs, dns; active no" in result.stderr
+    assert (
+        "plan: example.com; mode passive; scope no scope file; stages subs, dns; "
+        "tools passive only" in " ".join(result.stderr.split())
+    )
 
     (domain_dir,) = (tmp_path / "results").iterdir()
     assert domain_dir.name == "example.com"
@@ -201,13 +207,14 @@ def test_the_mode_is_asked_until_a_valid_answer_is_typed(
 
     monkeypatch.setattr(Engine, "run", fake_run)
     as_tty(monkeypatch)
+    monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
         app,
         interactive_args(config),
-        input="example.com\nn\nsideways\n\nactive\nall\nn\n",
+        input="example.com\nn\nsideways\n\nactive\nall\nn\n\nall\n\nn\nn\nn\n",
     )
     assert result.exit_code == 0, result.stderr
-    assert result.stderr.count("Scan mode: passive, active or full") == 3
+    assert result.stderr.count("Choice [passive/active/full]") == 3
     assert "invalid scan mode 'sideways'" in result.stderr
     (options,) = calls
     assert options.stages == (Stage.SUBS, Stage.DNS, Stage.LIVE)
@@ -342,6 +349,7 @@ def test_aggressive_yes_adds_the_ports_stages(
 
     monkeypatch.setattr(Engine, "run", fake_run)
     as_tty(monkeypatch)
+    monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
         app,
         interactive_args(
@@ -381,21 +389,23 @@ def test_aggressive_no_leaves_the_plan_alone(
 ) -> None:
     """Answering `no` adds nothing, so `active` stays subs+dns+live.
 
-    A scope file *is* present at the default location and does not list the
-    target, so the unchanged gate refuses the active stage and the run exits 3.
-    (An absent file would now be unrestricted - docs/05 rule 2, 2026-11-17.)
+    No scope file is present, so the run is unrestricted (docs/05 rule 2).
     """
     config = make_config(tmp_path)
-    present_scope_that_denies(tmp_path, monkeypatch)
     as_tty(monkeypatch)
+    monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
-        app, interactive_args(config), input="example.com\nn\nactive\nall\nn\n"
+        app,
+        interactive_args(config),
+        input="example.com\nn\nactive\nall\nn\n\nall\n\nn\nn\nn\n",
     )
-    assert "plan: example.com; stages subs, dns, live; active yes" in result.stderr
+    assert (
+        "plan: example.com; mode active; scope no scope file; stages subs, dns, live; "
+        "tools passive+active" in " ".join(result.stderr.split())
+    )
     plan_line = result.stderr.split("plan:")[1].splitlines()[0]
     assert Stage.PORTS.value not in plan_line
-    assert result.exit_code == 3
-    assert "scope" in " ".join(result.stderr.split()).lower()
+    assert result.exit_code == 0, result.stderr
 
 
 def test_a_present_scope_file_blocks_an_out_of_scope_interactive_target(
@@ -410,21 +420,27 @@ def test_a_present_scope_file_blocks_an_out_of_scope_interactive_target(
     config = make_config(tmp_path)
     present_scope_that_denies(tmp_path, monkeypatch)
     as_tty(monkeypatch)
+    # full asks no aggressive question; the out-of-scope prompt answers `d`.
     result = CliRunner().invoke(
         app,
         interactive_args(config),
-        input="example.com\nn\nfull\nall\ny\n",
+        input="example.com\nn\nfull\nall\nn\n\nall\n\nn\nn\nd\n",
     )
-    assert result.exit_code == 3
-    messages = " ".join(result.stderr.split()).lower()
-    assert "scope" in messages
-    # No report is lost: passive results are still written for the domain.
-    assert list((tmp_path / "results" / "example.com").iterdir())
+    assert result.exit_code == 2
+    assert "is not in scope.yaml" in result.stderr
+    # Option [d] aborts before any scan: no DB write, no report folder.
+    assert not (tmp_path / "results" / "example.com").exists()
 
 
-def test_full_mode_does_not_request_the_deferred_vulns_stage(
+def test_full_mode_requests_every_stage_including_vulns(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Changed 2026-11-17 from `test_full_mode_does_not_request_the_deferred_vulns_stage`.
+
+    Old: `full` deliberately left `vulns` out. New: the owner's mode table says
+    full = all seven stages, so `vulns` is requested (its tools still skip while
+    they have no adapter).
+    """
     config = make_config(tmp_path)
     calls: list[ScanOptions] = []
 
@@ -436,12 +452,14 @@ def test_full_mode_does_not_request_the_deferred_vulns_stage(
 
     monkeypatch.setattr(Engine, "run", fake_run)
     as_tty(monkeypatch)
+    monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
-        app, ["passive", "--mock", "--config", str(config)], input="example.com\nn\nfull\nall\nn\n"
+        app,
+        ["passive", "--mock", "--config", str(config)],
+        input="example.com\nn\nfull\nall\nn\n\nall\n\nn\nn\n",
     )
     assert result.exit_code == 0, result.stderr
     (options,) = calls
-    assert Stage.VULNS not in options.stages
     assert options.stages == (
         Stage.SUBS,
         Stage.DNS,
@@ -449,7 +467,9 @@ def test_full_mode_does_not_request_the_deferred_vulns_stage(
         Stage.PORTS,
         Stage.TECH,
         Stage.URLS,
+        Stage.VULNS,
     )
+    assert options.full is True and options.active is True
 
 
 def test_interactive_on_an_active_command_with_passive_chosen_is_refused(
@@ -716,3 +736,43 @@ def test_field_zero_is_out_of_range(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     )
     assert result.exit_code == 2
     assert "out of range" in result.stderr
+
+
+# ------------------------------------------------- mode consistency (2026-11-17)
+
+MODE_ANSWERS = {
+    "passive": "example.com\nn\npassive\nall\nn\n",
+    "active": "example.com\nn\nactive\nall\nn\n\nall\n\nn\nn\nn\n",
+    "full": "example.com\nn\nfull\nall\nn\n\nall\n\nn\nn\n",
+}
+
+
+@pytest.mark.parametrize("mode", ["passive", "active", "full"])
+def test_interactive_passive_active_full_match_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    """docs/02 section 2: the interactive answer produces the table's stages."""
+    from reconkit.engine import MODE_STAGES
+
+    config = make_config(tmp_path)
+    calls: list[ScanOptions] = []
+
+    async def fake_run(
+        self: Engine, target: str, options: ScanOptions | None = None
+    ) -> ScanSummary:
+        calls.append(options or ScanOptions())
+        return ScanSummary(target=target, target_id=1)
+
+    monkeypatch.setattr(Engine, "run", fake_run)
+    as_tty(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, interactive_args(config), input=MODE_ANSWERS[mode])
+    assert result.exit_code == 0, result.stderr
+    (options,) = calls
+    assert options.stages == MODE_STAGES[mode]
+    assert options.mode == mode
+    assert options.active is (mode != "passive")
+    assert options.full is (mode == "full")
+    plan = " ".join(result.stderr.split())
+    assert f"mode {mode}" in plan
+    assert ", ".join(stage.value for stage in MODE_STAGES[mode]) in plan

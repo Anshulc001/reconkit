@@ -25,6 +25,8 @@ from reconkit.core.scope import ScopeGate
 from reconkit.core.store import REDACTED, Store
 from reconkit.core.workspace import Workspace
 from reconkit.engine import (
+    MODE_STAGES,
+    MODE_TOOLS,
     STAGE_ORDER,
     DnsSignal,
     Engine,
@@ -32,6 +34,7 @@ from reconkit.engine import (
     HostEvidence,
     ScanOptions,
     ScanSummary,
+    allowed_tiers,
     confidence_for,
     decide_host_state,
 )
@@ -144,6 +147,7 @@ def tool(
     tier: Tier = Tier.CORE,
     mode: Mode = Mode.PASSIVE,
     keys: tuple[ToolKey, ...] = (),
+    exploitation: bool = False,
 ) -> ToolSpec:
     return ToolSpec(
         name=name,
@@ -153,6 +157,7 @@ def tool(
         mode=mode,
         phase=2,
         keys=keys,
+        exploitation=exploitation,
     )
 
 
@@ -264,7 +269,14 @@ async def test_stage_order_and_tool_rows(tmp_path: Path) -> None:
     ]
 
 
-async def test_tier_gating_and_explicit_intrusive_refusal(tmp_path: Path) -> None:
+async def test_tools_flag_overrides_tier_gating(tmp_path: Path) -> None:
+    """A named tool runs whatever its tier; an unknown name is still a usage error.
+
+    Changed 2026-11-17 from `test_tier_gating_and_explicit_intrusive_refusal`:
+    the old test asserted that `--tools intrusive` raised ConfigError, which is
+    exactly the rule the owner replaced (an explicit name now bypasses tier
+    gating). Tier gating without a name is asserted here too.
+    """
     rec = Recorder()
     specs = {
         "core": tool("core", Stage.SUBS),
@@ -287,10 +299,12 @@ async def test_tier_gating_and_explicit_intrusive_refusal(tmp_path: Path) -> Non
     )
     assert rec.names[-2:] == ["core", "noisy"]
 
-    with pytest.raises(ConfigError, match="intrusive"):
-        await make_engine(tmp_path / "third", specs, adapters).run(
-            "example.com", ScanOptions(tools=("intrusive",), mock=True)
-        )
+    engine = make_engine(tmp_path / "third", specs, adapters)
+    await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), tools=("intrusive",), mock=True)
+    )
+    assert rec.names[-1] == "intrusive"
+
     with pytest.raises(ConfigError, match="unknown"):
         await make_engine(tmp_path / "fourth", specs, adapters).run(
             "example.com", ScanOptions(tools=("missing",), mock=True)
@@ -355,7 +369,9 @@ async def test_naabu_is_selectable_in_active_mode(tmp_path: Path) -> None:
         Stage.PORTS, ScanOptions(active=False, tools=["pyscan", "naabu"])
     )
     assert passive == []
-    assert {reason for _spec, reason in passive_skipped} == {"requires --active"}
+    assert {reason for _spec, reason in passive_skipped} == {
+        "tool mode not included in passive mode"
+    }
 
 
 async def test_an_uninstalled_tool_is_skipped_and_the_others_still_run(tmp_path: Path) -> None:
@@ -2527,7 +2543,7 @@ async def test_scope_file_skips_naabu_when_no_target_verifies(tmp_path: Path) ->
 async def test_passive_mode_never_runs_naabu_with_or_without_a_scope_file(
     tmp_path: Path,
 ) -> None:
-    """(e) Passive mode: naabu skipped in both scope modes ("requires --active")."""
+    """(e) Passive mode: naabu skipped in both scope modes (tool mode excluded)."""
     rec = Recorder()
 
     async def resolve(host: str) -> list[str]:
@@ -2539,4 +2555,135 @@ async def test_passive_mode_never_runs_naabu_with_or_without_a_scope_file(
             Stage.PORTS, ScanOptions(active=False, tools=("naabu",))
         )
         assert selected == []
-        assert [(spec.name, reason) for spec, reason in skipped] == [("naabu", "requires --active")]
+        assert [(spec.name, reason) for spec, reason in skipped] == [
+            ("naabu", "tool mode not included in passive mode")
+        ]
+
+
+# ---------------------------------------------------------------- scan modes (2026-11-17)
+
+DENYING_SCOPE = """\
+authorization: "engagement 2026-11"
+in_scope:
+  - other.example
+allow_active: true
+"""
+
+
+def test_mode_stages_and_mode_tools_dicts_are_the_single_source_of_truth() -> None:
+    """docs/02 section 2: the two tables are the only place a mode is defined."""
+    assert MODE_STAGES == {
+        "passive": (Stage.SUBS, Stage.DNS),
+        "active": (Stage.SUBS, Stage.DNS, Stage.LIVE),
+        "full": STAGE_ORDER,
+    }
+    assert MODE_TOOLS["passive"].tool_modes == frozenset({Mode.PASSIVE})
+    assert MODE_TOOLS["active"].tool_modes == frozenset({Mode.PASSIVE, Mode.ACTIVE})
+    assert MODE_TOOLS["full"].tool_modes == frozenset({Mode.PASSIVE, Mode.ACTIVE})
+    assert MODE_TOOLS["passive"].tiers == frozenset({Tier.CORE})
+    assert MODE_TOOLS["active"].tiers == frozenset({Tier.CORE})
+    assert MODE_TOOLS["full"].tiers == frozenset({Tier.CORE, Tier.OPT_IN, Tier.INTRUSIVE})
+    assert allowed_tiers("passive", include_noisy=False) == frozenset({Tier.CORE})
+    assert allowed_tiers("passive", include_noisy=True) == frozenset({Tier.CORE, Tier.OPT_IN})
+    assert allowed_tiers("full", include_noisy=False) == MODE_TOOLS["full"].tiers
+    assert ScanOptions(full=True).mode == "full"
+    assert ScanOptions(active=True).mode == "active"
+    assert ScanOptions().mode == "passive"
+
+
+async def test_full_runs_all_tool_modes_and_enables_opt_in_and_intrusive(tmp_path: Path) -> None:
+    rec = Recorder()
+    specs = {
+        "core-passive": tool("core-passive", Stage.VULNS),
+        "core-active": tool("core-active", Stage.VULNS, mode=Mode.ACTIVE),
+        "noisy": tool("noisy", Stage.VULNS, tier=Tier.OPT_IN, mode=Mode.ACTIVE),
+        "intrusive": tool("intrusive", Stage.VULNS, tier=Tier.INTRUSIVE, mode=Mode.ACTIVE),
+    }
+    adapters = {name: adapter(name, Stage.VULNS, rec, records=[]) for name in specs}
+    engine = make_engine(tmp_path, specs, adapters, installed=lambda _adapter: True)
+
+    selected, skipped = await engine._select(Stage.VULNS, ScanOptions(full=True))
+    assert [spec.name for spec, _ in selected] == [
+        "core-passive",
+        "core-active",
+        "noisy",
+        "intrusive",
+    ]
+    assert skipped == []
+
+    selected, skipped = await engine._select(Stage.VULNS, ScanOptions(active=True))
+    assert [spec.name for spec, _ in selected] == ["core-passive", "core-active"]
+    assert {reason for _spec, reason in skipped} == {"tier not included in active mode"}
+
+
+async def test_full_skips_exploitation_tools_unless_named(tmp_path: Path) -> None:
+    """2026-11-17 pre-ruling: `full` never auto-fires an exploitation tool."""
+    rec = Recorder()
+    specs = {
+        "sqlmap-like": tool(
+            "sqlmap-like",
+            Stage.VULNS,
+            tier=Tier.INTRUSIVE,
+            mode=Mode.ACTIVE,
+            exploitation=True,
+        )
+    }
+    adapters = {"sqlmap-like": adapter("sqlmap-like", Stage.VULNS, rec, records=[])}
+    engine = make_engine(tmp_path, specs, adapters, installed=lambda _adapter: True)
+
+    selected, skipped = await engine._select(Stage.VULNS, ScanOptions(full=True))
+    assert selected == []
+    assert [(spec.name, reason) for spec, reason in skipped] == [
+        ("sqlmap-like", "exploitation tool requires explicit --tools")
+    ]
+
+    selected, _skipped = await engine._select(
+        Stage.VULNS, ScanOptions(full=True, tools=("sqlmap-like",))
+    )
+    assert [spec.name for spec, _ in selected] == ["sqlmap-like"]
+
+
+async def test_no_scope_flag_ignores_present_scope_file(tmp_path: Path) -> None:
+    rec = Recorder()
+    specs = {
+        "subs": tool("subs", Stage.SUBS),
+        "live": tool("live", Stage.LIVE, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "subs": adapter("subs", Stage.SUBS, rec, records=[]),
+        "live": adapter("live", Stage.LIVE, rec, records=[]),
+    }
+    engine = make_engine(tmp_path, specs, adapters, scope_text=DENYING_SCOPE)
+    summary = await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE), active=True, no_scope=True, mock=True),
+    )
+    assert "live" in rec.names
+    assert summary.scope_denied is False
+    assert summary.scope_mode == "unrestricted_flag"
+
+
+async def test_scan_writes_enforced_scope_mode_when_a_scope_file_is_used(tmp_path: Path) -> None:
+    rec = Recorder()
+    specs = {"subs": tool("subs", Stage.SUBS)}
+    adapters = {"subs": adapter("subs", Stage.SUBS, rec, records=[])}
+    engine = make_engine(tmp_path, specs, adapters, scope_text=SCOPE)
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
+    assert summary.scope_mode == "enforced"
+    row = engine.store._conn.execute(
+        "SELECT scope_mode FROM scan_runs ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert row["scope_mode"] == "enforced"
+
+
+async def test_scan_writes_no_file_scope_mode_when_no_scope_file(tmp_path: Path) -> None:
+    rec = Recorder()
+    specs = {"subs": tool("subs", Stage.SUBS)}
+    adapters = {"subs": adapter("subs", Stage.SUBS, rec, records=[])}
+    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
+    assert summary.scope_mode == "no_file"
+    row = engine.store._conn.execute(
+        "SELECT scope_mode FROM scan_runs ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert row["scope_mode"] == "no_file"

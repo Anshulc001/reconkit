@@ -16,7 +16,7 @@ from pathlib import Path
 
 from reconkit.errors import ConfigError
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 REDACTED = "***"
 # docs/04 section 5: the stored reason is one line of at most this many characters.
 DETAIL_MAX_CHARS = 200
@@ -151,12 +151,19 @@ _SCHEMA_V5 = """
 ALTER TABLE scan_runs DROP COLUMN speed;
 """
 
+# docs/04 section 4 (2026-11-17): which scope rule a run used. Existing rows
+# predate the column and read as `enforced`; every new run passes the value.
+_SCHEMA_V6 = """
+ALTER TABLE scan_runs ADD COLUMN scope_mode TEXT NOT NULL DEFAULT 'enforced';
+"""
+
 _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, _SCHEMA_V1),
     (2, _SCHEMA_V2),
     (3, _SCHEMA_V3),
     (4, _SCHEMA_V4),
     (5, _SCHEMA_V5),
+    (6, _SCHEMA_V6),
 )
 
 _COUNT_SQL: dict[str, str] = {
@@ -465,13 +472,16 @@ class Store:
         stage: str,
         *,
         params: str = "{}",
+        scope_mode: str = "enforced",
         started_at: str | None = None,
         secrets: Sequence[str] = (),
     ) -> int:
+        if scope_mode not in ("enforced", "no_file", "unrestricted_flag"):
+            raise ValueError(f"invalid scope_mode {scope_mode!r}")
         cursor = self._conn.execute(
-            "INSERT INTO scan_runs (target_id, stage, status, started_at, params_json)"
-            " VALUES (?, ?, 'running', ?, ?)",
-            (target_id, stage, started_at or _utc_now(), redact(params, secrets)),
+            "INSERT INTO scan_runs (target_id, stage, status, started_at, params_json, scope_mode)"
+            " VALUES (?, ?, 'running', ?, ?, ?)",
+            (target_id, stage, started_at or _utc_now(), redact(params, secrets), scope_mode),
         )
         self._commit()
         return int(cursor.lastrowid or 0)

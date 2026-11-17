@@ -121,6 +121,7 @@ def test_json_output_is_one_valid_document_with_documented_schema() -> None:
         "exit_code",
         "resumed",
         "scope_denied",
+        "scope_mode",
         "warnings",
         "hosts",
         "stages",

@@ -9,6 +9,16 @@ Journey overview: **setup -> doctor -> obtain the tools you need -> scope -> pas
 3. Output: table of tools (installed / path / identity), per-stage coverage, system packages, Python version, `scope.yaml` found?, API key names set/unset.
 4. Footer line: `Missing tools: 14. Scans will use the tools that are installed and skip the rest. Per-tool provenance: docs/10_TOOL_SOURCES.md.`
 
+**Choosing a scan mode (2026-11-17).** The first real scan is one of three
+modes, defined in the "Scan modes (source of truth)" table in docs/02 section 2:
+`passive` (default: `subs` + `dns`, passive tools only), `active` (`+ live`,
+passive and active tools), `full` (all seven stages, `opt_in` enabled, implies
+`--active` and `--include-noisy`). Exploitation-class tools never run
+automatically in any mode. Without a target flag on a terminal the same choice
+is question 3 (docs/02 section 2b). With no `scope.yaml` an active/full run is
+unrestricted; with one present, a blocked target prints the pre-flight block and
+exits `3` unless `--no-scope` is given (docs/02 section 3.1).
+
 - **Success:** exit code 0 with warnings listed.
 - **Failure:** Python < 3.11 or an unreadable `config.yaml`: clear message, exit code 1. `doctor` runs on every platform; reconkit installs nothing anywhere, so there is no platform-specific install path (docs/10 §4).
 
@@ -36,7 +46,7 @@ reconkit installs nothing: `install`, `update` and `doctor --fix` were removed o
 
 1. `reconkit passive -d example.com`
 2. The stage runs silently until it finishes (no header or estimated time in this build).
-3. There is no live progress line; `ui.render_progress` is not wired.
+3. Progress lines go to stderr (`subs: running 6 tool(s)`, one line per tool); `--silent` is the only thing that suppresses them (docs/02 section 5).
 4. The wildcard check runs before results are accepted; an `unknown` detection adds a warning instead of a result line.
 5. Result table columns: `Subdomain`, `State`, `Status`, `Ports`, `Sources`, `Trust`, followed by the Tools table.
 6. Footer: counts per state and tool statuses. It does not print workspace or DB paths.
@@ -49,7 +59,7 @@ reconkit installs nothing: `install`, `update` and `doctor --fix` were removed o
 ## Flow 5 - Live and shut-down detection (active)
 
 1. `reconkit live -d example.com --active`
-2. Scope gate runs first when `scope.yaml` is present; blocked = exit 3 and no traffic. With no scope file the stage runs unrestricted against the target (docs/05 rule 2).
+2. Scope gate runs first when `scope.yaml` is present and `--no-scope` was not given; a blocked target gets the pre-flight warning and exit `3` (`active scan refused: ... not in scope.yaml`), and no active traffic is sent. With no scope file, or with `--no-scope`, the stage runs unrestricted against the target (docs/05 rules 2 and 9).
 3. No speed preset: every selected tool starts together and runs at its own pace.
 4. Table columns: `Subdomain`, `State` (ALIVE / DNS_ONLY / SHUT_DOWN / DEAD), `Status`, `Ports`, `Sources`, `Trust`. Title and tech are not rendered in this build.
 5. State changes are not flagged in the stage table; `diff` shows them later as `STATE` rows (`old -> new`).
@@ -61,7 +71,7 @@ reconkit installs nothing: `install`, `update` and `doctor --fix` were removed o
 1. `reconkit ports -d example.com --active` (connect scan, default port set)
 2. Each selected port scanner uses its own default port set; results are merged by host, IP and port.
 3. Table columns: `Subdomain`, `State`, `Status`, `Ports`, `Sources`, `Trust`; the IP, service and per-port state are stored but not rendered as separate columns.
-4. This build has no `--ports`/`--full` flags; the port set comes from the adapters (docs/02).
+4. The port set comes from the adapters by default; `--ports 80,443,8000-8100` overrides it for `pyscan` and `naabu` (docs/02 section 3).
 
 ## Flow 7 - Diff
 

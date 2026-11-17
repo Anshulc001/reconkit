@@ -14,8 +14,8 @@ from typer.testing import CliRunner
 
 from reconkit.cli import app
 from reconkit.core.store import configure_redaction
-from reconkit.engine import Engine, HostSnapshot
-from reconkit.models import Confidence, HostState
+from reconkit.engine import MODE_STAGES, Engine, HostSnapshot, ScanOptions, ScanSummary
+from reconkit.models import Confidence, HostState, Tier
 
 REPO = Path(__file__).resolve().parents[1]
 CLI = REPO / "src" / "reconkit" / "cli.py"
@@ -35,6 +35,16 @@ DOCUMENTED_OPTIONS = {
     "--phase-timeout",
     "--mock",
     "--active",
+    "--full",
+    "--no-scope",
+    "--only-alive",
+    "--only-states",
+    "--ports",
+    "--status-codes",
+    "--header",
+    "--user-agent",
+    "--redact-headers",
+    "--show-headers",
     "--no-keys",
     "--resume",
     "--no-color",
@@ -569,3 +579,265 @@ def test_an_unreadable_dotenv_does_not_break_the_cli(
     monkeypatch.setattr("reconkit.cli.dotenv_values", explode)
     result = CliRunner().invoke(app, scan_args(config))
     assert result.exit_code == 0, result.stderr
+
+
+# ---------------------------------------------------------------- scan modes (2026-11-17)
+
+DENYING_SCOPE_TEXT = """\
+authorization: "engagement 2026-11"
+in_scope:
+  - other.example
+allow_active: true
+"""
+
+
+def mode_args(config: Path, *extra: str) -> list[str]:
+    """`run` on a target, with --mock and the new flags appended."""
+    return ["run", "-d", "example.com", "--mock", "--config", str(config), *extra]
+
+
+def captured_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> list[ScanOptions]:
+    calls: list[ScanOptions] = []
+
+    async def fake_run(
+        self: Engine, target: str, options: ScanOptions | None = None
+    ) -> ScanSummary:
+        calls.append(options or ScanOptions())
+        return ScanSummary(target=target, target_id=1)
+
+    monkeypatch.setattr(Engine, "run", fake_run)
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 0, result.stderr
+    return calls
+
+
+def test_cli_passive_runs_only_passive_stages_and_passive_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (options,) = captured_options(tmp_path, monkeypatch, mode_args(make_config(tmp_path)))
+    assert options.stages == MODE_STAGES["passive"]
+    assert options.active is False
+    assert options.full is False
+    assert options.include_noisy is False
+
+
+def test_cli_active_runs_subs_dns_live_stages_and_passive_active_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (options,) = captured_options(
+        tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--active")
+    )
+    assert options.stages == MODE_STAGES["active"]
+    assert options.active is True
+    assert options.full is False
+
+
+def test_cli_active_does_not_run_intrusive_tier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (options,) = captured_options(
+        tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--active")
+    )
+    assert Tier.INTRUSIVE not in options_tiers(options)
+
+
+def options_tiers(options: ScanOptions) -> frozenset[str]:
+    from reconkit.engine import allowed_tiers
+
+    return frozenset(tier.value for tier in allowed_tiers(options.mode, include_noisy=False))
+
+
+def test_cli_full_runs_all_stages_tool_modes_and_tiers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (options,) = captured_options(tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--full"))
+    assert options.stages == MODE_STAGES["full"]
+    assert options.mode == "full"
+    assert options_tiers(options) == {"core", "opt_in", "intrusive"}
+
+
+def test_full_implies_active(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (options,) = captured_options(tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--full"))
+    assert options.active is True
+
+
+def test_full_implies_include_noisy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (options,) = captured_options(tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--full"))
+    assert options.include_noisy is True
+
+
+def test_run_help_describes_stages_tool_modes_and_tiers() -> None:
+    """The help strings state stages + tool modes + tiers, generated from the table.
+
+    Asserted on the module constants because CliRunner renders at 80 columns and
+    truncates the description column; the rendered help still has to carry both
+    flags.
+    """
+    from reconkit.cli import _ACTIVE_HELP, _FULL_HELP, _NO_SCOPE_HELP
+
+    assert "Run active stages: subs, dns, live." in _ACTIVE_HELP
+    assert "Uses passive and active tools" in _ACTIVE_HELP
+    assert "no intrusive/aggressive tools" in _ACTIVE_HELP
+    assert "Run a full scan: all stages (subs, dns, live, ports, tech, urls, vulns)." in (
+        _FULL_HELP
+    )
+    assert "passive, active, and intrusive-tier tools" in _FULL_HELP
+    assert "Implies --active and --include-noisy" in _FULL_HELP
+    assert "scope_mode = unrestricted_flag" in _NO_SCOPE_HELP
+
+    result = CliRunner().invoke(app, ["run", "--help"])
+    assert result.exit_code == 0
+    for flag in ("--active", "--full", "--no-scope", "--only-alive", "--header"):
+        assert flag in result.stdout
+
+
+def test_full_json_skips_exploitation_tools_and_does_not_tier_skip_opt_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real registry: full never auto-fires sqlmap/dalfox/crlfuzz."""
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, mode_args(config, "--full", "--json"))
+    assert result.exit_code in (0, 5), result.stderr
+    document = json.loads(result.stdout)
+    skipped = {
+        item["tool"]: item["reason"] for stage in document["stages"] for item in stage["skipped"]
+    }
+    for name in ("sqlmap", "dalfox", "crlfuzz"):
+        assert skipped[name] == "exploitation tool requires explicit --tools"
+    # opt_in is enabled by --full: masscan is no longer tier-skipped.
+    assert skipped["masscan"] != "tier not included in full mode"
+    assert [stage["stage"] for stage in document["stages"]] == [
+        "subs",
+        "dns",
+        "live",
+        "ports",
+        "tech",
+        "urls",
+        "vulns",
+    ]
+
+
+def test_only_alive_and_only_states_filter_the_json_hosts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, mode_args(config, "--active", "--only-alive", "--json"))
+    assert result.exit_code == 0, result.stderr
+    document = json.loads(result.stdout)
+    assert document["filter"]["only_states"] == ["ALIVE"]
+    assert document["filter"]["matched"] == len(document["hosts"])
+    assert document["filter"]["total"] >= document["filter"]["matched"]
+    assert all(host["state"] == "ALIVE" for host in document["hosts"])
+
+    result = CliRunner().invoke(
+        app, mode_args(config, "--active", "--only-states", "ALIVE,DNS_ONLY", "--json")
+    )
+    document = json.loads(result.stdout)
+    assert document["filter"]["only_states"] == ["ALIVE", "DNS_ONLY"]
+    assert all(host["state"] in {"ALIVE", "DNS_ONLY"} for host in document["hosts"])
+
+
+def test_status_codes_filter_the_json_hosts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        app, mode_args(config, "--active", "--status-codes", "200", "--json")
+    )
+    assert result.exit_code == 0, result.stderr
+    document = json.loads(result.stdout)
+    assert document["filter"]["status_codes"] == [200]
+    assert all(host["status_code"] == 200 for host in document["hosts"])
+
+
+def test_injections_are_reported_and_headers_are_redacted_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        app,
+        mode_args(
+            config,
+            "--active",
+            "--ports",
+            "80,443",
+            "--status-codes",
+            "200,301",
+            "--header",
+            "X-Test: abc",
+            "--user-agent",
+            "reconkit-test",
+            "--json",
+        ),
+    )
+    assert result.exit_code == 0, result.stderr
+    injections = json.loads(result.stdout)["injections"]
+    assert injections["ports"] == [80, 443]
+    assert injections["status_codes"] == [200, 301]
+    assert injections["headers"] == {"X-Test": "***"}
+    assert injections["user_agent"] == "reconkit-test"
+
+    result = CliRunner().invoke(
+        app,
+        mode_args(config, "--active", "--header", "X-Test: abc", "--show-headers", "--json"),
+    )
+    assert json.loads(result.stdout)["injections"]["headers"] == {"X-Test": "abc"}
+
+
+def test_ports_injection_reaches_the_port_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, mode_args(config, "--full", "--ports", "80,443", "--json"))
+    assert result.exit_code in (0, 5), result.stderr
+    # pyscan runs in mock and must see exactly the injected ports; its mock
+    # fixture output is parsed unchanged, so the proof is the run params.
+    document = json.loads(result.stdout)
+    assert document["injections"]["ports"] == [80, 443]
+
+
+def test_no_scope_flag_overrides_a_scope_path_and_records_the_flag(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    scope = tmp_path / "denying.yaml"
+    scope.write_text(DENYING_SCOPE_TEXT, encoding="utf-8")
+    result = CliRunner().invoke(
+        app,
+        mode_args(config, "--active", "--no-scope", "--scope", str(scope), "--json"),
+    )
+    assert result.exit_code == 0, result.stderr
+    assert f"--scope {scope} ignored because --no-scope was given" in " ".join(
+        result.stderr.split()
+    )
+    document = json.loads(result.stdout)
+    assert document["scope_mode"] == "unrestricted_flag"
+    assert document["scope_denied"] is False
+
+
+def test_no_scope_in_passive_mode_warns_and_continues(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    result = CliRunner().invoke(app, mode_args(config, "--no-scope"))
+    assert result.exit_code == 0, result.stderr
+    assert "no effect on a passive run" in result.stderr
+
+
+def test_out_of_scope_non_interactive_warns_and_exits_three(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    scope = tmp_path / "denying.yaml"
+    scope.write_text(DENYING_SCOPE_TEXT, encoding="utf-8")
+    result = CliRunner().invoke(app, mode_args(config, "--active", "--scope", str(scope)))
+    assert result.exit_code == 3, result.stderr
+    assert "⚠ scope gate would block active stages for: example.com" in result.stderr
+    assert "other.example" in result.stderr
+    assert "pass --no-scope" in result.stderr
+    messages = " ".join(result.stderr.split())
+    assert (
+        "active scan refused: example.com not in scope.yaml. "
+        "Re-run with --no-scope or add example.com to scope.yaml."
+    ) in messages

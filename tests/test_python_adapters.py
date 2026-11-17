@@ -37,6 +37,8 @@ def make_ctx(
     ports: list[int] | None = None,
     mock: bool = False,
     ip_allowed: Callable[[str], bool] | None = lambda _ip: True,
+    headers: dict[str, str] | None = None,
+    user_agent: str | None = None,
 ) -> RunContext:
     return RunContext(
         target="example.com",
@@ -46,6 +48,8 @@ def make_ctx(
         workspace=REPO / "workspaces" / "example.com",
         mock=mock,
         ip_allowed=ip_allowed,
+        headers=headers or {},
+        user_agent=user_agent,
     )
 
 
@@ -240,6 +244,27 @@ async def test_pyprobe_normal() -> None:
     assert record.state is HostState.ALIVE
     assert record.status_code == 200
     assert record.title == "Example Domain"
+
+
+async def test_pyprobe_sends_the_injected_headers_and_user_agent() -> None:
+    """docs/02 section 3: `--header` / `--user-agent` reach pyprobe's requests."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, text="ok")
+
+    adapter = PyprobeAdapter(transport=httpx.MockTransport(handler))
+    await adapter.run(
+        make_ctx(
+            hosts=["www.example.com"],
+            headers={"X-Test": "abc"},
+            user_agent="reconkit-test",
+        )
+    )
+    assert seen
+    assert seen[0].headers["X-Test"] == "abc"
+    assert seen[0].headers["User-Agent"] == "reconkit-test"
 
 
 async def test_pyprobe_redirect_is_not_followed() -> None:
