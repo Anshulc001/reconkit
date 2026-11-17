@@ -556,6 +556,58 @@ Verified on this box (`nmap` 7.991 in `/usr/bin`, `rustscan` 2.3.0 in
   the adapter passes no scan type, so a host where nmap is unprivileged gets a
   connect scan and no root is ever required from the operator.
 
+### 4a7. Adapter wave 7 (2026-11-17): subs stage - urlscan, amass, findomain, chaos, github_subdomains
+
+All five are `subs` / `passive` / `core` and return `SubdomainRecord`s. This
+closes the stage: every `subs` tool in `tools.yaml` now has an adapter
+(`dnsreaper` stays unadapted by D15).
+
+| Tool | Invocation | Notes |
+|---|---|---|
+| `urlscan` | `GET https://urlscan.io/api/v1/search/?q=domain:<target>&size=100`, optional `api-key` header | `kind: http`, no binary; names from `results[].page.domain` then `task.domain` |
+| `amass` | `enum -d <target>` (v5 subcommand) | stdout is decorative; only lines that validate as hostnames become records |
+| `findomain` | `-t <target> -q` | bare names on stdout, one per line, no output file |
+| `chaos` | `-d <target> -silent -duc` | **requires `PDCP_API_KEY`**; skipped, not failed, without it |
+| `github_subdomains` | `-d <target> -o <workspace file>` | **requires `GITHUB_TOKEN`**; findings read from `-o`, never the CWD default |
+
+**A key that the tool cannot run without is a selection skip, not a failure.**
+`chaos` exits 1 with `[FTL] PDCP_API_KEY not specified` and
+`github-subdomains` has no keyless path either, so both adapters declare
+`requires_env` (a class attribute next to `needs_root`) and the engine skips
+them at selection with `requires <NAME>`, recorded in `tool_runs` and
+`stages[].skipped`. The reason is not one of the two absence-only gap reasons,
+so the stage keeps running its other tools and the run stays `complete` (D18).
+`--no-keys` skips them the same way. This is deliberately not a runtime
+`ToolStatus.SKIPPED`: an executed non-OK tool counts as failed and would exit 5
+for a credential the operator can supply (the wave-6 lesson, D14).
+
+Verified on this box (urlscan.io search API without a key, amass 5.1.3,
+findomain 11.0.0, chaos 0.5.2, github-subdomains with no version flag):
+
+- **urlscan is `kind: http`; `/usr/bin/urlscan` is a different program** (the
+  Python "parse and display URLs" CLI). The registry row needs no binary, so the
+  adapter never looks at `PATH`. A keyless search returns `results[]` {HTTP 200},
+  and `URLSCAN_API_KEY` is for submissions - the adapter sends it when present
+  and still runs when it is not.
+- **amass v5's stdout is not a name list.** A real `amass enum -d testfire.net`
+  prints a `Session Scope` block (`Session Scope`, `FQDN:`, the target) before any
+  findings, and `amass --version` prints only `v5.1.3` with no program name. The
+  identity probe is therefore `amass enum -h` (banner:
+  `OWASP Amass Project - @owaspamass`) and the parser keeps only lines that pass
+  `validate_host`, so decoration can not become a record. v5 also starts an
+  `amass engine` child process; on this box a 200 s run had not finished, so the
+  findings block is documented from the header shape, not from a completed run.
+- **findomain writes nothing to the CWD** without `-o`/`-u`; a real run printed
+  35 names for testfire.net.
+- **github-subdomains' `-o` default is `<domain>.txt` in the current directory**,
+  so the adapter always passes a workspace path and reads that file
+  (`read_output`), leaving the operator's directory untouched. `-version` is not
+  defined (`flag provided but not defined: -version`), hence the `-h` probe.
+
+`dnsreaper` (D15) is not adapted: no PyPI package, no `setup.py`, no console
+script - it is `main.py` + `requirements.txt` and would need a script-launching
+adapter kind. `subzy` covers takeover; revisit only if that kind is added.
+
 ### 4b. Per-tool support for the injected parameters
 
 | Parameter | `httpx` | `pyprobe` | `pyscan` | `naabu` | Every other adapter |

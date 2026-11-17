@@ -145,6 +145,12 @@ class BaseToolAdapter(ABC):
 
     name: ClassVar[str] = ""
     stage: ClassVar[Stage] = Stage.SUBS
+    # Env vars the tool cannot run without at all (chaos, github-subdomains). The
+    # engine skips such a tool at selection with `requires <NAME>` when the key is
+    # absent, so a keyless run records the reason instead of spawning a binary
+    # that can only fail (pre-approved, D18). Unlike `tools.yaml` `keys`, which
+    # describes an optional upgrade, this is a hard requirement.
+    requires_env: ClassVar[tuple[str, ...]] = ()
 
     def __init__(self, *, fixtures_dir: Path | None = None) -> None:
         self._fixtures_dir = fixtures_dir if fixtures_dir is not None else FIXTURES

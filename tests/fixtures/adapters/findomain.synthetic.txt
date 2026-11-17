@@ -1,0 +1,9 @@
+tv.testfire.net
+ma-all-automation44-alb.testfire.net
+mysotidev.testfire.net
+www.demo.testfire.net
+partners.testfire.net
+tienda.testfire.net
+evil.testfire.net
+www.testfire.net
+demo.testfire.net

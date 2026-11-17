@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from reconkit.adapters.certspotter import CertspotterAdapter
 from reconkit.adapters.crtsh import CrtshAdapter
 from reconkit.adapters.hackertarget import HackertargetAdapter
 from reconkit.adapters.otx import OtxAdapter
+from reconkit.adapters.urlscan import UrlscanAdapter
 from reconkit.models import RunContext, ToolResult, ToolStatus
 
 REPO = Path(__file__).resolve().parents[1]
@@ -22,9 +24,11 @@ FIXTURES = REPO / "tests" / "fixtures"
 ADAPTER_DIR = REPO / "src" / "reconkit" / "adapters"
 
 
-def make_ctx(*, mock: bool = False, env: dict[str, str] | None = None) -> RunContext:
+def make_ctx(
+    *, mock: bool = False, env: dict[str, str] | None = None, target: str = "example.com"
+) -> RunContext:
     return RunContext(
-        target="example.com",
+        target=target,
         timeout=5.0,
         workspace=REPO / "workspaces" / "example.com",
         mock=mock,
@@ -465,3 +469,42 @@ def test_base_contract_is_abstract() -> None:
     assert issubclass(HttpAdapter, BaseToolAdapter)
     with pytest.raises(TypeError):
         BaseToolAdapter()
+
+
+# ------------------------------------------------------ urlscan (wave 7)
+
+
+def test_urlscan_adapter_parses_json() -> None:
+    """One result per scan; the domain comes from page, then task."""
+    adapter = UrlscanAdapter()
+    records = adapter.parse_output(fixture("adapters", "urlscan.synthetic.json"))
+    assert [record.fqdn for record in records] == ["demo.testfire.net", "www.testfire.net"]
+    assert all(record.source == "urlscan" for record in records)
+
+
+def test_urlscan_works_without_key() -> None:
+    """`URLSCAN_API_KEY` is for submissions: a keyless search still runs."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, text=fixture("adapters", "urlscan.synthetic.json"))
+
+    adapter = UrlscanAdapter(transport=httpx.MockTransport(handler))
+    result = asyncio.run(adapter.run(make_ctx(target="testfire.net")))
+    assert result.status is ToolStatus.OK
+    assert fqdns(result) == ["demo.testfire.net", "www.testfire.net"]
+    assert "api-key" not in seen[0].headers
+    assert seen[0].url.params["q"] == "domain:testfire.net"
+
+
+def test_urlscan_sends_the_key_when_set() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, text=fixture("adapters", "urlscan.synthetic.json"))
+
+    adapter = UrlscanAdapter(transport=httpx.MockTransport(handler))
+    asyncio.run(adapter.run(make_ctx(env={"URLSCAN_API_KEY": "secret-key"})))
+    assert seen[0].headers["api-key"] == "secret-key"

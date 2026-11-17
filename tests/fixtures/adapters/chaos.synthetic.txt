@@ -1,0 +1,3 @@
+dev.testfire.net
+stage.testfire.net
+api.testfire.net

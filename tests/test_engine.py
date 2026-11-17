@@ -3164,3 +3164,53 @@ async def test_two_tools_disagreeing_on_the_service_store_no_fingerprint(
     # HIGH, so staying MEDIUM is the proof that nothing was invented.
     stored = [tuple(row) for row in rows(engine.store, "SELECT service, confidence FROM ports")]
     assert stored == [(None, "MEDIUM")]
+
+
+async def test_a_tool_that_cannot_run_without_a_key_is_skipped_not_failed(
+    tmp_path: Path,
+) -> None:
+    """chaos/github-subdomains: no key means no query, so the stage records a skip.
+
+    A runtime `SKIPPED` would count as a failed tool and push the run to exit 5;
+    the key-gating therefore happens at selection (`requires_env`, D18), exactly
+    like masscan's `needs_root`.
+    """
+    rec = Recorder()
+
+    class Keyed(BaseToolAdapter):
+        name = "keyed"
+        stage = Stage.SUBS
+        requires_env = ("PDCP_API_KEY",)
+
+        async def run(self, ctx: RunContext) -> ToolResult:  # pragma: no cover - must not run
+            raise AssertionError("a keyless tool must never be spawned")
+
+        def build_command(self, ctx: RunContext) -> list[str]:
+            raise NotImplementedError
+
+        def parse_output(self, raw: str) -> list[Record]:
+            return []
+
+    specs = {
+        "subs-fake": tool("subs-fake", Stage.SUBS),
+        "keyed": tool("keyed", Stage.SUBS),
+    }
+    adapters: dict[str, type[BaseToolAdapter]] = {
+        "subs-fake": adapter("subs-fake", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "keyed": Keyed,
+    }
+    engine = make_engine(tmp_path, specs, adapters, env={}, installed=lambda _adapter: True)
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,)))
+    assert rec.names == ["subs-fake"]
+    assert [(skip.tool, skip.reason) for skip in summary.skipped] == [
+        ("keyed", "requires PDCP_API_KEY")
+    ]
+    assert summary.exit_code is ExitCode.SUCCESS
+
+    engine_with_key = make_engine(
+        tmp_path / "key", specs, adapters, env={"PDCP_API_KEY": "k"}, installed=lambda _a: True
+    )
+    with_key = await engine_with_key.run("example.com", ScanOptions(stages=(Stage.SUBS,)))
+    # With the key present the tool is selected and runs; the fake adapter there
+    # records nothing, so the proof is that no skip reason is produced.
+    assert "keyed" not in [skip.tool for skip in with_key.skipped]

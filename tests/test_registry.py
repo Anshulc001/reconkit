@@ -124,8 +124,9 @@ def test_unknown_tool_raises_config_error() -> None:
 
 
 def test_listed_tool_without_adapter_raises_config_error() -> None:
+    # `urlscan` gained an adapter in wave 7; `dnsreaper` stays unadapted by D15.
     with pytest.raises(ConfigError, match="no adapter yet"):
-        get_adapter("urlscan")
+        get_adapter("dnsreaper")
 
 
 def test_invalid_yaml_is_a_config_error(tmp_path: Path) -> None:

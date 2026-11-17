@@ -771,6 +771,22 @@ D14. 2026-11-17 - Ports wave: four mechanics the brief and the tools disagreed
     per-file `S314` ignore because it parses only the `-oX` file nmap itself
     wrote.
 
+D15. 2026-11-17 - dnsreaper is not adapted (owner ruling). `pip install
+dnsreaper` has no distribution (`No matching distribution found`), the GitHub
+project has no `setup.py`/`pyproject.toml` and ships `main.py` +
+`requirements.txt`, so driving it needs a checkout plus a script-launching
+adapter kind the contract (http/python/binary) does not have. `subzy` already
+covers subdomain takeover. The tool stays in `tools.yaml` for the record and is
+reported as `no adapter yet`; revisit only if script-launch adapters are added.
+
+D18. 2026-11-17 - A key the tool cannot run without is a selection skip. `chaos`
+exits 1 with `[FTL] PDCP_API_KEY not specified` and `github-subdomains` has no
+keyless path; `tools.yaml` `keys` describes an optional upgrade, so the new
+class attribute `requires_env` marks a hard requirement. The engine skips such a
+tool at selection with `requires <NAME>` (recorded, not a gap, run stays
+complete), the same mechanism as masscan's `needs_root` - not a runtime
+`ToolStatus.SKIPPED`, which counts as a failed tool and exits 5.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

@@ -1155,6 +1155,16 @@ class Engine:
             if spec.needs_root and not running_as_root():
                 skipped.append((spec, "requires root / sudo"))
                 continue
+            # A tool that simply cannot run without a key (chaos,
+            # github-subdomains) is skipped for the same reason: the binary would
+            # start and exit, which is a failed result for a missing credential
+            # the operator can supply (docs/09 section 4a7, pre-approved D18).
+            required = getattr(adapter, "requires_env", ())
+            if required and not opts.no_keys:
+                absent = [name for name in required if not self.env.get(name)]
+                if absent:
+                    skipped.append((spec, f"requires {absent[0]}"))
+                    continue
             if not opts.mock and not await asyncio.to_thread(self._is_installed, adapter):
                 skipped.append((spec, "not installed"))
                 continue

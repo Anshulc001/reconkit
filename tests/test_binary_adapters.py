@@ -78,9 +78,10 @@ def make_ctx(
     mock: bool = False,
     headers: dict[str, str] | None = None,
     user_agent: str | None = None,
+    target: str = "example.com",
 ) -> RunContext:
     return RunContext(
-        target="example.com",
+        target=target,
         hosts=hosts or [],
         ports=ports or [],
         timeout=5.0,
@@ -220,6 +221,14 @@ NO_HOME_NEEDED: dict[str, str] = {
     "masscan": (
         "real `masscan --help` reads config only via -c (never passed); the "
         "adapter writes an -oL file and uses no key"
+    ),
+    "findomain": (
+        "real `findomain -h` lists only target/output/database flags: no config "
+        "file in HOME is read and no key is used"
+    ),
+    "github_subdomains": (
+        "the tool reads its token from -t or GITHUB_TOKEN only; the adapter passes "
+        "-d and -o, so no HOME config path is touched"
     ),
 }
 
@@ -2191,3 +2200,110 @@ def test_ports_adapters_are_registered_with_the_right_stage() -> None:
     assert ADAPTERS["masscan"] is MasscanAdapter
     for name in ("nmap", "rustscan", "smap", "masscan"):
         assert ADAPTERS[name].stage is Stage.PORTS
+
+
+# --------------------------------------------------------- subs (wave 7)
+
+from reconkit.adapters.amass import AmassAdapter  # noqa: E402
+from reconkit.adapters.chaos import ChaosAdapter  # noqa: E402
+from reconkit.adapters.findomain import FindomainAdapter  # noqa: E402
+from reconkit.adapters.github_subdomains import GithubSubdomainsAdapter  # noqa: E402
+
+
+def test_amass_adapter_parses_subdomains() -> None:
+    """Real amass stdout is decorative (`Session Scope` / `FQDN:`); only hosts count."""
+    records = AmassAdapter().parse_output(fixture("adapters", "amass.synthetic.txt"))
+    assert [record.fqdn for record in records] == [
+        "api.testfire.net",
+        "demo.testfire.net",
+        "testfire.net",
+        "www.testfire.net",
+    ]
+    assert all(record.source == "amass" for record in records)
+
+
+def test_amass_uses_v5_subcommand_syntax() -> None:
+    adapter = AmassAdapter(finder=lambda _name: "/usr/bin/amass")
+    command = adapter.build_command(make_ctx(target="testfire.net"))
+    assert command[1:4] == ["enum", "-d", "testfire.net"]
+    assert "-passive" not in command
+
+
+def test_amass_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome(stdout="v5.1.3\n\nOWASP Amass Project - @owaspamass\n"))
+    assert AmassAdapter(finder=lambda _name: "/x").check_installed().installed is True
+    fake_exec(monkeypatch, outcome(stdout="assetfinder 0.1\n"))
+    assert AmassAdapter(finder=lambda _name: "/x").check_installed().installed is False
+
+
+def test_findomain_adapter_parses_plain_subdomains() -> None:
+    records = FindomainAdapter().parse_output(fixture("adapters", "findomain.synthetic.txt"))
+    assert "www.testfire.net" in [record.fqdn for record in records]
+    assert len(records) == 9
+    assert all(record.source == "findomain" for record in records)
+
+
+def test_findomain_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome(stdout="findomain 11.0.0\n"))
+    assert FindomainAdapter(finder=lambda _name: "/x").check_installed().installed is True
+    fake_exec(monkeypatch, outcome(stdout="subfinder v2\n"))
+    assert FindomainAdapter(finder=lambda _name: "/x").check_installed().installed is False
+
+
+def test_chaos_adapter_parses_subdomains() -> None:
+    records = ChaosAdapter().parse_output(fixture("adapters", "chaos.synthetic.txt"))
+    assert [record.fqdn for record in records] == [
+        "dev.testfire.net",
+        "stage.testfire.net",
+        "api.testfire.net",
+    ]
+    assert all(record.source == "chaos" for record in records)
+
+
+def test_chaos_skips_when_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tool cannot run keyless (`[FTL] PDCP_API_KEY not specified`): a skip."""
+    assert ChaosAdapter.requires_env == ("PDCP_API_KEY",)
+    adapter = ChaosAdapter(finder=lambda _name: "/usr/bin/chaos")
+    command = adapter.build_command(make_ctx(target="testfire.net", env={}))
+    assert command[1:] == ["-d", "testfire.net", "-silent", "-duc"]
+
+
+def test_chaos_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(
+        monkeypatch, outcome(stdout="[INF] Current Version: 0.5.2\n chaos.projectdiscovery.io\n")
+    )
+    assert ChaosAdapter(finder=lambda _name: "/x").check_installed().installed is True
+    fake_exec(monkeypatch, outcome(stdout="chaos monkey 1.0\n"))
+    assert ChaosAdapter(finder=lambda _name: "/x").check_installed().installed is False
+
+
+def test_github_subdomains_adapter_parses_output() -> None:
+    records = GithubSubdomainsAdapter().parse_output(
+        fixture("adapters", "github_subdomains.synthetic.txt")
+    )
+    assert [record.fqdn for record in records] == [
+        "dev.testfire.net",
+        "qa.testfire.net",
+        "old.testfire.net",
+    ]
+    assert all(record.source == "github_subdomains" for record in records)
+
+
+def test_github_subdomains_skips_when_no_token(tmp_path: Path) -> None:
+    assert GithubSubdomainsAdapter.requires_env == ("GITHUB_TOKEN",)
+    adapter = GithubSubdomainsAdapter(finder=lambda _name: "/usr/bin/github-subdomains")
+    ctx = make_ctx(target="testfire.net")
+    ctx.workspace = tmp_path
+    command = adapter.build_command(ctx)
+    # `-o` is always passed: the tool's default writes <domain>.txt into the CWD.
+    assert command[3] == "-o"
+    assert Path(command[4]).parent == tmp_path
+
+
+def test_github_subdomains_reads_the_output_file(tmp_path: Path) -> None:
+    adapter = GithubSubdomainsAdapter(finder=lambda _name: "/usr/bin/github-subdomains")
+    ctx = make_ctx(target="testfire.net")
+    ctx.workspace = tmp_path
+    output = tmp_path / f"github-subdomains-{os.getpid()}.txt"
+    output.write_text("dev.testfire.net\n", encoding="utf-8")
+    assert adapter.read_output(ctx) == "dev.testfire.net\n"

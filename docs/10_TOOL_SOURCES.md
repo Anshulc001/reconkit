@@ -60,7 +60,7 @@ anything, because installing is not something reconkit does or asks for.
 | `urlfinder` | urls | Passive URL discovery over several sources | https://github.com/projectdiscovery/urlfinder/releases |
 | `nuclei` | vulns | Template-based takeover and exposure checks | https://github.com/projectdiscovery/nuclei/releases |
 | `subzy` | vulns | Subdomain takeover detection | github.com/PentestPad/subzy |
-| `dnsreaper` | vulns | Subdomain takeover detection from DNS records | https://github.com/punk-security/dnsReaper (source only: no PyPI package) |
+| `dnsreaper` | vulns | **Not adapted (D15):** no PyPI package, no console script, needs `git clone` + `python main.py`; `subzy` covers takeover | https://github.com/punk-security/dnsReaper |
 | `nikto` | vulns | Web server misconfiguration and exposure scan (`opt_in`) | Debian package `nikto` |
 | `ffuf` | vulns | Content and parameter discovery (`opt_in`) | github.com/ffuf/ffuf (v2) |
 | `dalfox` | vulns | XSS scanner (`intrusive`) | github.com/hahwul/dalfox (v2) |

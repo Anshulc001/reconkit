@@ -1,0 +1,36 @@
+{
+  "results": [
+    {
+      "task": {
+        "visibility": "public",
+        "method": "manual",
+        "domain": "demo.testfire.net",
+        "apexDomain": "testfire.net",
+        "time": "2026-11-16T23:05:05.751Z",
+        "uuid": "01a1e69b-4a18-73e7-a937-f2d6d0158d96",
+        "url": "http://demo.testfire.net/"
+      },
+      "page": {
+        "domain": "demo.testfire.net",
+        "url": "http://demo.testfire.net/"
+      }
+    },
+    {
+      "task": {
+        "visibility": "public",
+        "method": "manual",
+        "domain": "www.testfire.net",
+        "apexDomain": "testfire.net",
+        "time": "2026-11-17T01:12:44.018Z",
+        "uuid": "0b3c7f52-2aa1-71c3-8d0e-5f3c1f7d55d1",
+        "url": "https://www.testfire.net/"
+      },
+      "page": {
+        "domain": "www.testfire.net",
+        "url": "https://www.testfire.net/"
+      }
+    }
+  ],
+  "total": 2,
+  "took": 12
+}

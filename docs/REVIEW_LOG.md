@@ -3608,6 +3608,42 @@ install residue. No new feature, no behaviour change, no code-logic change.
   `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` (unchanged
   from the previous batch; no scope edit was made).
 
+## Adapter wave 7: subs stage - urlscan, amass, findomain, chaos, github_subdomains (2026-11-17, D15/D18)
+
+- Docs read / goal: AGENTS (rules 1/5/7), RESUME, docs/09 sections 3/4/4a7, docs/02
+  (flags table), docs/10 (tool table), `docs/tool_manuals/subs.md` (real captures for
+  all five), tools.yaml. Goal: close the `subs` stage and record D15 for dnsreaper.
+- Real evidence, one line each: `urlscan` is `kind: http` - `/usr/bin/urlscan` is the
+  unrelated Python "Parse and display URLs" CLI, and a keyless
+  `GET https://urlscan.io/api/v1/search/?q=domain:testfire.net` returned HTTP 200 with
+  `results[]`; `amass --version` prints only `v5.1.3` (no name), `amass enum -h` carries
+  `OWASP Amass Project - @owaspamass` and exit 0, and a real `amass enum -d testfire.net`
+  printed a `Session Scope` / `FQDN:` header before any finding (200 s run, not completed);
+  `findomain -t testfire.net -q` printed 35 bare names; `chaos -version` ->
+  `[INF] Current Version: 0.5.2` and `chaos -d testfire.net -silent` exits 1 with
+  `[FTL] PDCP_API_KEY not specified` (manual); `github-subdomains -version` ->
+  `flag provided but not defined`, `-h` shows `-o string  output file, default:
+  <domain>.txt` and `t string (required)`.
+- Behaviour: all five return `SubdomainRecord`s. `urlscan` sends `api-key` only when
+  `URLSCAN_API_KEY` is set (search works without it). `amass` = `enum -d <target>`, parser
+  keeps only `validate_host` hits because stdout is decorative. `findomain` = `-t <t> -q`,
+  no `-o`. `chaos` = `-d <t> -silent -duc`. `github_subdomains` = `-d <t> -o
+  <workspace>/github-subdomains-<pid>.txt` and `read_output`.
+- **New rule (D18):** `BaseToolAdapter.requires_env` marks a hard key requirement and the
+  engine skips the tool at selection with `requires <NAME>`. Runtime `SKIPPED` was not
+  used on purpose: it counts as failed and exits 5 (D14 lesson). `--no-keys` behaves the
+  same. A test proves a keyless tool is never spawned and the run still exits 0.
+- Tests: 15 new (795 passed, 780 -> 795): 3 urlscan (parse, keyless run + params, key
+  header), 11 binary/engine (amass parse/v5 syntax/identity, findomain parse/identity,
+  chaos parse/requires_env/identity, github parse/`-o` path/`read_output`) and 1 engine
+  key-gating test. Two existing tests updated: `NO_HOME_NEEDED` gained findomain +
+  github_subdomains with reasons, and `test_listed_tool_without_adapter_raises_config_error`
+  moved from `urlscan` (now adapted) to `dnsreaper`.
+- Gate: 795 passed, ruff clean, 85 files formatted, mypy 57 source files clean.
+  Doctor: urlscan `yes/n/a`, amass `yes/ok`, findomain `yes/ok`, chaos `yes/ok`,
+  github_subdomains `yes/ok`. Deviations: D15 (dnsreaper closed), D18 (requires_env).
+- Next action: Part 2 (dig, massdns, puredns, gowitness, nikto) + masscan sudo proof.
+
 ## Adapter wave 6: ports stage - nmap, rustscan, smap, masscan (2026-11-17, D14)
 
 - Docs read / goal: `AGENTS.md` (rules 1, 5, 7; section 7 recipe), RESUME, `docs/09` sections 3/4/4a6/5,

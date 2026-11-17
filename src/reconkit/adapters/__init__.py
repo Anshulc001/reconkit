@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from reconkit.adapters.amass import AmassAdapter
 from reconkit.adapters.assetfinder import AssetfinderAdapter
 from reconkit.adapters.base import BaseToolAdapter, BinaryAdapter, HttpAdapter
 from reconkit.adapters.cdncheck import CdncheckAdapter
 from reconkit.adapters.certspotter import CertspotterAdapter
+from reconkit.adapters.chaos import ChaosAdapter
 from reconkit.adapters.crtsh import CrtshAdapter
 from reconkit.adapters.dnspython import DnsPythonAdapter
 from reconkit.adapters.dnsx import DnsxAdapter
 from reconkit.adapters.ffuf import FfufAdapter
+from reconkit.adapters.findomain import FindomainAdapter
 from reconkit.adapters.gau import GauAdapter
+from reconkit.adapters.github_subdomains import GithubSubdomainsAdapter
 from reconkit.adapters.gospider import GospiderAdapter
 from reconkit.adapters.hackertarget import HackertargetAdapter
 from reconkit.adapters.hakrawler import HakrawlerAdapter
@@ -33,6 +37,7 @@ from reconkit.adapters.subzy import SubzyAdapter
 from reconkit.adapters.tlsx import TlsxAdapter
 from reconkit.adapters.unfurl import UnfurlAdapter
 from reconkit.adapters.urlfinder import UrlfinderAdapter
+from reconkit.adapters.urlscan import UrlscanAdapter
 from reconkit.adapters.wafw00f import Wafw00fAdapter
 from reconkit.adapters.waybackurls import WaybackurlsAdapter
 from reconkit.adapters.webanalyze import WebanalyzeAdapter
@@ -73,6 +78,11 @@ ADAPTERS: dict[str, type[BaseToolAdapter]] = {
     "rustscan": RustscanAdapter,
     "smap": SmapAdapter,
     "masscan": MasscanAdapter,
+    "urlscan": UrlscanAdapter,
+    "amass": AmassAdapter,
+    "findomain": FindomainAdapter,
+    "chaos": ChaosAdapter,
+    "github_subdomains": GithubSubdomainsAdapter,
 }
 
 __all__ = ["ADAPTERS", "BaseToolAdapter", "BinaryAdapter", "HttpAdapter"]
