@@ -82,10 +82,9 @@ def test_missing_binaries_are_counted_and_http_tools_need_nothing(tmp_path: Path
     assert report.missing == 2
     row = {check.name: check for check in report.tools}
     assert row["alpha"].installed == "yes"
-    assert row["alpha"].version == NO_BINARY
     assert row["alpha"].path == NO_BINARY
     assert row["beta"].installed == MISSING
-    assert row["beta"].version == "-"
+    assert row["beta"].path == "-"
     coverage = {item.stage.name: (item.ready, item.total) for item in report.stages}
     assert coverage["SUBS"] == (1, 2)
     assert coverage["DNS"] == (1, 2)
@@ -107,13 +106,22 @@ def test_wrong_program_is_a_warning_not_a_missing_binary(tmp_path: Path) -> None
     assert "beta" in report.warnings[0]
 
 
-def test_unparsable_version_is_reported_as_unknown(tmp_path: Path) -> None:
+def test_a_doctor_row_and_its_json_object_carry_no_version(tmp_path: Path) -> None:
+    """2026-11-17 (D6): the probe's string decides identity, it is never shown."""
     report = report_for(
         tmp_path,
-        statuses={"beta": InstallStatus(installed=True, version=None, path=tmp_path / "beta")},
+        statuses={"beta": InstallStatus(installed=True, version="1.2.3", path=tmp_path / "beta")},
     )
     row = {check.name: check for check in report.tools}
-    assert row["beta"].version == "unknown"
+    assert row["beta"].installed == "yes"
+    assert not hasattr(row["beta"], "version")
+    stream = io.StringIO()
+    render_doctor(report, json_output=True, stdout=stream)
+    document = json.loads(stream.getvalue())
+    first = document["tools"][0]
+    assert first["tool"] == "alpha"
+    assert set(first) == {"tool", "stage", "tier", "kind", "installed", "path", "identity"}
+    assert "version" not in stream.getvalue()
 
 
 def test_a_tool_without_an_adapter_is_probed_through_its_install_plan(
@@ -131,8 +139,9 @@ def test_a_tool_without_an_adapter_is_probed_through_its_install_plan(
     )
     beta = next(check for check in report.tools if check.name == "beta")
     assert beta.installed == "yes"
-    assert beta.version == "beta 1.2"
     assert beta.path == str(resolved)
+    # The probe's string is the identity signal only; the row has no version field.
+    assert not hasattr(beta, "version")
 
 
 def test_a_failed_plan_probe_is_a_wrong_program_warning(monkeypatch, tmp_path: Path) -> None:
@@ -205,10 +214,12 @@ def test_missing_tools_keep_exit_code_zero(tmp_path: Path) -> None:
     report = report_for(tmp_path)
     stream = io.StringIO()
     assert render_doctor(report, stderr=stream) == 0
-    assert "Missing tools: 2. Install them yourself (apt, go install, or release download)" in (
-        stream.getvalue()
+    text = stream.getvalue()
+    assert (
+        "Missing tools: 2. Scans will use the tools that are installed and skip the rest." in text
     )
-    assert "docs/10_TOOL_SOURCES.md" in stream.getvalue()
+    assert "Per-tool provenance: docs/10_TOOL_SOURCES.md." in text
+    assert "Install them yourself" not in text
     assert "reconkit install --all" not in stream.getvalue()
 
 

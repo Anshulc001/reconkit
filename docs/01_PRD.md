@@ -45,18 +45,18 @@
 ## 6. Core Features
 
 ### Feature 1 - Tool inventory (`doctor`)
-- **Purpose:** Report which registry tools are installed, which version is on disk, and where the missing ones come from - without installing anything (removed 2026-11-17, docs/MASTER_PLAN.md D4).
+- **Purpose:** Report which registry tools are installed and where each one comes from - without installing anything (removed 2026-11-17, docs/MASTER_PLAN.md D4) and without reporting version strings (owner ruling 2026-11-17, docs/MASTER_PLAN.md D6).
 - **Acceptance criteria:**
-  - One row per tool: installed, version, resolved path and identity, with the adapter's own check first and the registry's `version_cmd`/`binary` probe otherwise.
+  - One row per tool: installed, resolved path and identity, with the adapter's own check first and the registry's `version_cmd`/`binary` probe otherwise. The probe's version string feeds the identity check only and is never displayed.
   - A same-named program that fails the identity probe is reported as `wrong program`, never as installed.
-  - A missing tool is reported by count, with the instruction to install it yourself (apt, `go install`, or release download) and a pointer to the per-tool table in docs/10_TOOL_SOURCES.md.
+  - A missing tool is reported by count, with the one-line statement that scans use what is installed and skip the rest, and a pointer to the per-tool table in docs/10_TOOL_SOURCES.md.
   - Every binary tool in `tools.yaml` carries a non-empty `source:` string; reconkit never executes it.
 - **Edge cases:** tool present but not executable, version command fails, wrong `httpx` program found, a tool installed by hand outside `~/.reconkit/bin`, no tools installed at all.
 
 ### Feature 2 - Doctor
 - **Purpose:** Report readiness per stage.
 - **Acceptance criteria:**
-  - Shows each tool: installed, version, path.
+  - Shows each tool: installed, path, identity (never a version).
   - Shows per-stage coverage (example: `subs 6/9 ready`).
   - Checks system packages (`libpcap-dev`, `jq`), Python version, `scope.yaml` presence, and which API keys are set (names only, never values).
 - **Edge cases:** tool present but not executable, version command fails, wrong `httpx` program found.

@@ -3451,6 +3451,157 @@ install residue. No new feature, no behaviour change, no code-logic change.
      mention the removed command in the past tense; both are evidence, not
      instructions.
 
+## Doctor shows no version D6 (2026-11-17)  (commit subject `feat: doctor shows installed/path/identity only; versions hidden (version_cmd kept for identity checks)`; hash filled by the next commit)
+
+- **Docs read / goal:** `AGENTS.md`, PROGRESS RESUME, the pitfalls table and the
+  last three REVIEW_LOG entries, MASTER_PLAN D4-D5, docs/01 Feature 1-2,
+  docs/02 "Doctor output", docs/08 Flow 1, docs/10 section 3,
+  `docs/tool_manuals/README.md`, `src/reconkit/{doctor,ui}.py`,
+  `core/toolcheck.py`, `adapters/base.py::check_installed`, `tests/test_doctor.py`.
+  Owner ruling (2026-11-17, recorded as MASTER_PLAN **D6**): doctor reports
+  installed/not-installed, the resolved path and the identity verdict - never a
+  version. `version_cmd`/`version_regex` and `installed_version()` stay because
+  they are the identity check that keeps Python's `httpx` out of `httpx_tech`
+  (D5, `01daa8b`).
+- **Baseline before (raw):** `pytest -q` -> `637 passed in 10.04s`;
+  `ruff check .` -> `All checks passed!`; `ruff format --check .` -> `57 files
+  already formatted`; `mypy src/reconkit` -> `Success: no issues found in 29
+  source files`. `git status --short` empty at `31f681e`.
+- **Before, raw (`git stash` to the pre-change tree):**
+  ```
+  ┃ Tool      ┃ Stage ┃ Tier      ┃ Installed ┃ Version   ┃ Path      ┃ Identity ┃
+  │ amass     │ subs  │ core      │ yes       │ v5.1.3    │ /usr/bin… │ ok       │
+  │ assetfin… │ subs  │ core      │ yes       │ unknown   │ /home/ka… │ ok       │
+  {"tool": "amass", ..., "installed": "yes", "version": "v5.1.3",
+   "path": "/usr/bin/amass", "identity": "ok"}
+  tool rows: 48
+  ```
+- **Changes.** docs first: docs/01 Feature 1-2 (purpose, the three criteria and
+  "Shows each tool: installed, path, identity (never a version)"), docs/02
+  "Doctor output" (six columns, the no-version statement and the new footer),
+  docs/08 Flow 1 (row 3 and the footer), docs/10 section 3 (a new **What doctor
+  shows** paragraph, the two "version column" phrases reworded), docs/MASTER_PLAN
+  D6, `docs/tool_manuals/README.md` items 2-3, then code:
+  `doctor.ToolCheck` loses the `version` field (docstring says why), the four
+  `_tool_check` constructors lose `version=`, `ui.doctor_document` loses the
+  `"version"` key and `ui.render_doctor` loses the column, and the
+  `Missing tools:` footer becomes `Missing tools: {N}. Scans will use the tools
+  that are installed and skip the rest. Per-tool provenance:
+  docs/10_TOOL_SOURCES.md.` `core/toolcheck.installed_version()`,
+  `InstallStatus.version`, the D5 rule (a declared pattern that does not match
+  means not installed), `tools.yaml`'s `version_cmd`/`version_regex` fields and
+  every `source:` value are untouched.
+- **After, raw:**
+  ```
+  ┃ Tool            ┃ Stage ┃ Tier      ┃ Installed ┃ Path            ┃ Identity ┃
+  │ amass           │ subs  │ core      │ yes       │ /usr/bin/amass  │ ok       │
+  │ certspotter     │ subs  │ core      │ yes       │ n/a (no binary  │ n/a      │
+  Missing tools: 3. Scans will use the tools that are installed and skip the rest.
+  Per-tool provenance: docs/10_TOOL_SOURCES.md.
+  {"tool":"amass","stage":"subs","tier":"core","kind":"binary",
+   "installed":"yes","path":"/usr/bin/amass","identity":"ok"}
+  tool rows: 48 | keys: ['identity','installed','kind','path','stage','tier','tool']
+  ```
+  `grep -rn '"version"' src/reconkit/doctor.py src/reconkit/ui.py` -> no match
+  (exit 1). `grep -rn 'Install them yourself' src/` -> no match (exit 1).
+  The only `Version column` hits left under `docs/` are the historical ones in
+  REVIEW_LOG/PROGRESS, the manuals README items (reworded to say the column is
+  gone) and the D6 text itself.
+- **Identity still works (the acceptance test for "hid versions, not identity"):**
+  ```
+  # PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp/fakehome .venv/bin/reconkit doctor --json
+  {"tool": "httpx",      "installed": "wrong program", "path": "/usr/bin/httpx", "identity": "failed"}
+  {"tool": "httpx_tech", "installed": "wrong program", "path": "/usr/bin/httpx", "identity": "failed"}
+  # normal PATH
+  {"tool": "httpx",      "installed": "yes", "path": "/home/kali/.reconkit/bin/httpx", "identity": "ok"}
+  {"tool": "httpx_tech", "installed": "yes", "path": "/home/kali/.reconkit/bin/httpx", "identity": "ok"}
+  ```
+  Under the adversarial PATH no version value appears anywhere in the document.
+- **Tests changed (name / old / new / reason).**
+  1. `test_missing_binaries_are_counted_and_http_tools_need_nothing` - old:
+     asserted `row["alpha"].version == NO_BINARY` and `row["beta"].version == "-"`;
+     new: those two lines are gone and `row["beta"].path == "-"` is asserted
+     instead; reason: a row has no version any more, and the path column is what
+     carries `n/a (no binary required)`.
+  2. `test_unparsable_version_is_reported_as_unknown` - **deleted**; replaced by
+     `test_a_doctor_row_and_its_json_object_carry_no_version`. Old: a status with
+     `installed=True, version=None` printed `unknown` in the version cell; new:
+     that cell no longer exists, so the test asserts the row has no `version`
+     attribute, the JSON tool object has exactly the seven documented keys and
+     the word `version` does not appear in the JSON at all; reason: it asserted
+     removed display behaviour, and the replacement guards the new contract.
+  3. `test_a_tool_without_an_adapter_is_probed_through_its_install_plan` - old:
+     `assert beta.version == "beta 1.2"`; new: `assert not hasattr(beta,
+     "version")`; reason: the probe's string now feeds identity only, and
+     `installed == "yes"` + the path already prove the probe ran.
+  4. `test_missing_tools_keep_exit_code_zero` - old: asserted the frozen
+     `Missing tools: 2. Install them yourself (apt, go install, or release
+     download)` string; new: asserts `Missing tools: 2. Scans will use the tools
+     that are installed and skip the rest.` and `Per-tool provenance:
+     docs/10_TOOL_SOURCES.md.`, plus `"Install them yourself" not in text`;
+     reason: the footer is deliberately reworded by D6, and the new negative
+     assertion is what keeps install advice out.
+  5. `test_the_four_probed_tools_extract_their_real_output` - docstring only
+     ("so doctor must show one" -> "so their identity probe reads it"). **No
+     assertion changed.**
+  6. `test_tools_without_a_version_flag_have_no_probe` - docstring only ("the
+     path is the version" -> "they stay presence-only", and the `Usage of ...:`
+     note now says it proves nothing). **No assertion changed.**
+  Suite: 637 before (one deleted, one added) -> `637 passed` after.
+- **S1 checks (raw, twice):**
+  ```
+  pytest -q -> 637 passed in 10.04s   /  637 passed in 10.07s
+  ruff check . -> All checks passed!
+  ruff format --check . -> 57 files already formatted
+  mypy src/reconkit -> Success: no issues found in 29 source files
+  ```
+- **S3 scans (raw):** no `assert`, `shell=True`, `TODO/FIXME/XXX/HACK` or bare
+  `print(` in `src/`; `subprocess` only in `core/runner.py` (the hit is
+  `adapters/base.py:3`, prose in a docstring); `sqlite3` only in `core/store.py`;
+  no adapter imports `store`/`scope`/`ui`/`cli`.
+- **S4 requirement -> test.** Table has no Version column ->
+  `test_a_doctor_row_and_its_json_object_carry_no_version` (plus the raw
+  `reconkit doctor --no-color` run above); JSON drops the version key -> the same
+  test's `set(first)`/`"version" not in` assertions; installed/path/identity
+  still shown -> `test_missing_binaries_are_counted_and_http_tools_need_nothing`,
+  `test_wrong_program_is_a_warning_not_a_missing_binary`;
+  the identity check still rejects Python `httpx` ->
+  `test_the_python_httpx_cli_is_not_httpx_tech`,
+  `test_a_regex_miss_means_not_installed_for_any_tool` and the live adversarial
+  run; scans still use what is installed and skip the rest ->
+  `test_an_uninstalled_tool_is_skipped_and_the_others_still_run`; footer wording
+  -> `test_missing_tools_keep_exit_code_zero`; `installed_version()` still the
+  probe -> `test_a_tool_without_an_adapter_is_probed_through_its_install_plan`,
+  `test_the_four_probed_tools_extract_their_real_output`.
+- **S5 mutation proofs (raw).** (a) Identity bypass - forced
+  `InstallStatus(installed=True, path=status.path)` in `_tool_check`: 4 doctor
+  tests failed (`test_missing_binaries_are_counted_and_http_tools_need_nothing`,
+  `test_wrong_program_is_a_warning_not_a_missing_binary`,
+  `test_a_failed_plan_probe_is_a_wrong_program_warning`,
+  `test_missing_tools_keep_exit_code_zero`) and the adversarial CLI printed
+  `{'tool': 'httpx_tech', ..., 'installed': 'yes', 'path': '/usr/bin/httpx',
+  'identity': 'ok'}` - the exact bug the guards exist for. Restored from a copy;
+  `test_doctor.py` 13 passed. (b) Version key re-added to `doctor_document`: 1
+  failed (`test_a_doctor_row_and_its_json_object_carry_no_version`, at the
+  `set(first)` assertion). Restored; 13 passed; `git status --short` shows only
+  the intended files.
+- **S6 bugs found:** none. The only failure the change produced was the intended
+  contract break in four doctor tests, fixed as listed above.
+- **Requirement met with a scope note:** the batch text said "hide the Version
+  column from doctor output" and also "no version value anywhere in doctor's
+  output/JSON"; removing the field from `ToolCheck` satisfies both, because no
+  other code read it (`grep -rnE '\b(check|status|row)\.version\b' src/` -> only
+  the two removed ui call sites). `InstallStatus.version` is kept: it is the
+  value `installed_version()` returns when the probe matches, and deleting it
+  would change the adapter contract for no visible gain.
+- **Acceptance runs (raw):** `reconkit run -d example.com --mock --scope
+  /tmp/none.yaml --db /tmp/smoke.db --no-color` -> exit 0, `subs` and `dns` ran
+  (`dnspython ok 3`), `10 hosts: 0 ALIVE, 2 DNS_ONLY, 0 SHUT_DOWN, 1 DEAD, 7
+  UNKNOWN | tools: 7 ok, 0 failed, 9 skipped, 0 timeout`. `sha256sum scope.yaml`
+  before the commit:
+  `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` (unchanged
+  from the previous batch; no scope edit was made).
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

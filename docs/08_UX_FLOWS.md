@@ -6,8 +6,8 @@ Journey overview: **setup -> doctor -> obtain the tools you need -> scope -> pas
 
 1. User follows SETUP.md (native Kali/Ubuntu for real tools, or Windows for mock/passive use and `doctor`).
 2. `reconkit doctor`
-3. Output: table of tools (installed/missing + version), per-stage coverage, system packages, Python version, `scope.yaml` found?, API key names set/unset.
-4. Footer line: `Missing tools: 14. Install them yourself (apt, go install, or release download) — per-tool sources in docs/10_TOOL_SOURCES.md. Re-run doctor to confirm.`
+3. Output: table of tools (installed / path / identity), per-stage coverage, system packages, Python version, `scope.yaml` found?, API key names set/unset.
+4. Footer line: `Missing tools: 14. Scans will use the tools that are installed and skip the rest. Per-tool provenance: docs/10_TOOL_SOURCES.md.`
 
 - **Success:** exit code 0 with warnings listed.
 - **Failure:** Python < 3.11 or an unreadable `config.yaml`: clear message, exit code 1. `doctor` runs on every platform; reconkit installs nothing anywhere, so there is no platform-specific install path (docs/10 §4).

@@ -741,7 +741,6 @@ def doctor_document(report: DoctorReport) -> dict[str, object]:
                 "tier": check.tier.value,
                 "kind": check.kind,
                 "installed": check.installed,
-                "version": check.version,
                 "path": check.path,
                 "identity": check.identity,
             }
@@ -794,7 +793,6 @@ def render_doctor(
     table.add_column("Stage", no_wrap=True)
     table.add_column("Tier", no_wrap=True)
     table.add_column("Installed", no_wrap=True)
-    table.add_column("Version")
     table.add_column("Path")
     table.add_column("Identity", no_wrap=True)
     for check in report.tools:
@@ -804,7 +802,6 @@ def render_doctor(
             Text(check.stage.value),
             Text(check.tier.value),
             Text(check.installed, style=style),
-            Text(check.version),
             Text(check.path),
             Text(check.identity),
         )
@@ -850,9 +847,9 @@ def render_doctor(
     if report.missing:
         out.print(
             Text(
-                f"Missing tools: {report.missing}. Install them yourself (apt, go install, "
-                "or release download) — per-tool sources in docs/10_TOOL_SOURCES.md. "
-                "Re-run doctor to confirm.",
+                f"Missing tools: {report.missing}. Scans will use the tools that are "
+                "installed and skip the rest. Per-tool provenance: "
+                "docs/10_TOOL_SOURCES.md.",
                 style="yellow",
             )
         )

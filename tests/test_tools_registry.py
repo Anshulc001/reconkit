@@ -102,7 +102,7 @@ def test_the_seven_version_patterns_extract_their_real_banner(
 def test_the_four_probed_tools_extract_their_real_output(
     tool: str, output: str, expected: str
 ) -> None:
-    """2026-11-17: these four report a version, so doctor must show one."""
+    """2026-11-17: these four report a version, so their identity probe reads it."""
     pattern = load_tools()[tool].version_regex
     assert pattern is not None
     match = re.search(pattern, output)
@@ -114,10 +114,10 @@ def test_the_four_probed_tools_extract_their_real_output(
     "tool", ["github_subdomains", "webanalyze", "waybackurls", "unfurl", "httprobe"]
 )
 def test_tools_without_a_version_flag_have_no_probe(tool: str) -> None:
-    """Their real `-version` prints Go flag usage, so the path is the version.
+    """Their real `-version` prints Go flag usage, so they stay presence-only.
 
-    docs/10 documents this as intended; a `version_cmd` here would put
-    `Usage of ...:` in the Version column (what httprobe used to show).
+    docs/10 documents this as intended; a `version_cmd` here would match
+    `Usage of ...:` and prove nothing about identity (what httprobe used to do).
     """
     spec = load_tools()[tool]
     assert spec.version_cmd is None

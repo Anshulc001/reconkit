@@ -31,14 +31,17 @@ DPKG_INSTALLED = "install ok installed"
 
 @dataclass(frozen=True)
 class ToolCheck:
-    """One tool row: what is on disk and whether it is the expected program."""
+    """One tool row: what is on disk and whether it is the expected program.
+
+    There is no version field: the probe's string feeds the identity decision
+    only and is never shown (2026-11-17, docs/MASTER_PLAN.md D6).
+    """
 
     name: str
     stage: Stage
     tier: Tier
     kind: str
     installed: str
-    version: str
     path: str
     identity: str
 
@@ -173,7 +176,6 @@ def _tool_check(
             tier=spec.tier,
             kind=spec.kind,
             installed=YES,
-            version=NO_BINARY,
             path=NO_BINARY,
             identity=IDENTITY_NA,
         )
@@ -185,7 +187,6 @@ def _tool_check(
             tier=spec.tier,
             kind=spec.kind,
             installed=YES,
-            version=status.version or "unknown",
             path=str(status.path) if status.path is not None else "-",
             identity=IDENTITY_OK,
         )
@@ -196,7 +197,6 @@ def _tool_check(
             tier=spec.tier,
             kind=spec.kind,
             installed=WRONG_PROGRAM,
-            version="-",
             path=str(status.path),
             identity=IDENTITY_FAILED,
         )
@@ -206,7 +206,6 @@ def _tool_check(
         tier=spec.tier,
         kind=spec.kind,
         installed=MISSING,
-        version="-",
         path="-",
         identity=IDENTITY_NA,
     )

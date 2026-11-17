@@ -77,6 +77,13 @@ flag), so `dalfox`, `crlfuzz` and `sqlmap` are listed for completeness only.
 is already on disk. It runs nothing but a tool's own version command and it
 writes nothing.
 
+**What doctor shows.** One row per tool with `installed` (`yes`, `missing` or
+`wrong program`), the resolved `path`, and `identity` (`ok`, `failed` or `n/a`).
+**Version strings are not shown** (owner ruling 2026-11-17,
+docs/MASTER_PLAN.md D6): `version_cmd`/`version_regex` are the identity check,
+and the string they read decides `installed`/`identity` only - the table and
+`doctor --json` carry no version value at all.
+
 **Lookup order.** `~/.reconkit/bin/<binary>` first (the managed copy), then
 `PATH`. The directory is `config.bin_dir()` and is the only definition of the
 path; `adapters.base.managed_bin_dir()` returns the same value. A copy in
@@ -90,7 +97,7 @@ and `installed_version()` runs `version_cmd` as the identity probe, reading
 `stdout`, falling back to `stderr`. With a `version_regex`, the pattern is
 searched in the whole output and the first capture group is the version (the
 whole match when the pattern has none), so `katana`'s ASCII logo and `nuclei`'s
-ANSI `[INF]` line do not become the version column. An uncompilable pattern is a
+ANSI `[INF]` line are never mistaken for the banner. An uncompilable pattern is a
 `ConfigError` when the registry loads, before any command runs. The pattern
 describes a property of the tool, which is why it lives in `tools.yaml` next to
 `version_cmd`.
@@ -118,8 +125,8 @@ tool as `not installed`. Tools without an adapter go through the same
 there is nothing to run the name through: `crlfuzz`, `dalfox`, `dnsreaper`,
 `github_subdomains`, `gowitness`, `hakrawler`, `httprobe`, `sqlmap`, `subzy`,
 `unfurl`, `waybackurls`, `webanalyze`. For these, a **same-named program that is
-not the expected product is counted as installed**, and doctor's Version column
-shows the resolved path by design - not a missing version and not a defect.
+not the expected product is counted as installed**, and doctor's `path` column
+shows the resolved copy by design - not a missing version and not a defect.
 `httpx_tech` is not in this group: it carries `httpx -version` and a pattern, so
 the Python `httpx` CLI is `wrong program` there too. `smap`, `gospider`, `subjs`
 and `urlfinder` have real probes; the ProjectDiscovery tools, `wafw00f`,

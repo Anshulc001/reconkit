@@ -631,6 +631,24 @@ D5. 2026-11-17 - `httpx_tech` must not accept the Python `httpx` CLI.
     presence-only tools - they stay a documented limitation (docs/10 section 3).
     Supersedes the "absent or nothing matches" wording of decision 12j.
 
+D6. 2026-11-17 - `doctor` reports installed/not-installed, path and identity,
+    never a version.
+    Reason: "user-requested: doctor shows installed/not-installed only, not
+    versions; version_cmd/version_regex kept for identity checks" (owner
+    ruling). The Version column answered a question the user does not have -
+    what matters is whether a scan can use the tool - and it was the only place
+    a probe's raw text reached the screen. `ToolCheck` and the `doctor --json`
+    tool object lose the `version` key, and the table loses the column; the D5
+    identity check is untouched, because `core.toolcheck.installed_version()`
+    still runs `version_cmd`, still applies `version_regex`, and still returns
+    `None` on a miss (so Python's `httpx` stays `wrong program` under
+    `httpx_tech`). Nothing is deleted from `tools.yaml`: `version_cmd` and
+    `version_regex` remain the identity machinery. The `Missing tools: N`
+    footer is reworded to describe what a scan does with the gap
+    (`Scans will use the tools that are installed and skip the rest.`),
+    replacing the install-advice wording left after D4. This supersedes the
+    display half of 12j and D5 only; the probe itself is unchanged.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================
