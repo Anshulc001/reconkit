@@ -31,7 +31,7 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 
 ## Flow 4 - Passive recon (default, safe)
 
-1. `reconkit passive -d example.com` (speed `slow`)
+1. `reconkit passive -d example.com`
 2. The stage runs silently until it finishes (no header or estimated time in this build).
 3. There is no live progress line; `ui.render_progress` is not wired.
 4. The wildcard check runs before results are accepted; an `unknown` detection adds a warning instead of a result line.
@@ -46,16 +46,16 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 ## Flow 5 - Live and shut-down detection (active)
 
 1. `reconkit live -d example.com --active`
-2. Scope gate runs first; blocked = exit 3 and no traffic.
-3. Slow mode: hosts shuffled, random pause between hosts, rate-limited probes.
+2. Scope gate runs first when `scope.yaml` is present; blocked = exit 3 and no traffic. With no scope file the stage runs unrestricted against the target (docs/05 rule 2).
+3. No speed preset: every selected tool starts together and runs at its own pace.
 4. Table columns: `Subdomain`, `State` (ALIVE / DNS_ONLY / SHUT_DOWN / DEAD), `Status`, `Ports`, `Sources`, `Trust`. Title and tech are not rendered in this build.
 5. State changes are not flagged in the stage table; `diff` shows them later as `STATE` rows (`old -> new`).
 
-- **Fast speed:** `--speed fast` prints a warning and requires typing `I AM AUTHORIZED`.
+- **Speed:** there is no speed control (removed 2026-11-17): no `--speed`, no `--delay`, no confirmation prompt.
 
 ## Flow 6 - Port scanning (active)
 
-1. `reconkit ports -d example.com --active` (connect scan, default port set, slow)
+1. `reconkit ports -d example.com --active` (connect scan, default port set)
 2. Each selected port scanner uses its own default port set; results are merged by host, IP and port.
 3. Table columns: `Subdomain`, `State`, `Status`, `Ports`, `Sources`, `Trust`; the IP, service and per-port state are stored but not rendered as separate columns.
 4. This build has no `--ports`/`--full` flags; the port set comes from the adapters (docs/02).
@@ -76,7 +76,7 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 2. Output example:
 
 ```json
-{"type":"status","runs":[{"id":12,"target":"example.com","stage":"live","speed":"slow","status":"running","started_at":"2026-11-12T10:00:00Z","finished_at":null}]}
+{"type":"status","runs":[{"id":12,"target":"example.com","stage":"live","status":"running","started_at":"2026-11-12T10:00:00Z","finished_at":null}]}
 ```
 
 ## Flow 9 - Interrupt and resume
@@ -90,4 +90,4 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 
 1. `reconkit export -d example.com --format md -o report.md`
 2. Formats: `json`, `md`, `html`. HTML content is escaped.
-3. Report includes scope header (program, authorization note), scan dates, speed used, tools used, results with sources and trust.
+3. Report includes scope header (program, authorization note), scan dates, tools used, results with sources and trust.

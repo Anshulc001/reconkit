@@ -28,8 +28,6 @@ from reconkit.adapters.subfinder import (
     SubfinderAdapter,
     cleanup_stale_provider_dirs,
 )
-from reconkit.config import load_config, resolve_speed
-from reconkit.core.pacing import Pacer, RateLimiter
 from reconkit.core.runner import ExecResult
 from reconkit.errors import ToolFailed
 from reconkit.models import HostState, PortRecord, RunContext, SubdomainRecord, ToolStatus
@@ -38,16 +36,6 @@ REPO = Path(__file__).resolve().parents[1]
 CONFIG = REPO / "config.yaml"
 FIXTURES = REPO / "tests" / "fixtures"
 ADAPTER_DIR = REPO / "src" / "reconkit" / "adapters"
-RATE_FLAGS = {"subfinder": "-rl", "httpx": "-rl", "naabu": "-rate"}
-
-
-async def _no_sleep(_seconds: float) -> None:
-    return None
-
-
-class CountingLimiter(RateLimiter):
-    def __init__(self) -> None:
-        super().__init__(1_000_000, clock=lambda: 0.0, sleep=_no_sleep)
 
 
 def make_ctx(
@@ -57,13 +45,10 @@ def make_ctx(
     env: dict[str, str] | None = None,
     mock: bool = False,
 ) -> RunContext:
-    config = load_config(CONFIG, speed="fast")
     return RunContext(
         target="example.com",
         hosts=hosts or [],
         ports=ports or [],
-        pacer=Pacer(resolve_speed(config), rate_flags=RATE_FLAGS),
-        limiter=CountingLimiter(),
         timeout=5.0,
         workspace=REPO / "workspaces" / "example.com",
         mock=mock,
@@ -278,13 +263,15 @@ def test_identity_timeout_is_not_installed(monkeypatch: pytest.MonkeyPatch) -> N
 # ------------------------------------------------------------- build_command
 
 
-def test_subfinder_command_and_rate_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_subfinder_command_has_no_rate_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-11-17: the pacer is gone, so no `-rl` (or any rate flag) is passed."""
     adapter = SubfinderAdapter()
     argv = adapter.build_command(make_ctx())
     # argv[0] is whatever this machine resolves (managed dir, PATH or bare
     # name); pins the flags here and the resolution in the 11d-findings-e tests.
     assert Path(argv[0]).name == "subfinder"
-    assert argv[1:] == ["-d", "example.com", "-silent", "-nc", "-duc", "-rl", "20"]
+    assert argv[1:] == ["-d", "example.com", "-silent", "-nc", "-duc"]
+    assert "-rl" not in argv
 
 
 def test_assetfinder_command() -> None:
@@ -382,8 +369,6 @@ def test_httpx_command_dedupes_and_lowercases_hosts() -> None:
         "-location",
         "-td",
         "-cdn",
-        "-rl",
-        "300",
         "-u",
         "www.example.com",
         "-u",
@@ -406,8 +391,6 @@ def test_naabu_command_and_ports() -> None:
         "c",
         "-host",
         "www.example.com",
-        "-rate",
-        "300",
         "-p",
         "443,80",
     ]

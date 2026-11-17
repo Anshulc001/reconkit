@@ -625,7 +625,6 @@ def status_document(runs: Iterable[RunSnapshot]) -> dict[str, object]:
                 "id": run.id,
                 "target": run.target,
                 "stage": run.stage,
-                "speed": run.speed,
                 "status": run.status,
                 "started_at": run.started_at,
                 "finished_at": run.finished_at,
@@ -665,7 +664,6 @@ def render_status(
     table.add_column("ID")
     table.add_column("Target")
     table.add_column("Stage")
-    table.add_column("Speed")
     table.add_column("Status")
     table.add_column("Started")
     table.add_column("Finished")
@@ -674,7 +672,6 @@ def render_status(
             Text(str(run.id)),
             Text(run.target),
             Text(run.stage),
-            Text(run.speed),
             Text(run.status),
             Text(run.started_at),
             Text(run.finished_at or "-"),

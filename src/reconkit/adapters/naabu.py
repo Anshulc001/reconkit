@@ -58,7 +58,6 @@ class NaabuAdapter(BinaryAdapter):
             "-host",
             ",".join(hosts),
         ]
-        argv += ctx.pacer.tool_rate_args(self.name, "active")
         if ports:
             argv += ["-p", ",".join(str(port) for port in ports)]
         return argv

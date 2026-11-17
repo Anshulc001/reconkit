@@ -4,7 +4,7 @@
 
 - **Style:** Technical, calm, readable. Tables for results, one-line status for progress.
 - **Principles:**
-  - Safe and polite by default (passive, `--speed slow`).
+  - Safe and polite by default (passive unless `--active` is asked for). Tools run at their own natural pace: there is no speed preset, delay or artificial throttling.
   - Every result shows where it came from and how much to trust it.
   - Never hide failures: a skipped or failed tool is always reported.
   - Works without color (`--no-color`, or when output is not a terminal).
@@ -40,7 +40,7 @@
 | `lite -d X` | passive only (quick) |
 | `run -d X --active` | passive, live, ports, then enabled checks; resumable |
 
-`passive` is the stage command: it runs the subs and dns stages (plus passive port/CDN info) for one target. `lite` is the workflow shortcut for exactly that passive pipeline and nothing active; adapters, flags, pacing and exit codes are the same. Only `run` includes active stages.
+`passive` is the stage command: it runs the subs and dns stages (plus passive port/CDN info) for one target. `lite` is the workflow shortcut for exactly that passive pipeline and nothing active; adapters, flags and exit codes are the same. Only `run` includes active stages.
 
 `--active` is a usage error (exit `2`) on every passive-only command - the bare form, `lite`, `passive`, `subs` and `dns` - because none of them runs an active stage and accepting the flag would promise work the command cannot do. The message names `run` as the active workflow. Use `run -d X --active`, or an active stage command (`live`, `ports`, `tech`, `urls`, `vulns`), for active stages.
 
@@ -131,8 +131,6 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 |---|---|
 | `-d, --domain` / `-l, --list` | Target or file of targets. Omitting both on a scan command starts the interactive mode (section 2b); that is the only trigger and it adds no flag |
 | `--active` | Allow active stages. A `scope.yaml`, when present, is enforced; with no scope file, active scanning of the given targets is unrestricted (section 2) |
-| `--speed slow\|normal\|fast` | Pacing preset. **Default: `slow`** |
-| `--delay MIN-MAX` | Random pause in seconds between tools (example `--delay 5-20`) |
 | `--tools a,b` / `--exclude x,y` | Pick or skip adapters |
 | `--include-noisy` | Allow `opt_in` tier tools |
 | `--min-sources N` | Hide results confirmed by fewer than N tools |
@@ -144,23 +142,15 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | `--no-color`, `-v/--verbose`, `-q/--silent` | Output control |
 | `--config PATH`, `--scope PATH`, `--db PATH` | Override file locations |
 
-`install` and `update` are the exception: their only options are `--all`, `--dry-run`, `--config` and `--no-color` (verified from `--help`). None of the target, pacing, key or JSON flags above apply to them.
+`install` and `update` are the exception: their only options are `--all`, `--dry-run`, `--config` and `--no-color` (verified from `--help`). None of the target, key or JSON flags above apply to them.
+
+There is no `--speed` and no `--delay`: both were removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN.md D3). Tools start together and run at their own natural pace; nothing in reconkit throttles, delays or reshuffles them.
 
 Not provided (by design): any flag that skips the scope gate.
 
-## 4. Speed Modes
+## 4. Speed Modes (removed 2026-11-17)
 
-| | `slow` (default) | `normal` | `fast` |
-|---|---|---|---|
-| Passive tools at once | 1 | up to 3 | all |
-| Pause between tools | random 5-30 s passive, 10-60 s active | random 1-5 s passive, 2-10 s active | none |
-| Active tools at once | 1 | up to 2 | all |
-| Pause between hosts | random 1-5 s | random 0-2 s | none |
-| Active request rate | 10/s | 50/s | 300/s |
-| Order | hosts and ports shuffled | shuffled | sequential |
-| nmap timing | `-T2` | `-T3` | `-T4` |
-
-These numbers mirror `config.yaml`, which is the source of truth: slow `passive.tool_delay` is 5-30 s, slow `active.tool_delay` is 10-60 s and `active.host_delay` is 1-5 s. `--speed fast` on an active stage prints a warning and requires typing `I AM AUTHORIZED`. `scope.yaml` `max_speed` caps the speed. Slow scans can still be detected: the goal is polite and low-noise, not invisible.
+The `slow`/`normal`/`fast` presets, `--speed`, `--delay`, the pacer (delays, host/port shuffling, parallel limits, request rate limiting), the `-rl`/`-rate` flags passed to tools and the typed `I AM AUTHORIZED` confirmation for `fast` were all removed at the owner's request (docs/MASTER_PLAN.md D3, reason: "user-requested removal, no throttling desired"). Every tool starts together and runs at its own natural pace. This heading keeps its number so the existing "section 5", "section 6" references elsewhere stay valid. A `scope.yaml` that still carries `max_speed` loads unchanged; the field is accepted and ignored, because there is no speed left to cap.
 
 ## 5. Output
 
@@ -195,7 +185,7 @@ The `hosts` objects always carry `state`, `confidence` and `sources`; the top-le
 
 `stages[].skipped` lists every tool the engine selected out before it ran, as `{"tool":"<name>","reason":"<why>"}` objects - `no adapter yet (phase N)`, `requires --active`, `not installed`, or the naabu scope-mode skip from docs/05 rule 6 (resolution failed or resolved outside `in_scope_cidrs`). A stage that has no adapter for any tool in its pool therefore shows its skips instead of an empty `results` array, so `results: []` means "ran, found nothing" only when `skipped` is empty too. `summary.tools_skipped` counts these rows along with any executed tool whose status is `skipped`; it is the total, not a per-tool count of executed results.
 
-`diff --json` writes one document with `type: diff`, the run ids it compared (`baseline_run_id`, `previous_run_id`, `latest_run_id`; `baseline_run_id` is `null` until a third completed discovery run exists), and arrays `new`, `gone`, `pending_gone`, `state_changes`, `ports_opened` and `ports_closed`. `pending_gone` holds the hosts that are missing from the latest run only: the same list the human output prints under "not reported as GONE yet", so a script can apply its own tolerance without re-querying. `gone` follows the two-consecutive-miss rule above. `status --json` writes one document with `type: status` and a `runs` array; each run carries `id`, `target`, `stage`, `speed`, `status`, `started_at` and `finished_at`. `install`/`update`/`scope check`/the `db` and `export` stubs do not accept `--json` in this build.
+`diff --json` writes one document with `type: diff`, the run ids it compared (`baseline_run_id`, `previous_run_id`, `latest_run_id`; `baseline_run_id` is `null` until a third completed discovery run exists), and arrays `new`, `gone`, `pending_gone`, `state_changes`, `ports_opened` and `ports_closed`. `pending_gone` holds the hosts that are missing from the latest run only: the same list the human output prints under "not reported as GONE yet", so a script can apply its own tolerance without re-querying. `gone` follows the two-consecutive-miss rule above. `status --json` writes one document with `type: status` and a `runs` array; each run carries `id`, `target`, `stage`, `status`, `started_at` and `finished_at` (the `speed` field was removed with speed control on 2026-11-17). `install`/`update`/`scope check`/the `db` and `export` stubs do not accept `--json` in this build.
 
 ### Colors (Rich theme)
 
@@ -212,8 +202,8 @@ State words are always printed (never color alone). Symbols are ASCII-safe.
 
 ### Progress
 Every scan writes one progress line per stage and one per finished tool to
-**stderr**, so the user can see which stage and tool is running during a slow
-scan (a real `slow` run is minutes long). The format is
+**stderr**, so the user can see which stage and tool is running during a long
+scan. The format is
 `<stage>: <tool> <done>/<total> tools <elapsed>s` plus a `running`/`ok`/`failed`
 marker, and a closing line per stage with its item count.
 

@@ -4,56 +4,9 @@
 workspace_dir: workspaces        # raw outputs: workspaces/<target>/...
 db_path: recon.db                # SQLite state (see docs/04_DATABASE.md)
 results_dir: results             # saved reports: results/<domain>/<run>/ (interactive mode, docs/02 s5)
-default_speed: slow              # slow | normal | fast
 user_agent: "reconkit/{version}" # honest UA, no rotation
-
-# Speed presets. Delays are random uniform [min, max] seconds.
-# requests_per_second is passed to each tool's own rate flag (see tools.yaml rate_flag).
-speeds:
-  slow:
-    passive:
-      max_parallel_tools: 1
-      tool_delay: [5, 30]
-      requests_per_second: 1
-    active:
-      max_parallel_tools: 1
-      tool_delay: [10, 60]
-      host_delay: [1, 5]
-      requests_per_second: 10
-      shuffle_hosts: true
-      shuffle_ports: true
-      nmap_timing: 2
-      masscan_max_rate: 100
-  normal:
-    passive:
-      max_parallel_tools: 3
-      tool_delay: [1, 5]
-      requests_per_second: 3
-    active:
-      max_parallel_tools: 2
-      tool_delay: [2, 10]
-      host_delay: [0, 2]
-      requests_per_second: 50
-      shuffle_hosts: true
-      shuffle_ports: true
-      nmap_timing: 3
-      masscan_max_rate: 300
-  fast:
-    passive:
-      max_parallel_tools: 99
-      tool_delay: [0, 0]
-      requests_per_second: 20
-    active:
-      max_parallel_tools: 99
-      tool_delay: [0, 0]
-      host_delay: [0, 0]
-      requests_per_second: 300
-      shuffle_hosts: false
-      shuffle_ports: false
-      nmap_timing: 4
-      masscan_max_rate: 1000
-
-# Active stages with --speed fast need a typed confirmation (docs/05_SECURITY.md).
+# Tools run at their own natural pace: there is no speed or delay setting
+# (owner decision 2026-11-17, docs/MASTER_PLAN.md D3).
 
 # Seconds. A stage is cut off at its timeout; finished tools keep their results.
 timeouts:

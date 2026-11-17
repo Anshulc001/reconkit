@@ -40,7 +40,6 @@ class ToolSpec:
     tier: Tier
     mode: Mode
     phase: int
-    rate_flag: str | None = None
     keys: tuple[ToolKey, ...] = ()
     requires_apt: tuple[str, ...] = ()
 
@@ -100,15 +99,6 @@ def get_adapter(name: str, *, path: str | Path | None = None) -> type[BaseToolAd
     return adapter
 
 
-def rate_flags(*, path: str | Path | None = None) -> dict[str, str]:
-    """tool -> rate_flag, ready for `Pacer(rate_flags=...)`."""
-    return {
-        name: spec.rate_flag
-        for name, spec in load_tools(path).items()
-        if spec.rate_flag is not None
-    }
-
-
 def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
     if "needs_key" in entry:
         raise ConfigError(
@@ -128,9 +118,6 @@ def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
     phase = entry.get("phase", 3)
     if not isinstance(phase, int) or isinstance(phase, bool):
         raise ConfigError(f"tool {name!r} in tools.yaml has invalid phase {phase!r}")
-    rate_flag = entry.get("rate_flag")
-    if rate_flag is not None and not isinstance(rate_flag, str):
-        raise ConfigError(f"tool {name!r} in tools.yaml has a non-string rate_flag")
     requires_apt = entry.get("requires_apt", [])
     if not isinstance(requires_apt, list) or not all(
         isinstance(item, str) and item for item in requires_apt
@@ -143,7 +130,6 @@ def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
         tier=tier,
         mode=mode,
         phase=phase,
-        rate_flag=rate_flag,
         keys=_keys(name, entry),
         requires_apt=tuple(requires_apt),
     )

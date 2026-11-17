@@ -67,10 +67,6 @@ max_speed: fast
 """
 
 
-async def no_sleep(_seconds: float) -> None:
-    return None
-
-
 class SilentRng:
     def __init__(self) -> None:
         self._next = 0
@@ -188,7 +184,7 @@ def make_engine(
     installed: Callable[[type[BaseToolAdapter]], bool] | None = None,
     resolve: Callable[[str], object] | None = None,
 ) -> Engine:
-    config = load_config(CONFIG, speed="fast")
+    config = load_config(CONFIG)
     tmp_path.mkdir(parents=True, exist_ok=True)
     store = store if store is not None else Store(tmp_path / "recon.db")
     scope = tmp_path / "scope.yaml"
@@ -205,8 +201,6 @@ def make_engine(
         workspace_root=tmp_path / "workspaces",
         env=env or {},
         rng=SilentRng(),
-        sleep=no_sleep,
-        clock=lambda: 0.0,
         installed=installed,
         now=now,
         resolve=resolve,
@@ -252,7 +246,7 @@ async def test_stage_order_and_tool_rows(tmp_path: Path) -> None:
         "vulns-fake": adapter("vulns-fake", Stage.VULNS, rec, records=[]),
     }
     engine = make_engine(tmp_path, specs, adapters)
-    summary = await engine.run("example.com", ScanOptions(active=True, mock=True, speed="slow"))
+    summary = await engine.run("example.com", ScanOptions(active=True, mock=True))
     assert rec.names == [
         "subs-fake",
         "dns-fake",
@@ -283,13 +277,13 @@ async def test_tier_gating_and_explicit_intrusive_refusal(tmp_path: Path) -> Non
         "intrusive": adapter("intrusive", Stage.SUBS, rec, records=[]),
     }
     engine = make_engine(tmp_path, specs, adapters)
-    await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow"))
+    await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
     assert rec.names == ["core"]
 
     engine = make_engine(tmp_path / "second", specs, adapters)
     await engine.run(
         "example.com",
-        ScanOptions(stages=(Stage.SUBS,), include_noisy=True, mock=True, speed="slow"),
+        ScanOptions(stages=(Stage.SUBS,), include_noisy=True, mock=True),
     )
     assert rec.names[-2:] == ["core", "noisy"]
 
@@ -316,16 +310,14 @@ async def test_active_without_flag_skips_and_scope_drops_host(tmp_path: Path) ->
         "live": adapter("live", Stage.LIVE, rec, records=[alive("www.example.com")]),
     }
     engine = make_engine(tmp_path, specs, adapters)
-    await engine.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.LIVE), mock=True, speed="slow")
-    )
+    await engine.run("example.com", ScanOptions(stages=(Stage.SUBS, Stage.LIVE), mock=True))
     assert rec.names == ["subs"]
     assert rec.hosts == [["example.com"]]
 
     engine = make_engine(tmp_path / "active", specs, adapters)
     summary = await engine.run(
         "example.com",
-        ScanOptions(stages=(Stage.SUBS, Stage.LIVE), active=True, mock=True, speed="slow"),
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE), active=True, mock=True),
     )
     assert "live" in rec.names
     live_hosts = rec.hosts[rec.names.index("live")]
@@ -406,7 +398,7 @@ async def test_active_ports_stage_receives_the_cidr_predicate(tmp_path: Path) ->
     )
     await engine.run(
         "example.com",
-        ScanOptions(stages=(Stage.LIVE, Stage.PORTS), active=True, speed="slow"),
+        ScanOptions(stages=(Stage.LIVE, Stage.PORTS), active=True),
     )
     assert len(seen) == 1
     predicate = seen[0]
@@ -502,7 +494,7 @@ async def test_phase_timeout_records_a_timeout_row(tmp_path: Path) -> None:
     engine = make_engine(tmp_path, specs, adapters)
     summary = await engine.run(
         "example.com",
-        ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow", phase_timeout=0.02),
+        ScanOptions(stages=(Stage.SUBS,), mock=True, phase_timeout=0.02),
     )
     assert summary.stages[0].results == []
     row = engine.store._conn.execute("SELECT status, error FROM tool_runs").fetchone()
@@ -520,10 +512,22 @@ async def test_tool_error_is_redacted_before_storage(tmp_path: Path) -> None:
     assert REDACTED in row["error"]
 
 
-async def test_slow_mode_runs_one_tool_at_a_time(tmp_path: Path) -> None:
+async def test_tools_start_together_without_a_pace_limit(tmp_path: Path) -> None:
+    """2026-11-17: the pacer is gone, so a stage's tools all run concurrently."""
     rec = Recorder()
     active = 0
     peak = 0
+    release = asyncio.Event()
+    started = asyncio.Event()
+
+    async def track() -> None:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        if active == 2:
+            started.set()
+        await release.wait()
+        active -= 1
 
     specs = {"a": tool("a", Stage.SUBS), "b": tool("b", Stage.SUBS)}
 
@@ -531,23 +535,22 @@ async def test_slow_mode_runs_one_tool_at_a_time(tmp_path: Path) -> None:
         stage = Stage.SUBS
 
         async def run(self, ctx: RunContext) -> ToolResult:
-            nonlocal active, peak
             rec.names.append("tracked")
-            active += 1
-            peak = max(peak, active)
-            await asyncio.sleep(0)
-            active -= 1
+            await track()
             return ToolResult(tool="tracked", status=ToolStatus.OK, records=[])
 
         def parse_output(self, raw: str) -> list[object]:
             return []
 
     engine = make_engine(tmp_path, specs, {"a": Tracked, "b": Tracked})
-    await engine.run(
-        "example.com",
-        ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow"),
+    running = asyncio.create_task(
+        engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
     )
-    assert peak == 1
+    await asyncio.wait_for(started.wait(), timeout=5)
+    assert peak == 2
+    release.set()
+    await asyncio.wait_for(running, timeout=5)
+    assert engine.store.count("scan_runs") == 1
 
 
 # ---------------------------------------------------------------- confidence
@@ -628,7 +631,7 @@ async def test_dns_pass_does_not_overwrite_discovery_confidence(tmp_path: Path) 
     }
     engine = make_engine(tmp_path, specs, adapters)
     summary = await engine.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True, speed="slow")
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True)
     )
     assert summary.exit_code is ExitCode.SUCCESS
     row = engine.store._conn.execute(
@@ -706,7 +709,7 @@ async def test_subfinder_raw_file_never_contains_the_provider_key(
         installed=lambda _adapter: True,
     )
 
-    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), speed="slow"))
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,)))
 
     result = summary.stages[0].results[0]
     assert result.status is ToolStatus.OK
@@ -735,7 +738,7 @@ def seed_unknown_state(engine: Engine, host_name: str) -> int:
     hold, and what a pass that already had a previous state starts from.
     """
     target_id = engine.store.create_target("example.com")
-    run_id = engine.store.create_scan_run(target_id, "live", "fast")
+    run_id = engine.store.create_scan_run(target_id, "live")
     sub_id = engine.store.upsert_subdomain(target_id, host_name, run_id=run_id)
     engine.store.append_host_status(sub_id, run_id, "UNKNOWN")
     engine.store.finish_scan_run(run_id, "completed")
@@ -797,7 +800,7 @@ async def test_an_inconclusive_pass_keeps_the_previous_state_and_records_the_rea
         },
     )
     target_id = engine.store.create_target("example.com")
-    run_id = engine.store.create_scan_run(target_id, "dns", "fast")
+    run_id = engine.store.create_scan_run(target_id, "dns")
     sub_id = engine.store.upsert_subdomain(target_id, "example.com", run_id=run_id)
     engine.store.append_host_status(sub_id, run_id, "DNS_ONLY")
     engine.store.finish_scan_run(run_id, "completed")
@@ -1201,7 +1204,7 @@ async def test_regression_dangling_cname_survives_restart(tmp_path: Path) -> Non
     }
     first_store = Store(tmp_path / "recon.db")
     first_engine = make_engine(tmp_path, specs, first_adapters, store=first_store)
-    await first_engine.run("example.com", ScanOptions(stages=(Stage.DNS,), mock=True, speed="slow"))
+    await first_engine.run("example.com", ScanOptions(stages=(Stage.DNS,), mock=True))
     first_store.close()
 
     second_store = Store(tmp_path / "recon.db")
@@ -1214,9 +1217,7 @@ async def test_regression_dangling_cname_survives_restart(tmp_path: Path) -> Non
         )
     }
     second_engine = make_engine(tmp_path, specs, second_adapters, store=second_store)
-    summary = await second_engine.run(
-        "example.com", ScanOptions(stages=(Stage.DNS,), mock=True, speed="slow")
-    )
+    summary = await second_engine.run("example.com", ScanOptions(stages=(Stage.DNS,), mock=True))
     assert any("dangling CNAME" in warning for warning in summary.warnings)
     row = second_store._conn.execute(
         "SELECT state, cnames_json, dangling_cname FROM host_status_history"
@@ -1248,9 +1249,7 @@ async def test_dns_resolved_then_two_nxdomain_is_shut_down_then_dead(tmp_path: P
         store = Store(db_path)
         adapters = {"dns-fake": adapter("dns-fake", Stage.DNS, rec, records=records)}
         engine = make_engine(tmp_path, specs, adapters, store=store)
-        summary = await engine.run(
-            "example.com", ScanOptions(stages=(Stage.DNS,), mock=True, speed="slow")
-        )
+        summary = await engine.run("example.com", ScanOptions(stages=(Stage.DNS,), mock=True))
         row = store._conn.execute(
             "SELECT h.state, h.cnames_json, h.dangling_cname"
             " FROM host_status_history h JOIN subdomains s ON s.id = h.subdomain_id"
@@ -1384,7 +1383,7 @@ async def test_resume_skips_completed_stages_and_continues(tmp_path: Path) -> No
     with pytest.raises(asyncio.CancelledError):
         await engine1.run(
             "example.com",
-            ScanOptions(stages=(Stage.SUBS, Stage.DNS, Stage.LIVE), mock=True, speed="slow"),
+            ScanOptions(stages=(Stage.SUBS, Stage.DNS, Stage.LIVE), mock=True),
         )
     statuses = [
         (row["stage"], row["status"])
@@ -1408,7 +1407,6 @@ async def test_resume_skips_completed_stages_and_continues(tmp_path: Path) -> No
         ScanOptions(
             stages=(Stage.SUBS, Stage.DNS, Stage.LIVE),
             mock=True,
-            speed="slow",
             resume=True,
         ),
     )
@@ -1804,7 +1802,7 @@ def stored_wildcard(engine: Engine) -> dict[str, int]:
 
 async def test_wildcard_present_marks_matching_hosts(tmp_path: Path) -> None:
     engine, probes = wildcard_setup(tmp_path, DnsResult(DnsOutcome.RESOLVED, ips=["1.2.3.4"]))
-    summary = await engine.run("example.com", ScanOptions(stages=(Stage.DNS,), speed="fast"))
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.DNS,)))
     assert len(probes) == 3
     assert all(probe.endswith(".example.com") and probe != "example.com" for probe in probes)
     assert summary.warnings == []
@@ -1813,7 +1811,7 @@ async def test_wildcard_present_marks_matching_hosts(tmp_path: Path) -> None:
 
 async def test_wildcard_none_marks_nothing(tmp_path: Path) -> None:
     engine, probes = wildcard_setup(tmp_path, DnsResult(DnsOutcome.NXDOMAIN))
-    summary = await engine.run("example.com", ScanOptions(stages=(Stage.DNS,), speed="fast"))
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.DNS,)))
     assert len(probes) == 3
     assert summary.warnings == []
     assert stored_wildcard(engine) == {"www.example.com": 0, "own.example.com": 0}
@@ -1821,7 +1819,7 @@ async def test_wildcard_none_marks_nothing(tmp_path: Path) -> None:
 
 async def test_wildcard_unknown_warns_and_marks_nothing(tmp_path: Path) -> None:
     engine, probes = wildcard_setup(tmp_path, DnsResult(DnsOutcome.TIMEOUT))
-    summary = await engine.run("example.com", ScanOptions(stages=(Stage.DNS,), speed="fast"))
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.DNS,)))
     assert len(probes) == 3
     assert any("wildcard check inconclusive" in warning for warning in summary.warnings), (
         summary.warnings
@@ -1831,7 +1829,7 @@ async def test_wildcard_unknown_warns_and_marks_nothing(tmp_path: Path) -> None:
 
 async def test_wildcard_mark_reaches_the_subdomains_table(tmp_path: Path) -> None:
     engine, _probes = wildcard_setup(tmp_path, DnsResult(DnsOutcome.RESOLVED, ips=["1.2.3.4"]))
-    await engine.run("example.com", ScanOptions(stages=(Stage.DNS,), speed="fast"))
+    await engine.run("example.com", ScanOptions(stages=(Stage.DNS,)))
     rows = {
         str(row["fqdn"]): int(row["is_wildcard"])
         for row in engine.store._conn.execute(
@@ -1844,7 +1842,7 @@ async def test_wildcard_mark_reaches_the_subdomains_table(tmp_path: Path) -> Non
 
 async def test_wildcard_never_probes_under_mock(tmp_path: Path) -> None:
     engine, probes = wildcard_setup(tmp_path, DnsResult(DnsOutcome.RESOLVED, ips=["1.2.3.4"]))
-    await engine.run("example.com", ScanOptions(stages=(Stage.DNS,), mock=True, speed="fast"))
+    await engine.run("example.com", ScanOptions(stages=(Stage.DNS,), mock=True))
     assert probes == []
     assert stored_wildcard(engine) == {"www.example.com": 0, "own.example.com": 0}
 
@@ -1852,7 +1850,7 @@ async def test_wildcard_never_probes_under_mock(tmp_path: Path) -> None:
 def seed_subs_run(
     store: Store, target_id: int, hosts: list[str], *, status: str = "completed"
 ) -> int:
-    run_id = store.create_scan_run(target_id, Stage.SUBS.value, "slow")
+    run_id = store.create_scan_run(target_id, Stage.SUBS.value)
     for fqdn in hosts:
         sub_id = store.upsert_subdomain(target_id, fqdn, run_id=run_id, provenance="subs")
         store.add_subdomain_source(sub_id, run_id, "subfinder")
@@ -1909,9 +1907,7 @@ async def test_dns_only_host_has_dns_provenance_and_is_never_new(tmp_path: Path)
             "dns-a": adapter("dns-a", Stage.DNS, Recorder(), records=[]),
         },
     )
-    await first.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True, speed="slow")
-    )
+    await first.run("example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True))
     second = make_engine(
         tmp_path,
         specs,
@@ -1926,9 +1922,7 @@ async def test_dns_only_host_has_dns_provenance_and_is_never_new(tmp_path: Path)
         },
         store=first.store,
     )
-    await second.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True, speed="slow")
-    )
+    await second.run("example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True))
 
     row = second.store._conn.execute(
         "SELECT provenance, source_count FROM subdomains WHERE fqdn = ?",
@@ -1957,9 +1951,7 @@ async def test_a_discovered_host_keeps_its_real_provenance_and_is_new(
             "dns-a": adapter("dns-a", Stage.DNS, Recorder(), records=[]),
         },
     )
-    await first.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True, speed="slow")
-    )
+    await first.run("example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True))
     second = make_engine(
         tmp_path,
         specs,
@@ -1977,9 +1969,7 @@ async def test_a_discovered_host_keeps_its_real_provenance_and_is_new(
         },
         store=first.store,
     )
-    await second.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True, speed="slow")
-    )
+    await second.run("example.com", ScanOptions(stages=(Stage.SUBS, Stage.DNS), mock=True))
 
     rows = {
         str(row["fqdn"]): str(row["provenance"])
@@ -2031,9 +2021,7 @@ async def test_each_executed_tool_writes_one_raw_file_and_sets_raw_path(tmp_path
         ),
     }
     engine = make_engine(tmp_path, specs, adapters)
-    summary = await engine.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
-    )
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
 
     run_id = summary.stages[0].run_id
     stage_dir = tmp_path / "workspaces" / "example.com" / "subs"
@@ -2060,9 +2048,7 @@ async def test_failed_tool_still_writes_its_raw_output(tmp_path: Path) -> None:
         )
     }
     engine = make_engine(tmp_path, specs, adapters)
-    summary = await engine.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
-    )
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
 
     result = raw_result(summary, "flaky")
     written = Path(result.raw_path or "")
@@ -2078,9 +2064,7 @@ async def test_a_crashed_tool_writes_an_empty_file_instead_of_nothing(tmp_path: 
     specs = {"crasher": tool("crasher", Stage.SUBS)}
     adapters = {"crasher": adapter("crasher", Stage.SUBS, rec, error=RuntimeError("boom"))}
     engine = make_engine(tmp_path, specs, adapters)
-    summary = await engine.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
-    )
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
 
     result = raw_result(summary, "crasher")
     assert result.status is ToolStatus.FAILED
@@ -2096,9 +2080,7 @@ async def test_raw_output_file_is_capped_at_max_output_bytes(tmp_path: Path) -> 
         "chatty": adapter("chatty", Stage.SUBS, rec, raw_text="A" * (MAX_OUTPUT_BYTES + 5000))
     }
     engine = make_engine(tmp_path, specs, adapters)
-    summary = await engine.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
-    )
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
 
     written = Path(raw_result(summary, "chatty").raw_path or "")
     assert written.stat().st_size == MAX_OUTPUT_BYTES
@@ -2110,9 +2092,7 @@ async def test_raw_output_file_is_redacted_with_the_run_secrets(tmp_path: Path) 
     specs = {"leaky": tool("leaky", Stage.SUBS)}
     adapters = {"leaky": adapter("leaky", Stage.SUBS, rec, raw_text="provider token=sk-live-abc\n")}
     engine = make_engine(tmp_path, specs, adapters, env={"ONLY_ME": "sk-live-abc"})
-    summary = await engine.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
-    )
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
 
     content = Path(raw_result(summary, "leaky").raw_path or "").read_text(encoding="utf-8")
     assert "sk-live-abc" not in content
@@ -2134,9 +2114,7 @@ async def test_a_failed_workspace_write_keeps_the_tool_result(
         "tool": adapter("tool", Stage.SUBS, rec, records=[sub("www.example.com")], raw_text="out\n")
     }
     engine = make_engine(tmp_path, specs, adapters)
-    summary = await engine.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
-    )
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
 
     result = raw_result(summary, "tool")
     assert result.status is ToolStatus.OK
@@ -2153,9 +2131,7 @@ async def test_adapter_reported_duration_is_stored_and_never_overwritten(tmp_pat
     specs = {"timed": tool("timed", Stage.SUBS)}
     adapters = {"timed": adapter("timed", Stage.SUBS, rec, duration_s=12.5)}
     engine = make_engine(tmp_path, specs, adapters)
-    summary = await engine.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
-    )
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
 
     assert raw_result(summary, "timed").duration_s == 12.5
     row = engine.store._conn.execute("SELECT duration_s FROM tool_runs").fetchone()
@@ -2168,9 +2144,7 @@ async def test_missing_adapter_duration_gets_the_harness_wall_clock(tmp_path: Pa
     specs = {"slowish": tool("slowish", Stage.SUBS)}
     adapters = {"slowish": adapter("slowish", Stage.SUBS, rec, duration_s=0.0, delay=0.05)}
     engine = make_engine(tmp_path, specs, adapters)
-    summary = await engine.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
-    )
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
 
     row = engine.store._conn.execute("SELECT duration_s FROM tool_runs").fetchone()
     # The adapter slept 50 ms and reported nothing, so the stored number can only
@@ -2186,7 +2160,7 @@ async def test_a_non_positive_adapter_duration_is_never_stored(tmp_path: Path) -
     specs = {"weird": tool("weird", Stage.SUBS)}
     adapters = {"weird": adapter("weird", Stage.SUBS, rec, duration_s=-1.0, delay=0.02)}
     engine = make_engine(tmp_path, specs, adapters)
-    await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow"))
+    await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
 
     row = engine.store._conn.execute("SELECT duration_s FROM tool_runs").fetchone()
     assert row["duration_s"] > 0
@@ -2201,7 +2175,7 @@ async def test_raw_file_names_do_not_collide_across_tools_or_runs(tmp_path: Path
         "beta": adapter("beta", Stage.SUBS, rec, raw_text="beta\n"),
     }
     engine = make_engine(tmp_path, specs, adapters)
-    options = ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
+    options = ScanOptions(stages=(Stage.SUBS,), mock=True)
     first = await engine.run("example.com", options)
     second = await engine.run("example.com", options)
 
@@ -2222,9 +2196,7 @@ async def test_raw_output_keeps_nul_and_ansi_bytes_verbatim(tmp_path: Path) -> N
     specs = {"ansi": tool("ansi", Stage.SUBS)}
     adapters = {"ansi": adapter("ansi", Stage.SUBS, rec, raw_text=payload)}
     engine = make_engine(tmp_path, specs, adapters)
-    summary = await engine.run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True, speed="slow")
-    )
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
 
     written = Path(raw_result(summary, "ansi").raw_path or "")
     assert written.read_bytes() == payload.encode("utf-8")
@@ -2402,9 +2374,7 @@ async def test_no_scope_file_runs_naabu_on_hostnames_unrestricted(tmp_path: Path
     engine = ports_engine(tmp_path, rec, scope_text=None, resolve=resolve)
     summary = await engine.run(
         "example.com",
-        ScanOptions(
-            stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, speed="slow", mock=True
-        ),
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, mock=True),
     )
 
     assert "naabu" in rec.names
@@ -2432,7 +2402,7 @@ async def test_scope_file_passes_naabu_only_verified_ips(tmp_path: Path) -> None
     engine = ports_engine(tmp_path, rec, scope_text=SCOPE_WITH_CIDRS, resolve=resolve)
     await engine.run(
         "example.com",
-        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, speed="slow"),
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True),
     )
 
     naabu_hosts = rec.hosts[rec.names.index("naabu")]
@@ -2457,7 +2427,7 @@ async def test_scope_file_omits_a_target_whose_resolution_fails(tmp_path: Path) 
     engine = ports_engine(tmp_path, rec, scope_text=SCOPE_WITH_CIDRS, resolve=resolve)
     summary = await engine.run(
         "example.com",
-        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, speed="slow"),
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True),
     )
 
     naabu_hosts = rec.hosts[rec.names.index("naabu")]
@@ -2480,7 +2450,7 @@ async def test_scope_file_omits_a_target_that_resolves_out_of_scope(tmp_path: Pa
     engine = ports_engine(tmp_path, rec, scope_text=SCOPE_WITH_CIDRS, resolve=resolve)
     summary = await engine.run(
         "example.com",
-        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, speed="slow"),
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True),
     )
 
     naabu_hosts = rec.hosts[rec.names.index("naabu")]
@@ -2500,7 +2470,7 @@ async def test_scope_file_skips_naabu_when_no_target_verifies(tmp_path: Path) ->
     engine = ports_engine(tmp_path, rec, scope_text=SCOPE_WITH_CIDRS, resolve=resolve)
     summary = await engine.run(
         "example.com",
-        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, speed="slow"),
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True),
     )
 
     assert "naabu" not in rec.names

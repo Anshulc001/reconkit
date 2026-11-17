@@ -4,7 +4,6 @@
 
 Critical functionality to protect:
 - **Scope gate** (active stages refuse out-of-scope, missing, expired or disallowed scope).
-- **Pacing** (delays, shuffling, parallel limits, rate flags per speed).
 - **Parsers** for every adapter (real sample outputs).
 - **Consensus and confidence** (merge, source counts, UNCONFIRMED on disagreement).
 - **Host state transitions** (ALIVE / DNS_ONLY / SHUT_DOWN / DEAD) and diff.
@@ -14,7 +13,7 @@ Critical functionality to protect:
 ## 2. Test Types
 
 ### Unit tests
-Pure logic with fixtures: parsers, scope matching, pacing with a fake clock, confidence rules, wildcard detection, store queries on an in-memory/temp SQLite DB.
+Pure logic with fixtures: parsers, scope matching, confidence rules, wildcard detection, store queries on an in-memory/temp SQLite DB.
 
 ### Integration tests (no network)
 CLI invoked through Typer's `CliRunner` with `--mock`, a temp workspace and temp DB. Fake binaries (small scripts in `tests/fakebin/`) test the runner, timeouts and failure handling.
@@ -43,7 +42,7 @@ tests/
   test_binary_adapters.py
   test_python_adapters.py
   test_engine.py         # stage order, tiers, scope, consensus, host state, resume
-  test_scope.py  test_pacing.py  test_runner.py  test_config.py
+  test_scope.py  test_runner.py  test_config.py
   test_store.py  test_wildcard_workspace.py  test_ui.py  test_cli.py
   test_registry.py  test_package.py
   test_doctor.py
@@ -77,13 +76,9 @@ Expected: `NEW`, `GONE` and `STATE` (`old -> new`) shown correctly; port changes
 1. One adapter fixture raises timeout
 Expected: other results kept, run status `partial`, exit code 5.
 
-**Flow: slow speed timing**
-1. Run with fake clock and seeded RNG at `slow`
-Expected: delays between tools in [5,30], parallel limit 1, hosts shuffled.
-
 ## 6. Coverage
 
-- No coverage threshold is enforced. The suite prioritizes the scope gate, subprocess safety, pacing, consensus, store diff and installer verification.
+- No coverage threshold is enforced. The suite prioritizes the scope gate, subprocess safety, consensus, store diff and installer verification.
 
 ## 7. Commands
 

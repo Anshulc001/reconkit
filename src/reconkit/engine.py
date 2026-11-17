@@ -28,8 +28,7 @@ from reconkit.adapters import ADAPTERS
 from reconkit.adapters.base import BaseToolAdapter
 from reconkit.adapters.pyscan import default_resolve
 from reconkit.adapters.registry import ToolSpec, load_tools
-from reconkit.config import AppConfig, SpeedName, resolve_speed
-from reconkit.core.pacing import Clock, Pacer, RateLimiter
+from reconkit.config import AppConfig
 from reconkit.core.runner import validate_host, validate_target
 from reconkit.core.scope import load_scope, passive_warning, require_active, scope_present
 from reconkit.core.store import Store, redact, utc_now
@@ -84,7 +83,6 @@ NAABU_NO_IPS = (
     "blocked: no in-scope IP for any target "
     "(resolution failed or the address is outside in_scope_cidrs)"
 )
-Sleep = Callable[[float], Awaitable[None]]
 Resolve = Callable[[str], Awaitable[list[str]]]
 InstalledCheck = Callable[[type[BaseToolAdapter]], bool]
 
@@ -299,7 +297,6 @@ class ScanOptions:
     active: bool = False
     no_keys: bool = False
     mock: bool = False
-    speed: SpeedName = "slow"
     phase_timeout: float | None = None
     min_sources: int = 1
     resume: bool = False
@@ -388,7 +385,6 @@ class RunSnapshot:
     id: int
     target: str
     stage: str
-    speed: str
     status: str
     started_at: str
     finished_at: str | None
@@ -408,9 +404,7 @@ class Engine:
         workspace_root: Path | str | None = None,
         env: Mapping[str, str] | None = None,
         rng: Any = None,
-        sleep: Sleep | None = None,
         resolve: Resolve | None = None,
-        clock: Clock | None = None,
         installed: InstalledCheck | None = None,
         now: Now | None = None,
         progress: Progress | None = None,
@@ -428,11 +422,9 @@ class Engine:
         )
         self.env = dict(env or {})
         self._rng = rng if rng is not None else secrets.SystemRandom()
-        self._sleep = sleep if sleep is not None else asyncio.sleep
         # docs/05 rule 6: the engine, not naabu, resolves names when a scope file
         # is present; injected so tests never touch DNS.
         self._resolve = resolve if resolve is not None else default_resolve
-        self._clock = clock
         self._installed = installed
         self._now = now if now is not None else utc_now
         self._secrets = tuple(value for value in self.env.values() if value)
@@ -505,7 +497,6 @@ class Engine:
                 id=cast(int, row["id"]),
                 target=str(row["target"]),
                 stage=str(row["stage"]),
-                speed=str(row["speed"]),
                 status=str(row["status"]),
                 started_at=str(row["started_at"]),
                 finished_at=None if row["finished_at"] is None else str(row["finished_at"]),
@@ -545,18 +536,11 @@ class Engine:
     async def run(self, target: str, options: ScanOptions | None = None) -> ScanSummary:
         opts = options or ScanOptions()
         target = validate_target(target)
-        if opts.speed not in ("slow", "normal", "fast"):
-            raise ConfigError(f"invalid speed {opts.speed!r}; expected slow, normal or fast")
         if opts.phase_timeout is not None and opts.phase_timeout <= 0:
             raise ConfigError("phase timeout must be > 0")
         if opts.min_sources < 1:
             raise ConfigError("min_sources must be >= 1")
 
-        preset = resolve_speed(self.config, opts.speed)
-        rate_flags = {
-            name: spec.rate_flag for name, spec in self.specs.items() if spec.rate_flag is not None
-        }
-        pacer = Pacer(preset, rate_flags=rate_flags, rng=self._rng, sleep=self._sleep)
         # docs/03 section 11: file I/O never runs on the loop; the SQLite block
         # below stays on it on purpose (single writer, thread-bound connection).
         workspace = await asyncio.to_thread(
@@ -594,7 +578,7 @@ class Engine:
             ip_allowed: Callable[[str], bool] | None = None
             if opts.active and any(spec.mode is Mode.ACTIVE for spec, _ in selected):
                 hosts, dropped, scope_error = await asyncio.to_thread(
-                    self._active_hosts, target, hosts, opts.speed
+                    self._active_hosts, target, hosts
                 )
                 if scope_error is not None:
                     summary.scope_denied = True
@@ -619,7 +603,6 @@ class Engine:
             run_id = self.store.create_scan_run(
                 target_id,
                 stage.value,
-                opts.speed,
                 params=json.dumps(
                     {
                         "scan_key": scan_key,
@@ -650,7 +633,6 @@ class Engine:
                         selected,
                         hosts,
                         workspace,
-                        pacer,
                         opts,
                         ip_allowed,
                         tool_hosts,
@@ -833,7 +815,7 @@ class Engine:
         return kept
 
     def _active_hosts(
-        self, target: str, hosts: list[str], speed: str
+        self, target: str, hosts: list[str]
     ) -> tuple[list[str], list[str], str | None]:
         if not scope_present(self.scope_path):
             # docs/05 rule 2 (2026-11-17): no scope file means unrestricted
@@ -844,7 +826,7 @@ class Engine:
             gate = load_scope(self.scope_path)
             allowed = [host for host in hosts if gate.allows(host)]
             dropped = [host for host in hosts if not gate.allows(host)]
-            check = require_active(target, allowed, speed, path=self.scope_path)
+            check = require_active(target, allowed, path=self.scope_path)
         except ScopeError as exc:
             return hosts, [], str(exc)
         return check.hosts, dropped, None
@@ -1020,54 +1002,34 @@ class Engine:
         selected: Selected,
         hosts: list[str],
         workspace: Workspace,
-        pacer: Pacer,
         opts: ScanOptions,
         ip_allowed: Callable[[str], bool] | None,
         tool_hosts: dict[str, list[str]],
         results: list[ToolResult],
         done: set[str],
     ) -> RunContext:
-        mode = (
-            Mode.ACTIVE if any(spec.mode is Mode.ACTIVE for spec, _ in selected) else Mode.PASSIVE
-        )
-        rate = (
-            pacer.preset.passive_requests_per_second
-            if mode is Mode.PASSIVE
-            else pacer.preset.active_requests_per_second
-        )
-        limiter = RateLimiter(rate, clock=self._clock, sleep=self._sleep)
+        # Every tool in the stage starts at once and runs at its own natural
+        # pace (2026-11-17, MASTER_PLAN D3).
         ctx = RunContext(
             target=target,
             hosts=hosts,
             ports=[],
-            speed=opts.speed,
-            pacer=pacer,
-            limiter=limiter,
             timeout=self.config.timeouts.per_tool_default,
             workspace=workspace.directory,
             mock=opts.mock,
             ip_allowed=ip_allowed,
         )
 
-        semaphore = asyncio.Semaphore(pacer.parallel_limit(mode.value))
-
         async def one(spec: ToolSpec, adapter: type[BaseToolAdapter]) -> None:
-            async with semaphore:
-                await pacer.before_tool(mode.value)
-                overrides: dict[str, object] = {"env": self._tool_env(spec, opts)}
-                if spec.name in tool_hosts:
-                    # docs/05 rule 6: naabu's verified IPs replace the name list.
-                    overrides["hosts"] = tool_hosts[spec.name]
-                tool_ctx = ctx.model_copy(update=overrides)
-                result = await self._run_one(run_id, adapter, tool_ctx, workspace)
+            overrides: dict[str, object] = {"env": self._tool_env(spec, opts)}
+            if spec.name in tool_hosts:
+                # docs/05 rule 6: naabu's verified IPs replace the name list.
+                overrides["hosts"] = tool_hosts[spec.name]
+            tool_ctx = ctx.model_copy(update=overrides)
+            result = await self._run_one(run_id, adapter, tool_ctx, workspace)
             results.append(result)
             done.add(spec.name)
 
-        pacer.reset()
-        if opts.speed == "slow":
-            for spec, adapter in selected:
-                await one(spec, adapter)
-            return ctx
         await asyncio.gather(*(one(spec, adapter) for spec, adapter in selected))
         return ctx
 

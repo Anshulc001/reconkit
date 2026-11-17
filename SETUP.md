@@ -101,7 +101,7 @@ reconkit live -d <authorized-domain> --active
 reconkit ports -d <authorized-domain> --active
 ```
 
-Active scans stay inside `scope.yaml`; out-of-scope hosts are dropped. `--speed fast` on an active stage requires typing `I AM AUTHORIZED`.
+Active scans with a `scope.yaml` stay inside it; out-of-scope hosts are dropped. With no scope file, active scanning runs unrestricted against the targets you named (docs/05 rule 2). There is no speed preset or throttling.
 
 ## Part B - Windows (mock/passive and doctor only)
 

@@ -22,9 +22,7 @@ class AssetfinderAdapter(BinaryAdapter):
             raise ToolFailed("assetfinder: invalid target") from None
         # The child gets only the env keys passed in, so it has no PATH: launch the
         # path binary_path() resolved (docs/09 adapter contract), never the bare name.
-        argv = [self.binary_path() or self.binary, "--subs-only", target]
-        argv += ctx.pacer.tool_rate_args(self.name, "passive")
-        return argv
+        return [self.binary_path() or self.binary, "--subs-only", target]
 
     def parse_output(self, raw: str) -> list[Record]:
         return parse_subdomain_lines(raw, self.name)

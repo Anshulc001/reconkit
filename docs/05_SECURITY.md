@@ -19,13 +19,13 @@ Implemented in `core/scope.py`. Rules:
 5. **Every host is re-checked** right before it is probed (not only the root target). Out-of-scope hosts are dropped and counted in the summary.
 6. **IPs:** with a scope file present, probe an IP only if it is inside `in_scope_cidrs`; no CIDRs means no IPs. **Enforcement (11c-G-7, superseded in part 2026-11-17):** the engine hands each active stage the loaded scope's `ip_allowed` predicate through `RunContext.ip_allowed`, and `pyscan` filters every resolved address with it before connecting: an address outside is never probed, an empty resolution is never retried as a hostname, no CIDRs or an unreadable scope mean no addresses, and each skipped host is counted in `blocked=`. `naabu` cannot filter an address it resolves itself, so it is handled by scope mode: with **no scope file** it runs unrestricted like any other active tool; with a **scope file present** the engine pre-resolves each already-in-scope target itself, verifies every returned address with this same predicate, and passes naabu only the verified IP address(es) - never a bare domain. A target whose resolution fails or whose addresses are all out of scope is left out of that naabu invocation (no hostname fallback); if no target verifies, naabu does not run at all and the skip reason is recorded. `naabu` never runs in passive mode, like every other active tool (owner decision, 2026-11-17; docs/09 section 3 and selection rules). `--mock` is exempt from resolution because it connects to nothing. When **no scope file exists there is no CIDR list and no IP gate**: the engine hands the stage an allow-all `ip_allowed`, so "no scope" cannot silently block every address. That is the same 2026-11-17 decision as rule 2.
 7. **Port-scan pre-check:** port scans require a stored `live` result for the host. If no live result is stored, skip that host and print a warning (`run live first`); do not resolve and scan it directly. If the stored host status has `waf` set (the CDN/WAF marker the `httpx` live adapter parses from its JSON output, column `host_status_history.waf`), skip it as CDN/WAF-fronted. Phase 2 has no `cdncheck`; Phase 3 may add `cdncheck`/`wafw00f`.
-8. `max_speed` in `scope.yaml` caps `--speed`.
+8. `max_speed` in `scope.yaml` is accepted for compatibility and ignored: speed control was removed on 2026-11-17 (docs/MASTER_PLAN.md D3), so there is nothing left to cap. The program's real rate rules belong in `notes`, and the operator follows them.
 9. **No bypass.** No flag, env var, or hidden option may disable the gate *when a scope file is present*. Violations exit with code 3. The no-scope-file path is not a bypass: it is the documented meaning of an absent scope file (rule 2), and there is still no switch that weakens a real `scope.yaml` that the user provided.
 
-## 3. Pacing as a Safety Control
+## 3. Pacing (removed)
 
-- Default `--speed slow`. All network activity goes through the Pacer.
-- `--speed fast` on active stages requires typing `I AM AUTHORIZED`.
+- Speed control was removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN.md D3): there is no `--speed`, no `--delay`, no pacer and no rate limiter. Tools run at their own natural pace. `scope.yaml` `max_speed` still loads but is ignored.
+- Requests are still honest and attributable: the User-Agent is `reconkit/<version>`, and the operator is responsible for respecting the program's rate rules (which is what `scope.yaml` `notes` is for).
 - `opt_in` tools (nikto, masscan, ffuf, gowitness) are Phase 3 adapters in this build; none is selectable yet. When built they run only with `--tools <name>` or `--include-noisy`, and their rates are hard-capped from config (`masscan_max_rate`, `nmap_timing`).
 - `intrusive` tier: not selectable in this build. There is no `--intrusive` flag; no adapter runs intrusive tools.
 - Our own requests use the honest User-Agent `reconkit/<version>`. No User-Agent or IP rotation.
@@ -93,7 +93,7 @@ This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 fla
 - [ ] Targets validated before reaching subprocess
 - [ ] Installer uses registry sources and verifies checksums
 - [ ] No secrets in logs, DB, errors or exports
-- [ ] Pacer used for all network activity
+- [ ] No hidden throttling: no pacer, delay or rate-limiter path remains
 - [ ] Opt-in and intrusive tiers gated
 - [ ] HTML export escapes content
 - [ ] Dependencies reviewed and pinned in `pyproject.toml`

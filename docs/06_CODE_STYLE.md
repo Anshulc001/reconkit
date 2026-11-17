@@ -4,7 +4,7 @@
 
 - Prefer readable code over clever code.
 - Small, focused functions and modules.
-- Reuse existing utilities (`runner`, `pacing`, `store`, `ui`).
+- Reuse existing utilities (`runner`, `store`, `ui`).
 - Consistency over novelty. No unnecessary abstractions or dependencies.
 
 ## 2. Naming

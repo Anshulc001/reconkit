@@ -2,7 +2,7 @@
 
 A command-line reconnaissance orchestrator for **authorized** security testing. It runs several tools per stage, cross-checks their results, scores confidence by how many tools agree, and tracks what changed between scans in SQLite.
 
-- Polite by default: `--speed slow` (one tool at a time, random delays, shuffled order)
+- Natural pace: no speed preset, delay or artificial throttling; tools run at their own rate
 - Passive first: active scans need `--active` **and** a matching `scope.yaml`
 - Multi-tool stages with source attribution (HIGH / MEDIUM / LOW)
 - Host states: ALIVE, DNS_ONLY, SHUT_DOWN, DEAD, tracked across scans
@@ -72,7 +72,7 @@ In Git Bash, use `./scripts/bootstrap.sh` and `source .venv/Scripts/activate` in
 | `export -d X --format json\|md\|html` | **Phase 3 stub**: exits `1`; no report is written |
 | `scope import` | **Phase 3 stub**: exits `1` |
 
-Scan flags include `--speed slow|normal|fast` (default `slow`), `--delay MIN-MAX`, `--tools`, `--exclude`, `--include-noisy`, `--min-sources`, `--phase-timeout`, `--mock`, `--resume`, `--no-keys`, `--json`, `--no-color`, `-q/--silent`, `-v/--verbose`, and `--config/--scope/--db`. `--json` is available on the scan commands, `doctor`, `diff` and `status`, not on `install`/`update` or the Phase 3 stubs. There is no flag that skips the scope gate.
+Scan flags include `--tools`, `--exclude`, `--include-noisy`, `--min-sources`, `--phase-timeout`, `--mock`, `--resume`, `--no-keys`, `--json`, `--no-color`, `-q/--silent`, `-v/--verbose`, and `--config/--scope/--db`. `--json` is available on the scan commands, `doctor`, `diff` and `status`, not on `install`/`update` or the Phase 3 stubs. There is no flag that skips the scope gate.
 
 ## Example (real mock run)
 
@@ -96,7 +96,7 @@ No changes since run #1.
 | SETUP.md | Beginner setup for Kali/Ubuntu and Windows |
 | docs/01_PRD.md | Product scope and acceptance criteria |
 | docs/02_CLI_UX.md | Commands, flags, output, exit codes |
-| docs/03_ARCHITECTURE.md | Layers, structure, pacing, consensus |
+| docs/03_ARCHITECTURE.md | Layers, structure, concurrency, consensus |
 | docs/04_DATABASE.md | SQLite schema |
 | docs/05_SECURITY.md | Scope gate, subprocess and installer safety |
 | docs/06_CODE_STYLE.md | Code conventions |

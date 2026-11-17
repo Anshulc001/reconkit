@@ -17,8 +17,6 @@ from reconkit.adapters.base import BaseToolAdapter
 from reconkit.adapters.dnspython import DnsOutcome, DnsPythonAdapter
 from reconkit.adapters.pyprobe import TITLE_LIMIT, PyprobeAdapter
 from reconkit.adapters.pyscan import PyscanAdapter
-from reconkit.config import load_config, resolve_speed
-from reconkit.core.pacing import Pacer, RateLimiter
 from reconkit.models import (
     HostState,
     HostStatusRecord,
@@ -33,35 +31,17 @@ CONFIG = REPO / "config.yaml"
 ADAPTER_DIR = REPO / "src" / "reconkit" / "adapters"
 
 
-async def _no_sleep(_seconds: float) -> None:
-    return None
-
-
-class CountingLimiter(RateLimiter):
-    def __init__(self) -> None:
-        super().__init__(1_000_000, clock=lambda: 0.0, sleep=_no_sleep)
-        self.waits = 0
-
-    async def wait(self) -> float:
-        self.waits += 1
-        return 0.0
-
-
 def make_ctx(
     *,
     hosts: list[str] | None = None,
     ports: list[int] | None = None,
     mock: bool = False,
-    limiter: RateLimiter | None = None,
     ip_allowed: Callable[[str], bool] | None = lambda _ip: True,
 ) -> RunContext:
-    config = load_config(CONFIG, speed="fast")
     return RunContext(
         target="example.com",
         hosts=hosts or [],
         ports=ports or [],
-        pacer=Pacer(resolve_speed(config)),
-        limiter=limiter if limiter is not None else CountingLimiter(),
         timeout=5.0,
         workspace=REPO / "workspaces" / "example.com",
         mock=mock,
@@ -229,15 +209,6 @@ async def test_dnspython_idn_host_is_counted_not_resolved() -> None:
     assert resolver.queries == []
     assert result.records == []
     assert "invalid=1" in (result.error or "")
-
-
-async def test_dnspython_awaits_limiter_per_query() -> None:
-    limiter = CountingLimiter()
-    resolver = FakeResolver({("www.example.com", "A"): ["203.0.113.5"]})
-    adapter = DnsPythonAdapter(resolver=resolver)
-    await adapter.run(make_ctx(hosts=["www.example.com"], limiter=limiter))
-    assert len(resolver.queries) == 3
-    assert limiter.waits == 3
 
 
 async def test_dnspython_mock_mode_reads_fixture() -> None:
@@ -419,15 +390,6 @@ async def test_pyprobe_idn_host_is_skipped_without_a_request() -> None:
     assert "unreachable=1" in (result.error or "")
 
 
-async def test_pyprobe_awaits_limiter() -> None:
-    limiter = CountingLimiter()
-    adapter = PyprobeAdapter(
-        transport=httpx.MockTransport(lambda _r: httpx.Response(200, text="<title>ok</title>"))
-    )
-    await adapter.run(make_ctx(hosts=["www.example.com"], limiter=limiter))
-    assert limiter.waits == 1
-
-
 async def test_pyprobe_mock_mode_reads_fixture() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         raise AssertionError("mock mode must not hit the network")
@@ -486,24 +448,6 @@ async def test_pyscan_refused_vs_timeout() -> None:
     assert "timeouts=1" in (result.error or "")
 
 
-async def test_pyscan_uses_pacer_order_for_ports() -> None:
-    kinds: list[str] = []
-    ctx = make_ctx(hosts=["www.example.com"], ports=[443, 80])
-    original = ctx.pacer.order
-
-    def spy(items, *, kind="host"):
-        kinds.append(kind)
-        return original(items, kind=kind)
-
-    ctx.pacer.order = spy
-    adapter = PyscanAdapter(
-        connect=make_connect({443, 80}, {}),
-        resolve=lambda _host: asyncio.sleep(0, result=["203.0.113.5"]),
-    )
-    await adapter.run(ctx)
-    assert kinds == ["port"]
-
-
 async def test_pyscan_ignores_out_of_range_ports() -> None:
     seen: list[int] = []
 
@@ -522,9 +466,9 @@ async def test_pyscan_ignores_out_of_range_ports() -> None:
     assert [(r.port, r.state) for r in result.records] == [(443, "closed")]
 
 
-async def test_pyscan_respects_the_pacer_parallel_limit() -> None:
+async def test_pyscan_probes_its_ports_without_an_artificial_limit() -> None:
+    """2026-11-17: no pacer means no parallel cap; every port probe starts at once."""
     ctx = make_ctx(hosts=["www.example.com"], ports=list(range(1000, 1010)))
-    ctx.pacer.parallel_limit = lambda _mode: 2
     active = 0
     peak = 0
 
@@ -543,7 +487,7 @@ async def test_pyscan_respects_the_pacer_parallel_limit() -> None:
         resolve=lambda _host: asyncio.sleep(0, result=["203.0.113.5"]),
     )
     await adapter.run(ctx)
-    assert peak == 2
+    assert peak == 10
 
 
 class BannerReader:
@@ -590,16 +534,6 @@ async def test_pyscan_cancellation_closes_the_connection() -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
     assert writer.closed is True
-
-
-async def test_pyscan_awaits_limiter_per_query_and_connection() -> None:
-    limiter = CountingLimiter()
-    adapter = PyscanAdapter(
-        connect=make_connect({443, 80}, {}),
-        resolve=lambda _host: asyncio.sleep(0, result=["203.0.113.5"]),
-    )
-    await adapter.run(make_ctx(hosts=["www.example.com"], ports=[443, 80], limiter=limiter))
-    assert limiter.waits == 3
 
 
 async def test_pyscan_probes_only_an_address_inside_in_scope_cidrs() -> None:
@@ -752,83 +686,6 @@ FORBIDDEN = (
     "reconkit.cli",
     "subprocess",
 )
-
-
-class FixedRng:
-    """Deterministic stand-in for `random.Random`; the Pacer only calls `uniform`."""
-
-    def __init__(self, value: float = 3.0) -> None:
-        self.value = value
-
-    def uniform(self, _low: float, _high: float) -> float:
-        return self.value
-
-    def shuffle(self, _items: list[object]) -> None:
-        return None
-
-
-def recording_slow_pacer() -> tuple[Pacer, list[str]]:
-    """A slow Pacer whose sleeps are recorded instead of waited on."""
-    events: list[str] = []
-
-    async def sleep(seconds: float) -> None:
-        events.append(f"delay:{seconds:.3f}")
-
-    config = load_config(CONFIG, speed="slow")
-    return Pacer(resolve_speed(config), rng=FixedRng(), sleep=sleep), events
-
-
-async def test_pyscan_waits_between_hosts_before_dispatching_the_next() -> None:
-    """Regression: 11c-G-2.
-
-    Asserts the ordering, not a call count: host B must not be dispatched (resolved
-    or connected) until the pause after host A has completed, and the pause must be
-    the speed preset's active.host_delay, while the first host does not wait.
-    """
-    pacer, events = recording_slow_pacer()
-    ctx = make_ctx(hosts=["a.example.com", "b.example.com"], ports=[443])
-    ctx = ctx.model_copy(update={"pacer": pacer})
-    addresses = {"a.example.com": "203.0.113.5", "b.example.com": "203.0.113.6"}
-
-    async def resolve(host: str) -> list[str]:
-        events.append(f"resolve:{host}")
-        return [addresses[host]]
-
-    async def connect(ip: str, port: int) -> tuple[None, FakeWriter]:
-        events.append(f"connect:{ip}:{port}")
-        raise ConnectionRefusedError(port)
-
-    await PyscanAdapter(connect=connect, resolve=resolve).run(ctx)
-
-    assert events[0] == "resolve:a.example.com", "the first host must not wait"
-    delay = next(event for event in events if event.startswith("delay:"))
-    assert events.index(delay) > events.index("connect:203.0.113.5:443")
-    assert events.index(delay) < events.index("resolve:b.example.com")
-    assert 1.0 <= float(delay.split(":")[1]) <= 5.0
-
-
-async def test_pyprobe_waits_between_hosts_when_dispatch_is_sequential() -> None:
-    """Regression: 11c-G-2.
-
-    A delay awaited concurrently is not spacing: the second request must start only
-    after the pause that follows the first one has completed.
-    """
-    pacer, events = recording_slow_pacer()
-    assert pacer.parallel_limit("active") == 1
-    ctx = make_ctx(hosts=["a.example.com", "b.example.com"])
-    ctx = ctx.model_copy(update={"pacer": pacer})
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        events.append(f"probe:{request.url.host}")
-        return httpx.Response(200, text="ok")
-
-    adapter = PyprobeAdapter(transport=httpx.MockTransport(handler))
-    await adapter.run(ctx)
-
-    assert events[0] == "probe:a.example.com", "the first host must not wait"
-    delay = next(event for event in events if event.startswith("delay:"))
-    assert events.index(delay) > events.index("probe:a.example.com")
-    assert events.index(delay) < events.index("probe:b.example.com")
 
 
 @pytest.mark.parametrize("module", ["dnspython", "pyprobe", "pyscan"])

@@ -59,7 +59,6 @@ class HttpxAdapter(BinaryAdapter):
             "-td",
             "-cdn",
         ]
-        argv += ctx.pacer.tool_rate_args(self.name, "active")
         for host in hosts:
             argv += ["-u", host]
         return argv

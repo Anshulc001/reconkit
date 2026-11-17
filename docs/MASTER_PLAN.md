@@ -581,6 +581,20 @@ D2. 2026-11-17 - naabu is scope-mode dependent; entry 11c-G-7 is SUPERSEDED
     not run. 11c-G-7's permanent block (12i) is superseded by this decision; its
     historical entries in docs/REVIEW_LOG stay as written.
 
+D3. 2026-11-17 - All speed/throttle control is removed.
+    Reason: "user-requested removal, no throttling desired."
+    `--speed slow|normal|fast` and `--delay MIN-MAX` are gone from the CLI and
+    from interactive mode, the `fast` typed confirmation is gone, `config.yaml`
+    no longer carries a `speeds` block or `default_speed`, `core/pacing.py`
+    (pacer, rate limiter, shuffle, rate flags) is deleted, `RunContext` has no
+    `pacer`/`limiter`/`speed`, `tools.yaml`/the registry have no `rate_flag`,
+    and every stage starts its tools together under `asyncio.gather` with no
+    sleep, semaphore or shuffling. Schema 5 drops `scan_runs.speed`. A
+    `scope.yaml` `max_speed` key is still accepted (so real files keep loading)
+    and is ignored, because there is no speed left to cap. Timeouts and
+    per-tool caps are not throttling and remain. This supersedes plan rule 3 of
+    docs/05 for the pacing part only; the scope gate is untouched.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

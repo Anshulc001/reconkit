@@ -3,7 +3,7 @@
 The detector resolves a few random labels under the target and reports the
 wildcard answer set. It does not own a resolver: the engine injects the DNS
 adapter's `resolve_host` bound to the run context, so probes go through the
-same resolver and limiter and there is no second DNS stack.
+same resolver and there is no second DNS stack.
 
 A timeout, SERVFAIL, empty answer or unexpected error is `unknown`, never
 `none`: reading it as "no wildcard" would silently let wildcard noise into the

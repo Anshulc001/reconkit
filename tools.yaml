@@ -1,7 +1,7 @@
 # reconkit tool registry. The ONLY list of tools the program may run or install.
 # Fields: stage, kind (http|python|binary), tier (core|opt_in|intrusive), mode (passive|active),
 #   phase (build phase: 2 = working adapter in Phase 2, 3 = later), binary, version_cmd,
-#   rate_flag (how the speed engine passes requests/second), install (method + source),
+#   install (method + source),
 #   keys (optional list of {env,url,adds} for keys that are free to obtain; policy in docs/05_SECURITY.md 6.1).
 # `keys` is the only per-tool key field; there is no `needs_key` (the loader rejects it).
 # Install methods: github_release | go_install | apt | pipx | none.
@@ -73,7 +73,6 @@ tools:
     phase: 2
     binary: subfinder
     version_cmd: [subfinder, -version]
-    rate_flag: "-rl"
     install: {<<: *pd_release, name: subfinder, repo: projectdiscovery/subfinder, fallback: {method: go_install, package: "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"}}
     keys:
       - env: CERTSPOTTER_API_KEY
@@ -132,24 +131,24 @@ tools:
 
   # ---------------- dns ----------------
   dnspython:    {stage: dns, kind: python, tier: core, mode: passive, phase: 2, install: {method: none}, notes: "A/AAAA/CNAME/NS/MX/TXT, wildcard probe, dangling CNAME check."}
-  dnsx:         {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dnsx, version_cmd: [dnsx, -version], rate_flag: "-rl", install: {<<: *pd_release, name: dnsx, repo: projectdiscovery/dnsx}}
+  dnsx:         {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dnsx, version_cmd: [dnsx, -version], install: {<<: *pd_release, name: dnsx, repo: projectdiscovery/dnsx}}
   puredns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: puredns, version_cmd: [puredns, --version], requires: [massdns], install: {method: go_install, package: "github.com/d3mondev/puredns/v2@latest"}}
   massdns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: massdns, version_cmd: [dpkg-query, -W, '-f=${Version}', massdns], install: {method: apt, package: massdns}}
   dig:          {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dig, version_cmd: [dig, -v], install: {method: apt, package: dnsutils}}
 
   # ---------------- live (active) ----------------
   pyprobe:      {stage: live, kind: python, tier: core, mode: active, phase: 2, install: {method: none}, notes: "Async HTTP/HTTPS probe, status, title, redirects. Fallback when no binary is installed."}
-  httpx:        {stage: live, kind: binary, tier: core, mode: active, phase: 2, binary: httpx, version_cmd: [httpx, -version], rate_flag: "-rl", install: {<<: *pd_release, name: httpx, repo: projectdiscovery/httpx}, notes: "ProjectDiscovery httpx. Kali's apt package is httpx-toolkit; the python 'httpx' CLI is a different program. Always use ~/.reconkit/bin first."}
+  httpx:        {stage: live, kind: binary, tier: core, mode: active, phase: 2, binary: httpx, version_cmd: [httpx, -version], install: {<<: *pd_release, name: httpx, repo: projectdiscovery/httpx}, notes: "ProjectDiscovery httpx. Kali's apt package is httpx-toolkit; the python 'httpx' CLI is a different program. Always use ~/.reconkit/bin first."}
   httprobe:     {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: httprobe, version_cmd: [httprobe, -h], install: {method: go_install, package: "github.com/tomnomnom/httprobe@latest"}}
-  tlsx:         {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: tlsx, version_cmd: [tlsx, -version], rate_flag: "-rl", install: {<<: *pd_release, name: tlsx, repo: projectdiscovery/tlsx}, notes: "Certificate SANs can reveal more subdomains."}
+  tlsx:         {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: tlsx, version_cmd: [tlsx, -version], install: {<<: *pd_release, name: tlsx, repo: projectdiscovery/tlsx}, notes: "Certificate SANs can reveal more subdomains."}
 
   # ---------------- ports ----------------
   smap:         {stage: ports, kind: binary, tier: core, mode: passive, phase: 3, binary: smap, install: {method: go_install, package: "github.com/s0md3v/smap/cmd/smap@latest"}, notes: "Passive ports from Shodan data. No packets to the target."}
   pyscan:       {stage: ports, kind: python, tier: core, mode: active, phase: 2, install: {method: none}, notes: "Async TCP connect scan (no root). Fallback and verifier."}
-  naabu:        {stage: ports, kind: binary, tier: core, mode: active, phase: 2, binary: naabu, version_cmd: [naabu, -version], rate_flag: "-rate", requires_apt: [libpcap-dev], install: {<<: *pd_release, name: naabu, repo: projectdiscovery/naabu, checksums_pattern: "naabu-checksums.txt"}, notes: "Needs libpcap. Use connect scan (-scan-type c) when not root."}
-  nmap:         {stage: ports, kind: binary, tier: core, mode: active, phase: 3, binary: nmap, version_cmd: [nmap, --version], rate_flag: "-T", install: {method: apt, package: nmap}, notes: "Service/version verification (-sV). Timing from nmap_timing in config."}
+  naabu:        {stage: ports, kind: binary, tier: core, mode: active, phase: 2, binary: naabu, version_cmd: [naabu, -version], requires_apt: [libpcap-dev], install: {<<: *pd_release, name: naabu, repo: projectdiscovery/naabu, checksums_pattern: "naabu-checksums.txt"}, notes: "Needs libpcap. Use connect scan (-scan-type c) when not root."}
+  nmap:         {stage: ports, kind: binary, tier: core, mode: active, phase: 3, binary: nmap, version_cmd: [nmap, --version], install: {method: apt, package: nmap}, notes: "Service/version verification (-sV)."}
   rustscan:     {stage: ports, kind: binary, tier: core, mode: active, phase: 3, binary: rustscan, version_cmd: [rustscan, --version], install: {method: github_release, repo: RustScan/RustScan, asset_pattern: "verify-at-implementation"}, notes: "Phase 3, verify asset and checksum names at implementation."}
-  masscan:      {stage: ports, kind: binary, tier: opt_in, mode: active, phase: 3, binary: masscan, version_cmd: [masscan, --version], rate_flag: "--max-rate", needs_root: true, install: {method: apt, package: masscan}, notes: "Opt-in only. Rate hard-capped by speed (masscan_max_rate)."}
+  masscan:      {stage: ports, kind: binary, tier: opt_in, mode: active, phase: 3, binary: masscan, version_cmd: [masscan, --version], needs_root: true, install: {method: apt, package: masscan}, notes: "Opt-in only."}
 
   # ---------------- tech ----------------
   httpx_tech:   {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: httpx, notes: "httpx -td technology detection (reuses httpx)."}
@@ -161,7 +160,7 @@ tools:
   # ---------------- urls ----------------
   gau:          {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: gau, version_cmd: [gau, --version], install: {method: go_install, package: "github.com/lc/gau/v2/cmd/gau@latest"}}
   waybackurls:  {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: waybackurls, install: {method: go_install, package: "github.com/tomnomnom/waybackurls@latest"}}
-  katana:       {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: katana, version_cmd: [katana, -version], version_regex: 'Current version: (v?\d+\.\d+\.\d+)', rate_flag: "-rl", install: {<<: *pd_release, name: katana, repo: projectdiscovery/katana, checksums_pattern: "katana-{version}-checksums.txt"}}
+  katana:       {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: katana, version_cmd: [katana, -version], version_regex: 'Current version: (v?\d+\.\d+\.\d+)', install: {<<: *pd_release, name: katana, repo: projectdiscovery/katana, checksums_pattern: "katana-{version}-checksums.txt"}}
   hakrawler:    {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: hakrawler, install: {method: go_install, package: "github.com/hakluke/hakrawler@latest"}}
   gospider:     {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: gospider, install: {method: go_install, package: "github.com/jaeles-project/gospider@latest"}}
   subjs:        {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: subjs, install: {method: go_install, package: "github.com/lc/subjs@latest"}, notes: "JS file discovery."}
@@ -169,11 +168,11 @@ tools:
   urlfinder:    {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: urlfinder, install: {<<: *pd_release, name: urlfinder, repo: projectdiscovery/urlfinder}}
 
   # ---------------- vulns (takeover, exposure) ----------------
-  nuclei:       {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: nuclei, version_cmd: [nuclei, -version], version_regex: 'Nuclei Engine Version: (v?\d+\.\d+\.\d+)', rate_flag: "-rl", install: {<<: *pd_release, name: nuclei, repo: projectdiscovery/nuclei}, notes: "Run safe tags only (takeover, exposure, misconfig). Update templates with 'reconkit update'."}
+  nuclei:       {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: nuclei, version_cmd: [nuclei, -version], version_regex: 'Nuclei Engine Version: (v?\d+\.\d+\.\d+)', install: {<<: *pd_release, name: nuclei, repo: projectdiscovery/nuclei}, notes: "Run safe tags only (takeover, exposure, misconfig). Update templates with 'reconkit update'."}
   subzy:        {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: subzy, install: {method: go_install, package: "github.com/PentestPad/subzy@latest"}}
   dnsreaper:    {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: dnsreaper, install: {method: none}, notes: "No supported distribution: the repo has no setup.py/pyproject.toml (pipx refuses it) and no PyPI package (verified 2026-11-13). Install by hand from the repo before the phase-3 adapter lands."}
   nikto:        {stage: vulns, kind: binary, tier: opt_in, mode: active, phase: 3, binary: nikto, version_cmd: [nikto, -Version], install: {method: apt, package: nikto}, notes: "Opt-in only. Very noisy."}
-  ffuf:         {stage: vulns, kind: binary, tier: opt_in, mode: active, phase: 3, binary: ffuf, version_cmd: [ffuf, -V], rate_flag: "-rate", install: {method: go_install, package: "github.com/ffuf/ffuf/v2@latest"}, notes: "Opt-in only. Content discovery needs explicit --tools ffuf."}
+  ffuf:         {stage: vulns, kind: binary, tier: opt_in, mode: active, phase: 3, binary: ffuf, version_cmd: [ffuf, -V], install: {method: go_install, package: "github.com/ffuf/ffuf/v2@latest"}, notes: "Opt-in only. Content discovery needs explicit --tools ffuf."}
 
   # ---------------- shots ----------------
   gowitness:    {stage: shots, kind: binary, tier: opt_in, mode: active, phase: 3, binary: gowitness, install: {method: go_install, package: "github.com/sensepost/gowitness@latest"}}

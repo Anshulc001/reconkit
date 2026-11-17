@@ -64,7 +64,7 @@
 ### Feature 3 - Passive recon (`passive`, `subs`, `dns`)
 - **Purpose:** Discover subdomains from several third-party sources and resolve them, without sending traffic to the target.
 - **Acceptance criteria:**
-  - Runs every available `core` adapter of the stage, respecting `--speed`.
+  - Runs every available `core` adapter of the stage.
   - Dedupes and stores `sources` and `confidence` per subdomain.
   - Filters wildcard DNS results.
   - Works on day one with HTTP-only sources even if no binary is installed.
@@ -93,12 +93,9 @@
   - Confidence: HIGH (3+ tools), MEDIUM (2), LOW (1), UNCONFIRMED (tools disagree).
   - `--min-sources N`, `--tools a,b`, `--exclude x` work on every stage command.
 
-### Feature 7 - Speed and pacing (`--speed`)
-- **Purpose:** Polite, low-noise scans.
-- **Acceptance criteria:**
-  - Default `slow`: tools run one at a time with random delays; hosts and ports are shuffled; tool rate flags are set from config.
-  - `--delay MIN-MAX` overrides the pause range.
-  - `--speed fast` on an active stage requires typed confirmation and is capped by `max_speed` in `scope.yaml`.
+### Feature 7 - Speed and pacing (removed 2026-11-17)
+- **Was:** `--speed`/`--delay` presets, a pacer and rate limiting.
+- **Now:** removed at the owner's request (docs/MASTER_PLAN.md D3, "user-requested removal, no throttling desired"). Tools run at their own natural pace; there is no speed flag, delay flag, pacer or rate limiter, and `scope.yaml` `max_speed` is accepted but ignored.
 
 ### Feature 8 - Change tracking (`diff`, `status`, `db`, `export`)
 - **Acceptance criteria:**
@@ -124,7 +121,7 @@
 **Phase 1 (docs):** AGENTS.md, SETUP.md, docs 01-10, tools.yaml, config.yaml, scope.example.yaml.
 
 **Phase 2 (working core) - Must have:**
-- Skeleton, config, scope gate, SQLite store, pacing engine, consensus engine, `--mock`.
+- Skeleton, config, scope gate, SQLite store, consensus engine, `--mock`.
 - Commands: `doctor`, `install`, `update`, `passive`, `live`, `ports`, `diff`, `status`; `db list`, `db export`, `export` and `scope import` are explicit Phase 3 stubs (exit 1) in this build, and docs/02 marks them as such.
 - Adapters: crtsh, certspotter, otx, hackertarget, subfinder, assetfinder, dnspython, pyprobe, httpx, pyscan, naabu.
 - Tests passing on Linux and on plain Windows (fixtures).
@@ -160,6 +157,6 @@ No blocking product questions. Release asset names were verified against real re
 - [ ] Requirements implemented
 - [ ] Critical user flows (docs/08_UX_FLOWS.md) work
 - [ ] Tests, lint, type check pass
-- [ ] Scope gate and pacing verified by tests
+- [ ] Scope gate verified by tests
 - [ ] Security rules (docs/05_SECURITY.md) satisfied
 - [ ] Documentation updated

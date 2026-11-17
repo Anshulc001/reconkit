@@ -34,8 +34,6 @@ DOCUMENTED_OPTIONS = {
     "--include-noisy",
     "--phase-timeout",
     "--mock",
-    "--speed",
-    "--delay",
     "--active",
     "--no-keys",
     "--resume",
@@ -75,8 +73,6 @@ def scan_args(config: Path, command: str = "passive", *extra: str) -> list[str]:
         "-d",
         "example.com",
         "--mock",
-        "--speed",
-        "fast",
         "--config",
         str(config),
         *extra,
@@ -273,10 +269,6 @@ def test_silent_json_through_the_real_cli_has_no_stderr(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("extra", "expected"),
     [
-        (("--speed", "turbo"), "invalid speed"),
-        (("--delay", "10-5"), "invalid delay"),
-        (("--delay", "-1-5"), "invalid delay"),
-        (("--delay", "abc"), "invalid delay"),
         (("--tools", "not-a-tool"), "unknown tool"),
     ],
 )
@@ -343,24 +335,13 @@ def test_active_commands_require_active_flag(tmp_path: Path) -> None:
     assert "Traceback" not in result.stderr
 
 
-def test_fast_active_requires_typed_confirmation(tmp_path: Path) -> None:
+def test_speed_and_delay_flags_are_gone(tmp_path: Path) -> None:
+    """2026-11-17: the flags were removed, so Typer rejects them as unknown."""
     config = make_config(tmp_path)
-    result = CliRunner().invoke(
-        app,
-        [
-            "live",
-            "-d",
-            "example.com",
-            "--active",
-            "--speed",
-            "fast",
-            "--config",
-            str(config),
-        ],
-        input="no\n",
-    )
-    assert result.exit_code == 2
-    assert "cancelled" in result.stderr
+    for args in (["--speed", "fast"], ["--delay", "5-20"]):
+        result = CliRunner().invoke(app, scan_args(config, "passive", *args))
+        assert result.exit_code == 2
+        assert "No such option" in result.stderr
 
 
 def test_resume_flag_reaches_the_engine_resume_path(tmp_path: Path) -> None:
@@ -390,8 +371,6 @@ def test_target_list_accepts_comments_and_deduplicates(tmp_path: Path) -> None:
             "-l",
             str(target_file),
             "--mock",
-            "--speed",
-            "fast",
             "--config",
             str(config),
             "--json",
@@ -437,8 +416,6 @@ def test_root_invocation_without_a_command_runs_the_passive_pipeline(tmp_path: P
             "-d",
             "example.com",
             "--mock",
-            "--speed",
-            "fast",
             "--config",
             str(config),
             "--json",

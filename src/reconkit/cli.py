@@ -302,8 +302,6 @@ def _run_scan(
     include_noisy: bool,
     phase_timeout: float | None,
     mock: bool,
-    speed: str | None,
-    delay: str | None,
     active: bool,
     no_keys: bool,
     resume: bool,
@@ -327,7 +325,7 @@ def _run_scan(
             domain, list_file = plan.domain, plan.list_file
             scope_path = plan.scope_path
         targets = _targets(domain, list_file)
-        config: AppConfig = load_config(config_path, speed=speed, delay=delay)
+        config: AppConfig = load_config(config_path)
         is_active = active if plan is None else (plan.active or active)
         if command in _ACTIVE_ONLY and not is_active:
             raise ConfigError(f"{command} requires --active")
@@ -338,18 +336,6 @@ def _run_scan(
             raise ConfigError(
                 f"{command!r} is passive-only; --active needs: reconkit run -d X --active"
             )
-        if is_active and config.default_speed == "fast" and not mock:
-            render_message(
-                "warning: active fast mode can be noisy; typed confirmation is required.",
-                no_color=no_color,
-            )
-            answer = typer.prompt(
-                "Type I AM AUTHORIZED to continue",
-                default="",
-                show_default=False,
-            )
-            if answer != "I AM AUTHORIZED":
-                raise ConfigError("fast active scan cancelled")
         if json_output and len(targets) > 1:
             raise ConfigError("--json accepts one target per invocation; use -d")
         # Progress goes to stderr for every scan, --json included; only --silent
@@ -372,7 +358,6 @@ def _run_scan(
                         active=is_active,
                         no_keys=no_keys,
                         mock=mock,
-                        speed=config.default_speed,
                         phase_timeout=phase_timeout,
                         min_sources=min_sources,
                         resume=resume,
@@ -461,12 +446,6 @@ def _scan_command(
     mock: Annotated[
         bool, typer.Option("--mock", help="Use fixtures; no network or external processes.")
     ] = False,
-    speed: Annotated[
-        str | None, typer.Option("--speed", help="slow, normal or fast (default: slow).")
-    ] = None,
-    delay: Annotated[
-        str | None, typer.Option("--delay", help="Random pause MIN-MAX seconds.")
-    ] = None,
     active: Annotated[
         bool, typer.Option("--active", help="Allow active stages inside scope.")
     ] = False,
@@ -496,8 +475,6 @@ def _scan_command(
             include_noisy=include_noisy,
             phase_timeout=phase_timeout,
             mock=mock,
-            speed=speed,
-            delay=delay,
             active=active,
             no_keys=no_keys,
             resume=resume,
@@ -547,12 +524,6 @@ def main(
     mock: Annotated[
         bool, typer.Option("--mock", help="Use fixtures; no network or external processes.")
     ] = False,
-    speed: Annotated[
-        str | None, typer.Option("--speed", help="slow, normal or fast (default: slow).")
-    ] = None,
-    delay: Annotated[
-        str | None, typer.Option("--delay", help="Random pause MIN-MAX seconds.")
-    ] = None,
     active: Annotated[
         bool, typer.Option("--active", help="Allow active stages inside scope.")
     ] = False,
@@ -586,8 +557,6 @@ def main(
             include_noisy=include_noisy,
             phase_timeout=phase_timeout,
             mock=mock,
-            speed=speed,
-            delay=delay,
             active=active,
             no_keys=no_keys,
             resume=resume,

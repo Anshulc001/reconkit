@@ -87,7 +87,6 @@ class DnsPythonAdapter(BaseToolAdapter):
                 raw_text=fixture,
             )
 
-        semaphore = asyncio.Semaphore(ctx.pacer.parallel_limit("passive"))
         hosts: list[str] = []
         invalid = 0
         for host in ctx.hosts:
@@ -95,7 +94,7 @@ class DnsPythonAdapter(BaseToolAdapter):
                 hosts.append(validate_host(host))
             except (TypeError, ValueError):
                 invalid += 1
-        results = await asyncio.gather(*(self._guarded(ctx, host, semaphore) for host in hosts))
+        results = await asyncio.gather(*(self.resolve_host(ctx, host) for host in hosts))
         records: list[Record] = []
         counts: dict[DnsOutcome, int] = {}
         for host, result in zip(hosts, results, strict=True):
@@ -159,7 +158,6 @@ class DnsPythonAdapter(BaseToolAdapter):
         return DnsResult(DnsOutcome.RESOLVED, ips=ips, cnames=cnames)
 
     async def _query(self, ctx: RunContext, host: str, rtype: str) -> list[str]:
-        await ctx.limiter.wait()
         resolver = self._get_resolver()
         answer = await resolver.resolve(
             host, rtype, lifetime=self._lifetime, raise_on_no_answer=False
@@ -182,10 +180,6 @@ class DnsPythonAdapter(BaseToolAdapter):
             resolver.timeout = self._lifetime
             self._resolver = resolver
         return self._resolver
-
-    async def _guarded(self, ctx: RunContext, host: str, semaphore: asyncio.Semaphore) -> DnsResult:
-        async with semaphore:
-            return await self.resolve_host(ctx, host)
 
     def parse_output(self, raw: str) -> list[Record]:
         try:

@@ -79,27 +79,15 @@ class PyprobeAdapter(BaseToolAdapter):
                 raw_text=fixture,
             )
 
-        semaphore = asyncio.Semaphore(ctx.pacer.parallel_limit("active"))
         async with httpx.AsyncClient(
             timeout=ctx.timeout,
             headers={"User-Agent": USER_AGENT},
             transport=self._transport,
             follow_redirects=False,
         ) as client:
-            if ctx.pacer.parallel_limit("active") <= 1:
-                # A pause awaited inside a gather is not spacing: dispatch hosts one
-                # at a time so before_host() falls between real requests.
-                outcomes = []
-                for index, host in enumerate(ctx.hosts):
-                    if index:
-                        await ctx.pacer.before_host()
-                    outcomes.append(await self._probe(ctx, client, host, semaphore))
-            else:
-                outcomes = list(
-                    await asyncio.gather(
-                        *(self._probe(ctx, client, host, semaphore) for host in ctx.hosts)
-                    )
-                )
+            outcomes = list(
+                await asyncio.gather(*(self._probe(ctx, client, host) for host in ctx.hosts))
+            )
         records: list[Record] = [record for record in outcomes if record is not None]
         unreachable = len(outcomes) - len(records)
         error = f"unreachable={unreachable}" if unreachable else None
@@ -117,7 +105,6 @@ class PyprobeAdapter(BaseToolAdapter):
         ctx: RunContext,
         client: httpx.AsyncClient,
         host: str,
-        semaphore: asyncio.Semaphore,
     ) -> HostStatusRecord | None:
         try:
             host = validate_host(host)
@@ -125,33 +112,31 @@ class PyprobeAdapter(BaseToolAdapter):
             return None
         tls_error = False
         tls_detail: str | None = None
-        async with semaphore:
-            for scheme in SCHEMES:
-                await ctx.limiter.wait()
-                try:
-                    async with client.stream("GET", f"{scheme}://{host}/") as response:
-                        body = await self._read_prefix(response)
-                        return HostStatusRecord(
-                            fqdn=host,
-                            source=self.name,
-                            state=HostState.ALIVE,
-                            status_code=response.status_code,
-                            title=extract_title(body),
-                            location=response.headers.get("location"),
-                        )
-                except httpx.ConnectError as exc:
-                    # Regression: 11d-findings-f. A TLS failure on `https` must not
-                    # end the probe: the host may still answer plain `http` (a
-                    # certificate that does not match the name is enough). Only a
-                    # TLS error with no working scheme is evidence of UNKNOWN.
-                    if self._is_tls_error(exc):
-                        tls_error = True
-                        # Keep the reason for the UNKNOWN record: the store bounds
-                        # and redacts it (docs/04 section 5, part 12d).
-                        tls_detail = str(exc)
-                    continue
-                except (httpx.TimeoutException, httpx.HTTPError):
-                    continue
+        for scheme in SCHEMES:
+            try:
+                async with client.stream("GET", f"{scheme}://{host}/") as response:
+                    body = await self._read_prefix(response)
+                    return HostStatusRecord(
+                        fqdn=host,
+                        source=self.name,
+                        state=HostState.ALIVE,
+                        status_code=response.status_code,
+                        title=extract_title(body),
+                        location=response.headers.get("location"),
+                    )
+            except httpx.ConnectError as exc:
+                # Regression: 11d-findings-f. A TLS failure on `https` must not
+                # end the probe: the host may still answer plain `http` (a
+                # certificate that does not match the name is enough). Only a
+                # TLS error with no working scheme is evidence of UNKNOWN.
+                if self._is_tls_error(exc):
+                    tls_error = True
+                    # Keep the reason for the UNKNOWN record: the store bounds
+                    # and redacts it (docs/04 section 5, part 12d).
+                    tls_detail = str(exc)
+                continue
+            except (httpx.TimeoutException, httpx.HTTPError):
+                continue
         if tls_error:
             return HostStatusRecord(
                 fqdn=host, source=self.name, state=HostState.UNKNOWN, detail=tls_detail

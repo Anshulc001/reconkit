@@ -47,7 +47,7 @@ def make_config(tmp_path: Path) -> Path:
 
 def interactive_args(config: Path, command: str = "passive", *extra: str) -> list[str]:
     """A scan command with **no** -d and no -l: the interactive trigger."""
-    return [command, "--mock", "--speed", "fast", "--config", str(config), *extra]
+    return [command, "--mock", "--config", str(config), *extra]
 
 
 def as_tty(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,7 +76,7 @@ def test_a_flagged_run_never_asks_a_question(
     monkeypatch.setattr(cli.typer, "prompt", explode)
     monkeypatch.setattr(cli.typer, "confirm", explode)
     result = CliRunner().invoke(
-        app, ["passive", "-d", "example.com", "--mock", "--speed", "fast", "--config", str(config)]
+        app, ["passive", "-d", "example.com", "--mock", "--config", str(config)]
     )
     assert result.exit_code == 0
     assert "Domain, or path to a file of domains" not in result.stderr
@@ -98,7 +98,7 @@ def test_a_listed_run_never_asks_a_question(
     )
     result = CliRunner().invoke(
         app,
-        ["passive", "-l", str(targets), "--mock", "--speed", "fast", "--config", str(config)],
+        ["passive", "-l", str(targets), "--mock", "--config", str(config)],
     )
     assert result.exit_code == 0
     assert "Domain, or path to a file of domains" not in result.stderr
@@ -107,9 +107,7 @@ def test_a_listed_run_never_asks_a_question(
 def test_no_target_and_no_terminal_keeps_the_old_error(tmp_path: Path) -> None:
     """Without a TTY the command must not block on input that cannot arrive."""
     config = make_config(tmp_path)
-    result = CliRunner().invoke(
-        app, ["passive", "--mock", "--speed", "fast", "--config", str(config)]
-    )
+    result = CliRunner().invoke(app, ["passive", "--mock", "--config", str(config)])
     assert result.exit_code == 2
     assert "provide a target with -d/--domain or -l/--list" in result.stderr
 
@@ -303,7 +301,7 @@ def test_aggressive_yes_adds_the_ports_stages(
         app,
         interactive_args(
             config,
-        ),  # speed fast would need the typed confirmation
+        ),
         input="example.com\nn\npassive\nall\ny\n",
     )
     assert result.exit_code == 0, result.stderr
@@ -613,8 +611,6 @@ def test_a_flagged_json_run_now_shows_progress(
             "-d",
             "example.com",
             "--mock",
-            "--speed",
-            "fast",
             "--config",
             str(config),
             "--json",
@@ -661,7 +657,7 @@ def test_a_flagged_run_writes_no_report_folder(
     config = make_config(tmp_path)
     as_tty(monkeypatch)
     result = CliRunner().invoke(
-        app, ["passive", "-d", "example.com", "--mock", "--speed", "fast", "--config", str(config)]
+        app, ["passive", "-d", "example.com", "--mock", "--config", str(config)]
     )
     assert result.exit_code == 0
     assert not (tmp_path / "results").exists()

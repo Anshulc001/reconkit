@@ -16,7 +16,7 @@ from pathlib import Path
 
 from reconkit.errors import ConfigError
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 REDACTED = "***"
 # docs/04 section 5: the stored reason is one line of at most this many characters.
 DETAIL_MAX_CHARS = 200
@@ -145,11 +145,18 @@ _SCHEMA_V4 = """
 ALTER TABLE host_status_history ADD COLUMN detail TEXT;
 """
 
+# 2026-11-17 (MASTER_PLAN D3): speed control was removed, so the audit column
+# that recorded the preset goes with it. No query ever filtered on it.
+_SCHEMA_V5 = """
+ALTER TABLE scan_runs DROP COLUMN speed;
+"""
+
 _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, _SCHEMA_V1),
     (2, _SCHEMA_V2),
     (3, _SCHEMA_V3),
     (4, _SCHEMA_V4),
+    (5, _SCHEMA_V5),
 )
 
 _COUNT_SQL: dict[str, str] = {
@@ -435,7 +442,7 @@ class Store:
         if limit < 1:
             return []
         rows = self._conn.execute(
-            "SELECT r.id, t.domain AS target, r.stage, r.speed, r.status,"
+            "SELECT r.id, t.domain AS target, r.stage, r.status,"
             " r.started_at, r.finished_at"
             " FROM scan_runs r JOIN targets t ON t.id = r.target_id"
             " ORDER BY r.id DESC LIMIT ?",
@@ -456,16 +463,15 @@ class Store:
         self,
         target_id: int,
         stage: str,
-        speed: str,
         *,
         params: str = "{}",
         started_at: str | None = None,
         secrets: Sequence[str] = (),
     ) -> int:
         cursor = self._conn.execute(
-            "INSERT INTO scan_runs (target_id, stage, speed, status, started_at, params_json)"
-            " VALUES (?, ?, ?, 'running', ?, ?)",
-            (target_id, stage, speed, started_at or _utc_now(), redact(params, secrets)),
+            "INSERT INTO scan_runs (target_id, stage, status, started_at, params_json)"
+            " VALUES (?, ?, 'running', ?, ?)",
+            (target_id, stage, started_at or _utc_now(), redact(params, secrets)),
         )
         self._commit()
         return int(cursor.lastrowid or 0)

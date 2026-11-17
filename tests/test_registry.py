@@ -16,7 +16,6 @@ from reconkit.adapters.registry import (
     get_spec,
     load_system_packages,
     load_tools,
-    rate_flags,
 )
 from reconkit.errors import ConfigError
 from reconkit.models import Mode, Stage, Tier
@@ -41,13 +40,12 @@ def test_spec_exposes_stage_tier_mode_and_kind() -> None:
     assert spec.phase == 2
 
 
-def test_rate_flags_come_from_tools_yaml() -> None:
-    flags = rate_flags()
-    assert flags["subfinder"] == "-rl"
-    assert flags["naabu"] == "-rate"
-    assert flags["nmap"] == "-T"
-    assert flags["masscan"] == "--max-rate"
-    assert "crtsh" not in flags
+def test_no_rate_flag_survives_in_tools_yaml() -> None:
+    """2026-11-17: the pacer is gone, so the per-tool rate flag field is gone too."""
+    data = yaml.safe_load(TOOLS.read_text(encoding="utf-8"))
+    offenders = [name for name, entry in data["tools"].items() if "rate_flag" in entry]
+    assert offenders == []
+    assert not hasattr(get_spec("subfinder"), "rate_flag")
 
 
 def test_keys_are_parsed() -> None:

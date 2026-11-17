@@ -52,13 +52,13 @@ def test_example_scope_loads() -> None:
 
 def test_missing_scope_file(tmp_path: Path) -> None:
     with pytest.raises(ScopeError, match="not found"):
-        require_active("example.com", [], "slow", TODAY, path=tmp_path / "missing-scope.yaml")
+        require_active("example.com", [], TODAY, path=tmp_path / "missing-scope.yaml")
 
 
 def test_empty_authorization(tmp_path: Path) -> None:
     path = write_scope(tmp_path, authorization="   ")
     with pytest.raises(ScopeError, match="authorization is empty"):
-        require_active("example.com", [], "slow", TODAY, path=path)
+        require_active("example.com", [], TODAY, path=path)
 
 
 def test_missing_authorization_key(tmp_path: Path) -> None:
@@ -75,26 +75,26 @@ def test_missing_authorization_key(tmp_path: Path) -> None:
 def test_expired_scope(tmp_path: Path) -> None:
     path = write_scope(tmp_path, expires=date(2026, 1, 1))
     with pytest.raises(ScopeError, match="expired on 2026-01-01"):
-        require_active("example.com", [], "slow", TODAY, path=path)
+        require_active("example.com", [], TODAY, path=path)
 
 
 def test_expiry_is_inclusive(tmp_path: Path) -> None:
     path = write_scope(tmp_path, expires=TODAY)
-    require_active("example.com", [], "slow", TODAY, path=path)
+    require_active("example.com", [], TODAY, path=path)
 
 
 def test_allow_active_false(tmp_path: Path) -> None:
     path = write_scope(tmp_path, allow_active=False)
     with pytest.raises(ScopeError, match="allow_active is false"):
-        require_active("example.com", [], "slow", TODAY, path=path)
+        require_active("example.com", [], TODAY, path=path)
 
 
 def test_out_of_scope_wins(tmp_path: Path) -> None:
     path = write_scope(tmp_path)
     with pytest.raises(ScopeError, match="out of scope"):
-        require_active("admin.example.com", [], "slow", TODAY, path=path)
+        require_active("admin.example.com", [], TODAY, path=path)
     result = require_active(
-        "example.com", ["api.example.com", "admin.example.com"], "slow", TODAY, path=path
+        "example.com", ["api.example.com", "admin.example.com"], TODAY, path=path
     )
     assert result.hosts == ["api.example.com"]
     assert result.dropped == 1
@@ -157,22 +157,16 @@ def test_case_and_trailing_dot(tmp_path: Path) -> None:
 def test_underscore_hosts_are_in_scope(tmp_path: Path) -> None:
     path = write_scope(tmp_path)
     result = require_active(
-        "example.com", ["dev_api.example.com", "*.api.example.com"], "slow", TODAY, path=path
+        "example.com", ["dev_api.example.com", "*.api.example.com"], TODAY, path=path
     )
     assert result.hosts == ["dev_api.example.com", "api.example.com"]
 
 
-def test_max_speed_cap(tmp_path: Path) -> None:
+def test_max_speed_is_accepted_and_ignored(tmp_path: Path) -> None:
+    """2026-11-17: speed control is gone; an old scope file still loads and gates."""
     path = write_scope(tmp_path, max_speed="normal")
-    require_active("example.com", [], "normal", TODAY, path=path)
-    with pytest.raises(ScopeError, match="max_speed"):
-        require_active("example.com", [], "fast", TODAY, path=path)
-
-
-def test_unknown_speed(tmp_path: Path) -> None:
-    path = write_scope(tmp_path)
-    with pytest.raises(ScopeError, match="unknown speed"):
-        require_active("example.com", [], "turbo", TODAY, path=path)
+    check = require_active("example.com", [], TODAY, path=path)
+    assert check.match == "example.com"
 
 
 def test_every_host_is_rechecked(tmp_path: Path) -> None:
@@ -186,7 +180,6 @@ def test_every_host_is_rechecked(tmp_path: Path) -> None:
             "not a host",
             "API.EXAMPLE.COM.",
         ],
-        "slow",
         TODAY,
         path=path,
     )
@@ -199,7 +192,7 @@ def test_every_host_is_rechecked(tmp_path: Path) -> None:
 def test_target_outside_scope(tmp_path: Path) -> None:
     path = write_scope(tmp_path, in_scope=["example.org"])
     with pytest.raises(ScopeError, match="is not in scope"):
-        require_active("example.com", [], "slow", TODAY, path=path)
+        require_active("example.com", [], TODAY, path=path)
 
 
 def test_malformed_yaml(tmp_path: Path) -> None:

@@ -6,8 +6,9 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 - Status: **PART 12 AND PART 13 ARE COMPLETE (2026-11-16).** Part 12 closed on 2026-11-15 (12a-12k). Part 13 - the interactive scan mode, stderr progress and per-domain saved reports - is implemented, tested, self-reviewed (S1-S7) and committed, with docs written first. Phase 1 of the same session (the `docs/tool_manuals/` library) is closed in `8dc2829`.
 - What Part 13 changed, in one line: a scan command with **no** `-d`/`-l` **and** a real terminal asks five questions and then runs the ordinary scan inputs; a domain file becomes the ordinary `-l` path (one full scan and one `results/<domain>/<UTC stamp>/` folder per domain, `report.txt` + `report.json`); progress now goes to stderr for every mode except `--silent`, including `--json`. Every flag-based invocation is unchanged, including no prompts and no report folders (tests `test_a_flagged_run_never_asks_a_question`, `test_a_listed_run_never_asks_a_question`, `test_a_flagged_run_writes_no_report_folder`).
-- Nothing is queued. Part 13's own uncertainties are listed under "Open risks" (pre-existing all-`UNKNOWN` mock active runs, Windows, the pty demo being the only real run).
-- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 4): `734 passed`, `ruff check .` clean, `ruff format --check .` 69 files, `mypy src/reconkit` clean (36 source files).
+- Next action: Task 4 - one docs/02 section that walks the interactive flow end to end with the exact prompt text (target(s), passive/active/full, then the scope-file and no-scope-file branches, and no speed option anywhere). Nothing else is queued; Part 13's uncertainties stay under "Open risks".
+- **Owner-requested behavior changes (2026-11-17):** D1 (no scope file = unrestricted active scanning) is committed (`c99eaee`), D2 (naabu is scope-mode dependent) is committed (`6642ee4`), D3 (all speed/throttle control removed) is committed with this entry, and Task 4 (the end-to-end interactive-flow section in docs/02) is the next action.
+- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 5): `713 passed`, `ruff check .` clean, `ruff format --check .` 67 files, `mypy src/reconkit` clean (35 source files).
 - Nothing is pushed: local `main` is ahead of `reconkit/main`, which is still `5fd1d9a`. Push only if the owner asks (`git push reconkit main`).
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in `engine.py`; adapters never import `store`/`scope`/`ui`/`cli`; `subjack` replaced by `subzy` + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from `.env`; the ports ceiling is permanent (12i).
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in `src/`; new lint/type suppressions; `shell=True`; the whole environment to a child; adapters importing store/scope/ui/cli; consensus outside `engine.py`; pushing.
@@ -141,6 +142,58 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   `test_a_present_scope_file_blocks_an_out_of_scope_interactive_target` (same
   reason). New: the six `test_*_naabu*`/`test_scope_file_*` cases in
   `tests/test_engine.py`, `test_naabu_accepts_verified_ip_inputs`.
+- **2026-11-17 (owner-requested deviation D3), all speed/throttle control is
+  removed.** `--speed`, `--delay`, the `fast` typed confirmation, the `speeds`
+  block and `default_speed` in `config.yaml`, `core/pacing.py` (pacer, rate
+  limiter, shuffle, rate-flag table) and `tools.yaml`/registry `rate_flag` are
+  gone; `RunContext` carries no `pacer`/`limiter`/`speed`; every stage starts
+  its tools together under `asyncio.gather` with no sleep or semaphore; schema
+  5 drops `scan_runs.speed`. A `scope.yaml` `max_speed` is still accepted so a
+  real scope file loads, and is ignored (there is no speed left to cap). Docs
+  02/03/05/06/07/08/09, README, SETUP and AGENTS rule 3 were updated; MASTER_PLAN
+  D3 records the decision. Tests removed (36 functions -> suite 745 -> 713
+  passed; 17 of them were the whole of `tests/test_pacing.py`, which tested the
+  deleted module, so its file went with it): `test_slow_delays_and_parallel_limits`,
+  `test_normal_values`, `test_fast_never_sleeps`, `test_first_tool_and_reset`,
+  `test_shuffle_is_deterministic_and_a_permutation`, `test_fast_preserves_order`,
+  `test_next_pause_range`, `test_tool_rate_args_slow_passive_vs_active`,
+  `test_tool_rate_args_normal`, `test_tool_rate_args_fast`,
+  `test_tool_rate_args_nmap_and_masscan_use_active_values`,
+  `test_tool_rate_args_unknown`, `test_delay_override_applies`,
+  `test_rate_limiter_spacing`, `test_rate_limiter_rejects_bad_rate`,
+  `test_before_host_zero_skips_sleep`, `test_mode_literal_accepts_strings`
+  (all test_pacing.py; the behaviour and the module no longer exist), plus
+  `test_rate_limiter_is_used_before_the_request` (test_adapters.py; asserted the
+  limiter call inside the HTTP adapter), `test_dnspython_awaits_limiter_per_query`,
+  `test_pyprobe_awaits_limiter`,
+  `test_pyprobe_waits_between_hosts_when_dispatch_is_sequential`,
+  `test_pyscan_awaits_limiter_per_query_and_connection`,
+  `test_pyscan_respects_the_pacer_parallel_limit`,
+  `test_pyscan_uses_pacer_order_for_ports`,
+  `test_pyscan_waits_between_hosts_before_dispatching_the_next`
+  (test_python_adapters.py; each asserted a pacer/limiter call that no longer
+  exists in the adapter), `test_delay_override_applies_to_active_and_passive`,
+  `test_delay_range_in_file_is_rejected`, `test_invalid_delay_override`,
+  `test_invalid_speed_name`, `test_speed_override` (test_config.py; the settings
+  themselves were deleted), `test_max_speed_cap` and `test_unknown_speed`
+  (test_scope.py; `require_active` no longer takes or checks a speed). Tests
+  changed and renamed: `test_slow_mode_runs_one_tool_at_a_time` ->
+  `test_tools_start_together_without_a_pace_limit` (asserted the slow parallel
+  limit of 1; now asserts both tools are inside `run()` at the same time),
+  `test_fast_active_requires_typed_confirmation` ->
+  `test_speed_and_delay_flags_are_gone` (asserted the removed prompt; now
+  asserts both flags exit 2), `test_subfinder_command_and_rate_flag` ->
+  `test_subfinder_command_has_no_rate_flag` (same parsed args minus `-rl`),
+  `test_rate_flags_come_from_tools_yaml` -> `test_no_rate_flag_survives_in_tools_yaml`
+  (asserts the field and the YAML key are absent), and the `-rl`/`-rate`/`-T`
+  expectations in `test_binary_adapters.py` were dropped from the command
+  assertions. New: `test_a_speeds_block_is_rejected`,
+  `test_config_has_no_speed_fields`, `test_speed_and_delay_arguments_no_longer_exist`
+  (test_config.py), `test_pyscan_probes_its_ports_without_an_artificial_limit`
+  (test_python_adapters.py), `test_v4_database_migrates_by_removing_the_speed_column`,
+  `test_create_scan_run_writes_no_speed_column` (test_store.py),
+  `test_max_speed_is_accepted_and_ignored` (test_scope.py), and the three v1/v2/v3
+  migration fixtures gained the `scan_runs` table because schema 5 alters it.
 - **2026-11-16 (Part 13), a multi-domain file does not use a tool's own list
   flag:** the interactive file path reuses `-l` (one full scan per domain), even
   though `subfinder -dL`, `dnsx -l`, `httpx -l`, `tlsx -l`, `naabu -list`,

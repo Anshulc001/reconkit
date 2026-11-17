@@ -53,8 +53,8 @@ Before any significant change, read the relevant documents:
 | Document | Read it when you touch... |
 |---|---|
 | `docs/01_PRD.md` | features, scope, acceptance criteria |
-| `docs/02_CLI_UX.md` | commands, flags, output, colors, exit codes, `--speed` |
-| `docs/03_ARCHITECTURE.md` | layers, folders, engine, pacing, data flow |
+| `docs/02_CLI_UX.md` | commands, flags, output, colors, exit codes |
+| `docs/03_ARCHITECTURE.md` | layers, folders, engine, concurrency, data flow |
 | `docs/04_DATABASE.md` | any table, column, query, migration |
 | `docs/05_SECURITY.md` | scope gate, subprocess, secrets, installer, logging |
 | `docs/06_CODE_STYLE.md` | any code you write |
@@ -73,7 +73,7 @@ Do not contradict these documents. If code and docs disagree, stop and report th
 
 1. **Subprocess:** run external programs only through `reconkit.core.runner.run_exec(argv: list[str], ...)`. Never `shell=True`, `os.system`, string-built commands, or user input inside a shell string.
 2. **Scope gate:** every active stage must call `scope.require_active(target, hosts)` before sending any traffic. Never add a flag, env var, or code path that skips it. No `--i-have-permission` style bypass.
-3. **Pacing:** all network activity goes through the `Pacer` (`core/pacing.py`). Do not call `asyncio.gather` over network tools or hosts without it. Default speed is `slow`.
+3. **No pacing:** speed control was removed on 2026-11-17 (docs/MASTER_PLAN.md D3). There is no pacer, rate limiter, delay or speed flag; tools start together and run at their own pace. Do not reintroduce artificial throttling.
 4. **Registry only:** tools, install sources and download URLs come from `tools.yaml`. Never add `curl | bash`, unverified downloads, or sources not in the registry.
 5. **Secrets:** API keys come from `.env` / environment only. Never print, log, store in SQLite, or put them in command lines that get logged.
 6. **No exploitation in core:** the `core` and `opt_in` tiers are discovery and inventory only. Tools that send attack payloads belong to the `intrusive` tier (Phase 3). There is no `--intrusive` flag in this build; intrusive tools are not selectable.
@@ -91,7 +91,7 @@ Do not contradict these documents. If code and docs disagree, stop and report th
 
 ## 5. Implementation
 
-- Make focused changes. Reuse existing utilities (`runner`, `pacing`, `store`, `ui`).
+- Make focused changes. Reuse existing utilities (`runner`, `store`, `ui`).
 - One logical change per commit-sized task. No unrelated refactors.
 - Prefer small functions, typed signatures, Pydantic models at every boundary.
 

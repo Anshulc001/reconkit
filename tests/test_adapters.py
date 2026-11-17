@@ -14,8 +14,6 @@ from reconkit.adapters.certspotter import CertspotterAdapter
 from reconkit.adapters.crtsh import CrtshAdapter
 from reconkit.adapters.hackertarget import HackertargetAdapter
 from reconkit.adapters.otx import OtxAdapter
-from reconkit.config import load_config, resolve_speed
-from reconkit.core.pacing import Pacer, RateLimiter
 from reconkit.models import RunContext, ToolResult, ToolStatus
 
 REPO = Path(__file__).resolve().parents[1]
@@ -24,28 +22,9 @@ FIXTURES = REPO / "tests" / "fixtures"
 ADAPTER_DIR = REPO / "src" / "reconkit" / "adapters"
 
 
-async def _no_sleep(_seconds: float) -> None:
-    return None
-
-
-class CountingLimiter(RateLimiter):
-    def __init__(self) -> None:
-        super().__init__(1_000_000, clock=lambda: 0.0, sleep=_no_sleep)
-        self.waits = 0
-
-    async def wait(self) -> float:
-        self.waits += 1
-        return 0.0
-
-
-def make_ctx(
-    *, mock: bool = False, env: dict[str, str] | None = None, limiter: RateLimiter | None = None
-) -> RunContext:
-    config = load_config(CONFIG, speed="fast")
+def make_ctx(*, mock: bool = False, env: dict[str, str] | None = None) -> RunContext:
     return RunContext(
         target="example.com",
-        pacer=Pacer(resolve_speed(config)),
-        limiter=limiter if limiter is not None else CountingLimiter(),
         timeout=5.0,
         workspace=REPO / "workspaces" / "example.com",
         mock=mock,
@@ -273,12 +252,10 @@ async def test_connection_error_retries_once_with_injected_sleep() -> None:
         return httpx.Response(200, text="[]")
 
     adapter = CrtshAdapter(transport=httpx.MockTransport(handler), sleep=fake_sleep)
-    limiter = CountingLimiter()
-    result = await adapter.run(make_ctx(limiter=limiter))
+    result = await adapter.run(make_ctx())
     assert result.status == ToolStatus.OK
     assert len(calls) == 2
     assert sleeps == [RETRY_DELAY]
-    assert limiter.waits == 2
 
 
 async def test_connection_error_twice_fails_after_one_retry() -> None:
@@ -391,13 +368,6 @@ async def test_hackertarget_other_text_is_unexpected() -> None:
     result = await adapter.run(make_ctx())
     assert result.status == ToolStatus.FAILED
     assert "unexpected response" in (result.error or "")
-
-
-async def test_rate_limiter_is_used_before_the_request() -> None:
-    limiter = CountingLimiter()
-    adapter = CrtshAdapter(transport=httpx.MockTransport(lambda _r: httpx.Response(200, text="[]")))
-    await adapter.run(make_ctx(limiter=limiter))
-    assert limiter.waits == 1
 
 
 # ---------------------------------------------------------------- keys and mock

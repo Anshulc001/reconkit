@@ -385,7 +385,6 @@ class HttpAdapter(BaseToolAdapter):
             raise FetchFailed(f"{self.name}: {type(exc).__name__}") from None
 
     async def _attempt(self, ctx: RunContext) -> str:
-        await ctx.limiter.wait()
         async with httpx.AsyncClient(
             timeout=ctx.timeout,
             headers=self.headers(ctx),

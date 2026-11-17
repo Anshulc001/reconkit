@@ -73,24 +73,17 @@ class PyscanAdapter(BaseToolAdapter):
             )
 
         requested = [port for port in ctx.ports if 1 <= port <= 65535]
-        ports = ctx.pacer.order(requested or list(DEFAULT_PORTS), kind="port")
-        semaphore = asyncio.Semaphore(ctx.pacer.parallel_limit("active"))
+        ports = requested or list(DEFAULT_PORTS)
         records: list[Record] = []
         timeouts = 0
         failures = 0
         blocked = 0
-        dispatched = 0
         for raw_host in ctx.hosts:
             try:
                 host = validate_host(raw_host)
             except (TypeError, ValueError):
                 failures += 1
                 continue
-            if dispatched:
-                # Space real host dispatches; the first host of the stage does not wait.
-                await ctx.pacer.before_host()
-            dispatched += 1
-            await ctx.limiter.wait()
             try:
                 addresses = await self._resolve(host)
             except OSError:
@@ -105,9 +98,7 @@ class PyscanAdapter(BaseToolAdapter):
                 blocked += 1
                 continue
             ip = allowed[0]
-            outcomes = await asyncio.gather(
-                *(self._probe(ctx, ip, port, semaphore) for port in ports)
-            )
+            outcomes = await asyncio.gather(*(self._probe(ctx, ip, port) for port in ports))
             for port, outcome in zip(ports, outcomes, strict=True):
                 if outcome == "open":
                     records.append(
@@ -153,33 +144,23 @@ class PyscanAdapter(BaseToolAdapter):
                 allowed.append(address)
         return allowed
 
-    async def _probe(
-        self,
-        ctx: RunContext,
-        ip: str,
-        port: int,
-        semaphore: asyncio.Semaphore,
-    ) -> str:
-        async with semaphore:
-            await ctx.limiter.wait()
-            try:
-                _reader, writer = await asyncio.wait_for(
-                    self._opener(ip, port), timeout=ctx.timeout
-                )
-            except ConnectionRefusedError:
-                return "closed"
-            except TimeoutError:
-                return "timeout"
-            except OSError:
-                return "error"
-            # `close()` is synchronous and runs before the first await, so a
-            # cancellation while the socket drains can no longer leak it.
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except OSError:
-                pass
-            return "open"
+    async def _probe(self, ctx: RunContext, ip: str, port: int) -> str:
+        try:
+            _reader, writer = await asyncio.wait_for(self._opener(ip, port), timeout=ctx.timeout)
+        except ConnectionRefusedError:
+            return "closed"
+        except TimeoutError:
+            return "timeout"
+        except OSError:
+            return "error"
+        # `close()` is synchronous and runs before the first await, so a
+        # cancellation while the socket drains can no longer leak it.
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except OSError:
+            pass
+        return "open"
 
     def parse_output(self, raw: str) -> list[Record]:
         try:

@@ -17,7 +17,7 @@ reconkit is a single-process Python CLI. It does not reimplement recon: it **orc
 | CLI | Typer |
 | Terminal UI | Rich |
 | Schemas | Pydantic v2 |
-| Concurrency | asyncio (through the Pacer) |
+| Concurrency | asyncio (no artificial throttling) |
 | HTTP | httpx (Python library, async) |
 | DNS | dnspython |
 | Config | PyYAML (`safe_load` only) |
@@ -29,13 +29,13 @@ reconkit is a single-process Python CLI. It does not reimplement recon: it **orc
 
 ```
 CLI (Typer)            parse flags, load config, call engine, render output
-Engine (asyncio)       stage pipeline, adapter selection, pacing, merge, confidence, resume
+Engine (asyncio)       stage pipeline, adapter selection, merge, confidence, resume
 Adapters (per tool)    check_installed / build_command / run / parse_output -> normalized records
-Core services          scope gate, runner (subprocess), pacer, store (SQLite), workspace, installer, doctor
+Core services          scope gate, runner (subprocess), store (SQLite), workspace, installer, doctor
 ```
 
 - **CLI:** no business logic. Validates input, calls the engine, prints results. It configures console redaction once per process (`configure_redaction()` from `core/store.py`, seeded from `.env` the same way `Engine.open` loads it) and prints every error line through `redact()`, including the `-v` traceback (section 5, "Redaction API").
-- **Engine:** picks adapters for a stage, asks the Pacer when to start each, collects `ToolResult`s, merges and scores, writes through the store.
+- **Engine:** picks adapters for a stage, starts them together, collects `ToolResult`s, merges and scores, writes through the store.
 - **Adapters:** know only one tool or source. They never touch the DB, the scope gate, or the UI.
 - **Core:** shared, tested utilities.
 
@@ -58,7 +58,6 @@ reconkit/
     doctor.py
     core/
       runner.py       # run_exec(argv, timeout, ...) - the only subprocess entry
-      pacing.py       # Pacer: delays, jitter, shuffling, parallel limits
       scope.py        # scope.yaml loader + gate
       store.py        # SQLite access + diff queries + redact()/configure_redaction()
       workspace.py    # workspaces/<target>/... raw files
@@ -126,7 +125,7 @@ workspaces/<domain>/
 ### Engine API (`engine.py`)
 
 - `Engine.open(config, *, db_path=..., scope_path=..., env_file=..., ...)` is the CLI-facing factory: it creates the `Store`, loads optional `.env` values inside the engine, and returns an `Engine`. `close()` closes the store. The constructor remains injectable for tests.
-- `Engine(config, store, now=...).run(target, ScanOptions(...))` runs the selected stages in the fixed order `subs, dns, live, ports, tech, urls, vulns`. `ScanOptions` carries `stages`, `tools`, `exclude`, `include_noisy`, `active`, `no_keys`, `mock`, `speed`, `phase_timeout`, `min_sources` and `resume`.
+- `Engine(config, store, now=...).run(target, ScanOptions(...))` runs the selected stages in the fixed order `subs, dns, live, ports, tech, urls, vulns`. `ScanOptions` carries `stages`, `tools`, `exclude`, `include_noisy`, `active`, `no_keys`, `mock`, `phase_timeout`, `min_sources` and `resume` (there is no `speed`; see section 7).
 - `Engine(..., progress=callable)` is an optional injected reporting callback. The
   engine calls it with one short string at stage start, once per finished tool and
   once per finished stage; it never prints, formats or decides anything. `None`
@@ -142,7 +141,7 @@ workspaces/<domain>/
 - `ScanSummary.exit_code` is a typed `ExitCode` (`0` success, `1` unexpected, `2` usage, `3` scope, `4` no usable tool, `5` partial, `130` interrupted). The engine never calls `sys.exit()`; the CLI maps the value. `_exit_code()` is the single decision site and treats a requested stage that executed zero tools as one more source of `5`, adding one `ScanSummary.warnings` entry naming the stage (docs/02 section 6 has the precedence order).
 - Tools are selected from `tools.yaml` once per run. A `--tools` name must exist; `intrusive` tools are refused, `opt_in` tools need `--include-noisy` or an explicit `--tools`, and `--exclude` always wins. Every selected or skipped tool gets a `tool_runs` row with its redacted error.
 - Active tools run only when `--active` is set. **A scope file is optional:** when the resolved path (default `./scope.yaml`, `--scope` overrides) does not exist, active and full scanning run unrestricted against the operator's targets and the hosts discovered under them - no scope object is constructed and nothing is derived from the target to restrict it (docs/05 rule 2). When a scope file **is** present, `require_active()` runs unchanged: discovered hosts are revalidated and re-checked against scope before they reach an active `RunContext`; dropped hosts are reported, never probed; and a denial skips the active tools (exit 3) instead of raising out of the stage. The file is only read.
-- Each tool's `RunContext.env` contains only the env names in that tool's `keys` (none with `--no-keys`). One fresh `RateLimiter` is built per stage; `Pacer.reset()` runs at stage start; `slow` runs tools one at a time, other speeds use `pacer.parallel_limit()`.
+- Each tool's `RunContext.env` contains only the env names in that tool's `keys` (none with `--no-keys`). Every tool selected for a stage starts together under `asyncio.gather`; there is no pacer, semaphore, rate limiter, delay or shuffling (section 7, 2026-11-17).
 - `--mock` reads only the fixtures, never calls `check_installed()`, the network or a subprocess. Stage asset writes are batched with `store.transaction()`; tool runs are recorded individually.
 
 - `_run_one` writes the raw-output file for every executed tool, whatever its status: it takes the adapter's `ToolResult.raw_text` (docs/09 section 3), writes it through `Workspace.write` - redacted with the run's secrets, capped at `MAX_OUTPUT_BYTES`, into the stage's directory - and sets `raw_path` on the result only after the write returns. An empty capture still produces an empty file, so "one executed tool = one file" holds for a crash, a timeout and a quiet tool alike. A workspace write that raises (disk full, permissions, a rejected filename) is contained: the tool result and its `tool_runs` row are recorded unchanged and `raw_path` stays `None`. Raw capture is a diagnostic side channel; it never changes a status, an error or an exit code.
@@ -156,33 +155,33 @@ workspaces/<domain>/
 
 ## 6. Data Flow (example: `reconkit live -d example.com --active`)
 
-1. CLI parses flags (`--speed slow` default) and loads `config.yaml`.
+1. CLI parses flags and loads `config.yaml`.
 2. Scope gate: if `scope.yaml` exists it must not be expired, must allow active and must match `example.com` (exit code 3 otherwise). With no scope file at the resolved path the active stages run unrestricted against the named target (docs/05 rule 2).
 3. Engine reads known subdomains for the target from SQLite; each host is checked against scope again (out-of-scope removed).
 4. Engine selects adapters for stage `live` that are installed and allowed by tier/flags.
-5. Pacer orders hosts (shuffled in slow/normal) and schedules tools: one at a time with random delays in slow mode.
+5. Every selected adapter for the stage starts together; each one runs at its own natural pace.
 6. Each adapter runs (subprocess via `runner` or Python), returns `ToolResult` with normalized records.
 7. Engine merges records per host, records which tools reported what, computes state and confidence, handles disagreements.
 8. Store writes `scan_runs`, `tool_runs`, `host_status_history`, updates `subdomains`.
 9. Workspace writes one raw output file per executed tool (`<stage>/<run_id>-<tool>.txt`: stdout+stderr for a binary, the response body for an HTTP source, the per-host evidence document for a python adapter), redacted and capped, and `_run_one` sets `raw_path` on that result after the write returns; UI prints the table and tool summary; exit code reflects success/partial.
 
-## 7. Pacing Engine (`core/pacing.py`)
+## 7. Concurrency (no pacing)
 
-- Single `Pacer` object per run, built from the chosen speed preset plus `--delay` overrides.
-- API: `await pacer.before_tool(mode)`, `await pacer.before_host()`, `pacer.order(items, kind="host"|"port")`, `pacer.parallel_limit(mode)`, `pacer.tool_rate_args(tool, mode)`, `pacer.next_pause_range(mode)` for the progress line, `pacer.reset()` per stage.
-- `tool_rate_args(tool, mode)` uses `passive.requests_per_second` for passive tools and `active.requests_per_second` for active ones; `nmap -T<n>` and `masscan --max-rate` always use the active preset values. Whole-number rates print without `.0`.
-- `before_host()` spaces **host dispatches** in active stages, and is awaited by the adapters that issue one request or connection per host: `pyscan` (a connect batch per host) and `pyprobe` (an HTTP probe per host). The pause is `active.host_delay` from the speed preset; the first host of a stage does not wait. `pyprobe` dispatches hosts sequentially when `parallel_limit("active")` is `1` (the `slow` preset), so the pause falls between real dispatches; at higher limits it keeps parallel dispatch (normal `host_delay` is `[0, 2]`, fast is `[0, 0]`).
-- One-shot binary tools (`httpx`, `naabu`) are **exempt** from `before_host()`: they receive the whole host list in a single process and pace themselves through `-rl`/`-rate` from `tool_rate_args()`. No adapter may use `before_host()` as request pacing; it only spaces host dispatches.
-- Consequence, by design: `pyprobe` has **no inter-host pause outside `slow`** - at `normal`/`fast` it dispatches in parallel and the shared rate limiter is its only pacing - while `pyscan` applies `host_delay` at every speed (a no-op where the preset range is `[0, 0]`).
-- Randomness (`random.uniform`) and sleeping are **injected** (rng, sleep) so tests run instantly with a fake clock.
-- Passive stages also use the Pacer (third-party APIs ban bursts).
-- Per-source HTTP adapters share an async rate limiter (requests/second from the preset).
+Speed control was removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN.md D3, reason: "user-requested removal, no throttling desired"). `core/pacing.py`, the `Pacer`, the `RateLimiter`, the speed presets, `--speed`, `--delay`, the per-tool `rate_flag` (`-rl`/`-rate`/`-T`) and the typed `I AM AUTHORIZED` confirmation no longer exist. Leftovers that mention them are stale, not behaviour.
+
+- **Tools.** Every adapter selected for a stage starts at once (`asyncio.gather`). There is no parallel limit, no inter-tool delay, no inter-host delay and no host or port shuffling.
+- **Adapters.** `RunContext` carries `target`, `hosts`, `ports`, `timeout`, `workspace`, `mock`, `env` and `ip_allowed`. It has no `pacer`, `limiter` or `speed` field. HTTP adapters make their request directly; Python adapters dispatch their per-host work directly.
+- **Config.** `config.yaml` has no `speeds` block and no `default_speed`; `AppConfig` rejects those keys as unknown.
+- **Scope.** `scope.yaml` `max_speed` is still accepted so an existing file keeps loading, and is ignored: there is no speed left to cap.
+- **Persistence.** `scan_runs` has no `speed` column (schema version 5; migration 5 drops it), and `status` no longer prints a Speed column or field.
+- **Timeouts are not throttling** and remain: each stage has its phase timeout and each tool its per-tool timeout, both in `config.yaml`.
+- **Randomness** survives only where it is functional: wildcard probe labels (injected RNG), never for scheduling.
 
 ## 8. Consensus Engine
 
 - **Discovery stages (subs, urls):** union of all adapters; `sources` list per item; confidence from source count.
 - **Status stages (live, ports):** compare tools per host/port; agreement raises confidence; disagreement becomes `UNCONFIRMED`/`unconfirmed` and is stored.
-- **Wildcard filter:** before accepting resolved subdomains, probe `wildcard_check.probes` random non-existent names with the DNS adapter's resolver (through the run's limiter); if they resolve, mark hosts whose addresses or CNAMEs match the wildcard answer as wildcard noise. Detection returns `present`, `none` or `unknown`: `none` only when every probe is NXDOMAIN, `unknown` when no probe resolved and at least one timed out, SERVFAILed, returned no answer or errored. `unknown` is never treated as `none`; the engine warns and skips the filter. `wildcard_check.enabled: false` skips the filter entirely, and the filter never runs under `--mock` (mock reads fixtures only).
+- **Wildcard filter:** before accepting resolved subdomains, probe `wildcard_check.probes` random non-existent names with the DNS adapter's resolver; if they resolve, mark hosts whose addresses or CNAMEs match the wildcard answer as wildcard noise. Detection returns `present`, `none` or `unknown`: `none` only when every probe is NXDOMAIN, `unknown` when no probe resolved and at least one timed out, SERVFAILed, returned no answer or errored. `unknown` is never treated as `none`; the engine warns and skips the filter. `wildcard_check.enabled: false` skips the filter entirely, and the filter never runs under `--mock` (mock reads fixtures only).
 - **Host-state machine (implemented in `engine.py`):** `previous` is the last `host_status_history.state` row (or `None`). Evidence is the set of live-tool states plus the DNS signal (`resolved`, `nxdomain`, `uncertain`, `absent`).
 
 | previous | web ALIVE | DNS resolved, no web ALIVE | DNS NXDOMAIN | timeout/SERVFAIL/no answer | no evidence |
@@ -227,13 +226,13 @@ workspaces/<domain>/
 | Python | Fast to write/fix with AI agents; simple parsing; Kali ships Python | Go (AutoAR's language): single binary, but slower to extend with AI for this use case |
 | SQLite + workspace files | Diffing, resume, queries; plus human-browsable raw output | Flat files only (no history), Postgres (too heavy) |
 | Native Linux checkout (Kali/Ubuntu), separate Windows checkout | Real Linux tools; fast disk; no CRLF/locking issues | WSL2-only workflow; `/mnt/c` |
-| Slow-by-default pacing | Avoids API bans, WAF blocks, rate-limit violations | Max parallelism |
+| Natural-pace execution | The owner asked for no throttling (2026-11-17, D3); every tool runs at its own rate | Speed presets, delays, shuffling, rate limiter |
 | Adapter + registry | Add a tool without touching core | Hard-coded pipelines |
 | Own `~/.reconkit/bin` | No sudo, no global breakage, correct `httpx` | System PATH only |
 
 ## 11. Performance
 
-- Slow mode trades time for politeness; progress and ETA are always shown.
+- No throttling: stages start all their tools at once; progress is always shown.
 - Bulk DB writes in one transaction per stage.
 - Subprocess output streamed line by line (no loading huge output in memory).
 - **File I/O never runs directly on the event loop.** The `scope.yaml` read (`scope.load_scope`, used by the active gate and by the `ip_allowed` predicate) and `Workspace.create`'s mkdir/chmod go through `asyncio.to_thread`, like `check_installed()` and every child process. They are kernel I/O on the single thread that also carries every tool's async work and the progress output, so a slow filesystem (a network share, `/mnt/c`, an encrypted home) would otherwise freeze the whole run while it waited.

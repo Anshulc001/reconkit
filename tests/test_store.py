@@ -30,9 +30,9 @@ def store(tmp_path: Path) -> Iterator[Store]:
         db.close()
 
 
-def make_run(store: Store, domain: str = "example.com", speed: str = "slow") -> tuple[int, int]:
+def make_run(store: Store, domain: str = "example.com") -> tuple[int, int]:
     target_id = store.create_target(domain)
-    run_id = store.create_scan_run(target_id, "subs", speed)
+    run_id = store.create_scan_run(target_id, "subs")
     return target_id, run_id
 
 
@@ -96,6 +96,16 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (1);
+        CREATE TABLE scan_runs (
+          id          INTEGER PRIMARY KEY,
+          target_id   INTEGER NOT NULL,
+          stage       TEXT NOT NULL,
+          speed       TEXT NOT NULL CHECK (speed IN ('slow','normal','fast')),
+          status      TEXT NOT NULL,
+          started_at  TEXT NOT NULL,
+          finished_at TEXT,
+          params_json TEXT NOT NULL DEFAULT '{}'
+        );
         CREATE TABLE subdomains (
           id INTEGER PRIMARY KEY,
           target_id INTEGER NOT NULL,
@@ -141,7 +151,7 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 4
+        assert migrated.schema_version == SCHEMA_VERSION == 5
         assert "cnames_json" in columns
         assert "dangling_cname" in columns
         assert "detail" in columns
@@ -214,6 +224,16 @@ def test_v3_database_migrates_the_additive_detail_column(tmp_path: Path) -> None
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (3);
+        CREATE TABLE scan_runs (
+          id          INTEGER PRIMARY KEY,
+          target_id   INTEGER NOT NULL,
+          stage       TEXT NOT NULL,
+          speed       TEXT NOT NULL CHECK (speed IN ('slow','normal','fast')),
+          status      TEXT NOT NULL,
+          started_at  TEXT NOT NULL,
+          finished_at TEXT,
+          params_json TEXT NOT NULL DEFAULT '{}'
+        );
         CREATE TABLE host_status_history (
           id           INTEGER PRIMARY KEY,
           subdomain_id INTEGER NOT NULL,
@@ -238,7 +258,7 @@ def test_v3_database_migrates_the_additive_detail_column(tmp_path: Path) -> None
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 4
+        assert migrated.schema_version == SCHEMA_VERSION == 5
         columns = {
             str(row["name"])
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
@@ -610,6 +630,16 @@ def test_v2_database_migrates_provenance_with_backfill(tmp_path: Path) -> None:
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (2);
+        CREATE TABLE scan_runs (
+          id          INTEGER PRIMARY KEY,
+          target_id   INTEGER NOT NULL,
+          stage       TEXT NOT NULL,
+          speed       TEXT NOT NULL CHECK (speed IN ('slow','normal','fast')),
+          status      TEXT NOT NULL,
+          started_at  TEXT NOT NULL,
+          finished_at TEXT,
+          params_json TEXT NOT NULL DEFAULT '{}'
+        );
         CREATE TABLE subdomains (
           id INTEGER PRIMARY KEY,
           target_id INTEGER NOT NULL,
@@ -656,7 +686,7 @@ def test_v2_database_migrates_provenance_with_backfill(tmp_path: Path) -> None:
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(subdomains)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 4
+        assert migrated.schema_version == SCHEMA_VERSION == 5
         assert "provenance" in columns
         rows = {
             str(row["fqdn"]): str(row["provenance"])
@@ -779,7 +809,7 @@ def test_tool_run_error_is_redacted(store: Store) -> None:
 def test_scan_params_are_redacted(store: Store) -> None:
     target_id = store.create_target("example.com")
     run_id = store.create_scan_run(
-        target_id, "subs", "slow", params='{"token": "abc123"}', secrets=["abc123"]
+        target_id, "subs", params='{"token": "abc123"}', secrets=["abc123"]
     )
     row = store._conn.execute(
         "SELECT params_json FROM scan_runs WHERE id = ?", (run_id,)
@@ -869,3 +899,50 @@ def test_diff_gone_needs_the_miss_to_be_consecutive(store: Store) -> None:
     add_hosts(store, target_id, run_2, ["a.example.com"])
     assert store.diff_gone(run_1, run_2, run_3) == []
     assert store.diff_pending_gone(run_2, run_3) == ["a.example.com"]
+
+
+def test_v4_database_migrates_by_removing_the_speed_column(tmp_path: Path) -> None:
+    """Schema 5 drops `scan_runs.speed`; every other value of the row survives."""
+    db_path = tmp_path / "v4.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE schema_version (version INTEGER NOT NULL);
+        INSERT INTO schema_version (version) VALUES (4);
+        CREATE TABLE scan_runs (
+          id          INTEGER PRIMARY KEY,
+          target_id   INTEGER NOT NULL,
+          stage       TEXT NOT NULL,
+          speed       TEXT NOT NULL CHECK (speed IN ('slow','normal','fast')),
+          status      TEXT NOT NULL,
+          started_at  TEXT NOT NULL,
+          finished_at TEXT,
+          params_json TEXT NOT NULL DEFAULT '{}'
+        );
+        INSERT INTO scan_runs (id, target_id, stage, speed, status, started_at, params_json)
+          VALUES (7, 1, 'subs', 'slow', 'completed', '2026-11-16T10:00:00Z', '{"scan_key":"k"}');
+        """
+    )
+    conn.close()
+
+    migrated = Store(db_path)
+    try:
+        assert migrated.schema_version == SCHEMA_VERSION == 5
+        columns = {
+            str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(scan_runs)")
+        }
+        assert "speed" not in columns
+        row = migrated._conn.execute(
+            "SELECT id, target_id, stage, status, started_at, params_json FROM scan_runs"
+        ).fetchone()
+        assert (row["id"], row["stage"], row["status"]) == (7, "subs", "completed")
+        assert row["params_json"] == '{"scan_key":"k"}'
+    finally:
+        migrated.close()
+
+
+def test_create_scan_run_writes_no_speed_column(store: Store) -> None:
+    target_id = store.create_target("example.com")
+    run_id = store.create_scan_run(target_id, "subs")
+    row = store._conn.execute("SELECT * FROM scan_runs WHERE id = ?", (run_id,)).fetchone()
+    assert "speed" not in row.keys()

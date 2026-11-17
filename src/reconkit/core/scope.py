@@ -18,7 +18,6 @@ from reconkit.errors import ConfigError, ScopeError
 
 DEFAULT_SCOPE_PATH = Path("scope.yaml")
 MAX_PATTERN_LEN = 200
-_SPEED_RANK: dict[str, int] = {"slow": 0, "normal": 1, "fast": 2}
 _SCOPE_KEYS = frozenset(
     {
         "program",
@@ -48,6 +47,10 @@ class Scope(BaseModel):
     in_scope_cidrs: list[str] = Field(default_factory=list)
     allow_active: bool = False
     allow_intrusive: bool = False
+    # Accepted for compatibility with existing scope files, and no longer
+    # enforced: speed control was removed on 2026-11-17 (MASTER_PLAN D3), so
+    # there is no speed left to cap. Kept in the schema so a real scope.yaml
+    # that carries it still loads.
     max_speed: Literal["slow", "normal", "fast"] = "slow"
     notes: str | None = None
 
@@ -232,7 +235,6 @@ def _check_expiry(scope: Scope, today: date) -> None:
 def require_active(
     target: str,
     hosts: Iterable[str],
-    speed: str,
     today: date | None = None,
     *,
     path: Path | str | None = None,
@@ -240,7 +242,8 @@ def require_active(
     """Gate an active stage and re-check every host (docs/05 section 2).
 
     Checks run in order: scope file exists, authorization is set, not expired,
-    `allow_active`, target allowed, `max_speed`. Any failure raises ScopeError.
+    `allow_active`, target allowed. Any failure raises ScopeError. There is no
+    speed check: speed control was removed on 2026-11-17 (MASTER_PLAN D3).
     """
     scope_path = _path(path)
     if not scope_path.exists():
@@ -279,14 +282,6 @@ def require_active(
         raise _fail(
             f"{root} is not in scope",
             "add it (or a wildcard) to in_scope in scope.yaml",
-        )
-
-    if speed not in _SPEED_RANK:
-        raise _fail(f"unknown speed {speed!r}", "use slow, normal or fast")
-    if _SPEED_RANK[speed] > _SPEED_RANK[scope.max_speed]:
-        raise _fail(
-            f"speed {speed!r} exceeds max_speed {scope.max_speed!r}",
-            "lower --speed or raise max_speed in scope.yaml",
         )
 
     allowed: list[str] = []
