@@ -125,6 +125,38 @@ After the last answer the CLI echoes the resolved plan (targets, stages, active
 or not, field numbers) and runs the ordinary engine once per target. Results also
 land on disk, one folder per domain per run (section 5).
 
+### The flow end to end (2026-11-17)
+
+This is the whole runtime flow in one place. The prompt text below is the exact
+text the CLI prints (typer renders a yes/no question as `[Y/n]` or `[y/N]`).
+
+1. **Launch.** `reconkit subs` (or `dns`, `live`, `ports`, `tech`, `urls`,
+   `vulns`, `passive`, `lite`, `run`) with no `-d` and no `-l`, on a terminal.
+2. **Target.** `Domain, or path to a file of domains (one per line)` - a domain,
+   or a path to a file that is read exactly like `-l`.
+3. **Scope file.** `Do you have a scope file? [Y/n]`; on `y`,
+   `Scope file path` (an existing path is required, used exactly like `--scope`).
+   On `n` the scope location stays at its default: `./scope.yaml` if it exists.
+4. **Scan mode.** `Scan mode: passive, active or full` - no default, re-asked
+   until valid. `passive`, `active` and `full` mean what point 3 above says.
+5. **Report fields.** The numbered menu of stored fields, then
+   `Fields [all]` (`1,3,5`, `all`, ...).
+6. **Aggressive scanning.** `Also run aggressive scanning (port scan + version
+   detection)? [y/N]` - asked whatever the mode was; `y` adds `live` + `ports`
+   and sets `--active`.
+7. **Plan echo.** `plan: <target>; stages <stages>; active yes|no; fields <n>`.
+8. **Run.** The ordinary engine runs once per target, results are stored, and a
+   report folder per domain is written (section 5).
+9. **Scope branch at run time.** With **no scope file** the active/full stages
+   run unrestricted against the target(s) the operator named and everything
+   discovered under them (docs/05 rule 2). With a scope file **present**, the
+   unchanged gate applies (exit `3` on a missing `allow_active`, expired scope
+   or out-of-scope target) and `naabu` runs only on IPs reconkit resolved and
+   verified against `in_scope_cidrs`, skipping a target whose resolution fails
+   or resolves out of scope (docs/05 rule 6).
+10. **No speed option.** There is no `--speed`, `--delay`, preset or throttle
+    question anywhere in this flow, and none in `--help` (docs/03 section 7).
+
 The interactive path adds **no flags**: `--help` for a scan command is unchanged,
 and there is no `--interactive` switch. Omitting the target is the whole trigger.
 

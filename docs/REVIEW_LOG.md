@@ -2782,6 +2782,15 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Not verified:** a real-network run after the change is in the final report; Windows unchanged.
 - **Next part must know:** `RunContext` has no `pacer`/`limiter`/`speed`; do not reintroduce `asyncio.Semaphore` over tools or hosts. `scope.require_active(target, hosts, today=None, *, path=None)` is the signature. `SCHEMA_VERSION == 5`.
 
+## Task 4 (2026-11-17): the interactive flow end to end (docs only)
+
+- **Goal:** one place where the runtime flow after Tasks 1-3 can be read start to finish, with the exact prompt text users see.
+- **What was added:** `docs/02` section 2b, "The flow end to end (2026-11-17)", ten numbered steps: launch trigger, target question, scope question, scan mode (no default, re-asked), field menu, aggressive question, plan echo, the ordinary run plus report folder, the scope branch at run time (no file = unrestricted; file present = unchanged gate and naabu on resolved-and-verified IPs only, skipping a target whose resolution fails or resolves out of scope), and no speed option anywhere in the flow or `--help`.
+- **Prompt text source:** read from `src/reconkit/cli.py` (`_ask_target`, `_ask_scope`, `_ask_mode`, `_ask_fields`, `_ask_aggressive`, `_interactive_plan`), not from memory: `Domain, or path to a file of domains (one per line)`; `Do you have a scope file? [Y/n]`; `Scope file path`; `Scan mode: passive, active or full`; `Fields [all]` after the numbered stored-field menu; `Also run aggressive scanning (port scan + version detection)? [y/N]`; `plan: <target>; stages <...>; active yes|no; fields <n>`.
+- **No code or test change:** `git diff --name-only` for this commit lists `docs/02_CLI_UX.md`, `docs/PROGRESS.md`, `docs/REVIEW_LOG.md` only.
+- **Raw check output:** see the commit's pre-commit block; the docs-only run was `714 passed`, `ruff check .` clean, `67 files already formatted`, `mypy src/reconkit` clean (35 source files).
+- **Not verified:** nothing new; there is no new behaviour to verify.
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

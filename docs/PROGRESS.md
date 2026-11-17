@@ -6,7 +6,7 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 - Status: **PART 12 AND PART 13 ARE COMPLETE (2026-11-16).** Part 12 closed on 2026-11-15 (12a-12k). Part 13 - the interactive scan mode, stderr progress and per-domain saved reports - is implemented, tested, self-reviewed (S1-S7) and committed, with docs written first. Phase 1 of the same session (the `docs/tool_manuals/` library) is closed in `8dc2829`.
 - What Part 13 changed, in one line: a scan command with **no** `-d`/`-l` **and** a real terminal asks five questions and then runs the ordinary scan inputs; a domain file becomes the ordinary `-l` path (one full scan and one `results/<domain>/<UTC stamp>/` folder per domain, `report.txt` + `report.json`); progress now goes to stderr for every mode except `--silent`, including `--json`. Every flag-based invocation is unchanged, including no prompts and no report folders (tests `test_a_flagged_run_never_asks_a_question`, `test_a_listed_run_never_asks_a_question`, `test_a_flagged_run_writes_no_report_folder`).
-- Next action: Task 4 - one docs/02 section that walks the interactive flow end to end with the exact prompt text (target(s), passive/active/full, then the scope-file and no-scope-file branches, and no speed option anywhere). Nothing else is queued; Part 13's uncertainties stay under "Open risks".
+- All four owner tasks (2026-11-17) are implemented, tested and committed: D1 `c99eaee`, D2 `6642ee4`, D3 `6a2db4d`, the interactive-mode fix `10b3a48`, Task 4 docs with this entry. Nothing else is queued; Part 13's uncertainties stay under "Open risks".
 - **Owner-requested behavior changes (2026-11-17):** D1 (no scope file = unrestricted active scanning) is committed (`c99eaee`), D2 (naabu is scope-mode dependent) is committed (`6642ee4`), D3 (all speed/throttle control removed) is committed with this entry, and Task 4 (the end-to-end interactive-flow section in docs/02) is the next action.
 - Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 5): `713 passed`, `ruff check .` clean, `ruff format --check .` 67 files, `mypy src/reconkit` clean (35 source files).
 - Nothing is pushed: local `main` is ahead of `reconkit/main`, which is still `5fd1d9a`. Push only if the owner asks (`git push reconkit main`).
@@ -123,6 +123,12 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   coverage against a real file. New: `test_no_scope_file_runs_active_stages_unrestricted`,
   `test_a_present_scope_file_is_enforced_exactly_as_before`,
   `test_no_scope_file_never_loads_or_derives_a_scope_object`.
+- **2026-11-17 (owner-requested Task 4), the interactive flow is documented end
+  to end.** docs/02 section 2b gained "The flow end to end (2026-11-17)": launch,
+  the five questions with their exact prompt text, the plan echo, the per-target
+  run and report folder, the no-scope-file vs scope-file-present branch (naabu's
+  resolve-and-verify path), and the statement that no speed option exists. Docs
+  only; no code or test changed.
 - **2026-11-17 (D1 follow-up), interactive mode never assumes a scan mode.**
   The `Scan mode: passive, active or full` question had typer's `default="passive"`
   and turned a bad word into exit 2; the owner's wording is "must not proceed
