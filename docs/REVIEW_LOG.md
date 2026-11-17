@@ -2979,6 +2979,49 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Sudo:** none. **Not verified:** nothing new (no adapter consumes these
   values yet).
 
+## Install backlog T3 (2026-11-17): real version probes for four tools, path rows documented for five  (commit subject `fix: probe the version of smap, gospider, subjs and urlfinder`; hash filled by the next commit)
+
+- **Docs read / goal:** docs/10 `version_cmd`/`version_args`/`version_regex`,
+  docs/09, `tools.yaml`. Goal: stop doctor showing a path in the Version column
+  where the tool can report a version, and document the ones that cannot.
+- **Real probes (raw, this box):** `smap -h` -> stdout line 1 `Smap 1.0.0-beta`
+  then `Usage: smap <targets here>`, exit 0, stderr empty; `gospider --version`
+  -> stdout `Version: v1.1.6`, exit 0, stderr empty (`gospider -version` errors:
+  `unknown shorthand flag: 'e' in -ersion`); `subjs -version` -> stdout
+  `subjs version: 1.0.1`, exit 0; `urlfinder -version` -> **stderr**
+  `[\x1b[34mINF\x1b[0m] Current Version: v0.0.3`, stdout empty, exit 0.
+- **No version output at all:** `github-subdomains`, `webanalyze`,
+  `waybackurls`, `httprobe`, `unfurl` -> `flag provided but not defined:
+  -version` + `Usage of <tool>:` (Go `flag`), `-h` the same usage text. This is
+  the owner-approved escape clause: documented, not invented.
+- **Docs first:** docs/10 gained "Tools with no version output at all" naming
+  the five path rows and the four probes with their streams; the manuals README
+  flagged item 3 is marked closed.
+- **First draft bug, caught by proof not by the gate:** smap and gospider were
+  given `^Smap (\S+)$` / `^Version: (\S+)$`. Those never match, because the
+  probe text continues after the version line (`$` is end-of-text without
+  `re.M`), so doctor showed `Smap` and `Version:`. Proof line
+  `installed_version -> 'Smap 1.0.0-beta'` exposed it; both patterns are now
+  unanchored and the four doctor rows read `1.0.0-be…`, `v1.1.6`, `1.0.1`,
+  `v0.0.3`.
+- **`httprobe` change:** its `version_cmd: [httprobe, -h]` was removed. It made
+  doctor print `Usage of ***/.reconkit/bin/httprobe:` (redacted) in the Version
+  column; with no probe it prints the documented path instead. Disclosed here
+  and in PROGRESS - a deliberate behaviour change, not a silent edit.
+- **Tests added:**
+  `test_the_four_probed_tools_extract_their_real_output` (smap multi-line body,
+  gospider multi-line body, subjs, urlfinder ANSI) and
+  `test_tools_without_a_version_flag_have_no_probe` (the five: empty
+  `version_args`, `version_regex is None`). No existing test changed.
+- **S5 mutation:** re-anchoring smap's pattern to `^Smap (\S+)$` ->
+  `1 failed` on the smap case; restored from a copy (`sha256sum`
+  `57f1068b...` before and after), test green.
+- **S1 checks:** `730 passed in 16.36s` (721 + 9 new cases); `ruff check .` ->
+  `All checks passed!`; `ruff format --check .` -> `67 files already formatted`;
+  `mypy src/reconkit` -> `Success: no issues found in 35 source files`.
+- **Sudo:** none. **Not verified:** the tools' `doctor` identity beyond `ok`
+  (unchanged path); no adapter consumes these versions yet.
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

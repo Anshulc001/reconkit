@@ -140,11 +140,11 @@ tools:
   # ---------------- live (active) ----------------
   pyprobe:      {stage: live, kind: python, tier: core, mode: active, phase: 2, install: {method: none}, notes: "Async HTTP/HTTPS probe, status, title, redirects. Fallback when no binary is installed."}
   httpx:        {stage: live, kind: binary, tier: core, mode: active, phase: 2, binary: httpx, version_cmd: [httpx, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', install: {<<: *pd_release, name: httpx, repo: projectdiscovery/httpx}, notes: "ProjectDiscovery httpx. Kali's apt package is httpx-toolkit; the python 'httpx' CLI is a different program. Always use ~/.reconkit/bin first."}
-  httprobe:     {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: httprobe, version_cmd: [httprobe, -h], install: {method: go_install, package: "github.com/tomnomnom/httprobe@latest"}}
+  httprobe:     {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: httprobe, install: {method: go_install, package: "github.com/tomnomnom/httprobe@latest"}}
   tlsx:         {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: tlsx, version_cmd: [tlsx, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', install: {<<: *pd_release, name: tlsx, repo: projectdiscovery/tlsx}, notes: "Certificate SANs can reveal more subdomains."}
 
   # ---------------- ports ----------------
-  smap:         {stage: ports, kind: binary, tier: core, mode: passive, phase: 3, binary: smap, install: {method: go_install, package: "github.com/s0md3v/smap/cmd/smap@latest"}, notes: "Passive ports from Shodan data. No packets to the target."}
+  smap:         {stage: ports, kind: binary, tier: core, mode: passive, phase: 3, binary: smap, version_cmd: [smap, -h], version_regex: 'Smap (\S+)', install: {method: go_install, package: "github.com/s0md3v/smap/cmd/smap@latest"}, notes: "Passive ports from Shodan data. No packets to the target."}
   pyscan:       {stage: ports, kind: python, tier: core, mode: active, phase: 2, install: {method: none}, notes: "Async TCP connect scan (no root). Fallback and verifier."}
   naabu:        {stage: ports, kind: binary, tier: core, mode: active, phase: 2, binary: naabu, version_cmd: [naabu, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', requires_apt: [libpcap-dev], install: {<<: *pd_release, name: naabu, repo: projectdiscovery/naabu, checksums_pattern: "naabu-checksums.txt"}, notes: "Needs libpcap. Use connect scan (-scan-type c) when not root."}
   nmap:         {stage: ports, kind: binary, tier: core, mode: active, phase: 3, binary: nmap, version_cmd: [nmap, --version], install: {method: apt, package: nmap}, notes: "Service/version verification (-sV)."}
@@ -163,10 +163,10 @@ tools:
   waybackurls:  {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: waybackurls, install: {method: go_install, package: "github.com/tomnomnom/waybackurls@latest"}}
   katana:       {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: katana, version_cmd: [katana, -version], version_regex: 'Current version: (v?\d+\.\d+\.\d+)', install: {<<: *pd_release, name: katana, repo: projectdiscovery/katana, checksums_pattern: "katana-{version}-checksums.txt"}}
   hakrawler:    {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: hakrawler, install: {method: go_install, package: "github.com/hakluke/hakrawler@latest"}}
-  gospider:     {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: gospider, install: {method: go_install, package: "github.com/jaeles-project/gospider@latest"}}
-  subjs:        {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: subjs, install: {method: go_install, package: "github.com/lc/subjs@latest"}, notes: "JS file discovery."}
+  gospider:     {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: gospider, version_cmd: [gospider, --version], version_regex: 'Version: (\S+)', install: {method: go_install, package: "github.com/jaeles-project/gospider@latest"}}
+  subjs:        {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: subjs, version_cmd: [subjs, -version], version_regex: 'subjs version: (\S+)', install: {method: go_install, package: "github.com/lc/subjs@latest"}, notes: "JS file discovery."}
   unfurl:       {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: unfurl, install: {method: go_install, package: "github.com/tomnomnom/unfurl@latest"}, notes: "Parameter/path extraction. Pattern sorting (xss/sqli/ssrf/lfi/redirect candidates) is done in Python, no traffic."}
-  urlfinder:    {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: urlfinder, install: {<<: *pd_release, name: urlfinder, repo: projectdiscovery/urlfinder}}
+  urlfinder:    {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: urlfinder, version_cmd: [urlfinder, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', install: {<<: *pd_release, name: urlfinder, repo: projectdiscovery/urlfinder}}
 
   # ---------------- vulns (takeover, exposure) ----------------
   nuclei:       {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: nuclei, version_cmd: [nuclei, -version], version_regex: 'Nuclei Engine Version: (v?\d+\.\d+\.\d+)', install: {<<: *pd_release, name: nuclei, repo: projectdiscovery/nuclei}, notes: "Run safe tags only (takeover, exposure, misconfig). Update templates with 'reconkit update'."}

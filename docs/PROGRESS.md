@@ -304,6 +304,24 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   `tests/test_installer_registry.py::test_the_seven_version_patterns_extract_their_real_banner`
   (7 parametrized cases) pins each real banner -> expected version, and a
   mutation (dropping the ANSI tolerance from the wafw00f pattern) makes it fail.
+- **2026-11-17 (install backlog T3), four tools report a version and five are
+  documented as path rows.** `smap` (`-h`, stdout, `Smap 1.0.0-beta`),
+  `gospider` (`--version`, stdout, `Version: v1.1.6`), `subjs` (`-version`,
+  stdout, `subjs version: 1.0.1`) and `urlfinder` (`-version`, **stderr**,
+  `[INF] Current Version: v0.0.3`) now carry `version_cmd` + `version_regex`.
+  Their patterns are unanchored on purpose: smap and gospider print a multi-line
+  body after the version, so the first draft's `^...$` patterns silently failed
+  and doctor fell back to the first line (`Smap`, `Version:`) - caught before
+  the commit and re-verified. `github_subdomains`, `webanalyze`, `waybackurls`,
+  `unfurl` and `httprobe` genuinely have no version output (`-version` ->
+  `flag provided but not defined: -version`), so they carry no probe and
+  doctor's Version column shows the resolved path **by design** (docs/10).
+  `httprobe`'s old `version_cmd: [httprobe, -h]` was removed - it put
+  `Usage of ***/httprobe:` in the Version column, which is worse than the
+  documented path. New tests:
+  `test_the_four_probed_tools_extract_their_real_output` (4 cases) and
+  `test_tools_without_a_version_flag_have_no_probe` (5 cases); no existing test
+  changed.
 - **2026-11-17 (verification follow-up F8), the D3 test-count wording uses the
   measured figures.** The D3 entry above now says 32 test functions deleted and
   4 renamed (44 collected node ids removed, 12 added, 745 -> 713), then one

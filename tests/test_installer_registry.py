@@ -127,6 +127,47 @@ def test_the_seven_version_patterns_extract_their_real_banner(
     assert match.group(1) == expected
 
 
+@pytest.mark.parametrize(
+    ("tool", "output", "expected"),
+    [
+        # Real probe output, 2026-11-17. smap and gospider print a multi-line
+        # body after the version, so an anchored `^...$` pattern does not match
+        # (found the hard way: doctor fell back to the first line).
+        (
+            "smap",
+            "Smap 1.0.0-beta\nUsage: smap <targets here>\n  -i string\n",
+            "1.0.0-beta",
+        ),
+        ("gospider", "Version: v1.1.6\n\n\nExamples:\n  gospider -s URL\n", "v1.1.6"),
+        ("subjs", "subjs version: 1.0.1\n", "1.0.1"),
+        ("urlfinder", "[\x1b[34mINF\x1b[0m] Current Version: v0.0.3\n", "v0.0.3"),
+    ],
+)
+def test_the_four_probed_tools_extract_their_real_output(
+    tool: str, output: str, expected: str
+) -> None:
+    """2026-11-17: these four report a version, so doctor must show one."""
+    pattern = plan_for(tool).version_regex
+    assert pattern is not None
+    match = re.search(pattern, output)
+    assert match is not None, f"{tool}: {pattern!r} did not match {output!r}"
+    assert match.group(1) == expected
+
+
+@pytest.mark.parametrize(
+    "tool", ["github_subdomains", "webanalyze", "waybackurls", "unfurl", "httprobe"]
+)
+def test_tools_without_a_version_flag_have_no_probe(tool: str) -> None:
+    """Their real `-version` prints Go flag usage, so the path is the version.
+
+    docs/10 documents this as intended; a `version_cmd` here would put
+    `Usage of ...:` in the Version column (what httprobe used to show).
+    """
+    plan = plan_for(tool)
+    assert plan.version_args == ()
+    assert plan.version_regex is None
+
+
 def test_a_broken_version_regex_is_a_config_error(tmp_path: Path) -> None:
     """A pattern that cannot compile fails at load, not inside doctor."""
     tools = tmp_path / "tools.yaml"

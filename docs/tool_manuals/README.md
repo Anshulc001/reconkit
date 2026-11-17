@@ -143,11 +143,15 @@ each one is recorded and left alone.
    `1.3.1`, `v1.12.0`, `v1.4.0`, `2.7.0`, `v1.4.0` and `v2.4.2`. The PD six print
    the version to stderr, which `installed_version()` already reads; `wafw00f`
    writes to stdout with an ANSI-wrapped value. See `docs/10` "version_regex".
-3. **Tools with no version flag report their *path* as the version.**
-   `installed_version()` returns `argv0` when `version_args` is empty, so
-   `doctor` shows a path in the Version column for `github_subdomains`, `smap`,
-   `webanalyze`, `gospider`, `subjs`, `unfurl`, `urlfinder`, `waybackurls` and
-   `httprobe` (whose `-h` prints usage text instead of a version). Cosmetic, but
+3. **Tools with no version flag report their *path* as the version (closed
+   2026-11-17).** `smap`, `gospider`, `subjs` and `urlfinder` now have a real
+   probe and show `1.0.0-beta`, `v1.1.6`, `1.0.1` and `v0.0.3`. The other five
+   (`github_subdomains`, `webanalyze`, `unfurl`, `waybackurls`, `httprobe`)
+   genuinely print only Go `flag` usage - `-version` answers `flag provided but
+   not defined` - so they keep the path in the Version column **by design**;
+   `httprobe`'s `-h` version command was removed because `Usage of httprobe:`
+   is worse than the documented path. See `docs/10` "Tools with no version
+   output". Cosmetic, but
    it makes the column untrustworthy for those rows.
 4. **`assetfinder -h` exits 0, not 2.** `docs/09` section 9 says the Go flag
    package makes it exit 2; on this box (2026-11-16) it printed `Usage of
