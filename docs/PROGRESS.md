@@ -265,6 +265,31 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   to the same commit, so it now says the field was removed on 2026-11-17 and no
   adapter passes `-T` any more. `docs/tool_manuals/urls.md:484` is hakrawler's
   own `--delay` flag help, not a reconkit claim, and was left alone.
+- **2026-11-17 (install backlog T1), `rustscan` installs from its real release.**
+  The placeholder `asset_pattern: "verify-at-implementation"` is gone. The
+  registry now names `repo: bee-san/RustScan`, `asset_pattern:
+  "rustscan-{version}-x86_64-linux.zip"` and `verify_checksums: false`, and the
+  version pin `2.3.0` lives in `config.yaml` `tool_versions` because
+  `load_plans(versions=...)` is the only place the registry reads a pin from (a
+  `version:` key inside `install:` is ignored - chosen the working way, not the
+  literal one). Why 2.3.0: 2.4.1 publishes `x86_64-linux-rustscan.tar.gz.zip`, a
+  nested archive the single-layer extractor cannot read, its `x86_64`/`aarch64`
+  names do not match `{arch}` (`amd64`/`arm64`), and no recent release publishes
+  checksums. Clean version in doctor needs a `version_regex`, because the first
+  line is `rustscan 2.3.0` and the table cell truncates it: regex
+  `^rustscan (\d+\.\d+\.\d+)$` -> `2.3.0`. Changed tests: (1)
+  `tests/test_installer_github_release.py::test_rustscan_placeholder_cannot_resolve`
+  -> `test_rustscan_pinned_plan_resolves_its_real_asset`; old: asserted
+  `asset_pattern == "verify-at-implementation"` and that resolution fails; new:
+  asserts the real repo, pattern, `verify_checksums is False`, the pinned
+  `releases/tags/2.3.0` request and the resolved asset name; reason: the
+  placeholder no longer exists. (2)
+  `tests/test_config.py::test_unknown_top_level_key_is_rejected`: old built its
+  fixture with `.replace("tool_versions: {}", ...)`; new appends the unknown key
+  to the real file; reason: the literal `{}` is gone (rustscan pin), so the old
+  test silently stopped injecting anything and passed nothing through the
+  schema check - the append form tests the same thing without coupling to one
+  line's spelling.
 - **2026-11-17 (verification follow-up F8), the D3 test-count wording uses the
   measured figures.** The D3 entry above now says 32 test functions deleted and
   4 renamed (44 collected node ids removed, 12 added, 745 -> 713), then one
@@ -290,18 +315,24 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
 - `SUDO_DENIAL_MARKERS` includes `no tty present` and `askpass`, neither reproduced live; `_fetch_text`'s 64 KiB default and the non-UTF-8 checksums rejection have no dedicated tests; `requires` (puredns -> massdns) is parsed but not auto-installed.
 - `doctor` does not check wordlists (no phase-2 adapter uses one); `dnsutils` is not checked because it appears only in the `dig` install block.
 - `scope.yaml` cannot express out-of-scope CIDRs; `in_scope_cidrs` is the only IP gate.
-- Unverifiable tool facts, named: OTX's response shape was never observed live (anonymous 429, synthetic fixture); `assetfinder`'s identity probe is inferred from Go `flag` source; `rustscan`'s `-V` and asset pattern come from Kali's package page, not a binary run.
+- Unverifiable tool facts, named: OTX's response shape was never observed live (anonymous 429, synthetic fixture); `assetfinder`'s identity probe is inferred from Go `flag` source; `rustscan`'s asset naming and `--version` are now verified against the real 2.3.0/2.4.1 releases and a real binary (2026-11-17, T1 below), so its entry is no longer in this list.
 - `subfinder` provider keys cover only certspotter, chaos, github and virustotal; no real `subfinder` run has accepted the generated provider file yet.
 - 11c-bis-1: `--help` renders switches as value-taking (`--json <bool>`); `typer>=0.12` has no upper bound and no test pins the rendering. 11c-bis-2: `reconkit --json doctor` accepts a global `--json` and silently ignores it.
 - **Superseded 2026-11-17 (D2):** `naabu` is no longer permanently skipped. It runs unrestricted with no scope file, and on engine-verified IPs when a scope file is present; ports confidence can now exceed LOW when both `pyscan` and `naabu` report a port. The 12i "pyscan-only / LOW ceiling" risk is historical.
 - Wildcard matches are a mark only: docs/09's "exclude from counts" names no count and no code filters it.
 - `tech`, `urls` and `vulns` have no adapter for any tool in their pools, so no real tool in those stages has ever been driven by `reconkit`; they exit 5 with the 12k warning. (2026-11-16: every phase-3 binary in `tech`/`urls`/`shots` was run by hand for the manuals - the tools work, only the adapters are missing.)
 - 2026-11-16, for the owner: `docs/tool_manuals/README.md` lists six registry
-  discrepancies flagged by the manual verification - `rustscan`'s placeholder
-  asset, seven tools whose version column shows ASCII art (PIT-48 class),
-  path-instead-of-version rows for tools with no version flag, `assetfinder -h`
-  exiting 0, `amass` v5.1.3 versus the v4 registry note, and `webanalyze`
-  needing `-update` first. No code or registry value was changed.
+  discrepancies flagged by the manual verification. **2026-11-17: all six are
+  closed** by the install/doc backlog batch - `rustscan`'s placeholder asset
+  (T1), the seven ASCII-art version columns (T2), the path-instead-of-version
+  rows (T3), `assetfinder -h` exiting 0 (T4), `amass` v5.1.3 versus the v4 note
+  (T5) and `webanalyze -update` (T6).
+- **Open item, 2026-11-17 (T1 follow-up):** `reconkit`'s extractor unwraps one
+  archive layer only, so `rustscan` 2.4.1 (`x86_64-linux-rustscan.tar.gz.zip`)
+  cannot be installed and the registry pins 2.3.0 instead. Nested-archive
+  extraction is a future installer capability, not built in this batch; the
+  pin is amd64-only because 2.4.1's `x86_64`/`aarch64` asset names do not match
+  the `{arch}` values `amd64`/`arm64`.
 
 ## Notes for later tasks
 

@@ -267,17 +267,43 @@ def test_host_arch_maps_machine_names() -> None:
         host_arch("riscv64")
 
 
-def test_rustscan_placeholder_cannot_resolve() -> None:
-    """The registry still holds a placeholder, so 10c must not install it."""
-    plan = plan_for("rustscan")
-    assert plan.asset_pattern == "verify-at-implementation"
+def test_rustscan_pinned_plan_resolves_its_real_asset() -> None:
+    """2026-11-17: 2.3.0 is pinned and its flat zip holds the binary.
 
-    def respond(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"tag_name": "2.4.1", "assets": []})
+    The placeholder is gone (`verify-at-implementation`); the pin lives in
+    `config.yaml` `tool_versions`, because the registry takes versions from
+    there, and 2.3.0 publishes no checksums asset.
+    """
+    plan = plan_for("rustscan", versions={"rustscan": "2.3.0"})
+    assert plan.repo == "bee-san/RustScan"
+    assert plan.asset_pattern == "rustscan-{version}-x86_64-linux.zip"
+    assert plan.verify_checksums is False
+    assert plan.version == "2.3.0"
+
+    asset = "rustscan-2.3.0-x86_64-linux.zip"
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert "releases/tags/2.3.0" in str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "tag_name": "2.3.0",
+                "assets": [
+                    {
+                        "name": asset,
+                        "browser_download_url": (
+                            "https://github.com/bee-san/RustScan/releases/download/2.3.0/"
+                            "rustscan-2.3.0-x86_64-linux.zip"
+                        ),
+                    }
+                ],
+            },
+        )
 
     with httpx.Client(transport=httpx.MockTransport(respond)) as http:
-        with pytest.raises(InstallError, match="has no asset"):
-            release_for(plan, client=http, arch="amd64")
+        release = release_for(plan, client=http, arch="amd64")
+    assert release.asset_name == asset
+    assert release.checksums_url is None
 
 
 def test_release_lookup_follows_a_rename_redirect() -> None:

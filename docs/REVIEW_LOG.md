@@ -2882,6 +2882,62 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Not verified:** Windows `--help` rendering (no Windows run in this session,
   unchanged from the rest of the log).
 
+## Install backlog T1 (2026-11-17): rustscan installs from its real release  (commit subject `fix: install rustscan from its real 2.3.0 release`; hash filled by the next commit)
+
+- **Docs read / goal:** docs/10 (github_release, `asset_pattern`, `member`,
+  `verify_checksums`, version policy, extraction rules), docs/09 tool-flags
+  table, `docs/tool_manuals/{README,ports}.md`, `tools.yaml`, `config.yaml`.
+  Goal: replace the `verify-at-implementation` placeholder so
+  `reconkit install rustscan` succeeds and doctor shows a version.
+- **Real release facts (GitHub API, redirect followed; `bee-san/RustScan`, tag
+  2.4.1):** assets `aarch64-linux-rustscan.zip`, `rustscan.deb.zip`,
+  `x86-linux-rustscan.zip`, `x86_64-linux-rustscan.tar.gz.zip`,
+  `x86_64-linux-rustscan.tar.gz.1.zip`, plus macOS/Windows. `unzip -l` on the
+  amd64 asset shows one member, `x86_64-linux-rustscan.tar.gz`; `tar -tzf` on
+  that shows `rustscan`. No checksums asset in any of the last five releases.
+  2.3.0 publishes `rustscan-2.3.0-x86_64-linux.zip`, which contains the binary
+  directly at `tmp/rustscan-2.3.0-x86_64-linux/rustscan`; running it gives
+  `rustscan 2.3.0` (exit 0, stdout).
+- **Decision:** Route A (owner-approved): pin 2.3.0, keep the single-layer
+  extractor. Route B (nested-archive extraction) is recorded as an open item and
+  **not** implemented.
+- **Placement deviation, deliberate:** the pin is `config.yaml`
+  `tool_versions: { rustscan: "2.3.0" }`, not a `version:` key inside
+  `tools.yaml`'s `install:` block, because `registry.load_plans` takes versions
+  from the `versions` mapping only (verified: with `install.version: 2.3.0` the
+  loaded plan still said `version: latest`). `docs/10` already documents the
+  config pin as the mechanism, so no code changed.
+- **Docs first:** `docs/tool_manuals/ports.md` (why 2.3.0, the pin snippet, the
+  install/version output, the Route B follow-up), `docs/tool_manuals/README.md`
+  (40/40 binaries; flagged item 1 closed), `docs/09` rustscan flags row,
+  `docs/10` registry-values paragraph. Then `tools.yaml`, then `config.yaml`.
+- **Requirement -> proof:** placeholder gone -> `grep -n
+  verify-at-implementation tools.yaml` -> no match; install -> `installed
+  /home/kali/.reconkit/bin/rustscan` exit 0; real binary -> `rustscan 2.3.0`;
+  doctor row -> `rustscan | ports | core | yes | 2.3.0 | /home/ka… | ok`;
+  `doctor --json` -> `{'tool': 'rustscan', ..., 'version': '2.3.0', 'path':
+  '/home/kali/.reconkit/bin/rustscan', 'identity': 'ok'}`; second install ->
+  `already installed (2.3.0)`.
+- **Why a version_regex here:** without one, `installed_version` returns
+  `rustscan 2.3.0` and the doctor table truncates that cell to `rustscan`; the
+  regex `^rustscan (\d+\.\d+\.\d+)$` yields `2.3.0`.
+- **Tests changed (both disclosed in PROGRESS):**
+  `test_rustscan_placeholder_cannot_resolve` ->
+  `test_rustscan_pinned_plan_resolves_its_real_asset`;
+  `test_unknown_top_level_key_is_rejected` now appends its unknown key instead of
+  `.replace("tool_versions: {}", ...)`. The second one was found by the gate: the
+  literal it replaced no longer exists, so the test injected nothing and would
+  have passed against a schema that accepted anything - the append form keeps
+  the assertion meaningful.
+- **S1 checks:** `714 passed in 16.26s`; `ruff check .` -> `All checks passed!`;
+  `ruff format --check .` -> `67 files already formatted`; `mypy src/reconkit` ->
+  `Success: no issues found in 35 source files`.
+- **S3 scans:** no `assert` in `src/`, no `shell=True`, no placeholder pattern in
+  `tools.yaml`; no new suppression, no new module, no new dependency.
+- **Sudo:** none needed (download to `~/.reconkit/bin`).
+- **Not verified:** an actual `rustscan` scan (no adapter yet, phase 3); arm64
+  (the pin's asset is amd64-only).
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

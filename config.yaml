@@ -30,7 +30,9 @@ wildcard_check:
 
 # Pin tool versions to avoid parser breakage after upstream changes. Empty = latest.
 # Example: tool_versions: { nuclei: "3.3.0" }
-tool_versions: {}
+# rustscan is pinned: the latest release (2.4.1) is a nested .tar.gz.zip that the
+# single-layer extractor cannot read (see tools.yaml rustscan notes).
+tool_versions: { rustscan: "2.3.0" }
 
 install:
   dir: "~/.reconkit/bin"

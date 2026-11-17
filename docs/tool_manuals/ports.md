@@ -513,33 +513,56 @@ box**. `masscan --version` exits 1 while printing a valid banner (PIT-35).
 - **Registry:** binary, core, active, phase 3, `stage: ports`
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/RustScan/RustScan
-- **Installed on this box:** **not installed** - and `reconkit install rustscan` cannot install it today
-- **Install command:** `reconkit install rustscan` **fails** (see below)
-- **Multi-domain input:** unverified - the binary is absent, so no `--help` exists to read
+- **Installed on this box:** `/home/kali/.reconkit/bin/rustscan`, `rustscan 2.3.0`
+- **Install command:** `reconkit install rustscan` (pinned `github_release` 2.3.0)
+- **Multi-domain input:** `-a, --addresses` takes a comma-separated list; unverified against a scan
 
-#### The install failure, raw
+#### Why 2.3.0 is pinned (2026-11-17)
 
-```
-$ reconkit install rustscan
-tool       method          result     detail
-rustscan   github_release  failed     rustscan: release 2.4.1 has no asset
-                                      'verify-at-implementation'
-rustscan: rustscan: release 2.4.1 has no asset 'verify-at-implementation'
-```
+The latest release, 2.4.1, publishes `x86_64-linux-rustscan.tar.gz.zip` - a zip
+that contains a `.tar.gz` that contains the binary. `reconkit`'s extractor
+unwraps exactly one archive layer (`docs/10` section on extraction), so no
+`asset_pattern` alone can install it. The 2.4.1 names also use `x86_64`/
+`aarch64` where `{arch}` renders `amd64`/`arm64`, so one pattern cannot cover
+both architectures, and no recent release publishes a checksums asset.
 
-`tools.yaml` carries a deliberate placeholder:
+The newest release whose zip holds the binary directly is 2.3.0
+(`rustscan-2.3.0-x86_64-linux.zip`, member `rustscan`), so the registry pins it:
 
 ```yaml
-install: {method: github_release, repo: RustScan/RustScan,
-          asset_pattern: "verify-at-implementation"},
+# config.yaml: the pin lives here (docs/10: load_plans(versions=...))
+tool_versions: { rustscan: "2.3.0" }
+
+# tools.yaml
+rustscan: {..., install: {method: github_release, repo: bee-san/RustScan,
+           asset_pattern: "rustscan-{version}-x86_64-linux.zip",
+           verify_checksums: false}, notes: "Pinned 2.3.0 ..."}
 ```
 
-so the installer fails closed exactly as designed. **This is the flagged
-`tools.yaml` mismatch:** the release is 2.4.1, the real asset is
-`rustscan_2.4.1_amd64.deb` (or the `.zip`), and no asset matches the
-placeholder. Until the owner rules on the real asset name, `rustscan` stays
-uninstalled and undocumented beyond this entry. No code and no registry value
-was changed in this phase.
+`verify_checksums: false` is required because 2.3.0 publishes no checksums file
+(`docs/10`: `false` only for a release that publishes none), so the post-install
+identity probe (`rustscan --version`) is the only verification. This is an
+amd64-only pin.
+
+**Future follow-up, not a current capability:** nested-archive extraction (unwrap
+a zip/tar.gz that contains one archive member) would let the registry install
+2.4.1 on amd64. It is not implemented; the pin above is the whole fix.
+
+#### The real install, raw (2026-11-17)
+
+```
+$ reconkit install rustscan --no-color
+tool      method          result     detail
+rustscan  github_release  installed  /home/kali/.reconkit/bin/rustscan
+exit=0
+
+$ ~/.reconkit/bin/rustscan --version
+rustscan 2.3.0
+```
+
+`reconkit doctor` then reports `rustscan` as `installed yes`, version `2.3.0`,
+path `~/.reconkit/bin/rustscan`, identity `ok`. A second install is a no-op:
+`already installed (2.3.0)`.
 
 
 ---

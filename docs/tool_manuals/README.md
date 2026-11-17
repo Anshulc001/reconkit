@@ -51,9 +51,11 @@ every tool still gets its own `##` section with the same fixed fields, so a
 | `shots` | 1 | - | gowitness (1) |
 
 Installed on this box (managed directory `~/.reconkit/bin` first, then `PATH`):
-**39 of the 40** documented tools have their binary (or are `http`/`python`
-kinds with no binary). The one missing binary is **`rustscan`**: the registry's
-asset pattern is a placeholder, so `reconkit install rustscan` fails closed.
+**40 of the 40** documented tools have their binary (or are `http`/`python`
+kinds with no binary). `rustscan` used to be the one missing binary; the
+registry now pins 2.3.0 with its real asset name (2026-11-17), so
+`reconkit install rustscan` installs it (amd64 only; the note in
+`docs/tool_manuals/ports.md` explains why the latest release cannot be used).
 Six of the installed ones still have no runnable path here without a key, a root
 shell or a one-time data file: `chaos` (`PDCP_API_KEY`), `github_subdomains`
 (`GITHUB_TOKEN`), `otx` (anonymous 429), `certspotter` (anonymous answers `[]`),
@@ -130,10 +132,11 @@ what the engine uses today for every tool.
 These are discrepancies found while verifying. Phase 1 is documentation only, so
 each one is recorded and left alone.
 
-1. **`rustscan` cannot be installed.** `tools.yaml` has
-   `asset_pattern: "verify-at-implementation"`. `reconkit install rustscan` ->
-   `release 2.4.1 has no asset 'verify-at-implementation'`. Needs the real asset
-   name from the release before any adapter work.
+1. **`rustscan` (closed 2026-11-17).** The placeholder is gone: the registry
+   pins 2.3.0 with its real asset name and `reconkit install rustscan` installs
+   it. The latest release (2.4.1) ships a nested `.tar.gz.zip`, so 2.4.1 stays
+   uninstallable until nested-archive extraction exists; see the rustscan entry
+   in `docs/tool_manuals/ports.md` and `docs/10` section 3.
 2. **Seven tools' version column shows ASCII art.** `installed_version()` returns
    the first output line, and only `katana`/`nuclei` carry a `version_regex`
    (12j/PIT-48). Real `reconkit doctor` output today: `chaos` -> `__`,
