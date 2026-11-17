@@ -15,12 +15,30 @@ from reconkit.errors import ParseError, ToolFailed
 from reconkit.models import HostState, HostStatusRecord, Record, RunContext, Stage
 
 
-def _fqdn(value: str) -> str:
+def httpx_fqdn(value: str, tool: str = "httpx") -> str:
     host = urlsplit(value).hostname if "://" in value else value
     try:
         return validate_host(host or "")
     except (TypeError, ValueError):
-        raise ParseError(f"httpx: invalid host {value!r}") from None
+        raise ParseError(f"{tool}: invalid host {value!r}") from None
+
+
+# Shared with the tech-stage httpx_tech adapter: one invocation, two stages.
+def httpx_hosts(ctx: RunContext, tool: str = "httpx") -> list[str]:
+    """Validated, deduplicated hostnames for the `-u` flags."""
+    hosts: list[str] = []
+    seen: set[str] = set()
+    for raw in ctx.hosts:
+        try:
+            host = validate_host(raw)
+        except (TypeError, ValueError):
+            raise ToolFailed(f"{tool}: invalid host {raw!r}") from None
+        if host not in seen:
+            seen.add(host)
+            hosts.append(host)
+    if not hosts:
+        raise ToolFailed(f"{tool}: no hosts to probe")
+    return hosts
 
 
 class HttpxAdapter(BinaryAdapter):
@@ -32,18 +50,7 @@ class HttpxAdapter(BinaryAdapter):
     needs_home = True
 
     def build_command(self, ctx: RunContext) -> list[str]:
-        hosts: list[str] = []
-        seen: set[str] = set()
-        for raw in ctx.hosts:
-            try:
-                host = validate_host(raw)
-            except (TypeError, ValueError):
-                raise ToolFailed(f"httpx: invalid host {raw!r}") from None
-            if host not in seen:
-                seen.add(host)
-                hosts.append(host)
-        if not hosts:
-            raise ToolFailed("httpx: no hosts to probe")
+        hosts = httpx_hosts(ctx, self.name)
         # The child gets only the env keys passed in, so it has no PATH: launch the
         # path binary_path() resolved (docs/09 adapter contract), never the bare name.
         argv = [
@@ -85,7 +92,7 @@ class HttpxAdapter(BinaryAdapter):
             value = data.get("input") or data.get("url")
             if not isinstance(value, str) or not value:
                 raise ParseError("httpx: JSON line has no input/url")
-            fqdn = _fqdn(value)
+            fqdn = httpx_fqdn(value, self.name)
             status = data.get("status_code")
             if status is None:
                 # A failed probe is not an HTTP response; httpx only prints a

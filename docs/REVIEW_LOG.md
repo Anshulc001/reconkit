@@ -3606,6 +3606,97 @@ install residue. No new feature, no behaviour change, no code-logic change.
   `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` (unchanged
   from the previous batch; no scope edit was made).
 
+## Adapter wave 4: unfurl, wafw00f, whatweb, httpx_tech (2026-11-17)
+
+- Docs read / goal: `AGENTS.md` (0d item 11), RESUME, PIT-14/30/50/51/52,
+  docs/09 adapter contract + §4a4 slot, docs/10 version contract, docs/04
+  section 5, docs/tool_manuals/{tech,urls}.md, `tools.yaml`. Four adapters in
+  one commit, no mode-table change, no schema change.
+- Baseline: `726 passed`, `ruff check .` clean, `ruff format --check .` 61 files,
+  `mypy src/reconkit` clean (41 source files), tree clean at `a30a6c6`,
+  `scope.yaml` sha256 `d45a3c9...eeee8b` (unchanged at the end of this entry).
+- Real flags and output read off this box before coding: `unfurl -h` writes the
+  usage to **stderr** with exit 0 and `-version` exits 2 (`flag provided but not
+  defined`); `wafw00f --version` -> `[+] The version of WAFW00F you have is
+  v2.4.2`, `wafw00f -a -f json -o -` -> a JSON array, exit 0; `whatweb
+  --version` -> `WhatWeb version 0.6.4 ...`, `whatweb --quiet --log-json=-
+  --no-errors --color=never -a 1` -> a JSON array on stdout, exit 0.
+- **`whatweb` trap found by trying it:** `--log-json=-` **alone fails** - the
+  JSON reaches stdout, then the one-line brief is written to the same closed
+  stream, Ruby raises `logging.rb:89:in 'write': closed stream (IOError)` and the
+  tool exits 1, which the base flow would report as a failed tool. `--quiet`
+  (real help: "Do not display brief logging to STDOUT.") is therefore part of
+  the command, not a nicety. Same class as PIT-10: the flag list alone did not
+  reveal it.
+- **unfurl: choice (b), full URL lines.** `format '%s://%d%:%P%p?%q'` rebuilds
+  one canonical URL per line, which is what the urls stage stores; components as
+  metadata would need a new model field nothing consumes (rejected). Real quirk:
+  `%?` is unconditional, so a bare root returns `https://host/?`; the adapter
+  runs `normalize_url()` and relies on `-u` plus parser dedupe. Honest
+  limitation: the urls stage hands over hostnames, so unfurl only sees the two
+  scheme roots per host - its real value (canonicalising an existing URL list)
+  needs a urls->urls hand-off the engine does not have.
+- **Docs-vs-brief conflict, ruled by the registry:** the brief lists unfurl as
+  `active`; `tools.yaml:158` and docs/09 §4 line 312 say `mode: passive`. The
+  registry wins (same ruling as `gau` in wave 1, `urlfinder` in wave 3), so
+  `tools.yaml` is untouched and unfurl also runs in a passive scan.
+- **Merge-semantics question, answered from the code, nothing changed:**
+  `tech` is a **merged list** (`_persist_tech` unions per pass at engine.py:1691;
+  `Store.update_host_extras` appends unseen names to the stored `tech_json` at
+  store.py:612), and `waf` is a **single string**: first non-None inside one pass
+  (`results` order is completion order from `asyncio.gather`, engine.py:1712),
+  replaced by the latest pass across runs. So `httpx_tech` (`cdn_name`) and
+  `wafw00f` never merge - whichever finishes first names the WAF and the other
+  detection is silently dropped, and a rerun can flip the winner. That is what
+  the mock proof below shows (`cloudflare` stored, `Cloudflare` dropped).
+  Changing it would need a list column on `host_status_history` (schema change),
+  which was out of scope: reported as an open item for a ruling, code untouched.
+- **`httpx_tech` shares the `httpx` invocation.** `HttpxAdapter` has no `run()`
+  override (the flow is `BinaryAdapter.run`), so the thing worth sharing is
+  `build_command` plus its host/dedupe helpers: `_fqdn` became the public
+  `httpx_fqdn(value, tool)` and the host loop became `httpx_hosts(ctx, tool)`,
+  both in `httpx_tool.py`. `HttpxTechAdapter(HttpxAdapter)` overrides only
+  `name`, `stage` and `parse_output`, so `-td`, the stdin/env handling, the
+  identity probe and 01daa8b's Python-vs-ProjectDiscovery rejection are
+  inherited rather than copied, and a change to the invocation can no longer
+  reach one stage and miss the other.
+- **Behaviour choices, all documented in docs/09 §4a4:** `wafw00f` emits a
+  record only for `detected: true` (`waf=<firewall>`, `UNKNOWN`, no
+  `manufacturer`), so a `detected: false` entry is silence like cdncheck;
+  `whatweb` stores plugin names minus `NON_TECH_PLUGINS` (IP, Country, Title,
+  Cookies, HttpOnly, Script, Email, HTML5, ...), because a response-describing
+  match is not software; `httpx_tech` stores `tech`/`cdn_name` and produces no
+  record for a host with no technology.
+- **One test changed (test-change rule):**
+  `test_a_stage_with_no_adapter_reports_its_skips` used `tech --tools whatweb`,
+  which is the last tech tool that had no adapter - every `tech` tool has one
+  now, so it moved to `vulns --tools nuclei` (a phase-3 tool with no adapter),
+  same four assertions, same exit code 4. No other existing test was touched;
+  `test_binary_adapters_are_registered` gained four assertions and
+  `NO_HOME_NEEDED` gained unfurl/wafw00f/whatweb with reasons from their real
+  help output.
+- Evidence, raw in the report: `doctor` shows all four `yes` / `ok`
+  (`httpx_tech` `~/.reconkit/bin/httpx`, `wafw00f` and `whatweb` `/usr/bin`,
+  `unfurl` `~/.reconkit/bin/unfurl`); combined mock run
+  `--tools pyprobe,unfurl,wafw00f,whatweb,httpx_tech` -> live `pyprobe ok 2`,
+  tech `httpx_tech ok 2`, `whatweb ok 1`, `wafw00f ok 1`, urls `unfurl ok 4`,
+  `tools_ok 5`, `tools_skipped 0`; the same run's DB shows
+  `testfire.net  tech_json=["Apache","Apache Tomcat","HTTPServer","Java"]  waf=cloudflare`
+  (two tech tools merged, one of two WAF detections kept) and
+  `www.testfire.net  tech_json=["Java"]`; the adversarial PATH
+  (`PATH=/usr/local/bin:/usr/bin:/bin HOME=/tmp/fakehome`, where `/usr/bin/httpx`
+  is the Python CLI) gives `httpx_tech` `"installed":"wrong program"`,
+  `"identity":"failed"` - the D5/01daa8b check still applies to the new row.
+- Tests: 10 new (`736 passed`, `726 -> 736`), `ruff check .` clean, `ruff format
+  --check .` 73 files, `mypy src/reconkit` clean (45 source files: four new
+  adapter modules). No PIT row: a new adapter plus a tool quirk is not a bug the
+  code shipped with, and no invariant changed.
+- Next action: none. Still unadapted: subs `urlscan, amass, findomain, chaos,
+  github_subdomains`; dns `puredns, massdns, dig`; ports `smap, nmap, rustscan,
+  masscan`; vulns all nine (`nuclei`, `subzy`, `dnsreaper`, `nikto`, `ffuf`,
+  `dalfox`, `crlfuzz`, `sqlmap`) and `gowitness` (shots). Every `tech` and
+  `urls` tool now has an adapter.
+
 ## Adapter wave 3: hakrawler, gospider, subjs, urlfinder (2026-11-17)
 
 - Docs read / goal: `AGENTS.md` (0d item 11 adapter pre-approval), RESUME,

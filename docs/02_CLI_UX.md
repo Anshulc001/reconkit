@@ -67,9 +67,11 @@ contradiction elsewhere, this table wins - file it as a doc bug.**
 What "full = all" means today, honestly: every stage is requested and every
 `core` and `opt_in` tool is eligible. The `intrusive` tier is enabled, but its
 three tools are `exploitation: true` and therefore still skip unless named;
-and most `tech`, `urls` and `vulns` tools have no adapter yet (phase 3), so they
-report `no adapter yet (phase 3)` and make the run partial (exit `5`). The
-per-tool mode/tier table is in docs/09 section 4.
+and the `subs`, `dns`, `ports`, `vulns` and `shots` pools still carry tools with
+no adapter yet (phase 3); `tech` and `urls` are fully adapted since adapter wave
+4 (2026-11-17). Those tools report `no adapter yet (phase 3)`, and a stage left
+with only those is a completion gap (exit `0`), not a partial run. The per-tool
+mode/tier table is in docs/09 section 4.
 
 ### Setup and health
 | Command | Purpose | Phase |
@@ -455,9 +457,10 @@ Code `6` is retired (2026-11-17, docs/MASTER_PLAN.md D4): it belonged to `instal
 The gaps block is printed by `ui.render_completion_gaps()` and is **stderr-only**, so `--json` stdout stays one clean document. It prints nothing at all when there are no gaps, which keeps every ordinary run's output byte-identical. `--silent` suppresses it like every other message; the exit code and `completion` in `--json` are unaffected.
 
 ```text
-⚠ full scan completed with gaps — 3 stage(s) had no runnable tools
-  tech: 5 tool(s) skipped (no adapter yet (phase 3))
-  urls: 8 tool(s) skipped (no adapter yet (phase 3))
+⚠ full scan completed with gaps — 4 stage(s) had no runnable tools
+  subs: 5 tool(s) skipped (no adapter yet (phase 3))
+  dns: 3 tool(s) skipped (no adapter yet (phase 3))
+  ports: 4 tool(s) skipped (no adapter yet (phase 3))
   vulns: 5 tool(s) skipped (no adapter yet (phase 3))
   run 'reconkit doctor' to see what is installed; see docs/10_TOOL_SOURCES.md for provenance.
   this is not a failure — the scan used every tool that was available.

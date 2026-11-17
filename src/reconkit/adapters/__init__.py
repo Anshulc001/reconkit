@@ -14,6 +14,7 @@ from reconkit.adapters.gospider import GospiderAdapter
 from reconkit.adapters.hackertarget import HackertargetAdapter
 from reconkit.adapters.hakrawler import HakrawlerAdapter
 from reconkit.adapters.httprobe import HttprobeAdapter
+from reconkit.adapters.httpx_tech import HttpxTechAdapter
 from reconkit.adapters.httpx_tool import HttpxAdapter
 from reconkit.adapters.katana import KatanaAdapter
 from reconkit.adapters.naabu import NaabuAdapter
@@ -23,9 +24,12 @@ from reconkit.adapters.pyscan import PyscanAdapter
 from reconkit.adapters.subfinder import SubfinderAdapter
 from reconkit.adapters.subjs import SubjsAdapter
 from reconkit.adapters.tlsx import TlsxAdapter
+from reconkit.adapters.unfurl import UnfurlAdapter
 from reconkit.adapters.urlfinder import UrlfinderAdapter
+from reconkit.adapters.wafw00f import Wafw00fAdapter
 from reconkit.adapters.waybackurls import WaybackurlsAdapter
 from reconkit.adapters.webanalyze import WebanalyzeAdapter
+from reconkit.adapters.whatweb import WhatwebAdapter
 
 ADAPTERS: dict[str, type[BaseToolAdapter]] = {
     "crtsh": CrtshAdapter,
@@ -51,6 +55,10 @@ ADAPTERS: dict[str, type[BaseToolAdapter]] = {
     "gospider": GospiderAdapter,
     "subjs": SubjsAdapter,
     "urlfinder": UrlfinderAdapter,
+    "unfurl": UnfurlAdapter,
+    "wafw00f": Wafw00fAdapter,
+    "whatweb": WhatwebAdapter,
+    "httpx_tech": HttpxTechAdapter,
 }
 
 __all__ = ["ADAPTERS", "BaseToolAdapter", "BinaryAdapter", "HttpAdapter"]

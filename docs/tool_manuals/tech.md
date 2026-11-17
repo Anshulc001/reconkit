@@ -13,9 +13,9 @@ Tools from the `vulns` stage are deliberately absent - see
 
 | Tool | Kind | Tier | Mode | Phase | Adapter in this build |
 |---|---|---|---|---|---|
-| `httpx_tech` | binary | core | active | 3 | no |
-| `whatweb` | binary | core | active | 3 | no |
-| `wafw00f` | binary | core | active | 3 | no |
+| `httpx_tech` | binary | core | active | 3 | yes (wave 4, 2026-11-17) |
+| `whatweb` | binary | core | active | 3 | yes (wave 4, 2026-11-17) |
+| `wafw00f` | binary | core | active | 3 | yes (wave 4, 2026-11-17) |
 | `cdncheck` | binary | core | passive | 3 | yes (wave 2, 2026-11-17) |
 | `webanalyze` | binary | core | active | 3 | yes (wave 2, 2026-11-17) |
 
@@ -26,7 +26,7 @@ Tools from the `vulns` stage are deliberately absent - see
 ## `httpx_tech`
 
 - **Registry:** binary, core, active, phase 3, `stage: tech`
-- **Adapter in this build:** none yet (phase 3, no adapter; `tools.yaml` has no `install` block - it reuses the `httpx` binary)
+- **Adapter in this build:** `src/reconkit/adapters/httpx_tech.py` (wave 4, 2026-11-17); subclasses the `httpx` adapter and overrides only the stage and the parser, so the command (with `-td`), the identity check and the stdin/env handling are shared. Records are `HostStatusRecord(UNKNOWN, tech=[...], waf=cdn_name)`; a host with neither a technology nor a CDN/WAF name produces no record
 - **Official source used:** https://github.com/projectdiscovery/httpx
 - **Installed on this box:** same binary as `httpx` (`/home/kali/.reconkit/bin/httpx`, v1.12.0)
 - **Install command:** nothing to install - it is `httpx -td`
@@ -67,7 +67,7 @@ https://testfire.net [200] [] [Altoro Mutual] [Apache Tomcat,Java]
 ## `whatweb`
 
 - **Registry:** binary, core, active, phase 3, `stage: tech`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/whatweb.py` (wave 4, 2026-11-17); runs `--quiet --log-json=- --no-errors --color=never -a 1 <url...>` and stores the plugin names (minus the informational plugins in `NON_TECH_PLUGINS`) as `HostStatusRecord(UNKNOWN, tech=[...])`. `--quiet` is required: with `--log-json=-` alone the brief write hits the closed stream, prints a Ruby traceback and exits 1 (verified on this binary)
 - **Official source used:** https://github.com/urbanadventurer/WhatWeb
 - **Installed on this box:** `/usr/bin/whatweb`, `WhatWeb version 0.6.4`
 - **Where it comes from:** Debian package `whatweb` - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
@@ -271,7 +271,7 @@ when writing to a pipe unless `--color=never` is added, which a parser will need
 ## `wafw00f`
 
 - **Registry:** binary, core, active, phase 3, `stage: tech`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/wafw00f.py` (wave 4, 2026-11-17); runs `-a -f json -o - <url...>` and stores `HostStatusRecord(UNKNOWN, waf=<firewall>)` for `detected: true` entries only. A `detected: false` entry is silence (0 records), like cdncheck; `manufacturer` is not stored
 - **Official source used:** https://github.com/EnableSecurity/wafw00f
 - **Installed on this box:** `/usr/bin/wafw00f`, `WAFW00F : v2.4.2`
 - **Where it comes from:** PyPI package `wafw00f` - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it

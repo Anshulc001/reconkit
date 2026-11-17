@@ -19,7 +19,7 @@ Tools from the `vulns` stage are deliberately absent - see
 | `hakrawler` | binary | core | active | 3 | yes (wave 3, 2026-11-17) |
 | `gospider` | binary | core | active | 3 | yes (wave 3, 2026-11-17) |
 | `subjs` | binary | core | active | 3 | yes (wave 3, 2026-11-17) |
-| `unfurl` | binary | core | passive | 3 | no |
+| `unfurl` | binary | core | passive | 3 | yes (wave 4, 2026-11-17) |
 | `urlfinder` | binary | core | passive | 3 | yes (wave 3, 2026-11-17) |
 
 
@@ -593,7 +593,7 @@ Version command is `-version`.
 ## `unfurl`
 
 - **Registry:** binary, core, passive, phase 3, `stage: urls`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/unfurl.py` (wave 4, 2026-11-17); runs `-u format '%s://%d%:%P%p?%q'` with URLs on stdin and stores one `UrlRecord` per canonical URL. `%?` is unconditional on the real binary, so a bare root comes back as `https://host/?` and the adapter's `normalize_url()` drops the empty query. The urls stage only supplies hostnames, so unfurl sees the two scheme roots per host; feeding it another urls tool's output is not plumbed yet
 - **Official source used:** https://github.com/tomnomnom/unfurl
 - **Installed on this box:** `/home/kali/.reconkit/bin/unfurl` (no version flag; `-h` prints usage)
 - **Where it comes from:** github.com/tomnomnom/unfurl - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it

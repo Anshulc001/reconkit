@@ -1,0 +1,3 @@
+{"timestamp":"2026-11-17T09:12:01.114Z","input":"testfire.net","url":"https://testfire.net/","status_code":200,"tech":["Apache Tomcat","Java"],"cdn_name":"cloudflare"}
+{"timestamp":"2026-11-17T09:12:01.883Z","input":"www.testfire.net","url":"https://www.testfire.net/","status_code":200,"tech":["Java"]}
+{"timestamp":"2026-11-17T09:12:02.401Z","input":"static.testfire.net","url":"https://static.testfire.net/","status_code":200}

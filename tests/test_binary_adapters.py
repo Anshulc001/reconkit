@@ -25,6 +25,7 @@ from reconkit.adapters.gau import GauAdapter
 from reconkit.adapters.gospider import GospiderAdapter
 from reconkit.adapters.hakrawler import HakrawlerAdapter
 from reconkit.adapters.httprobe import HttprobeAdapter
+from reconkit.adapters.httpx_tech import HttpxTechAdapter
 from reconkit.adapters.httpx_tool import HttpxAdapter
 from reconkit.adapters.katana import KatanaAdapter
 from reconkit.adapters.naabu import NaabuAdapter
@@ -37,10 +38,16 @@ from reconkit.adapters.subfinder import (
 )
 from reconkit.adapters.subjs import SubjsAdapter
 from reconkit.adapters.tlsx import TlsxAdapter
+from reconkit.adapters.unfurl import UnfurlAdapter
 from reconkit.adapters.urlfinder import UrlfinderAdapter
+from reconkit.adapters.wafw00f import Wafw00fAdapter
 from reconkit.adapters.waybackurls import WaybackurlsAdapter
 from reconkit.adapters.webanalyze import WebanalyzeAdapter
+from reconkit.adapters.whatweb import WhatwebAdapter
+from reconkit.config import load_config
 from reconkit.core.runner import ExecResult
+from reconkit.core.store import Store
+from reconkit.engine import Engine
 from reconkit.errors import ToolFailed
 from reconkit.models import (
     HostState,
@@ -48,6 +55,7 @@ from reconkit.models import (
     PortRecord,
     RunContext,
     SubdomainRecord,
+    ToolResult,
     ToolStatus,
     UrlRecord,
 )
@@ -145,6 +153,10 @@ def test_binary_adapters_are_registered() -> None:
     assert ADAPTERS["gospider"] is GospiderAdapter
     assert ADAPTERS["subjs"] is SubjsAdapter
     assert ADAPTERS["urlfinder"] is UrlfinderAdapter
+    assert ADAPTERS["unfurl"] is UnfurlAdapter
+    assert ADAPTERS["wafw00f"] is Wafw00fAdapter
+    assert ADAPTERS["whatweb"] is WhatwebAdapter
+    assert ADAPTERS["httpx_tech"] is HttpxTechAdapter
 
 
 # Binary tools whose invocation never touches $HOME, so neither the identity
@@ -175,6 +187,17 @@ NO_HOME_NEEDED: dict[str, str] = {
     "subjs": (
         "real `subjs -h` lists only -c/-i/-t/-ua/-version: no config file, no "
         "key, and URLs arrive on stdin"
+    ),
+    "unfurl": (
+        "real `unfurl -h` lists only -u/-v: no config file, no key, and URLs arrive on stdin"
+    ),
+    "wafw00f": (
+        "real `wafw00f --help` lists only -a/-f/-o/-i/-l/-p/-t/-v: no config "
+        "path is read and no key is used"
+    ),
+    "whatweb": (
+        "real `whatweb --help` lists only scan/log/plugin flags: no config path "
+        "is read and no key is used"
     ),
 }
 
@@ -1454,6 +1477,200 @@ def test_urlfinder_skips_archived_junk_and_feeds_domains(monkeypatch: pytest.Mon
 def test_urlfinder_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_exec(monkeypatch, outcome("[INF] Current Version: v0.0.3\n", stderr="some other tool\n"))
     status = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder").check_installed()
+    assert status.installed is False
+
+
+# ------------------------------------------------- wave 4 (unfurl, wafw00f, whatweb, httpx_tech)
+
+
+def test_unfurl_adapter_parses_output() -> None:
+    """`format '%s://%d%:%P%p?%q'` rebuilds one canonical URL per line."""
+    records = UnfurlAdapter().parse_output(fixture("adapters", "unfurl.synthetic.txt"))
+    assert [record.url for record in records] == [
+        "https://testfire.net/",
+        "https://testfire.net/login.jsp?uid=1&pw=2",
+        "http://testfire.net/login.jsp",
+        "https://demo.testfire.net/bank/queryxpath.jsp?query=1",
+    ]
+    assert all(isinstance(record, UrlRecord) for record in records)
+    assert all(record.source == "unfurl" for record in records)
+    adapter = UnfurlAdapter(finder=lambda _name: "/usr/bin/unfurl")
+    ctx = make_ctx(hosts=["testfire.net"])
+    assert adapter.build_command(ctx)[1:] == ["-u", "format", "%s://%d%:%P%p?%q"]
+    # Scheme-pair input, the same order the crawlers get: unfurl has no URL feed.
+    assert adapter.stdin_text(ctx) == "https://testfire.net/\nhttp://testfire.net/\n"
+
+
+def test_unfurl_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`-h` writes the usage to stderr; another `unfurl` named binary fails."""
+    fake_exec(
+        monkeypatch,
+        outcome(stderr="Format URLs provided on stdin\n\nUsage:\n  unfurl [OPTIONS] [MODE]\n"),
+    )
+    accepted = UnfurlAdapter(finder=lambda _name: "/usr/bin/unfurl").check_installed()
+    assert accepted.installed is True
+    fake_exec(monkeypatch, outcome("urlfinder v0.0.3\n"))
+    rejected = UnfurlAdapter(finder=lambda _name: "/usr/bin/unfurl").check_installed()
+    assert rejected.installed is False
+
+
+def test_wafw00f_adapter_parses_waf_detection() -> None:
+    """Only `detected: true` becomes a record; the name lands in `waf`."""
+    records = Wafw00fAdapter().parse_output(fixture("adapters", "wafw00f.synthetic.json"))
+    assert [(record.fqdn, record.waf, record.tech) for record in records] == [
+        ("testfire.net", "Cloudflare", [])
+    ]
+    assert all(record.state is HostState.UNKNOWN for record in records)
+    adapter = Wafw00fAdapter(finder=lambda _name: "/usr/bin/wafw00f")
+    command = adapter.build_command(make_ctx(hosts=["testfire.net"]))
+    assert command[1:6] == ["-a", "-f", "json", "-o", "-"]
+    assert command[6:] == ["https://testfire.net/", "http://testfire.net/"]
+
+
+def test_wafw00f_handles_no_waf_case() -> None:
+    """A `detected: false` entry is silence, not an empty answer (cdncheck rule)."""
+    raw = (
+        '[{"detected": false, "firewall": "None", "manufacturer": "None",'
+        ' "trigger_url": null, "url": "http://testfire.net/"}]'
+    )
+    assert Wafw00fAdapter().parse_output(raw) == []
+    assert Wafw00fAdapter().parse_output("") == []
+
+
+def test_wafw00f_and_cdncheck_merge_or_replace_waf(tmp_path: Path) -> None:
+    """Documents the real WAF rule: one name, first in the pass, latest pass wins.
+
+    `Engine._persist_tech` (engine.py:1712) keeps the FIRST non-None `waf` in
+    `results` order and unions every tech list; `Store.update_host_extras`
+    (store.py:612) then replaces the stored `waf` with the new pass's name. So
+    two WAF tools never produce a merged string, and the winner between them
+    depends on completion order - reported as an open item in docs/09.
+    """
+    db = Store(tmp_path / "recon.db")
+    try:
+        target_id = db.create_target("testfire.net")
+        run_id = db.create_scan_run(target_id, "tech")
+        sub_id = db.upsert_subdomain(target_id, "testfire.net", run_id=run_id)
+        # The tech stage annotates the live row; it never creates one (D11).
+        assert db.update_host_extras(sub_id, waf="cloudflare") is False
+        db.append_host_status(sub_id, run_id, "ALIVE")
+        engine = Engine(
+            load_config(CONFIG),
+            db,
+            specs={},
+            adapters={},
+            scope_path=None,
+            workspace_root=tmp_path / "workspaces",
+        )
+        cdncheck = ToolResult(
+            tool="cdncheck",
+            status=ToolStatus.OK,
+            records=[
+                HostStatusRecord(
+                    fqdn="testfire.net",
+                    source="cdncheck",
+                    state=HostState.UNKNOWN,
+                    tech=["google"],
+                    waf="cloudflare",
+                )
+            ],
+        )
+        wafw00f = ToolResult(
+            tool="wafw00f",
+            status=ToolStatus.OK,
+            records=[
+                HostStatusRecord(
+                    fqdn="testfire.net",
+                    source="wafw00f",
+                    state=HostState.UNKNOWN,
+                    waf="Cloudflare",
+                )
+            ],
+        )
+        engine._persist_tech(target_id, run_id, [cdncheck, wafw00f], "testfire.net")
+        stored = db._conn.execute(
+            "SELECT tech_json, waf FROM host_status_history ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert stored["waf"] == "cloudflare"  # first non-None in results order
+        assert stored["tech_json"] == '["google"]'
+        # The same two tools finishing in the other order flip the winner, and the
+        # tech list still merges: completion order decides, not tool priority.
+        engine._persist_tech(target_id, run_id, [wafw00f, cdncheck], "testfire.net")
+        stored = db._conn.execute(
+            "SELECT tech_json, waf FROM host_status_history ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert stored["waf"] == "Cloudflare"
+        assert stored["tech_json"] == '["google"]'
+    finally:
+        db.close()
+
+
+def test_whatweb_adapter_parses_tech_list() -> None:
+    """Plugin names are the technologies; informational plugins are filtered."""
+    records = WhatwebAdapter().parse_output(fixture("adapters", "whatweb.synthetic.json"))
+    assert [(record.fqdn, record.tech) for record in records] == [
+        ("testfire.net", ["Apache", "HTTPServer", "Java"]),
+    ]
+    assert all(record.state is HostState.UNKNOWN for record in records)
+    adapter = WhatwebAdapter(finder=lambda _name: "/usr/bin/whatweb")
+    command = adapter.build_command(make_ctx(hosts=["testfire.net"]))
+    # `--quiet` is what makes `--log-json=-` usable: without it whatweb writes its
+    # brief to the same closed stream and exits 1 (verified on the real binary).
+    assert command[1:7] == ["--quiet", "--log-json=-", "--no-errors", "--color=never", "-a", "1"]
+    assert command[7:] == ["https://testfire.net/", "http://testfire.net/"]
+
+
+def test_whatweb_merges_tech_with_webanalyze(tmp_path: Path) -> None:
+    """Tech is a merged list: the row keeps what it had, new names are appended."""
+    db = Store(tmp_path / "recon.db")
+    try:
+        target_id = db.create_target("testfire.net")
+        run_id = db.create_scan_run(target_id, "tech")
+        sub_id = db.upsert_subdomain(target_id, "testfire.net", run_id=run_id)
+        db.append_host_status(
+            sub_id, run_id, "ALIVE", tech=["Apache Tomcat", "Java"], tools=["webanalyze"]
+        )
+        assert db.update_host_extras(sub_id, tech=["Apache", "HTTPServer", "Java"]) is True
+        stored = db._conn.execute(
+            "SELECT tech_json FROM host_status_history ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert stored["tech_json"] == '["Apache Tomcat", "Java", "Apache", "HTTPServer"]'
+    finally:
+        db.close()
+
+
+def test_httpx_tech_adapter_parses_tech_from_httpx_json() -> None:
+    """`-td` gives `tech` (and `cdn_name` for `waf`); neither empty is no record."""
+    records = HttpxTechAdapter().parse_output(fixture("adapters", "httpx_tech.synthetic.jsonl"))
+    assert [(record.fqdn, record.tech, record.waf) for record in records] == [
+        ("testfire.net", ["Apache Tomcat", "Java"], "cloudflare"),
+        ("www.testfire.net", ["Java"], None),
+    ]
+    assert all(record.state is HostState.UNKNOWN for record in records)
+    assert all(record.source == "httpx_tech" for record in records)
+
+
+def test_httpx_tech_and_httpx_share_the_invocation_logic() -> None:
+    """One command builder, two stages: the tech adapter inherits it unchanged."""
+    ctx = make_ctx(hosts=["testfire.net", "www.testfire.net", "testfire.net"])
+    live = HttpxAdapter(finder=lambda _name: "/usr/bin/httpx")
+    tech = HttpxTechAdapter(finder=lambda _name: "/usr/bin/httpx")
+    assert live.build_command(ctx) == tech.build_command(ctx)
+    command = tech.build_command(ctx)
+    assert "-td" in command
+    assert command.count("testfire.net") == 1  # shared dedupe
+    assert live.name != tech.name and live.stage is not tech.stage
+    # The identity check 01daa8b added is inherited, not re-written.
+    assert tech.version_args == live.version_args == ["-version"]
+    assert tech.identity_markers == live.identity_markers
+
+
+def test_httpx_tech_identity_rejects_the_python_httpx_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The namesake Python CLI prints no ProjectDiscovery banner: still rejected."""
+    fake_exec(monkeypatch, outcome(stderr="usage: httpx [-h] [--version]\nhttpx: error: ...\n"))
+    status = HttpxTechAdapter(finder=lambda _name: "/usr/bin/httpx").check_installed()
     assert status.installed is False
 
 

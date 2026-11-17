@@ -146,8 +146,8 @@ Phase 2 = working adapter in the first build. Phase 3 = listed in `tools.yaml`, 
 | dns | passive | dnspython, dnsx, puredns (+massdns), dig | dnspython, dnsx |
 | live | active | pyprobe, httpx, httprobe, tlsx | pyprobe, httpx, tlsx, httprobe |
 | ports | active (smap passive) | pyscan, naabu, nmap, rustscan, smap; masscan (opt_in) | pyscan, naabu |
-| tech | active | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze | webanalyze, cdncheck |
-| urls | passive/active | gau, waybackurls, katana, hakrawler, gospider, subjs, unfurl, urlfinder | gau, katana, waybackurls, hakrawler, gospider, subjs, urlfinder |
+| tech | active | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze |
+| urls | passive/active | gau, waybackurls, katana, hakrawler, gospider, subjs, unfurl, urlfinder | gau, katana, waybackurls, hakrawler, gospider, subjs, unfurl, urlfinder |
 | vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) | - |
 | shots | active | gowitness (opt_in) | - |
 
@@ -279,6 +279,82 @@ SAN discovery are the only stored facts. The SANs reach `subdomains` through
 `Engine._persist_live_discoveries` (PIT-49), which persists every
 `SubdomainRecord` a live pass discovered, not only the hosts it was given.
 
+### 4a4. Adapter wave 4 (2026-11-17): unfurl, wafw00f, whatweb, httpx_tech
+
+| Tool | Stage | Invocation | Records |
+|---|---|---|---|
+| `unfurl` | urls | `-u format '%s://%d%:%P%p?%q'`, URLs on **stdin** | `UrlRecord` per canonical URL (normalized and deduplicated) |
+| `wafw00f` | tech | `-a -f json -o - <url...>` (positional URLs) | `HostStatusRecord(UNKNOWN, waf=<firewall>)`, only when `detected: true` |
+| `whatweb` | tech | `--quiet --log-json=- --no-errors --color=never -a 1 <url...>` | `HostStatusRecord(UNKNOWN, tech=[plugin names])` |
+| `httpx_tech` | tech | inherits `httpx`'s command: `-json -silent -td ...` (one URL per host) | `HostStatusRecord(UNKNOWN, tech=<tech>, waf=<cdn_name>)`, no record when both are empty |
+
+**`unfurl` is `mode: passive` in `tools.yaml`** (the registry is the source of
+truth, as for `gau` and `urlfinder`), so it runs in all three modes even though
+this brief listed it as active; that is a reported deviation, not a code change.
+Real `unfurl` behaviour on this box, verified by hand:
+
+- `-h` is the identity probe: the usage goes to **stderr** with exit 0
+  (`Format URLs provided on stdin`, `Usage:\n  unfurl [OPTIONS] [MODE] [FORMATSTRING]`)
+  and there is no `-version` (`flag provided but not defined: -version`, exit 2).
+- Choice (b) from the brief: the adapter emits **full URL lines**, not
+  components as metadata. `format '%s://%d%:%P%p?%q'` rebuilds one canonical
+  URL per input line, which is what a urls stage stores; components would need a
+  new model field for facts nothing consumes yet (schema change, rejected).
+- Real quirk: `%?` is unconditional, so a bare root comes back as
+  `https://host/?`. The adapter runs `normalize_url()` on every line, which drops
+  the empty query, and `-u` plus the parser's dedupe collapse repeats.
+- Honest limitation: the urls stage hands over hostnames (as for every crawler),
+  so unfurl only sees the two scheme roots per host. Its real value is
+  canonicalising a URL list; that needs an earlier urls tool's output plumbed
+  into the next urls pass, which this build does not do.
+
+**`whatweb`: `--log-json=-` needs `--quiet`.** Verified on the real binary:
+`--log-json=-` alone writes the JSON to stdout and then its one-line brief to
+the same closed stream, printing a Ruby traceback (`logging.rb:89:in 'write':
+closed stream (IOError)`) and exiting 1. `--quiet` (real help: "Do not display
+brief logging to STDOUT.") removes that second write, so `--quiet
+--log-json=-` prints only the JSON array and exits 0. Plugin names are the
+technologies, minus the informational plugins in `NON_TECH_PLUGINS` (IP,
+Country, Title, Cookies, HttpOnly, Script, Email, HTML5 and the other
+response-describing matches); a plugin name that describes the response is not
+software and would otherwise be stored as a technology.
+
+**`wafw00f`: a `detected: false` entry is silence.** The JSON is one object per
+URL with `detected`, `firewall`, `manufacturer`, `trigger_url`; only a true
+`detected` becomes a record, and `manufacturer` is not stored (it is the
+vendor of the firewall name, not a technology). An empty output or a run where
+nothing was detected is `ok` with zero records, like `cdncheck`.
+
+**`httpx_tech` shares the `httpx` invocation.** It subclasses `HttpxAdapter` and
+overrides only `name`, `stage` and `parse_output`; the command (including `-td`),
+stdin, child env, identity probe and the Python-vs-ProjectDiscovery check of
+01daa8b all come from `httpx_tool.py` through the new public helpers
+`httpx_hosts()` / `httpx_fqdn()`. There is exactly one command builder: a change
+to the `httpx` invocation can no longer reach one stage and miss the other.
+`parse_output` keeps only `tech`/`cdn_name` (a host with neither a technology
+nor a CDN/WAF name produces no record) and every record is `UNKNOWN`, because
+reading technology says nothing about liveness (D11).
+
+**Technology merge semantics (answer to the wave-4 question, unchanged code).**
+Two rules apply, and they are not symmetric:
+
+- **`tech` is a merged list.** Within a pass `Engine._persist_tech`
+  (engine.py:1712) unions every record's `tech` for the same host; across passes
+  `Store.update_host_extras` (store.py:612) keeps the row's existing list and
+  appends names it does not have. Two tech tools therefore add up, order is
+  first-writer-first, and no tool can remove another's finding.
+- **`waf` is a single string - last writer wins across the pass boundary, first
+  writer wins inside one pass.** `update_host_extras` replaces the stored `waf`
+  with the name the new pass supplies; `_persist_tech` keeps the first non-None
+  `waf` in `results` order, and `results` is completion order (`asyncio.gather`),
+  not a tool priority. So on the same host `httpx_tech` (`cdn_name`) and
+  `wafw00f` cannot merge: whichever finished first names the WAF and the other
+  detection is dropped, and a rerun can flip the winner. The live mock proof in
+  docs/REVIEW_LOG.md shows exactly this (`cloudflare` from `httpx_tech` stored,
+  `Cloudflare` from `wafw00f` dropped). This is reported as an open item for a
+  ruling: merging would need a list field on `host_status_history`, which is a
+  schema change and was explicitly out of scope here.
+
 ### 4b. Per-tool support for the injected parameters
 
 | Parameter | `httpx` | `pyprobe` | `pyscan` | `naabu` | Every other adapter |
@@ -347,7 +423,8 @@ truth). Two consequences for this table:
     This state rule is unconditional: no other input can change it.
   - "At least 2 agreeing checks when 2 are available" only sets confidence (LOW when only one check is available). It never changes the state.
   - Responses that look like WAF/CDN blocks (for example 403/429 with CDN markers) still count as `ALIVE`.
-- **Port-scan pre-check (Phase 2):** port scans require a stored `live` result for the host. If none is stored, skip the host and print a warning (`run live first`). If the stored `HostStatusRecord.waf` is set (from the `httpx` CDN/WAF JSON fields), skip it as CDN/WAF-fronted. `cdncheck` and `wafw00f` are Phase 3.
+- **Port-scan pre-check (Phase 2):** port scans require a stored `live` result for the host. If none is stored, skip the host and print a warning (`run live first`). If the stored `HostStatusRecord.waf` is set (from the `httpx` CDN/WAF JSON fields), skip it as CDN/WAF-fronted. `cdncheck` and `wafw00f` both write that field
+  (wave 2 and wave 4), so either tool's match can trigger the skip.
 - **Ports:** `open` if at least one tool saw it open. If one tool saw open and another (that scanned the same port) saw closed, store `unconfirmed` with both in `port_sources`. Verified by a service fingerprint (nmap -sV, banner) raises confidence by one level.
 
 ### Passive ports (smap)

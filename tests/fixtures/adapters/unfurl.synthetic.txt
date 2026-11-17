@@ -1,0 +1,5 @@
+https://testfire.net/?
+https://testfire.net/login.jsp?uid=1&pw=2
+http://testfire.net/login.jsp
+https://demo.testfire.net/bank/queryxpath.jsp?query=1
+https://testfire.net/login.jsp?uid=1&pw=2

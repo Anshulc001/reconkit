@@ -324,17 +324,17 @@ def test_passive_only_commands_reject_active(tmp_path: Path, command: str) -> No
 def test_a_stage_with_no_adapter_reports_its_skips(tmp_path: Path) -> None:
     """Regression: 11d-findings-f, `tools_skipped: 0` for a stage that built nothing.
 
-    Changed 2026-11-17 (wave 2): `tech` has two adapters now, so the tool is named
-    instead of the stage - `--tools whatweb`, the last tech tool without one.
+    Changed 2026-11-17 (wave 4): every `tech` tool has an adapter now, so the tool
+    is named from a phase-3 stage instead - `--tools nuclei`, no adapter yet.
     """
     config = make_config(tmp_path)
     result = CliRunner().invoke(
-        app, scan_args(config, "tech", "--active", "--json", "--tools", "whatweb")
+        app, scan_args(config, "vulns", "--active", "--json", "--tools", "nuclei")
     )
     assert result.exit_code == 4  # no usable tool for the stage, unchanged
     document = json.loads(result.stdout)
     (stage,) = document["stages"]
-    assert stage["stage"] == "tech"
+    assert stage["stage"] == "vulns"
     assert stage["results"] == []
     assert stage["skipped"], "a stage with no adapter must list what it skipped"
     assert all("no adapter yet" in skip["reason"] for skip in stage["skipped"])

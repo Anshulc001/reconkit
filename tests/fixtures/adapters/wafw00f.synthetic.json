@@ -1,0 +1,23 @@
+[
+  {
+    "detected": true,
+    "firewall": "Cloudflare",
+    "manufacturer": "Cloudflare Inc.",
+    "trigger_url": "https://testfire.net/",
+    "url": "https://testfire.net/"
+  },
+  {
+    "detected": false,
+    "firewall": "None",
+    "manufacturer": "None",
+    "trigger_url": null,
+    "url": "http://testfire.net/"
+  },
+  {
+    "detected": false,
+    "firewall": "None",
+    "manufacturer": "None",
+    "trigger_url": null,
+    "url": "https://www.testfire.net/"
+  }
+]

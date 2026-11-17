@@ -1,0 +1,5 @@
+[
+{"target":"http://testfire.net/","http_status":200,"request_config":{"headers":{"User-Agent":"WhatWeb/0.6.4"}},"plugins":{"Apache":{},"Cookies":{"string":["JSESSIONID"]},"Country":{"string":["UNITED STATES"],"module":["US"]},"HTTPServer":{"string":["Apache-Coyote/1.1"]},"HttpOnly":{"string":["JSESSIONID"]},"IP":{"string":["65.61.137.117"]},"Java":{},"Title":{"string":["Altoro Mutual"]}}}
+,
+{"target":"https://www.testfire.net/","http_status":200,"request_config":{"headers":{"User-Agent":"WhatWeb/0.6.4"}},"plugins":{"Cookies":{"string":["JSESSIONID"]},"IP":{"string":["65.61.137.117"]},"Title":{"string":["Altoro Mutual"]}}}
+]
