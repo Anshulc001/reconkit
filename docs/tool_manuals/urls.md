@@ -16,11 +16,11 @@ Tools from the `vulns` stage are deliberately absent - see
 | `gau` | binary | core | passive | 3 | yes (wave 1, 2026-11-17) |
 | `waybackurls` | binary | core | passive | 3 | yes (wave 2, 2026-11-17) |
 | `katana` | binary | core | active | 3 | yes (wave 1, 2026-11-17) |
-| `hakrawler` | binary | core | active | 3 | no |
-| `gospider` | binary | core | active | 3 | no |
-| `subjs` | binary | core | active | 3 | no |
+| `hakrawler` | binary | core | active | 3 | yes (wave 3, 2026-11-17) |
+| `gospider` | binary | core | active | 3 | yes (wave 3, 2026-11-17) |
+| `subjs` | binary | core | active | 3 | yes (wave 3, 2026-11-17) |
 | `unfurl` | binary | core | passive | 3 | no |
-| `urlfinder` | binary | core | passive | 3 | no |
+| `urlfinder` | binary | core | passive | 3 | yes (wave 3, 2026-11-17) |
 
 
 
@@ -368,7 +368,7 @@ D3), so reconkit no longer passes `-rl` and the limit above was typed by hand.
 ## `hakrawler`
 
 - **Registry:** binary, core, active, phase 3, `stage: urls`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/hakrawler.py` (wave 3, 2026-11-17); runs as `-d 2 -u -timeout <s>` with URLs on **stdin**, and each host is offered as `https://<host>/` then `http://<host>/` because bare hostnames crawl nothing. There is **no `-silent`** flag and `-insecure` is never passed. Identity is `-version` (which exits 2 and prints the usage) plus two markers
 - **Official source used:** https://github.com/hakluke/hakrawler
 - **Installed on this box:** `/home/kali/.reconkit/bin/hakrawler` (no version flag; `--help` prints usage and `-h` takes an argument)
 - **Where it comes from:** github.com/hakluke/hakrawler - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
@@ -446,11 +446,11 @@ given scope, so the empty result is correct behaviour, not a failure. Note
 ## `gospider`
 
 - **Registry:** binary, core, active, phase 3, `stage: urls`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/gospider.py` (wave 3, 2026-11-17); runs as `-S <sites file> -d 2 -q -t 10 -m <s>`. `-s` takes one string and there is no stdin, so the adapter writes the sites file into the run workspace and removes it. `-q` output is bare URLs; a verbose `[tag] - [code-200] - URL` line is still parsed by cutting at the first scheme. Identity is `-h` (`--version` prints only `Version: v1.1.6`)
 - **Official source used:** https://github.com/jaeles-project/gospider
 - **Installed on this box:** `/home/kali/.reconkit/bin/gospider`, `v1.1.6`
 - **Where it comes from:** github.com/jaeles-project/gospider - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
-- **Multi-domain input:** not verified from `-h`; `-S`/`--site` takes a list
+- **Multi-domain input:** **yes** - `-S, --sites string` (a file; verified with a two-URL file, which produced both roots); `-s, --site` is one string
 
 #### Real `--help` (raw, full)
 
@@ -537,7 +537,7 @@ a tag such as `[url] -` in the default format, which a parser must strip.
 ## `subjs`
 
 - **Registry:** binary, core, active, phase 3, `stage: urls`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/subjs.py` (wave 3, 2026-11-17); runs as `-c 10 -t <s> -ua <reconkit UA>` with URLs on **stdin** (verified locally: a page referencing two scripts produced both URLs). No `.js` filter is added on top - the tool prints JavaScript files only. Real testfire.net run: `ok 0 item(s)`, because that host has no `.js` reference at all (`curl` shows only image `src` attributes)
 - **Official source used:** https://github.com/lc/subjs
 - **Installed on this box:** `/home/kali/.reconkit/bin/subjs`, `subjs version: 1.0.1`
 - **Where it comes from:** github.com/lc/subjs - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
@@ -683,7 +683,7 @@ name per line, which is what a parameter-candidate feature would consume.
 ## `urlfinder`
 
 - **Registry:** binary, core, passive, phase 3, `stage: urls`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/urlfinder.py` (wave 3, 2026-11-17); runs as `-all -silent -nc -timeout <s>` with **domains on stdin** (`-d` is unnecessary: verified `printf 'testfire.net\n' | urlfinder -all -silent` prints URLs). It is `mode: passive` in `tools.yaml`, so it also runs in a passive scan. A source failure keeps exit 0 and partial URLs are still printed; a line with inner whitespace (archived junk such as `...;curl d9q...oast.live`) is skipped, not stored. Real run: `ok 932 item(s)`
 - **Official source used:** https://github.com/projectdiscovery/urlfinder
 - **Installed on this box:** `/home/kali/.reconkit/bin/urlfinder`, `[INF] Current Version: v0.0.3`
 - **Where it comes from:** https://github.com/projectdiscovery/urlfinder/releases - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it

@@ -128,11 +128,12 @@ there is nothing to run the name through: `crlfuzz`, `dalfox`, `dnsreaper`,
 not the expected product is counted as installed**, and doctor's `path` column
 shows the resolved copy by design - not a missing version and not a defect.
 `httpx_tech` is not in this group: it carries `httpx -version` and a pattern, so
-the Python `httpx` CLI is `wrong program` there too. Three of the twelve
-(`httprobe`, `webanalyze`, `waybackurls`) gained adapters on 2026-11-17 (wave 2)
-and prove their identity through `-h` markers instead, so **a scan** rejects a
-namesake as `wrong program`; `doctor`, which reads `tools.yaml`, still reports
-them from the file's presence and keeps this limitation for those three. `smap`, `gospider`, `subjs`
+the Python `httpx` CLI is `wrong program` there too. Seven of the twelve
+(`httprobe`, `webanalyze`, `waybackurls` in wave 2; `hakrawler`, `gospider`,
+`subjs`, `urlfinder` in wave 3) gained adapters on 2026-11-17 and prove their
+identity through their own `-h`/`-version` markers instead. `doctor` asks the
+adapter when one exists (`doctor.default_status`), so the identity column is a
+real check for those seven; the five without an adapter stay presence-only. `smap`, `gospider`, `subjs`
 and `urlfinder` have real probes; the ProjectDiscovery tools, `wafw00f`,
 `findomain`, `puredns`, `dig`, `massdns`, `whatweb`, `nmap`, `masscan`, `gau`,
 `ffuf` and `nikto` report a version from their own banner. `gau` gained a

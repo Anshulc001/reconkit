@@ -147,7 +147,7 @@ Phase 2 = working adapter in the first build. Phase 3 = listed in `tools.yaml`, 
 | live | active | pyprobe, httpx, httprobe, tlsx | pyprobe, httpx, tlsx, httprobe |
 | ports | active (smap passive) | pyscan, naabu, nmap, rustscan, smap; masscan (opt_in) | pyscan, naabu |
 | tech | active | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze | webanalyze, cdncheck |
-| urls | passive/active | gau, waybackurls, katana, hakrawler, gospider, subjs, unfurl, urlfinder | gau, katana, waybackurls |
+| urls | passive/active | gau, waybackurls, katana, hakrawler, gospider, subjs, unfurl, urlfinder | gau, katana, waybackurls, hakrawler, gospider, subjs, urlfinder |
 | vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) | - |
 | shots | active | gowitness (opt_in) | - |
 
@@ -219,6 +219,58 @@ keeps `-version` (its own banner) and the ProjectDiscovery markers.
   row. A host with no status row yet (a `tech` run without `live`) stores
   nothing, and a record naming a host outside the target is dropped like every
   other off-target record.
+
+### 4a3. Adapter wave 3 (2026-11-17): hakrawler, gospider, subjs, urlfinder
+
+Three are `urls` / `active` / `core` (`hakrawler`, `gospider`, `subjs`), so they
+run in `--active` and `--full` and are skipped in `passive` mode by the tool-mode
+rule (D10). **`urlfinder` is `mode: passive` in `tools.yaml`** and stays that way
+(the registry is the source of truth, same ruling as `gau` in wave 1), so it also
+runs in `passive` mode - semantically right, since it queries third-party
+archives and never returns to the target. All four receive hostnames from the
+engine and turn them into URLs themselves:
+
+| Tool | Invocation | Target form | Records |
+|---|---|---|---|
+| `hakrawler` | `-d 2 -u -timeout <s>`, URLs on **stdin** | both `https://<host>/` and `http://<host>/` | `UrlRecord` per crawled URL |
+| `gospider` | `-S <sites file> -d 2 -q -t 10 -m <s>` | sites file with both schemes | `UrlRecord`; a leading `[tag] - [code-200] - ` is stripped |
+| `subjs` | `-c 10 -t <s> -ua <reconkit UA>`, URLs on **stdin** | both schemes | `UrlRecord` per JavaScript URL |
+| `urlfinder` | `-all -silent -nc -timeout <s>`, domains on **stdin** | bare hostnames | `UrlRecord` per archived URL (mode `passive`: runs in all three modes) |
+
+Why the two-scheme form: the engine hands the stage bare hostnames, and these
+crawlers need a URL. `https://<host>/` then `http://<host>/` is the same order
+`pyprobe` uses for liveness, and it is what makes a host whose certificate does
+not cover its name still crawlable over http (`testfire.net` is exactly that:
+curl reports `SSL: no alternative certificate subject name matches target
+hostname`, and hakrawler printed nothing for the https form). `-insecure` is
+never passed: disabling TLS verification would hide a real certificate problem.
+
+Verified per tool: `hakrawler` has **no `-silent`** (real flags `-d`, `-dr`, `-i`,
+`-insecure`, `-json`, `-proxy`, `-s`, `-size`, `-subs`, `-t`, `-timeout`, `-u`,
+`-w`; `-version` exits 2) and its `-h` is *not* help (it takes custom headers),
+so identity is `-version` plus the `depth to crawl` / `show only unique urls`
+markers; `gospider -h` exits 0 and `--version` prints only `Version: v1.1.6`, so
+identity is `-h` with `fast web spider` / `site to crawl`; `subjs -version`
+prints `subjs version: 1.0.1` and it reads URLs on stdin (verified with a local
+page that references two scripts); `urlfinder -version` prints
+`[INF] Current Version: v0.0.3` and it reads domains on stdin.
+
+- **Links that are not URLs.** A crawl prints the page's own links verbatim, and
+the first real hakrawler run on testfire.net produced
+`javascript:checkSiteStatus('AltoroMutual')` and made the strict parser fail the
+tool. `base.is_non_web_reference()` now recognises `javascript:`, `mailto:`,
+`tel:`, `data:`, `about:`, `ftp:` and `file:` and every urls parser skips them;
+a line that is neither one of those nor an HTTP(S) URL is still a `ParseError`
+(PIT-52).
+- **subjs adds no `.js` filter.** The tool prints JavaScript files only; a second
+  filter would drop a `.php`-suffixed script endpoint it deliberately reported.
+- **urlfinder is a passive aggregator in an active stage.** It queries third
+  party archives and never returns to the target; `-all` is passed, `-rl` is not
+  (reconkit has no pacing, and the tool's per-source defaults stay). A source
+  failure does not fail the run - exit stays 0 and the URLs found so far are
+  printed - so partial results are already the normal path. Archived rows can be
+  junk rather than URLs (`http://host/path;curl d9q...oast.live`); a line with
+  inner whitespace is skipped, not stored.
 
 **tlsx cert metadata (Ruling A, 2026-11-17).** Cert metadata (expiry, issuer,
 self-signed) is extracted by tlsx but not persisted - future addition if operator

@@ -22,6 +22,8 @@ from reconkit.adapters.base import BinaryAdapter
 from reconkit.adapters.cdncheck import CdncheckAdapter
 from reconkit.adapters.dnsx import DnsxAdapter
 from reconkit.adapters.gau import GauAdapter
+from reconkit.adapters.gospider import GospiderAdapter
+from reconkit.adapters.hakrawler import HakrawlerAdapter
 from reconkit.adapters.httprobe import HttprobeAdapter
 from reconkit.adapters.httpx_tool import HttpxAdapter
 from reconkit.adapters.katana import KatanaAdapter
@@ -33,7 +35,9 @@ from reconkit.adapters.subfinder import (
     SubfinderAdapter,
     cleanup_stale_provider_dirs,
 )
+from reconkit.adapters.subjs import SubjsAdapter
 from reconkit.adapters.tlsx import TlsxAdapter
+from reconkit.adapters.urlfinder import UrlfinderAdapter
 from reconkit.adapters.waybackurls import WaybackurlsAdapter
 from reconkit.adapters.webanalyze import WebanalyzeAdapter
 from reconkit.core.runner import ExecResult
@@ -45,6 +49,7 @@ from reconkit.models import (
     RunContext,
     SubdomainRecord,
     ToolStatus,
+    UrlRecord,
 )
 
 REPO = Path(__file__).resolve().parents[1]
@@ -136,6 +141,10 @@ def test_binary_adapters_are_registered() -> None:
     assert ADAPTERS["webanalyze"] is WebanalyzeAdapter
     assert ADAPTERS["cdncheck"] is CdncheckAdapter
     assert ADAPTERS["waybackurls"] is WaybackurlsAdapter
+    assert ADAPTERS["hakrawler"] is HakrawlerAdapter
+    assert ADAPTERS["gospider"] is GospiderAdapter
+    assert ADAPTERS["subjs"] is SubjsAdapter
+    assert ADAPTERS["urlfinder"] is UrlfinderAdapter
 
 
 # Binary tools whose invocation never touches $HOME, so neither the identity
@@ -154,6 +163,18 @@ NO_HOME_NEEDED: dict[str, str] = {
     "waybackurls": (
         "real `waybackurls -h` lists only -dates/-get-versions/-no-subs: no "
         "config file, no key, and domains arrive on stdin"
+    ),
+    "hakrawler": (
+        "real `hakrawler -version` prints the Go usage (exit 2) and it lists only "
+        "crawl flags: no config file, no key, and URLs arrive on stdin"
+    ),
+    "gospider": (
+        "real `gospider -h` lists only crawl flags and -o (an output folder we "
+        "never pass): no config file is read and no key is used"
+    ),
+    "subjs": (
+        "real `subjs -h` lists only -c/-i/-t/-ua/-version: no config file, no "
+        "key, and URLs arrive on stdin"
     ),
 }
 
@@ -1292,3 +1313,166 @@ def test_waybackurls_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPa
     fake_exec(monkeypatch, outcome("Usage of /usr/bin/waybackurls:\n  -other\n"))
     status = WaybackurlsAdapter(finder=lambda _name: "/usr/bin/waybackurls").check_installed()
     assert status.installed is False
+
+
+# ------------------------------------------------------- adapter wave 3 (2026-11-17)
+
+
+def test_hakrawler_adapter_parses_plain_urls() -> None:
+    """hakrawler prints one URL per line, no prefix, no JSON."""
+    records = HakrawlerAdapter().parse_output(fixture("adapters", "hakrawler.synthetic.txt"))
+    assert len(records) == 5
+    assert records[0].url == "http://testfire.net/"
+    assert records[-1].url == "http://testfire.net/index.jsp?content=inside_contact.htm"
+    assert all(record.source == "hakrawler" for record in records)
+    # A repeated URL is one record: a nav bar links the same page everywhere.
+    assert HakrawlerAdapter().parse_output("http://testfire.net/a\nhttp://testfire.net/a\n") == [
+        UrlRecord(url="http://testfire.net/a", source="hakrawler")
+    ]
+
+
+def test_hakrawler_offers_both_schemes_on_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bare hostnames cannot be crawled: https first, then http (verified)."""
+    calls = fake_exec(monkeypatch, outcome(stdout=""))
+    adapter = HakrawlerAdapter(finder=lambda _name: "/usr/bin/hakrawler")
+    ctx = make_ctx(hosts=["testfire.net"])
+    assert adapter.build_command(ctx)[1:2] == ["-d"]
+    assert "-u" in adapter.build_command(ctx)
+    assert adapter.stdin_text(ctx) == "https://testfire.net/\nhttp://testfire.net/\n"
+    assert calls == []
+
+
+def test_hakrawler_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome("flag provided but not defined: -version\n"))
+    status = HakrawlerAdapter(finder=lambda _name: "/usr/bin/hakrawler").check_installed()
+    assert status.installed is False
+
+
+def test_hakrawler_identity_accepts_the_real_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(
+        monkeypatch,
+        outcome(
+            "flag provided but not defined: -version\nUsage of hakrawler:\n"
+            "  -d int\n\t\tDepth to crawl. (default 2)\n"
+            "  -u\tShow only unique urls.\n",
+            returncode=2,
+        ),
+    )
+    status = HakrawlerAdapter(finder=lambda _name: "/usr/bin/hakrawler").check_installed()
+    assert status.installed is True
+
+
+def test_gospider_adapter_parses_and_strips_prefix() -> None:
+    """The verbose shape `[tag] - [code-200] - URL` becomes the URL alone."""
+    records = GospiderAdapter().parse_output(fixture("adapters", "gospider.synthetic.txt"))
+    assert [record.url for record in records] == [
+        "https://testfire.net/",
+        "https://testfire.net/style.css",
+        "https://testfire.net/index.jsp",
+        "https://testfire.net/login.jsp",
+        "https://testfire.net/feedback.jsp",
+    ]
+    # `-q` prints bare URLs, which must parse too (same process, other flag set).
+    assert GospiderAdapter().parse_output("https://testfire.net/a\n") == [
+        UrlRecord(url="https://testfire.net/a", source="gospider")
+    ]
+
+
+def test_gospider_writes_and_removes_its_sites_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`-s` is a single string and there is no stdin, so `-S` gets a file."""
+    calls = fake_exec(monkeypatch, outcome(stdout=""))
+    adapter = GospiderAdapter(finder=lambda _name: "/usr/bin/gospider")
+    ctx = make_ctx(hosts=["testfire.net"]).model_copy(update={"workspace": tmp_path})
+    with adapter.prepare(ctx):
+        command = adapter.build_command(ctx)
+        sites_file = Path(command[command.index("-S") + 1])
+        assert sites_file.read_text(encoding="utf-8") == (
+            "https://testfire.net/\nhttp://testfire.net/\n"
+        )
+        assert command[command.index("-q")] == "-q"
+        assert command[command.index("-d") + 1] == "2"
+    assert not sites_file.exists()
+    assert calls == []
+
+
+def test_gospider_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome("Version: v9.9.9\n"))
+    status = GospiderAdapter(finder=lambda _name: "/usr/bin/gospider").check_installed()
+    assert status.installed is False
+
+
+def test_subjs_adapter_parses_js_urls() -> None:
+    records = SubjsAdapter().parse_output(fixture("adapters", "subjs.synthetic.txt"))
+    assert [record.url for record in records] == [
+        "http://testfire.net/js/validate.js",
+        "http://testfire.net/js/menu.js",
+        "http://testfire.net/vendor/jquery.min.js",
+    ]
+    assert all(record.source == "subjs" for record in records)
+
+
+def test_subjs_sends_the_honest_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These are reconkit's own requests, so the UA names reconkit (AGENTS rule 8)."""
+    fake_exec(monkeypatch, outcome(stdout=""))
+    adapter = SubjsAdapter(finder=lambda _name: "/usr/bin/subjs")
+    command = adapter.build_command(make_ctx(hosts=["testfire.net"]))
+    assert command[command.index("-ua") + 1].startswith("reconkit/")
+    overridden = adapter.build_command(make_ctx(hosts=["testfire.net"], user_agent="custom/1.0"))
+    assert overridden[overridden.index("-ua") + 1] == "custom/1.0"
+
+
+def test_subjs_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome("subjs 9.9.9\n"))
+    status = SubjsAdapter(finder=lambda _name: "/usr/bin/subjs").check_installed()
+    assert status.installed is False
+
+
+def test_urlfinder_adapter_parses_plain_urls() -> None:
+    records = UrlfinderAdapter().parse_output(fixture("adapters", "urlfinder.synthetic.txt"))
+    assert len(records) == 4
+    assert records[2].url == "http://testfire.net/javadoc/"
+    assert all(record.source == "urlfinder" for record in records)
+
+
+def test_urlfinder_skips_archived_junk_and_feeds_domains(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stored probe string with spaces is not a URL; domains arrive on stdin."""
+    junk = "http://testfire.net/api/v1/license/keys-status/;curl d9q...oast.live\n"
+    good = "https://testfire.net/login.jsp\n"
+    assert [record.url for record in UrlfinderAdapter().parse_output(junk + good)] == [
+        "https://testfire.net/login.jsp"
+    ]
+    calls = fake_exec(monkeypatch, outcome(stdout=good))
+    adapter = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder")
+    ctx = make_ctx(hosts=["testfire.net", "www.testfire.net"])
+    assert adapter.build_command(ctx)[1:] == ["-all", "-silent", "-nc", "-timeout", "5"]
+    assert adapter.stdin_text(ctx) == "testfire.net\nwww.testfire.net\n"
+    assert calls == []
+
+
+def test_urlfinder_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome("[INF] Current Version: v0.0.3\n", stderr="some other tool\n"))
+    status = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder").check_installed()
+    assert status.installed is False
+
+
+def test_a_javascript_href_is_skipped_not_a_parse_error() -> None:
+    """Real hakrawler output on testfire.net carried a `javascript:` href (PIT-52)."""
+    raw = (
+        "http://testfire.net/index.jsp\n"
+        "javascript:checkSiteStatus('AltoroMutual')\n"
+        "mailto:info@testfire.net\n"
+        "http://testfire.net/login.jsp\n"
+    )
+    crawlers: tuple[BinaryAdapter, ...] = (
+        HakrawlerAdapter(),
+        GospiderAdapter(),
+        SubjsAdapter(),
+        UrlfinderAdapter(),
+    )
+    for adapter in crawlers:
+        urls = [record.url for record in adapter.parse_output(raw) if isinstance(record, UrlRecord)]
+        assert urls == ["http://testfire.net/index.jsp", "http://testfire.net/login.jsp"], (
+            adapter.name
+        )

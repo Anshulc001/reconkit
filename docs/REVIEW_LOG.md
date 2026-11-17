@@ -63,6 +63,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 
 | PIT-47 | A first `live` pass that contacted a host but could not decide wrote no `host_status_history` row, so "probed and inconclusive" was indistinguishable from "never touched the host", and the reason 12d stores was dropped in exactly the first-run case (11d-findings-g) | `decide_host_state` tied `persist` to `previous is not None`, so the write only started at the second pass; the pass's own evidence (a returned record) was never consulted, although docs/04 section 5 promises one row per host per status pass with a `dns`-stage exemption only | `persist` in the two inconclusive branches is `previous is not None or attempted`, where `attempted = bool(evidence.web)` - a live tool returned a record for that host, ambiguous or not, per the owner ruling and docs/04 section 5. A pass with no record (failed or timed-out tool, or no tool) still writes nothing, and the `dns` stage's SERVFAIL/timeout/no-answer skip is untouched because its evidence never carries web records | `test_regression_an_attempted_probe_persists_with_no_previous_state` (`Regression: PIT-47`), `test_a_first_inconclusive_live_pass_writes_an_unknown_row`, `test_only_the_host_a_tool_reported_gets_the_unknown_row`, `test_a_host_without_a_record_gets_no_row_even_when_another_did`, `test_a_failed_live_tool_attempted_nothing_and_writes_no_row` |
 | PIT-49 | A host a live-stage adapter discovered while probing (a `tlsx` certificate SAN) entered the in-memory `discovered` set - later stages probed it - but had **no row in `subdomains`**: it vanished from `status`, `diff` and the report, and `--new-only` could never show it | `_persist_live` iterated only its input `hosts` list and only collected `HostStatusRecord`s; `_update_discovered` had already unioned the `SubdomainRecord`s into memory, so the loss was invisible inside the run | A status pass persists the discoveries it made as well as the hosts it was given: `_persist_live_discoveries` writes one `subdomains` row (`provenance='subs'`, its tool in `subdomain_sources`, `source_count` per run, `min_sources` respected) for every live `SubdomainRecord` not already in `hosts` or `subdomains`; existing rows keep their own count (PIT-03), and the host-state path is unchanged | `test_regression_live_discovered_subdomain_reaches_the_subdomains_table` (`Regression: PIT-49`), `test_tlsx_sans_enter_discovered_and_reach_subdomains_table` |
+| PIT-52 | The first **real** hakrawler crawl failed the whole tool: `hakrawler: line is not a URL "javascript:checkSiteStatus('AltoroMutual')"`. The strict parser treated a page's own non-HTTP link as malformed tool output, so a perfectly good crawl was thrown away | every urls parser raised `ParseError` on any line `normalize_url()` could not turn into an http(s) URL, and the mock fixtures only contained real URLs - the fake data hid the class of line a real page produces | `base.is_non_web_reference()` recognises `javascript:`, `mailto:`, `tel:`, `data:`, `about:`, `ftp:` and `file:` and all four wave-3 parsers (plus nothing else) skip those lines before parsing. A line that is neither a known non-web link nor an HTTP(S) URL is still a `ParseError`, so genuinely broken output still fails loudly | `test_a_javascript_href_is_skipped_not_a_parse_error` (`Regression: PIT-52`) |
 | PIT-50 | Two tools could not be driven at all: `httprobe` and `waybackurls` read their host list on **stdin**, and `run_exec` opened stdin as `DEVNULL` with no way to feed it - the only alternatives were a shell pipe or a temporary file, and AGENTS rule 1 forbids the first | `run_exec` was written for flag-driven ProjectDiscovery tools, so "input" meant argv | `run_exec(..., stdin_text=...)` feeds the child from its own daemon thread (a lazily-reading child cannot block the timeout clock, an early exit is only a broken pipe) and `None` keeps the documented EOF. The adapter hook is `stdin_text(ctx)`; nothing else changed | `test_stdin_text_reaches_the_child_and_none_keeps_stdin_closed` (`Regression: PIT-50`), `test_stdin_text_survives_a_child_that_never_reads_it`, `test_httprobe_feeds_hosts_on_stdin_and_never_uses_a_shell`, `test_waybackurls_feeds_domains_on_stdin` |
 | PIT-51 | The `tech` stage had no persistence branch at all: `_persist_stage` covered subs/dns/live/ports/urls, so every `HostStatusRecord` a tech adapter returned was dropped - webanalyze and cdncheck would have run, printed `ok N item(s)` and stored nothing | the tech stage never had an adapter, so the missing branch was invisible; `host_status_history.tech_json`/`waf` existed but only a live pass could fill them | `_persist_tech` merges `tech`/`waf` into the host's newest status row through the new `Store.update_host_extras`: no state row is appended and `state` is never touched, so `diff`/`previous_state()` are unchanged; an off-target record is dropped and a host with no status row is not annotated (D11) | `test_tech_stage_annotates_the_latest_host_row` (`Regression: PIT-51`), `test_tech_stage_drops_a_host_outside_the_target` |
 | PIT-48 | `doctor` showed junk for two installed tools (`katana` -> `__`, `nuclei` -> `[I…` plus ANSI escapes), and `update` could not call `katana` up to date, so an already-current binary would be downloaded again on every run (12j) | `installed_version()` returned `text.splitlines()[0]` for every tool, but `katana -version` prints four lines of ASCII art (the real version is on line 8, on stderr) and `nuclei -version` prints a coloured `[INF]` line first, so `_same_version()` compared a release tag against a logo | A tool may carry a top-level `version_regex` in `tools.yaml`; `installed_version()` searches the whole `version_cmd` output, returns the first capture group (or the whole match when the pattern has no group), and falls back to `splitlines()[0]` when the field is absent or nothing matches. A pattern that does not compile is a `ConfigError` at registry load, before any command runs | `test_katana_version_ignores_the_ascii_banner` (`Regression: PIT-48`), `test_nuclei_version_drops_the_ansi_log_prefix` (`Regression: PIT-48`), `test_a_regex_with_no_match_falls_back_to_the_first_line`, `test_a_version_regex_without_a_group_returns_the_match`, `test_version_regex_is_parsed_from_the_registry`, `test_a_broken_version_regex_is_a_config_error`, `test_version_regex_survives_the_plan_copy` |
@@ -3604,6 +3605,59 @@ install residue. No new feature, no behaviour change, no code-logic change.
   before the commit:
   `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` (unchanged
   from the previous batch; no scope edit was made).
+
+## Adapter wave 3: hakrawler, gospider, subjs, urlfinder (2026-11-17)
+
+- Docs read / goal: `AGENTS.md` (0d item 11 adapter pre-approval), RESUME,
+  PIT-14/30/50, docs/09 adapter contract + §4a3 slot, docs/10 version contract,
+  `tools.yaml`. Four urls-stage adapters on top of the D10 mode table, no table
+  change.
+- Baseline: `712 passed`, ruff/format/mypy clean, `scope.yaml` sha256
+  `d45a3c9...eeee8b`.
+- Real flags (`~/.reconkit/bin`, not on PATH): `hakrawler -version` prints the Go
+  usage and exits 2, `-h` is *custom headers* not help, and there is **no
+  `-silent`** (brief assumed one); `gospider -h` lists `-s/-S/-d/-q/-t/-m/--version`
+  and `--version` prints `Version: v1.1.6`; `subjs -version` prints
+  `subjs version: 1.0.1`; `urlfinder -version` prints `[INF] Current Version:
+  v0.0.3`.
+- Two input facts shaped the adapters: hakrawler crawls nothing without a scheme
+  (bare `testfire.net` on stdin -> 0 URLs) and testfire.net fails TLS
+  verification (`curl`: `SSL: no alternative certificate subject name matches
+  target hostname`), so each host is offered as `https://<host>/` then
+  `http://<host>/` (the pyprobe order) and `-insecure` is never passed; gospider
+  has no stdin and `-s` takes one string, so it gets a `-S` sites file written
+  into the run workspace and removed in `finally` (webanalyze precedent).
+- **PIT-52, found by the first real run:** hakrawler's crawl of testfire.net
+  includes `javascript:checkSiteStatus('AltoroMutual')` in its output, and the
+  strict parser failed the tool on it. Added
+  `base.is_non_web_reference()`; all four wave-3 parsers skip `javascript:`,
+  `mailto:`, `tel:`, `data:`, `about:`, `ftp:`, `file:` and still raise on any
+  other unparseable line. The mock fixtures could not have caught this - a
+  fixture written from a crawl that has no such link is not the same thing as
+  the crawl.
+- **Docs-vs-brief conflict, ruled by the registry:** the brief says urlfinder is
+  `mode: active`; `tools.yaml:159` says `mode: passive`. The registry wins (the
+  same ruling as `gau` in wave 1), so urlfinder also runs in a passive scan,
+  which is semantically right for a third-party archive reader. Nothing in
+  `tools.yaml` or the mode tables was changed.
+- **On the brief's "handle 429/timeouts by returning partial results":**
+  urlfinder exits 0 when a source fails and prints what it found, so partial
+  results are already the normal `ok` path (real run: `ok 932 item(s)`). A hard
+  phase timeout is still `TIMEOUT` with the raw text kept and no records - that
+  is the shared adapter contract for every binary tool, and adding a
+  partial-on-timeout path would change all of them, so it is reported rather
+  than coded (stop rule).
+- Evidence (raw in the report): mock `--tools pyprobe,hakrawler,gospider,subjs,urlfinder`
+  -> urls 4/4 tools, `hakrawler ok 5`, `gospider ok 5`, `subjs ok 3`,
+  `urlfinder ok 4`, 16 unique URLs stored; real runs on testfire.net ->
+  `hakrawler ok 66`, `gospider ok 67`, `subjs ok 0` (host has no `.js`),
+  `urlfinder ok 932`; `doctor` shows all four `yes` / `ok`.
+- Tests: 14 new (13 adapter + the PIT-52 guard), `712 -> 726`; no test changed.
+  `test_binary_adapters_are_registered` gained 4 assertions and `NO_HOME_NEEDED`
+  gained hakrawler/gospider/subjs with reasons.
+- Next action: none. Still unadapted: subs `urlscan, amass, findomain, chaos,
+  github_subdomains`; dns `puredns, massdns, dig`; ports `smap, nmap, rustscan,
+  masscan`; tech `httpx_tech, whatweb, wafw00f`; urls `unfurl`; vulns all five.
 
 ## Adapter wave 2: httprobe, webanalyze, cdncheck, waybackurls + tech persistence (2026-11-17, D11)
 

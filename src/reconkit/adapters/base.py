@@ -99,6 +99,17 @@ def parse_subdomain_lines(raw: str, source: str) -> list[Record]:
     return records
 
 
+# Links a page carries that are not HTTP requests at all. Crawlers print them
+# verbatim (hakrawler emitted `javascript:checkSiteStatus('AltoroMutual')` on the
+# first real testfire.net crawl), so a parser must skip them, not fail on them.
+_NON_WEB_PREFIXES = ("javascript:", "mailto:", "tel:", "data:", "about:", "ftp:", "file:")
+
+
+def is_non_web_reference(value: str) -> bool:
+    """True when a line is a page link but not an HTTP(S) URL."""
+    return value.strip().lower().startswith(_NON_WEB_PREFIXES)
+
+
 def normalize_url(value: str) -> str | None:
     """Return one http(s) URL without its fragment, or None for anything else.
 
