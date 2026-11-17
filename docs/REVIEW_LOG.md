@@ -3022,6 +3022,31 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Sudo:** none. **Not verified:** the tools' `doctor` identity beyond `ok`
   (unchanged path); no adapter consumes these versions yet.
 
+## Install backlog T4 (2026-11-17): assetfinder's documented exit code  (commit subject `docs: assetfinder -h exits 0, measured`; hash filled by the next commit)
+
+- **Docs read / goal:** docs/09 assetfinder row, `docs/tool_manuals/subs.md`
+  (which already recorded exit 0), `adapters/assetfinder.py`, its test. Goal:
+  the registry doc must match the measured binary.
+- **Raw measurement:** `assetfinder -h 1>/dev/null 2>/tmp/af.err; echo $?` ->
+  `exit=0`; `/tmp/af.err` -> `Usage of assetfinder:` / `  -subs-only` /
+  `    \tOnly include subdomains of search domain`; `assetfinder -h
+  2>/dev/null | wc -c` -> `0` (stderr only). `assetfinder -version` ->
+  `flag provided but not defined: -version` then the same usage, exit 0.
+- **Conflict found and resolved:** docs/09 said "exits 2" (inferred from Go
+  `flag` source, and it said the binary was not installed); subs.md said exit 0.
+  The measurement sides with subs.md; docs/09 was corrected, not the manual.
+- **Real adapter run:** `AssetfinderAdapter().check_installed()` ->
+  `installed=True version=None path=/home/kali/.reconkit/bin/assetfinder`;
+  `reconkit doctor --json` -> `'identity': 'ok'` (version `unknown` is correct:
+  the tool has no version output, only usage).
+- **No code change needed:** `tests/test_binary_adapters.py::test_assetfinder_usage_identity`
+  already drives `returncode=0`, so the adapter never required the exit-2
+  assumption. Nothing in `src/` changed.
+- **S1 checks (docs-only):** `730 passed in 16.73s`; `ruff check .` ->
+  `All checks passed!`; `ruff format --check .` -> `67 files already formatted`;
+  `mypy src/reconkit` -> `Success: no issues found in 35 source files`.
+- **Sudo:** none. **Not verified:** nothing new.
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

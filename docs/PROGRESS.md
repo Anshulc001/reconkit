@@ -322,6 +322,17 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   `test_the_four_probed_tools_extract_their_real_output` (4 cases) and
   `test_tools_without_a_version_flag_have_no_probe` (5 cases); no existing test
   changed.
+- **2026-11-17 (install backlog T4), `assetfinder -h` exits 0, not 2.**
+  docs/09's assetfinder row claimed "exits 2" from reading Go `flag` source and
+  said the binary was not installed. Measured here:
+  `assetfinder -h` writes `Usage of assetfinder:` + `-subs-only` to **stderr**,
+  stdout is 0 bytes, exit **0** (the subs manual already said exit 0, so the two
+  docs disagreed and the manual was right). The row now states the measured
+  behaviour and that the identity probe has been exercised on the real binary
+  (`reconkit doctor --json` -> `'identity': 'ok'`). Docs-only change: the
+  adapter and its test already expected exit 0
+  (`tests/test_binary_adapters.py::test_assetfinder_usage_identity`,
+  `returncode=0`), so no code or test changed.
 - **2026-11-17 (verification follow-up F8), the D3 test-count wording uses the
   measured figures.** The D3 entry above now says 32 test functions deleted and
   4 renamed (44 collected node ids removed, 12 added, 745 -> 713), then one
