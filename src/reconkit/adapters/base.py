@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from typing import ClassVar
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -96,6 +97,18 @@ def parse_subdomain_lines(raw: str, source: str) -> list[Record]:
             seen.add(fqdn)
             records.append(SubdomainRecord(fqdn=fqdn, source=source))
     return records
+
+
+def normalize_url(value: str) -> str | None:
+    """Return one http(s) URL without its fragment, or None for anything else.
+
+    Crawlers and archives emit `http://host:80/path?q#frag`; the stored URL keeps
+    every meaningful part and drops the fragment, which never reaches a server.
+    """
+    parts = urlsplit(value.strip())
+    if parts.scheme not in ("http", "https") or not parts.netloc or not parts.hostname:
+        return None
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, ""))
 
 
 def normalize_subdomains(candidates: Iterable[str], source: str) -> list[Record]:
@@ -230,6 +243,11 @@ class BaseToolAdapter(ABC):
         )
         if len(files) == 1:
             return files[0].read_text(encoding="utf-8")
+        # The adapter-wave tools keep one flat `<tool>.synthetic.*` fixture instead
+        # of a per-tool directory; it is the only file, so there is nothing to pick.
+        flat = sorted((self._fixtures_dir / "adapters").glob(f"{self.name}.synthetic.*"))
+        if len(flat) == 1:
+            return flat[0].read_text(encoding="utf-8")
         raise FetchFailed(f"{self.name}: no fixture for {ctx.target}")
 
 

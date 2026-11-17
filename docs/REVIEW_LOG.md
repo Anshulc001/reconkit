@@ -62,6 +62,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-45 | A `SIGKILL` between writing the subfinder `provider-config.yaml` and the `finally` unlink left a provider-key file in the shared system temp dir indefinitely; `finally` was the only mitigation (C-2) | the adapter wrote a bare `mkstemp` file in the shared temp dir, so nothing recorded which run owned it, nothing bounded its lifetime, and a later run could not tell a stranded key file from a live one | provider keys live in a per-run directory named `reconkit-subfinder-<pid>-<random>` with mode 0700 (file 0600), created explicitly and removed with `rmtree` in `finally`. Every run first removes stale directories: a dead pid is removed at once, a live pid only once its mtime is older than `STALE_AFTER_S` (900 s, and the only rule on Windows where no safe liveness probe exists); stale pre-12g `*.yaml` files are removed by the same age rule. Cleanup never raises and never touches the current run's own directory (docs/09) | `test_a_sigkilled_run_leaves_a_directory_the_next_start_removes` (`Regression: PIT-45`), `test_provider_config_lives_in_a_0700_per_run_directory`, `test_cleanup_leaves_a_concurrent_runs_directory_alone`, `test_when_liveness_is_unknown_age_alone_decides` |
 
 | PIT-47 | A first `live` pass that contacted a host but could not decide wrote no `host_status_history` row, so "probed and inconclusive" was indistinguishable from "never touched the host", and the reason 12d stores was dropped in exactly the first-run case (11d-findings-g) | `decide_host_state` tied `persist` to `previous is not None`, so the write only started at the second pass; the pass's own evidence (a returned record) was never consulted, although docs/04 section 5 promises one row per host per status pass with a `dns`-stage exemption only | `persist` in the two inconclusive branches is `previous is not None or attempted`, where `attempted = bool(evidence.web)` - a live tool returned a record for that host, ambiguous or not, per the owner ruling and docs/04 section 5. A pass with no record (failed or timed-out tool, or no tool) still writes nothing, and the `dns` stage's SERVFAIL/timeout/no-answer skip is untouched because its evidence never carries web records | `test_regression_an_attempted_probe_persists_with_no_previous_state` (`Regression: PIT-47`), `test_a_first_inconclusive_live_pass_writes_an_unknown_row`, `test_only_the_host_a_tool_reported_gets_the_unknown_row`, `test_a_host_without_a_record_gets_no_row_even_when_another_did`, `test_a_failed_live_tool_attempted_nothing_and_writes_no_row` |
+| PIT-49 | A host a live-stage adapter discovered while probing (a `tlsx` certificate SAN) entered the in-memory `discovered` set - later stages probed it - but had **no row in `subdomains`**: it vanished from `status`, `diff` and the report, and `--new-only` could never show it | `_persist_live` iterated only its input `hosts` list and only collected `HostStatusRecord`s; `_update_discovered` had already unioned the `SubdomainRecord`s into memory, so the loss was invisible inside the run | A status pass persists the discoveries it made as well as the hosts it was given: `_persist_live_discoveries` writes one `subdomains` row (`provenance='subs'`, its tool in `subdomain_sources`, `source_count` per run, `min_sources` respected) for every live `SubdomainRecord` not already in `hosts` or `subdomains`; existing rows keep their own count (PIT-03), and the host-state path is unchanged | `test_regression_live_discovered_subdomain_reaches_the_subdomains_table` (`Regression: PIT-49`), `test_tlsx_sans_enter_discovered_and_reach_subdomains_table` |
 | PIT-48 | `doctor` showed junk for two installed tools (`katana` -> `__`, `nuclei` -> `[I…` plus ANSI escapes), and `update` could not call `katana` up to date, so an already-current binary would be downloaded again on every run (12j) | `installed_version()` returned `text.splitlines()[0]` for every tool, but `katana -version` prints four lines of ASCII art (the real version is on line 8, on stderr) and `nuclei -version` prints a coloured `[INF]` line first, so `_same_version()` compared a release tag against a logo | A tool may carry a top-level `version_regex` in `tools.yaml`; `installed_version()` searches the whole `version_cmd` output, returns the first capture group (or the whole match when the pattern has no group), and falls back to `splitlines()[0]` when the field is absent or nothing matches. A pattern that does not compile is a `ConfigError` at registry load, before any command runs | `test_katana_version_ignores_the_ascii_banner` (`Regression: PIT-48`), `test_nuclei_version_drops_the_ansi_log_prefix` (`Regression: PIT-48`), `test_a_regex_with_no_match_falls_back_to_the_first_line`, `test_a_version_regex_without_a_group_returns_the_match`, `test_version_regex_is_parsed_from_the_registry`, `test_a_broken_version_regex_is_a_config_error`, `test_version_regex_survives_the_plan_copy` |
 
 ## Commit map
@@ -3601,6 +3602,66 @@ install residue. No new feature, no behaviour change, no code-logic change.
   before the commit:
   `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` (unchanged
   from the previous batch; no scope edit was made).
+
+## Adapter wave 1: dnsx, tlsx, katana, gau + the live-discovery persistence fix (2026-11-17, Part 2)
+
+- Docs read / goal: `AGENTS.md` (0d item 11 = adapter pre-approval), the RESUME
+  block, PIT-01/03/14/30/35/44, docs/09 (adapter contract, stage table, JSON),
+  docs/04 (provenance), docs/10 (version contract), `tools.yaml`. Four phase-3
+  tools get their first adapter, plus the persistence bug found while scoping
+  tlsx.
+- Baseline: `672 passed`, `ruff check .` clean, `ruff format --check .`
+  `57 files already formatted`, `mypy src/reconkit` clean (29 files).
+  `scope.yaml` sha256 `d45a3c9...eeee8b` before and after.
+- Decisions (owner rulings in the batch prompt): **A** - tlsx is liveness-only
+  (ALIVE/UNKNOWN + SANs), no new `HostStatusRecord` fields, no schema 7, cert
+  metadata not persisted (docs/09 records the one-line note), and the real bug
+  found on the way is fixed: a live pass now persists the hosts it *discovered*,
+  not only the hosts it was handed (PIT-49). **B** - gau stays `mode: passive`
+  (`tools.yaml` was right; the prompt's `active` was wrong). **C** - gau gains
+  `version_regex: 'gau version: (\d+\.\d+\.\d+)'` from the real banner. **D** -
+  dnsx (dns/passive) and katana (urls/active) as specified.
+- Adapters (`src/reconkit/adapters/`, all `BinaryAdapter`, `needs_home = True`,
+  `tier: core`, registered in `adapters/__init__.py` `ADAPTERS` - the prompt's
+  "registry.py" is `adapters/registry.py`, which *reads* that map and would
+  import-cycle if it declared it): `dnsx.py` (`-silent -json -a -or -duc -nc -l
+  <comma list>`; A records -> `SubdomainRecord.ips`, `NXDOMAIN` -> DEAD only),
+  `tlsx.py` (`-silent -json -san -duc -nc` + one `-u` per host; probe_status ->
+  ALIVE/UNKNOWN, SANs -> `SubdomainRecord(source="tlsx:san")`), `katana.py`
+  (`-silent -jsonl -or -ob -duc -nc` + `-u`; `request.endpoint` -> `UrlRecord`,
+  error-only lines skipped), `gau.py` (`--json --timeout=<n>` + positional
+  hosts; JSON **and** plain URL lines; stderr notice ignored). No new
+  dependencies, no new module outside docs/09's adapter list.
+- The fix: `Engine._persist_live` ends with `_persist_live_discoveries`, which
+  groups live `SubdomainRecord`s not already in `hosts` or `subdomains`, applies
+  `min_sources` and `confidence_for` like the discovery pass, and writes
+  `provenance='subs'` + `subdomain_sources` rows. Existing rows keep their
+  `source_count` (PIT-03); the host-state path is untouched.
+- Evidence: the four `-h`/version/sample captures are in the session and in the
+  tool manuals; real `--full --no-scope --tools dnsx,tlsx,katana,gau` against
+  testfire.net: `dnsx ok 1`, `tlsx ok 2`, `katana ok 58`, `gau ok 389`, exit 0;
+  the DB then holds `demo.testfire.net|subs|1` with `subdomain_sources.tool =
+  tlsx` (the SAN row the fix exists for). Provisioning of `tlsx`/`gau` used
+  standing pre-approval 1 (`go install`, purpose recorded). Mutation proof for
+  PIT-49: reverting the call made the new test fail with `AssertionError: the
+  SAN must reach the subdomains table`; restoring it passed.
+- Tests: 15 new (13 adapter, 2 engine), `672 -> 687`; two changed
+  (`test_binary_adapters_are_registered` +4 assertions;
+  `test_a_full_run_reports_the_gaps_of_stages_with_no_adapter` now expects
+  `tech`+`vulns` because `urls` gained adapters).
+- Deviations: (1) the prompt's `tests/fixtures/adapters/<tool>.synthetic.*`
+  path is honoured, and `base._read_fixture` gained one flat-lookup fallback so
+  `--mock` finds it; (2) registration went to `adapters/__init__.py` because
+  that is the real map (`registry.py` consumes it); (3) the acceptance items
+  "gau/katana run in `--active`" and "gau fires in a passive run" cannot happen
+  - `MODE_STAGES` is passive=subs+dns, active=+live, full=all seven - so the
+  proof used `--full`, and `--active`/passive were captured to show the
+  exclusion; (4) `doctor` shows no version (D6), so gau proves identity via
+  `ok` + the regex, not by printing `2.2.4`; (5) the prompt's SQL
+  `WHERE source='tlsx:san'` cannot run (`subdomains` has no `source` column) -
+  `provenance` + `subdomain_sources.tool` are the stored equivalent.
+- Next action: none for this wave; the `tech` and `vulns` stages still report
+  `no adapter yet (phase 3)`.
 
 ## Completion gaps + standing pre-approvals, Part 1 (2026-11-17, MASTER_PLAN D9)
 

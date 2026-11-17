@@ -1573,6 +1573,54 @@ class Engine:
             for warning in transition.warnings:
                 if warning not in self._warnings:
                     self._warnings.append(warning)
+        self._persist_live_discoveries(target_id, run_id, results, target, hosts, opts)
+
+    def _persist_live_discoveries(
+        self,
+        target_id: int,
+        run_id: int,
+        results: list[ToolResult],
+        target: str,
+        hosts: list[str],
+        opts: ScanOptions,
+    ) -> None:
+        """Persist subdomains a live-stage adapter discovered while probing.
+
+        A live pass writes a row for each of its *input* hosts only, so a host an
+        adapter found in passing (a certificate SAN, tlsx) used to stop at the
+        in-memory `discovered` set and never reach `subdomains`. Records already
+        known from the discovery pass or the input list keep their own row and
+        source count (PIT-03), so this only creates the missing rows
+        (Regression: PIT-49).
+        """
+        known = set(hosts) | {str(row["fqdn"]) for row in self.store.subdomains(target_id)}
+        groups: dict[str, set[str]] = {}
+        for result in results:
+            if result.status is not ToolStatus.OK:
+                continue
+            for record in result.records:
+                if not isinstance(record, SubdomainRecord):
+                    continue
+                for cleaned in self._clean_hosts([record.fqdn], target):
+                    if cleaned not in known:
+                        groups.setdefault(cleaned, set()).add(result.tool)
+        for fqdn, tools in groups.items():
+            if len(tools) < opts.min_sources:
+                continue
+            sub_id = self.store.upsert_subdomain(
+                target_id,
+                fqdn,
+                run_id=run_id,
+                confidence=confidence_for(
+                    tools,
+                    high_min=self.config.confidence.high_min_sources,
+                    medium_min=self.config.confidence.medium_min_sources,
+                ).value,
+                source_count=len(tools),
+                provenance="subs",
+            )
+            for tool in sorted(tools):
+                self.store.add_subdomain_source(sub_id, run_id, tool)
 
     def _previous_facts(
         self, target_id: int, host: str, run_id: int

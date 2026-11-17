@@ -131,7 +131,10 @@ shows the resolved copy by design - not a missing version and not a defect.
 the Python `httpx` CLI is `wrong program` there too. `smap`, `gospider`, `subjs`
 and `urlfinder` have real probes; the ProjectDiscovery tools, `wafw00f`,
 `findomain`, `puredns`, `dig`, `massdns`, `whatweb`, `nmap`, `masscan`, `gau`,
-`ffuf` and `nikto` report a version from their own banner.
+`ffuf` and `nikto` report a version from their own banner. `gau` gained a
+`version_regex` on 2026-11-17 (`gau version: (\d+\.\d+\.\d+)`, from the real
+banner `gau version: 2.2.4`), so a namesake that prints anything else is now
+`wrong program` instead of `yes` (Ruling C).
 
 **Everything else doctor prints.** Entries with no `binary:` (all HTTP and
 Python adapters) are `yes` with `n/a (no binary required)`. Per-stage coverage

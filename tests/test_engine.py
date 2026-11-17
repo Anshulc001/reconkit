@@ -19,6 +19,7 @@ from reconkit.adapters.base import BaseToolAdapter
 from reconkit.adapters.dnspython import DnsOutcome, DnsResult
 from reconkit.adapters.registry import ToolKey, ToolSpec, get_spec
 from reconkit.adapters.subfinder import SubfinderAdapter
+from reconkit.adapters.tlsx import TlsxAdapter
 from reconkit.config import load_config
 from reconkit.core.runner import MAX_OUTPUT_BYTES, ExecResult
 from reconkit.core.scope import ScopeGate
@@ -461,6 +462,93 @@ async def test_active_ports_stage_receives_the_cidr_predicate(tmp_path: Path) ->
     assert predicate is not None, "the active ports stage must get a CIDR predicate"
     assert predicate("203.0.113.5") is True
     assert predicate("198.51.100.5") is False
+
+
+async def test_regression_live_discovered_subdomain_reaches_the_subdomains_table(
+    tmp_path: Path,
+) -> None:
+    """Regression: PIT-49.
+
+    A live adapter that names a host while probing (a certificate SAN) must leave
+    a `subdomains` row, not only an in-memory discovered entry.
+    """
+    rec = Recorder()
+    specs = {"live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE)}
+    adapters: dict[str, type[BaseToolAdapter]] = {
+        "live-fake": adapter(
+            "live-fake",
+            Stage.LIVE,
+            rec,
+            records=[
+                alive("example.com"),
+                SubdomainRecord(fqdn="cert.example.com", source="fake"),
+            ],
+        )
+    }
+    store = Store(tmp_path / "recon.db")
+    engine = make_engine(tmp_path, specs, adapters, store=store)
+    await engine.run("example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True))
+
+    row = store._conn.execute(
+        "SELECT provenance, source_count FROM subdomains WHERE fqdn = 'cert.example.com'"
+    ).fetchone()
+    assert row is not None, "the SAN must reach the subdomains table"
+    assert (row["provenance"], row["source_count"]) == ("subs", 1)
+    assert (
+        store._conn.execute(
+            "SELECT COUNT(*) AS n FROM subdomain_sources WHERE subdomain_id ="
+            " (SELECT id FROM subdomains WHERE fqdn = 'cert.example.com')"
+        ).fetchone()["n"]
+        == 1
+    )
+    # The probed host itself is still persisted, so the fix adds rows, never
+    # replaces the host-state path.
+    assert (
+        store._conn.execute(
+            "SELECT COUNT(*) AS n FROM host_status_history WHERE subdomain_id ="
+            " (SELECT id FROM subdomains WHERE fqdn = 'example.com')"
+        ).fetchone()["n"]
+        == 1
+    )
+
+
+async def test_tlsx_sans_enter_discovered_and_reach_subdomains_table(tmp_path: Path) -> None:
+    """Ruling A: a SAN is a new host, so it is discovered *and* persisted.
+
+    Runs the real `TlsxAdapter` over its synthetic fixture (no network, no
+    binary): the certificate names `www.testfire.net`, the later urls stage must
+    receive it as input, and it must leave a `subdomains` row (PIT-49).
+    """
+    rec = Recorder()
+    specs = {
+        "tlsx": tool("tlsx", Stage.LIVE, mode=Mode.ACTIVE),
+        "urls-fake": tool("urls-fake", Stage.URLS, mode=Mode.ACTIVE),
+    }
+    adapters: dict[str, type[BaseToolAdapter]] = {
+        "tlsx": TlsxAdapter,
+        "urls-fake": adapter("urls-fake", Stage.URLS, rec, records=[]),
+    }
+    store = Store(tmp_path / "recon.db")
+    engine = make_engine(tmp_path, specs, adapters, store=store, scope_text=None)
+    await engine.run(
+        "testfire.net",
+        ScanOptions(stages=(Stage.LIVE, Stage.URLS), active=True, mock=True),
+    )
+    assert set(rec.hosts[-1]) == {"testfire.net", "www.testfire.net"}
+    persisted = {
+        str(row["fqdn"]): str(row["provenance"])
+        for row in rows(store, "SELECT fqdn, provenance FROM subdomains")
+    }
+    assert persisted.get("www.testfire.net") == "subs"
+    sources = [
+        str(row["tool"])
+        for row in rows(
+            store,
+            "SELECT tool FROM subdomain_sources WHERE subdomain_id ="
+            " (SELECT id FROM subdomains WHERE fqdn = 'www.testfire.net')",
+        )
+    ]
+    assert sources == ["tlsx"]
 
 
 async def test_passive_run_outside_scope_warns(tmp_path: Path) -> None:

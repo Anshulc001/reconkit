@@ -14,7 +14,7 @@ Tools from the `vulns` stage are deliberately absent - see
 | Tool | Kind | Tier | Mode | Phase | Adapter in this build |
 |---|---|---|---|---|---|
 | `dnspython` | python | core | passive | 2 | yes |
-| `dnsx` | binary | core | passive | 3 | no |
+| `dnsx` | binary | core | passive | 3 | yes (wave 1, 2026-11-17) |
 | `puredns` | binary | core | passive | 3 | no |
 | `massdns` | binary | core | passive | 3 | no |
 | `dig` | binary | core | passive | 3 | no |
@@ -61,7 +61,7 @@ produce `DEAD` (PIT-01).
 ## `dnsx`
 
 - **Registry:** binary, core, passive, phase 3, `stage: dns`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/dnsx.py` (wave 1, 2026-11-17); runs as `-silent -json -a -or -duc -nc -l <comma-separated hosts>`. A line with an `a` list becomes `SubdomainRecord.ips`; `status_code: NXDOMAIN` is the only value that becomes `HostStatusRecord(DEAD)`
 - **Official source used:** https://github.com/projectdiscovery/dnsx
 - **Installed on this box:** `/usr/bin/dnsx`, `[INF] Current Version: 1.3.1`
 - **Where it comes from:** https://github.com/projectdiscovery/dnsx/releases - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it

@@ -143,11 +143,11 @@ Phase 2 = working adapter in the first build. Phase 3 = listed in `tools.yaml`, 
 | Stage | Mode | Pool (tier core unless noted) | Phase 2 working |
 |---|---|---|---|
 | subs | passive | crtsh, certspotter, otx, hackertarget, urlscan, subfinder, assetfinder, amass, findomain, chaos, github_subdomains | crtsh, certspotter, otx, hackertarget, subfinder, assetfinder |
-| dns | passive | dnspython, dnsx, puredns (+massdns), dig | dnspython |
-| live | active | pyprobe, httpx, httprobe, tlsx | pyprobe, httpx |
+| dns | passive | dnspython, dnsx, puredns (+massdns), dig | dnspython, dnsx |
+| live | active | pyprobe, httpx, httprobe, tlsx | pyprobe, httpx, tlsx |
 | ports | active (smap passive) | pyscan, naabu, nmap, rustscan, smap; masscan (opt_in) | pyscan, naabu |
 | tech | active | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze | - |
-| urls | passive/active | gau, waybackurls, katana, hakrawler, gospider, subjs, unfurl, urlfinder | - |
+| urls | passive/active | gau, waybackurls, katana, hakrawler, gospider, subjs, unfurl, urlfinder | gau, katana |
 | vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) | - |
 | shots | active | gowitness (opt_in) | - |
 
@@ -160,6 +160,32 @@ Selection rules (2026-11-17: the mode tables in docs/02 section 2 and `MODE_STAG
 
 There is no speed control: every selected adapter of a stage starts together and runs at its own natural pace (2026-11-17, docs/MASTER_PLAN.md D3).
 
+### 4a. Adapter wave 1 (2026-11-17): dnsx, tlsx, katana, gau
+
+Every command below was read off the real binary's `-h` on this box; the
+fixtures are `tests/fixtures/adapters/<tool>.synthetic.*` (the only place the
+flat `<tool>.synthetic.*` lookup in `base._read_fixture` looks).
+
+| Tool | Stage | Invocation | Records |
+|---|---|---|---|
+| `dnsx` | dns | `-silent -json -a -or -duc -nc -l <comma-separated hosts>` | `SubdomainRecord(ips=[a...])`; `HostStatusRecord(DEAD)` only for `status_code: NXDOMAIN` (PIT-01) |
+| `tlsx` | live | `-silent -json -san -duc -nc -u <host>` (one `-u` per host) | `HostStatusRecord(ALIVE)` when `probe_status` is true, `UNKNOWN` with `detail="tls probe failed"` when false; one `SubdomainRecord(source="tlsx:san")` per certificate SAN, `*.` stripped |
+| `katana` | urls | `-silent -jsonl -or -ob -duc -nc -u <host>` (one `-u` per host) | `UrlRecord` from `request.endpoint`; a line carrying only `error` (for example `max depth reached`) is skipped |
+| `gau` | urls | `--json --timeout=<n> <host...>` (hosts are positional; gau has no `-silent`/`-nc`/`-duc`) | `UrlRecord` from `{"url": ...}` per line, and from plain URL lines too (older builds); the stderr `level=warning msg="error reading config..."` notice is ignored because only stdout is parsed |
+
+`dnsx` has no repeatable input flag, so its hosts travel in one `-l` list
+(`-l` documents "file or comma separated or stdin"); every host is validated
+before it is placed there. All four are `kind: binary`, `tier: core`, declare
+`needs_home = True` and use both ProjectDiscovery markers (`projectdiscovery`,
+`current version`) except `gau`, which requires the `gau version:` marker.
+
+**tlsx cert metadata (Ruling A, 2026-11-17).** Cert metadata (expiry, issuer,
+self-signed) is extracted by tlsx but not persisted - future addition if operator
+needs it (would require schema 7 + new HostStatusRecord fields). Liveness and
+SAN discovery are the only stored facts. The SANs reach `subdomains` through
+`Engine._persist_live_discoveries` (PIT-49), which persists every
+`SubdomainRecord` a live pass discovered, not only the hosts it was given.
+
 ### 4b. Per-tool support for the injected parameters
 
 | Parameter | `httpx` | `pyprobe` | `pyscan` | `naabu` | Every other adapter |
@@ -167,6 +193,11 @@ There is no speed control: every selected adapter of a stage starts together and
 | `--ports` | - (live stage) | - | yes, `ctx.ports` replaces `DEFAULT_PORTS` | yes, `-p` (verified: `naabu -h` `-port, -p string`) | ignored |
 | `--header` | yes, `-H "Name: Value"` (verified: `httpx -h` `-H, -header string[]`) | yes, request headers | ignored + one warning | ignored + one warning | ignored + one warning |
 | `--user-agent` | yes, `-H "User-Agent: ..."` | yes, client header | ignored + one warning | ignored + one warning | ignored + one warning |
+
+The four wave-1 adapters (`dnsx`, `tlsx`, `katana`, `gau`) are in the "every
+other adapter" column: they accept a `--header`/`--user-agent` flag upstream
+(`tlsx`/`katana` have `-H`) but do not use it in this build, so the flags stay
+ignored there rather than half-applied.
 | `--status-codes` | filter only (hosts whose stored `status_code` matches) | filter only | - | - | - |
 
 The `--status-codes` filter and `--only-alive`/`--only-states` act on the

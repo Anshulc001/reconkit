@@ -1,0 +1,3 @@
+{"host":"www.testfire.net","ttl":300,"resolver":["1.1.1.1:53"],"a":["65.61.137.117"],"status_code":"NOERROR","timestamp":"2026-11-17T11:00:00.000000000-05:00","query-time":"12ms"}
+{"host":"testfire.net","ttl":214,"resolver":["1.0.0.1:53"],"a":["65.61.137.117","65.61.137.118"],"status_code":"NOERROR","timestamp":"2026-11-17T11:00:00.100000000-05:00","query-time":"12ms"}
+{"host":"mail.testfire.net","ttl":0,"resolver":["8.8.8.8:53"],"status_code":"NXDOMAIN","timestamp":"2026-11-17T11:00:00.200000000-05:00","query-time":"9ms"}

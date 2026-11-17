@@ -1,0 +1,3 @@
+{"timestamp":"2026-11-17T11:00:02.000000000-05:00","request":{"method":"GET","endpoint":"https://testfire.net/","tag":"","attribute":"","source":"","raw":""},"response":{"status_code":200,"body":"","headers":{}}}
+{"timestamp":"2026-11-17T11:00:02.100000000-05:00","request":{"method":"GET","endpoint":"https://testfire.net/login.jsp","tag":"a","attribute":"href","source":"https://testfire.net/","raw":""},"response":{"status_code":200,"body":"","headers":{}}}
+{"timestamp":"2026-11-17T11:00:02.200000000-05:00","request":{"method":"GET","endpoint":"https://testfire.net/bank/main.jsp?login=1","tag":"a","attribute":"href","source":"https://testfire.net/","raw":""},"response":{"status_code":302,"body":"","headers":{}}}

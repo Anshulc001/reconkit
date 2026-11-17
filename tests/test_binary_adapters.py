@@ -19,7 +19,10 @@ from reconkit.adapters import base as base_module
 from reconkit.adapters import subfinder as subfinder_module
 from reconkit.adapters.assetfinder import AssetfinderAdapter
 from reconkit.adapters.base import BinaryAdapter
+from reconkit.adapters.dnsx import DnsxAdapter
+from reconkit.adapters.gau import GauAdapter
 from reconkit.adapters.httpx_tool import HttpxAdapter
+from reconkit.adapters.katana import KatanaAdapter
 from reconkit.adapters.naabu import NaabuAdapter
 from reconkit.adapters.registry import get_spec, load_tools
 from reconkit.adapters.subfinder import (
@@ -28,9 +31,17 @@ from reconkit.adapters.subfinder import (
     SubfinderAdapter,
     cleanup_stale_provider_dirs,
 )
+from reconkit.adapters.tlsx import TlsxAdapter
 from reconkit.core.runner import ExecResult
 from reconkit.errors import ToolFailed
-from reconkit.models import HostState, PortRecord, RunContext, SubdomainRecord, ToolStatus
+from reconkit.models import (
+    HostState,
+    HostStatusRecord,
+    PortRecord,
+    RunContext,
+    SubdomainRecord,
+    ToolStatus,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 CONFIG = REPO / "config.yaml"
@@ -113,6 +124,10 @@ def test_binary_adapters_are_registered() -> None:
     assert ADAPTERS["assetfinder"] is AssetfinderAdapter
     assert ADAPTERS["httpx"] is HttpxAdapter
     assert ADAPTERS["naabu"] is NaabuAdapter
+    assert ADAPTERS["dnsx"] is DnsxAdapter
+    assert ADAPTERS["tlsx"] is TlsxAdapter
+    assert ADAPTERS["katana"] is KatanaAdapter
+    assert ADAPTERS["gau"] is GauAdapter
 
 
 # Binary tools whose invocation never touches $HOME, so neither the identity
@@ -950,3 +965,139 @@ async def test_mock_run_captures_the_fixture_text(tmp_path: Path) -> None:
     result = await SubfinderAdapter(fixtures_dir=fixtures).run(make_ctx(mock=True))
     assert result.status is ToolStatus.OK
     assert result.raw_text == "a.example.com\n"
+
+
+# ------------------------------------------------- adapter wave 1 (phase 3)
+# Every sample below is the real shape the tool printed on this box, with the
+# live values replaced by the testfire.net fixture data.
+
+
+def test_dnsx_adapter_parses_jsonl() -> None:
+    records = DnsxAdapter().parse_output(fixture("adapters", "dnsx.synthetic.jsonl"))
+    resolved = {record.fqdn: record for record in records if isinstance(record, SubdomainRecord)}
+    assert set(resolved) == {"www.testfire.net", "testfire.net"}
+    assert resolved["testfire.net"].ips == ["65.61.137.117", "65.61.137.118"]
+    # PIT-01: NXDOMAIN is the only answer that may become DEAD.
+    dead = [record for record in records if isinstance(record, HostStatusRecord)]
+    assert [(record.fqdn, record.state) for record in dead] == [
+        ("mail.testfire.net", HostState.DEAD)
+    ]
+
+
+def test_dnsx_keeps_a_noanswer_host_undecided() -> None:
+    """A NOERROR line with no A record is not evidence of death (PIT-01)."""
+    raw = '{"host":"empty.testfire.net","status_code":"NOERROR","a":[]}\n'
+    assert DnsxAdapter().parse_output(raw) == []
+
+
+def test_dnsx_puts_every_host_in_one_comma_separated_list_flag() -> None:
+    """dnsx has no repeatable `-u`: its input flag is `-l` (verified help text)."""
+    adapter = DnsxAdapter(finder=lambda _name: "/usr/bin/dnsx")
+    argv = adapter.build_command(make_ctx(hosts=["a.example.com", "b.example.com"]))
+    assert argv[argv.index("-l") + 1] == "a.example.com,b.example.com"
+    assert "-json" in argv and "-a" in argv
+
+
+def test_tlsx_adapter_extracts_sans_and_marks_alive() -> None:
+    records = TlsxAdapter().parse_output(fixture("adapters", "tlsx.synthetic.jsonl"))
+    hosts = {record.fqdn: record for record in records if isinstance(record, HostStatusRecord)}
+    assert set(hosts) == {"www.testfire.net", "testfire.net"}
+    assert all(record.state is HostState.ALIVE for record in hosts.values())
+    assert hosts["www.testfire.net"].ips == ["65.61.137.117"]
+    sans = {record.fqdn: record.source for record in records if isinstance(record, SubdomainRecord)}
+    # The wildcard SAN names its parent, which is the host worth remembering; the
+    # second certificate carries no subject_an at all.
+    assert sans == {"www.testfire.net": "tlsx:san", "testfire.net": "tlsx:san"}
+
+
+def test_tlsx_marks_a_failed_handshake_unknown_not_alive() -> None:
+    raw = '{"host":"quiet.testfire.net","ip":"65.61.137.117","port":"443","probe_status":false}\n'
+    records = TlsxAdapter().parse_output(raw)
+    assert len(records) == 1
+    assert isinstance(records[0], HostStatusRecord)
+    assert (records[0].state, records[0].detail) == (HostState.UNKNOWN, "tls probe failed")
+
+
+def test_tlsx_repeats_the_host_flag_once_per_input() -> None:
+    adapter = TlsxAdapter(finder=lambda _name: "/usr/bin/tlsx")
+    argv = adapter.build_command(make_ctx(hosts=["a.example.com", "b.example.com"]))
+    assert argv.count("-u") == 2
+    assert "-san" in argv and "-json" in argv
+
+
+def test_katana_adapter_parses_jsonl() -> None:
+    records = KatanaAdapter().parse_output(fixture("adapters", "katana.synthetic.jsonl"))
+    assert [record.url for record in records] == [
+        "https://testfire.net/",
+        "https://testfire.net/login.jsp",
+        "https://testfire.net/bank/main.jsp?login=1",
+    ]
+    assert {record.source for record in records} == {"katana"}
+
+
+def test_katana_skips_a_crawl_error_line() -> None:
+    """`{"error": "max depth reached"}` is not a URL (real katana output)."""
+    raw = '{"timestamp":"2026-11-17T11:00:02Z","error":"max depth reached"}\n'
+    assert KatanaAdapter().parse_output(raw) == []
+
+
+def test_gau_adapter_parses_plain_urls() -> None:
+    plain = (
+        "http://testfire.net/\n"
+        "http://testfire.net/login.jsp\n"
+        "http://testfire.net/bank/main.jsp\n"
+        "https://www.testfire.net/admin/admin.aspx\n"
+        "https://testfire.net/search.jsp?query=abc\n"
+    )
+    records = GauAdapter().parse_output(plain)
+    assert [record.url for record in records] == [
+        "http://testfire.net/",
+        "http://testfire.net/login.jsp",
+        "http://testfire.net/bank/main.jsp",
+        "https://www.testfire.net/admin/admin.aspx",
+        "https://testfire.net/search.jsp?query=abc",
+    ]
+
+
+def test_gau_parses_its_json_output_and_drops_the_fragment() -> None:
+    records = GauAdapter().parse_output(fixture("adapters", "gau.synthetic.txt"))
+    assert len(records) == 5
+    assert records[-1].url == "https://testfire.net/search.jsp?query=abc"
+    # A repeated URL is one record: two archives can return the same page.
+    assert GauAdapter().parse_output('{"url":"http://testfire.net/"}\nhttp://testfire.net/\n') == [
+        records[0]
+    ]
+
+
+async def test_gau_ignores_its_stderr_config_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only stdout is parsed; the "config file not found" notice is stderr."""
+    fake_exec(
+        monkeypatch,
+        outcome(
+            stdout='{"url":"http://testfire.net/"}\n',
+            stderr=(
+                'time="2026-11-17T11:04:42-05:00" level=warning msg="error reading'
+                " config: Config file /home/kali/.gau.toml not found, using default"
+                ' config"\n'
+            ),
+        ),
+    )
+    result = await GauAdapter(finder=lambda _name: "/usr/bin/gau").run(
+        make_ctx(hosts=["testfire.net"])
+    )
+    assert result.status is ToolStatus.OK
+    assert [record.url for record in result.records] == ["http://testfire.net/"]
+
+
+def test_gau_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: PIT-14 pattern - a namesake binary is not gau."""
+    fake_exec(monkeypatch, outcome("gau 0.1.0-something-else\n"))
+    status = GauAdapter(finder=lambda _name: "/usr/bin/gau").check_installed()
+    assert status.installed is False
+
+
+def test_gau_identity_accepts_the_real_version_banner(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome("gau version: 2.2.4\n"))
+    status = GauAdapter(finder=lambda _name: "/usr/bin/gau").check_installed()
+    assert status.installed is True
+    assert status.version == "2.2.4"

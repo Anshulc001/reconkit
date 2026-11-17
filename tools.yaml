@@ -149,7 +149,7 @@ tools:
   webanalyze:   {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: webanalyze, source: "go install github.com/rverton/webanalyze/cmd/webanalyze@latest", notes: "Needs `webanalyze -update` once per working directory first: it writes technologies.json (~2.1 MB) into the CWD, and a scan without it exits 1 (can not open apps file). Point -apps elsewhere to reuse one file."}
 
   # ---------------- urls ----------------
-  gau:          {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: gau, version_cmd: [gau, --version], source: "go install github.com/lc/gau/v2/cmd/gau@latest"}
+  gau:          {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: gau, version_cmd: [gau, --version], version_regex: 'gau version: (\d+\.\d+\.\d+)', source: "go install github.com/lc/gau/v2/cmd/gau@latest"}
   waybackurls:  {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: waybackurls, source: "go install github.com/tomnomnom/waybackurls@latest"}
   katana:       {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: katana, version_cmd: [katana, -version], version_regex: 'Current version: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/katana/releases"}
   hakrawler:    {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: hakrawler, source: "go install github.com/hakluke/hakrawler@latest"}

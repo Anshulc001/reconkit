@@ -13,9 +13,9 @@ Tools from the `vulns` stage are deliberately absent - see
 
 | Tool | Kind | Tier | Mode | Phase | Adapter in this build |
 |---|---|---|---|---|---|
-| `gau` | binary | core | passive | 3 | no |
+| `gau` | binary | core | passive | 3 | yes (wave 1, 2026-11-17) |
 | `waybackurls` | binary | core | passive | 3 | no |
-| `katana` | binary | core | active | 3 | no |
+| `katana` | binary | core | active | 3 | yes (wave 1, 2026-11-17) |
 | `hakrawler` | binary | core | active | 3 | no |
 | `gospider` | binary | core | active | 3 | no |
 | `subjs` | binary | core | active | 3 | no |
@@ -29,7 +29,7 @@ Tools from the `vulns` stage are deliberately absent - see
 ## `gau`
 
 - **Registry:** binary, core, passive, phase 3, `stage: urls`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/gau.py` (wave 1, 2026-11-17); runs as `--json --timeout=<n> <host...>` (positional domains). `{"url": ...}` per line becomes a `UrlRecord`; plain URL lines are accepted too, because that is what older builds print. The `level=warning msg="error reading config..."` notice below is stderr, and only stdout is parsed
 - **Official source used:** https://github.com/lc/gau
 - **Installed on this box:** `/home/kali/.reconkit/bin/gau`, `gau version: 2.2.4`
 - **Where it comes from:** github.com/lc/gau (v2) - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
@@ -180,7 +180,7 @@ Queries the Wayback CDX API; no traffic to the target.
 ## `katana`
 
 - **Registry:** binary, core, active, phase 3, `stage: urls`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/katana.py` (wave 1, 2026-11-17); runs as `-silent -jsonl -or -ob -duc -nc -u <host>` (one `-u` per host). `request.endpoint` becomes a `UrlRecord`; a line that carries only `error` (for example `max depth reached`) is skipped
 - **Official source used:** https://github.com/projectdiscovery/katana
 - **Installed on this box:** `/home/kali/go/bin/katana`, `[INF] Current version: v1.8.0`
 - **Where it comes from:** https://github.com/projectdiscovery/katana/releases - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it

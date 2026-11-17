@@ -736,14 +736,13 @@ def test_a_full_run_reports_the_gaps_of_stages_with_no_adapter(
         "status": "complete_with_gaps",
         "gaps": [
             {"stage": "tech", "reason": "no adapter yet (phase 3)"},
-            {"stage": "urls", "reason": "no adapter yet (phase 3)"},
             {"stage": "vulns", "reason": "no adapter yet (phase 3)"},
         ],
     }
     # The human block is stderr-only: stdout stays one clean document.
     assert result.stdout.count("\n") == 1
-    assert "⚠ full scan completed with gaps — 3 stage(s)" in result.stderr
-    assert "urls: 8 tool(s) skipped (no adapter yet (phase 3))" in result.stderr
+    assert "⚠ full scan completed with gaps — 2 stage(s)" in result.stderr
+    assert "vulns: 5 tool(s) skipped (no adapter yet (phase 3))" in result.stderr
     assert "this is not a failure" in result.stderr
 
 

@@ -16,7 +16,7 @@ Tools from the `vulns` stage are deliberately absent - see
 | `pyprobe` | python | core | active | 2 | yes |
 | `httpx` | binary | core | active | 2 | yes |
 | `httprobe` | binary | core | active | 3 | no |
-| `tlsx` | binary | core | active | 3 | no |
+| `tlsx` | binary | core | active | 3 | yes (wave 1, 2026-11-17) |
 
 
 
@@ -379,7 +379,7 @@ code, no title. A future adapter gets liveness only.
 ## `tlsx`
 
 - **Registry:** binary, core, active, phase 3, `stage: live`
-- **Adapter in this build:** none yet (phase 3, no adapter)
+- **Adapter in this build:** `src/reconkit/adapters/tlsx.py` (wave 1, 2026-11-17); runs as `-silent -json -san -duc -nc -u <host>` (one `-u` per host), liveness-only by ruling: `probe_status: true` becomes `ALIVE`, `false` becomes `UNKNOWN` with `detail="tls probe failed"`, and every SAN becomes a `SubdomainRecord` with `source="tlsx:san"` (the engine then persists it, PIT-49). Cert expiry/issuer/self-signed are **not** stored - that would need schema 7 and new `HostStatusRecord` fields
 - **Official source used:** https://github.com/projectdiscovery/tlsx
 - **Installed on this box:** `/home/kali/.reconkit/bin/tlsx`, `v1.4.0`
 - **Where it comes from:** https://github.com/projectdiscovery/tlsx/releases - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
