@@ -24,10 +24,6 @@ from reconkit.ui import render_doctor
 
 REPO = Path(__file__).resolve().parents[1]
 CONFIG = load_config(REPO / "config.yaml")
-# The real config pins rustscan in `tool_versions`, which now adds one warning
-# (accepted-and-ignored, 2026-11-17). Tests that assert the warning list use
-# NOPIN_CONFIG; the pin's own warning is tested on its own below.
-NOPIN_CONFIG = CONFIG.model_copy(update={"tool_versions": {}})
 
 TOOLS_YAML = """\
 version: 1
@@ -57,7 +53,7 @@ def report_for(
 ) -> DoctorReport:
     mapping = statuses or {}
     return collect_report(
-        config=NOPIN_CONFIG,
+        config=CONFIG,
         tools_path=write_tools(tmp_path),
         env=env if env is not None else {},
         scope_path=tmp_path / "scope.yaml",
@@ -203,21 +199,6 @@ def test_json_document_has_the_documented_shape(tmp_path: Path) -> None:
         }
     ]
     assert "placeholder-value" not in stream.getvalue()
-
-
-def test_a_tool_versions_pin_is_reported_once_as_ignored(tmp_path: Path) -> None:
-    """2026-11-17: the pin has no consumer, so doctor says so once."""
-    report = collect_report(
-        config=CONFIG,
-        tools_path=write_tools(tmp_path),
-        env={},
-        scope_path=tmp_path / "scope.yaml",
-        dpkg_status=tmp_path / "dpkg-status",
-        status_of=lambda spec: InstallStatus(installed=False),
-    )
-    ignored = [warning for warning in report.warnings if "tool_versions" in warning]
-    assert len(ignored) == 1
-    assert "docs/10_TOOL_SOURCES.md" in ignored[0]
 
 
 def test_missing_tools_keep_exit_code_zero(tmp_path: Path) -> None:

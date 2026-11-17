@@ -25,7 +25,7 @@ Tools from the `vulns` stage are deliberately absent - see
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/sensepost/gowitness
 - **Installed on this box:** `/home/kali/.reconkit/bin/gowitness`, v3 build with `git hash: dev`, `build env: dev`, `build time: dev`
-- **Install yourself:** `go install github.com/sensepost/gowitness@latest`; this is how it got installed in Phase 1 - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** github.com/sensepost/gowitness (this is how the binary used for the Phase 1 manual was obtained) - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** see note - v3 uses `scan` subcommands and file input
 
 #### Real `--help` (raw, full)

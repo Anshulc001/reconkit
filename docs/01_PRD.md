@@ -148,7 +148,7 @@
 
 ## 12. Open Questions
 
-No blocking product questions. Tool sources were verified against real releases during Part 10 and are listed in docs/10_TOOL_SOURCES.md §1; `nuclei` stays Phase 3. Which optional keys a user configures first remains a deployment preference, not a product decision; free mode needs none.
+No blocking product questions. Tool sources were verified against real releases during Part 10 and are listed in docs/10_TOOL_SOURCES.md §2; `nuclei` stays Phase 3. Which optional keys a user configures first remains a deployment preference, not a product decision; free mode needs none.
 
 ## 13. Definition of Done
 

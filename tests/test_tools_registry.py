@@ -202,9 +202,9 @@ def test_go_sources_are_pinned_to_nothing() -> None:
 def test_tools_yaml_carries_no_version_pin_field() -> None:
     """Replaces `test_version_pin_applies_to_a_plain_go_package`.
 
-    A pin can only live in `config.yaml` `tool_versions`, which no longer has a
-    consumer; the registry itself must not grow a `version:` or `tool_versions`
-    key that looks like one.
+    A pin has no home anywhere: reconkit installs and pins nothing (2026-11-17),
+    so the registry itself must not grow a `version:` or `tool_versions` key that
+    looks like one.
     """
     import yaml
 

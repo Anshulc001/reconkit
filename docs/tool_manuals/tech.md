@@ -70,7 +70,7 @@ https://testfire.net [200] [] [Altoro Mutual] [Apache Tomcat,Java]
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/urbanadventurer/WhatWeb
 - **Installed on this box:** `/usr/bin/whatweb`, `WhatWeb version 0.6.4`
-- **Install yourself:** `apt install whatweb`, needs sudo - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** Debian package `whatweb` - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** **yes** - `--input-file=FILE, -i`
 
 #### Real `--help` (raw, full)
@@ -274,7 +274,7 @@ when writing to a pipe unless `--color=never` is added, which a parser will need
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/EnableSecurity/wafw00f
 - **Installed on this box:** `/usr/bin/wafw00f`, `WAFW00F : v2.4.2`
-- **Install yourself:** `pipx install wafw00f` - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** PyPI package `wafw00f` - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** **yes** - `-i INPUT, --input-file=INPUT`
 
 #### Real `--help` (raw, full)
@@ -367,7 +367,7 @@ handful of probe requests, so it belongs to the active side.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/projectdiscovery/cdncheck
 - **Installed on this box:** `/home/kali/.reconkit/bin/cdncheck`, `[INF] Current version: v1.4.0`
-- **Install yourself:** from the GitHub release - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** https://github.com/projectdiscovery/cdncheck/releases - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** **yes** - `-i, -input string[]` (list of ip / dns)
 
 #### Real `--help` (raw, full)
@@ -462,7 +462,7 @@ for parseable output; without it the banner is the only thing on stdout.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/rverton/webanalyze
 - **Installed on this box:** `/home/kali/.reconkit/bin/webanalyze`, `v0.3.9`
-- **Install yourself:** `go install github.com/rverton/webanalyze/cmd/webanalyze@latest` - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** github.com/rverton/webanalyze - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** not verified - see the note; `-hosts` was not confirmed
 
 #### Real `--help` (raw, full)

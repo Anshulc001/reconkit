@@ -276,13 +276,6 @@ def collect_report(
         for check in tools
         if check.installed == WRONG_PROGRAM
     ]
-    if config.tool_versions:
-        # Accepted-and-ignored since the installer was removed (2026-11-17, D4):
-        # nothing reads a pin any more, so say so once instead of silently ignoring it.
-        warnings.append(
-            "tool_versions in config.yaml is accepted and ignored: reconkit no longer "
-            "installs or pins tools (docs/10_TOOL_SOURCES.md section 1)."
-        )
 
     current = tuple(python_version) if python_version is not None else tuple(sys.version_info[:3])
     scope_file = Path(scope_path) if scope_path is not None else DEFAULT_SCOPE_PATH

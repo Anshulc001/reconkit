@@ -19,7 +19,7 @@ Phase 2 (working core) is complete: passive discovery (`subs`, `dns`), `live`, `
 
 | Platform | What works |
 |---|---|
-| Kali / Ubuntu (native or WSL2) | Everything, including the real tools (installed by you). Python 3.11+, `git`, and your own `apt`/`go install` access for tools. |
+| Kali / Ubuntu (native or WSL2) | Everything, including the real tools - obtaining them is your own job, outside reconkit. Python 3.11+ and `git` for the checkout. |
 | Windows | `doctor`, `--mock` runs and the pure-Python passive flow. Real tools need a Linux checkout (native Kali/Ubuntu or WSL2); reconkit installs nothing on any platform, so there is no install command to refuse. |
 
 ## Quick start (Kali / Ubuntu)
@@ -30,8 +30,8 @@ cd /path/to/reconkit
 source .venv/bin/activate
 
 reconkit doctor                        # what is installed, what is missing
-# install the missing tools yourself: apt, go install or a release download.
-# Every tool's source is in docs/10_TOOL_SOURCES.md (and tools.yaml `source:`).
+# obtain any missing tool however you prefer; reconkit installs nothing.
+# Provenance for every tool is in docs/10_TOOL_SOURCES.md (and tools.yaml `source:`).
 # Optional: cp .env.example .env and add the API keys you have.
 cp scope.example.yaml scope.yaml      # edit with YOUR authorized targets
 reconkit passive -d example.com --mock
@@ -52,7 +52,7 @@ reconkit doctor
 reconkit passive -d example.com --mock
 ```
 
-In Git Bash, use `./scripts/bootstrap.sh` and `source .venv/Scripts/activate` instead. There is no install command to run on Windows or anywhere else: install the real tools yourself on a Linux checkout, using the per-tool sources in [docs/10_TOOL_SOURCES.md](docs/10_TOOL_SOURCES.md).
+In Git Bash, use `./scripts/bootstrap.sh` and `source .venv/Scripts/activate` instead. There is no install command to run on Windows or anywhere else: the real tools need a Linux checkout, and obtaining them is your own job - [docs/10_TOOL_SOURCES.md](docs/10_TOOL_SOURCES.md) shows where each project lives, not how to install it.
 
 ## Commands
 
@@ -103,7 +103,7 @@ No changes since run #1.
 | docs/07_TESTING.md | Test strategy |
 | docs/08_UX_FLOWS.md | User journeys |
 | docs/09_TOOL_CONTRACTS.md | Adapter contract and stage registry |
-| docs/10_TOOL_SOURCES.md | Where every tool comes from, lookup order, doctor's checks |
+| docs/10_TOOL_SOURCES.md | Tool reference: every tool, its stage, where the project lives, doctor's checks |
 | tools.yaml / config.yaml / scope.example.yaml | Registry, settings, scope template |
 
 ## Legal disclaimer

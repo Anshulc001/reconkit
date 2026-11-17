@@ -175,9 +175,9 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | `--no-color`, `-v/--verbose`, `-q/--silent` | Output control |
 | `--config PATH`, `--scope PATH`, `--db PATH` | Override file locations |
 
-`install`, `update` and `doctor --fix` no longer exist (removed 2026-11-17, docs/MASTER_PLAN.md D4). Installing tools is your package manager, `go install` or a release download; the per-tool sources are in docs/10_TOOL_SOURCES.md.
+`install`, `update` and `doctor --fix` no longer exist (removed 2026-11-17, docs/MASTER_PLAN.md D4). Obtaining a missing tool is entirely up to you and is never a reconkit command; docs/10_TOOL_SOURCES.md is a reference to where each project lives, not a how-to.
 
-`config.yaml` `tool_versions` is **accepted and ignored** for the same reason: there is no download left to pin. Keeping the key means an older config still loads; `doctor` prints one warning when the block is non-empty. The `install:` block (`dir`, `verify_checksums`) is accepted and ignored too.
+`config.yaml` has no `tool_versions` key: it was accepted and ignored after the installer went, and the key itself was removed on 2026-11-17, so a config that still carries one is rejected as an unknown key like any other typo. The `install:` block (`dir`, `verify_checksums`) is accepted and ignored.
 
 There is no `--speed` and no `--delay`: both were removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN.md D3). Tools start together and run at their own natural pace; nothing in reconkit throttles, delays or reshuffles them.
 
@@ -204,7 +204,7 @@ new.example.com    UNKNOWN    -       -        certspotter, hackertarget  MEDIUM
 
 ### Doctor output
 
-`doctor` prints one row per tool: `tool`, `stage`, `tier`, `installed`, `version`, `path`, `identity`. A `kind: http` or `kind: python` tool needs no binary, so `version` and `path` print `n/a (no binary required)` and `installed` is always `yes`; only `kind: binary` tools can be missing. A binary that exists but fails its identity check prints `wrong program` in `installed` (with its `path`) and counts as not ready. Below the table: per-stage coverage (`subs 6/11 ready`), system packages, the Keys table (names and sign-up URLs, never values), and `Missing tools: N. Install them yourself (apt, go install, or release download) — per-tool sources in docs/10_TOOL_SOURCES.md. Re-run doctor to confirm.` when anything is missing. A non-empty `config.yaml` `tool_versions` adds one `warning:` line saying the pin is accepted and ignored. `--json` writes one document with `type`, `python`, `python_ok`, `config`, `scope`, `db`, `tools`, `stages`, `system_packages`, `keys`, `missing`, `warnings` and `exit_code`, and keeps warnings at exit `0` (docs/10 section 3).
+`doctor` prints one row per tool: `tool`, `stage`, `tier`, `installed`, `version`, `path`, `identity`. A `kind: http` or `kind: python` tool needs no binary, so `version` and `path` print `n/a (no binary required)` and `installed` is always `yes`; only `kind: binary` tools can be missing. A binary that exists but fails its identity check prints `wrong program` in `installed` (with its `path`) and counts as not ready. Below the table: per-stage coverage (`subs 6/11 ready`), system packages, the Keys table (names and sign-up URLs, never values), and `Missing tools: N. Install them yourself (apt, go install, or release download) — per-tool sources in docs/10_TOOL_SOURCES.md. Re-run doctor to confirm.` when anything is missing. `--json` writes one document with `type`, `python`, `python_ok`, `config`, `scope`, `db`, `tools`, `stages`, `system_packages`, `keys`, `missing`, `warnings` and `exit_code`, and keeps warnings at exit `0` (docs/10 section 3).
 
 ### JSON (`--json`)
 

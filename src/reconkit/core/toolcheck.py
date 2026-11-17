@@ -25,7 +25,7 @@ Runner = Callable[..., ExecResult]
 
 
 def installed_copy(spec: ToolSpec, directory: Path) -> Path | None:
-    """The managed copy, else a copy on PATH, else None (docs/10 section 2)."""
+    """The managed copy, else a copy on PATH, else None (docs/10 section 3)."""
     if spec.binary is None:
         return None
     candidate = directory / spec.binary

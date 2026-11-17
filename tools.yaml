@@ -4,9 +4,9 @@
 #   version_regex, source,
 #   keys (optional list of {env,url,adds} for keys that are free to obtain; policy in docs/05_SECURITY.md 6.1).
 # `keys` is the only per-tool key field; there is no `needs_key` (the loader rejects it).
-# `source` is a human-readable install hint, never executed: reconkit installs nothing
-# (removed 2026-11-17, docs/MASTER_PLAN.md D4). Per-tool instructions live in docs/10_TOOL_SOURCES.md.
-# Version pins in config.yaml `tool_versions` are accepted and ignored (no consumer).
+# `source` is provenance only - where this tool's upstream project lives. reconkit does not
+# install or download anything; `source` is never executed and is shown only in
+# docs/10_TOOL_SOURCES.md.
 version: 1
 
 stages:

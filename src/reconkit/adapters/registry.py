@@ -35,8 +35,8 @@ class ToolSpec:
     """One tools.yaml entry: the only source of tool metadata.
 
     `binary`/`version_cmd`/`version_regex` are what doctor probes (docs/10
-    section 3); `source` is a human-readable install hint, never executed
-    (reconkit installs nothing since 2026-11-17).
+    section 3); `source` is provenance only - where the upstream project lives -
+    and is never executed, parsed into a command or read by any code.
     """
 
     name: str
@@ -67,7 +67,7 @@ def _document(file: Path) -> dict[str, Any]:
 
 
 def load_system_packages(path: str | Path | None = None) -> tuple[str, ...]:
-    """Return the top-level `system_packages` list (docs/10 section 3b)."""
+    """Return the top-level `system_packages` list (docs/10 section 3)."""
     file = Path(path) if path is not None else TOOLS_PATH
     raw = _document(file).get("system_packages", [])
     if not isinstance(raw, list) or not all(isinstance(item, str) and item for item in raw):

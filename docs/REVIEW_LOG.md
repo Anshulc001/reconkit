@@ -3294,6 +3294,163 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
   **Not verified:** a real `doctor` run on Windows (no Windows box here); the
   removed commands are gone on every platform by construction.
 
+## Install residue removal S1-S7 (2026-11-17, cleanup only)  (commit subject `chore: remove install residue; docs/10 becomes tool reference (reconkit installs nothing)`; hash filled by the next commit)
+
+- **Goal (owner batch, S1-S7):** reconkit installs nothing; `doctor` is the only
+tool-check surface and scans skip what is missing. This batch removes the last
+install residue. No new feature, no behaviour change, no code-logic change.
+- **Baseline before (raw):** `python --version` -> `Python 3.14.8`; `pytest -q` ->
+  `638 passed in 10.37s`; `ruff check .` -> `All checks passed!`;
+  `ruff format --check .` -> `57 files already formatted`;
+  `mypy src/reconkit` -> `Success: no issues found in 29 source files`.
+  `git status --short` -> empty; `git log --oneline -1` -> `01daa8b`.
+- **S1 stale bytecode.** `find . -name '__pycache__' -type d -exec ls -la {} \; |
+  grep -i installer` showed four test bytecode files; the filtered sweep found
+  five (`test_install_cli`, `test_installer_backends`,
+  `test_installer_github_release`, `test_installer_registry`,
+  `test_installer_verify`, all `tests/__pycache__`, 03:38-05:12). Deleted with
+  `find . -name '*.pyc' -exec rm {} \;`. `__pycache__` dirs **73 before and 73
+  after** (only the file contents went), no installer `.pyc` remains, and
+  `git status --short` stayed empty (all gitignored). No `src/reconkit/installer`
+  directory and no `tests/test_install*` file exists any more.
+- **S2 `config.yaml` `tool_versions`.** Removed the four lines (three comments
+  plus the pin) at old lines 31-34; `config.yaml` 44 -> 40 lines, and the
+  `install:` block is untouched. `grep -n 'tool_versions' src/reconkit/config.py`
+  before: `81:    tool_versions: dict[str, str] = Field(default_factory=dict)`; the
+  field is gone, so `grep -rn 'tool_versions' src/` is now empty. `doctor.py`'s
+  accepted-and-ignored warning block is gone:
+  `grep -rn 'tool_versions' src/reconkit/doctor.py src/reconkit/ui.py` -> empty.
+  `grep -rn 'tool_versions' tests/` -> three lines, all in
+  `tests/test_tools_registry.py`, all about `tools.yaml` never carrying the key
+  (kept). `reconkit doctor` before/after: the diff is exactly the two warning
+  lines, 180 -> 178 lines; `Missing tools: 3. Install them yourself (apt, go
+  install, or release download) - per-tool sources in docs/10_TOOL_SOURCES.md.
+  Re-run doctor to confirm.` is byte-identical in both.
+- **S3 docs/10 rewritten as a tool reference.** 243 -> 149 lines. New sections:
+  1 what this document is, 2 the tool table, 3 how doctor checks a tool, 4 what
+  reconkit does NOT do. The table has **48 rows**, and a script compared it with
+  `tools.yaml`: `doc rows: 48 registry tools: 48`, no name missing, no extra, no
+  stage mismatch. The `source:` strings are rendered as provenance (repo path,
+  release URL, `Debian package X`, `PyPI package X`), never as commands;
+  `grep -nE 'apt install|apt-get install|go install|pip install|pipx install|
+  curl -|wget |git clone|brew install' docs/10_TOOL_SOURCES.md` -> no match.
+- **S4 SETUP.md trimmed.** The base-packages apt block, the whole "install the
+  recon tools" section and the Windows "install the real tools" advice are gone,
+  as is the `libpcap-dev` apt troubleshooting row; the one-line pointer is in
+  section 3 and `pip install -e ".[dev]"` (reconkit itself, twice, plus the
+  PowerShell copy) is the only install command left.
+- **S5 README + root sweep.** README lost `apt`/`go install` access wording, the
+  quick-start "install the missing tools yourself" comment and the Windows
+  "install the real tools" sentence; the docs table row now describes docs/10 as
+  a reference. The batch's literal root sweep uses GNU-grep-incompatible
+  `--max-depth`, so `grep -rnE 'install' --include='*.md' --max-depth=1 .` exits
+  `2` (`grep: unrecognized option '--max-depth=1'`); the equivalent per-file
+  sweep was run instead and its only findings are the AGENTS.md lines named
+  under Findings below.
+- **S6 `tools.yaml` header.** The `source` comment now reads "`source` is
+  provenance only - where this tool's upstream project lives. reconkit does not
+  install or download anything; `source` is never executed and is shown only in
+  docs/10_TOOL_SOURCES.md." No `source:` value was changed (19 `source:` lines
+  still contain `go install`/`pipx install`; they are frozen by the batch text
+  and are reported under Findings). The stale `tool_versions` comment line is
+  gone, and `ToolSpec`'s docstring says provenance too.
+  `grep -rnE '\.source\b|source:' src/reconkit/` -> only `ToolSpec.source`'s
+  declaration (`registry.py:53`) and its assignment (`registry.py:147`), plus
+  unrelated `source` fields in `models.py`, `ui.py` and the `parse_subdomain_lines`
+  parameter in `base.py`; `grep -rnE '\b(spec|entry|tool|candidate)\.source\b'
+  src/` -> no read sites, so `source` is load-and-store only, never executed.
+- **S7 sweep classification (93 raw hits).** (a) historical audit trail:
+  `docs/REVIEW_LOG.md` (35), `docs/PROGRESS.md` (8), `docs/MASTER_PLAN.md` (2) -
+  keep. (b) reconkit self-install: `SETUP.md:27`, `SETUP.md:35`, `README.md:49` -
+  keep. (c) real residue fixed in this batch: `docs/08` Flow 2's
+  `sudo apt install`/`go install`/`pipx install` steps, `SETUP.md`'s tool
+  sections, `README.md:22`/`:33`, 30 `**Install yourself:**` bullets across the
+  seven tool manuals, `docs/tool_manuals/ports.md`'s "Why 2.3.0 is pinned" block
+  (it presented a `tool_versions` snippet for a key that no longer exists),
+  `docs/02:178`/`:180`, `docs/01:151`, `docs/05:48`/`:60`/`:65` and
+  `tools.yaml`'s header. (d) upstream usage, not an install command:
+  `docs/tool_manuals/subs.md`'s five `curl` transcript lines and
+  `tests/test_tools_registry.py:342`'s captured Python-`httpx` stderr fixture -
+  keep. Remaining hits are prose that says reconkit installs nothing, or the
+  frozen footer text (Findings 1).
+- **Docs first, then code.** docs/02 section 3's `tool_versions` paragraph and
+  its doctor sentence, docs/01, docs/05, docs/08, docs/10 (whole file),
+  `SETUP.md`, `README.md` and the manuals were edited before the two `src/`
+  changes that had to follow (`config.py` field, `doctor.py` warning). Section
+  renumbering: docs/10 old §1 (per-tool sources) is now §2 and old §2 (lookup
+  order) is now §3, so `docs/01`, `docs/05`, `docs/08`, the manuals README and
+  four `src/` docstrings (`config.bin_dir`, `base.managed_bin_dir`,
+  `toolcheck.installed_copy`, `registry.load_system_packages`) were re-pointed.
+  docs/10's old §6 (`.env` setup) is gone, so docs/05's two `§6` pointers now
+  name `.env.example`/`SETUP.md` (which keeps that step).
+- **Tests changed (name / old / new / reason).**
+  1. `tests/test_doctor.py::test_a_tool_versions_pin_is_reported_once_as_ignored`
+     - **deleted.** Old: built a config with a pin and asserted one warning
+     naming docs/10; new: nothing; reason: the warning and the field it read no
+     longer exist, so the test asserted removed behaviour.
+  2. `tests/test_doctor.py::report_for` (helper, not a test) - old:
+     `config=NOPIN_CONFIG` where `NOPIN_CONFIG = CONFIG.model_copy(
+     update={"tool_versions": {}})`; new: `config=CONFIG`, and the constant plus
+     its four-line comment are gone; reason: the real config no longer pins
+     anything, so the workaround had nothing left to neutralise.
+  3. `tests/test_config.py::test_unknown_top_level_key_is_rejected` - old
+     comment: the real file's `tool_versions` value is no longer the literal
+     `{}`; new comment: append rather than string-replace so the test does not
+     depend on one line's spelling; reason: the line the old comment explained
+     was deleted. **No assertion changed.**
+  4. `tests/test_tools_registry.py::test_tools_yaml_carries_no_version_pin_field`
+     - old docstring: "a pin can only live in `config.yaml` `tool_versions`";
+     new: "a pin has no home anywhere"; reason: the key no longer exists.
+     **No assertion changed** (`assert "tool_versions" not in data` still pins
+     the registry, not the config).
+  Suite 638 -> 637 collected, exactly the one deleted test.
+- **Structural consequence, documented not hidden:** with `extra="forbid"` on
+  `_StrictModel`, removing the field means a `config.yaml` that still carries
+  `tool_versions` now fails to load with exit 2 instead of being accepted and
+  ignored. docs/02 section 3 says so. The batch text asked for the field to be
+  removed, so this is the requested cleanup, not a regression - but it is a
+  behaviour change for an older config file and is recorded here.
+- **Gate after (raw):** `pytest -q` -> `637 passed in 10.55s`;
+  `ruff check .` -> `All checks passed!`; `ruff format --check .` -> `57 files
+  already formatted`; `mypy src/reconkit` -> `Success: no issues found in 29
+  source files`.
+- **Acceptance runs (raw):** `reconkit doctor` exit 0, 48 rows
+  (`reconkit doctor --json` -> `tool rows: 48`, `missing: 3`, `warnings: []`,
+  `exit_code: 0`), footer `Missing tools: 3. ...` unchanged, **no
+  `tool_versions` warning**. `reconkit run -d example.com --mock --scope
+  /tmp/none.yaml --db /tmp/smoke.db --no-color` exit 0, stages `subs` 6/6 and
+  `dns` 1/1, `10 hosts`, `7 ok, 0 failed, 9 skipped`. **Mock mode runs the
+  fixtures without consulting installation**, so no `not installed` skip can
+  appear in a `--mock` run - the skips there read `no adapter yet (phase 3)`.
+  The `not installed` path is covered by
+  `tests/test_engine.py::test_an_uninstalled_tool_is_skipped_and_the_others_still_run`
+  (`1 passed, 91 deselected`). `sha256sum scope.yaml` ->
+  `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` before the
+  commit; `scope.yaml` is untouched (`ls -la` still `Nov 15 15:51`, 265 bytes) and
+  no scope edit was made.
+- **Findings left for the owner (not changed):**
+  1. The doctor footer `Missing tools: N. Install them yourself (apt, go
+     install, or release download) ...` in `ui.py:852-855` still names install
+     routes. It is the one install-flavoured string left, and the batch text
+     explicitly requires it to stay identical before/after, so it was frozen.
+     Changing it is a one-line code change plus `tests/test_doctor.py:208`,
+     `docs/02:207`, `docs/08:10` and `docs/01:52`.
+  2. The 19 `tools.yaml` `source:` values still spell `go install ...` /
+     `pipx install ...`. The batch text froze them; they are never executed and
+     docs/10 renders them as provenance.
+  3. Nine tool-manual bullets still read `**Install command:** nothing to
+     install (`install: {method: none}`)`, a reference to a tools.yaml field that
+     no longer exists. They instruct nothing, so they were left for a later
+     sweep rather than rewritten here.
+  4. `AGENTS.md` still points at `docs/10_TOOL_INSTALLER.md` (line 64), says
+     docs/05 covers "installer" (line 59), and its registry rule and tool
+     recipe mention install sources and an install method (lines 77, 112, 121).
+     The instruction file was not edited in this batch.
+  5. `docs/tool_manuals/ports.md:540-543` keeps a `reconkit install rustscan`
+     transcript labelled historical, and `docs/tool_manuals/README.md:57,137`
+     mention the removed command in the past tense; both are evidence, not
+     instructions.
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

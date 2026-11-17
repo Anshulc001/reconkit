@@ -76,7 +76,7 @@ counted as `blocked`, never connected to (PIT-34).
 - **Adapter in this build:** `src/reconkit/adapters/naabu.py` (present but blocked at selection time)
 - **Official source used:** https://github.com/projectdiscovery/naabu
 - **Installed on this box:** `/usr/bin/naabu`, `[INF] Current Version: 2.7.0`
-- **Install yourself:** from the GitHub release; `requires_apt: [libpcap-dev]` - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** https://github.com/projectdiscovery/naabu/releases - the registry marks `requires_apt: [libpcap-dev]` - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** **yes** - `-list, -l string` (list of hosts, file)
 
 #### Real `--help` (raw, full)
@@ -252,7 +252,7 @@ of it (connect scan, no root).
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://nmap.org/book/man.html
 - **Installed on this box:** `/usr/bin/nmap`, `Nmap version 7.991`
-- **Install yourself:** `apt install nmap`, needs sudo - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** Debian package `nmap` - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** **yes** - `-iL <inputfilename>`
 
 #### Real `--help` (raw, full)
@@ -429,7 +429,7 @@ D3), so no adapter passes `-T` any more (a bare `-T` was never valid; it needed
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/robertdavidgraham/masscan
 - **Installed on this box:** `/usr/bin/masscan`, `Masscan version 1.3.2`
-- **Install yourself:** `apt install masscan`, needs sudo - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** Debian package `masscan` - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** **yes** - `-iL` for a list file
 
 #### Real `--help` (raw, full)
@@ -514,35 +514,23 @@ box**. `masscan --version` exits 1 while printing a valid banner (PIT-35).
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/RustScan/RustScan
 - **Installed on this box:** `/home/kali/.reconkit/bin/rustscan`, `rustscan 2.3.0`
-- **Install yourself:** pinned `github_release` 2.3.0 - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** https://github.com/bee-san/RustScan/releases - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** `-a, --addresses` takes a comma-separated list; unverified against a scan
 
-#### Why 2.3.0 is pinned (2026-11-17)
+#### Release note: 2.3.0 versus 2.4.1 (2026-11-17)
 
 The latest release, 2.4.1, publishes `x86_64-linux-rustscan.tar.gz.zip` - a zip
-that contains a `.tar.gz` that contains the binary. `reconkit`'s extractor
-unwraps exactly one archive layer (`docs/10` section on extraction), so no
-`asset_pattern` alone can install it. The 2.4.1 names also use `x86_64`/
-`aarch64` where `{arch}` renders `amd64`/`arm64`, so one pattern cannot cover
-both architectures, and no recent release publishes a checksums asset.
+that contains a `.tar.gz` that contains the binary, so it takes a manual unpack.
+The 2.4.1 asset names also use `x86_64`/`aarch64` where the older names use
+`amd64`/`arm64`, and no recent release publishes a checksums asset.
 
 The newest release whose zip holds the binary directly is 2.3.0
-(`rustscan-2.3.0-x86_64-linux.zip`, member `rustscan`), so the registry pins it:
+(`rustscan-2.3.0-x86_64-linux.zip`, member `rustscan`), which is the version
+documented here and the one the `tools.yaml` `source:` string names.
 
-```yaml
-# config.yaml: the pin lives here (docs/10: load_plans(versions=...))
-tool_versions: { rustscan: "2.3.0" }
-
-# tools.yaml
-rustscan: {..., install: {method: github_release, repo: bee-san/RustScan,
-           asset_pattern: "rustscan-{version}-x86_64-linux.zip",
-           verify_checksums: false}, notes: "Pinned 2.3.0 ..."}
-```
-
-`verify_checksums: false` is required because 2.3.0 publishes no checksums file
-(`docs/10`: `false` only for a release that publishes none), so the post-install
-identity probe (`rustscan --version`) is the only verification. This is an
-amd64-only pin.
+reconkit pins nothing and downloads nothing (the installer was removed on
+2026-11-17), so this paragraph is a note about the releases - not a pin, not a
+procedure.
 
 **Future follow-up, not a current capability:** nested-archive extraction (unwrap
 a zip/tar.gz that contains one archive member) would have let the registry install
@@ -574,7 +562,7 @@ path `~/.reconkit/bin/rustscan`, identity `ok`. A second install is a no-op:
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/s0md3v/Smap
 - **Installed on this box:** `/home/kali/.reconkit/bin/smap`, `Smap 1.0.0-beta`
-- **Install yourself:** `go install github.com/s0md3v/smap/cmd/smap@latest` - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** github.com/s0md3v/smap - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** **yes** - `-iL <filename>` (or `-` for stdin)
 
 #### Real `--help` (raw, full)

@@ -80,7 +80,7 @@ scheme writes no record at all (`unreachable=`), never `DEAD`.
 - **Adapter in this build:** `src/reconkit/adapters/httpx_tool.py`
 - **Official source used:** https://github.com/projectdiscovery/httpx
 - **Installed on this box:** `/home/kali/.reconkit/bin/httpx` and `/home/kali/go/bin/httpx`, `[INF] Current Version: v1.12.0`
-- **Install yourself:** from the GitHub release; Kali's apt package is `httpx-toolkit` and the Python `httpx` CLI is a different program - PIT-14 - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** https://github.com/projectdiscovery/httpx/releases - Kali ships it as `httpx-toolkit`, and the Python `httpx` CLI is a different program (PIT-14) - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** **yes** - `-l, -list string` (input file of hosts)
 
 #### Real `--help` (raw, full)
@@ -324,7 +324,7 @@ Format: `url [status] [location] [title] [tech]`. The `[]` is the empty
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/tomnomnom/httprobe
 - **Installed on this box:** `/home/kali/.reconkit/bin/httprobe` (no version flag; `-h` prints usage)
-- **Install yourself:** `go install github.com/tomnomnom/httprobe@latest` - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** github.com/tomnomnom/httprobe - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** **yes, via stdin** - one host per line
 
 #### Real `--help` (raw, full)
@@ -382,7 +382,7 @@ code, no title. A future adapter gets liveness only.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/projectdiscovery/tlsx
 - **Installed on this box:** `/home/kali/.reconkit/bin/tlsx`, `v1.4.0`
-- **Install yourself:** from the GitHub release - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** https://github.com/projectdiscovery/tlsx/releases - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** **yes** - `-l, -list string` (target list file)
 
 #### Real `--help` (raw, full)

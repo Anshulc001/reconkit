@@ -17,7 +17,7 @@ DEFAULT_CONFIG_PATH = Path("config.yaml")
 
 
 def bin_dir(home: Path | None = None) -> Path:
-    """The managed binary directory: `~/.reconkit/bin` (docs/10 section 2).
+    """The managed binary directory: `~/.reconkit/bin` (docs/10 section 3).
 
     Hard-coded on purpose: doctor's lookup and every adapter's binary resolution
     check this path first, and the value must not depend on which config file a
@@ -78,7 +78,6 @@ class AppConfig(_StrictModel):
     timeouts: Timeouts
     confidence: ConfidenceConfig
     wildcard_check: WildcardCheck
-    tool_versions: dict[str, str] = Field(default_factory=dict)
     install: InstallConfig
     webhook: Webhook | None = None
 

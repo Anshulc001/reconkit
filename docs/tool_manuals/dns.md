@@ -64,7 +64,7 @@ produce `DEAD` (PIT-01).
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/projectdiscovery/dnsx
 - **Installed on this box:** `/usr/bin/dnsx`, `[INF] Current Version: 1.3.1`
-- **Install yourself:** from the GitHub release - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** https://github.com/projectdiscovery/dnsx/releases - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** **yes** - `-l, -list` (file, comma separated, or stdin)
 
 #### Real `--help` (raw, full)
@@ -193,7 +193,7 @@ exit 0
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/d3mondev/puredns
 - **Installed on this box:** `/home/kali/.reconkit/bin/puredns`, `puredns version v2.1.1`
-- **Install yourself:** `go install github.com/d3mondev/puredns/v2@latest` - sources in docs/10_TOOL_SOURCES.md; needs `massdns` on `PATH`
+- **Where it comes from:** github.com/d3mondev/puredns (v2) - reference: docs/10_TOOL_SOURCES.md; `massdns` must also be on `PATH`; reconkit does not install it
 - **Multi-domain input:** **yes** - takes a file of domains (`puredns resolve domains.txt`)
 
 #### Real `--help` (raw, full)
@@ -270,7 +270,7 @@ or it has no resolvers to ask. It prints a banner on stderr even with `-q`.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/blechschmidt/massdns
 - **Installed on this box:** `/usr/bin/massdns`, `dpkg-query` version `1.1.0-0kali2`
-- **Install yourself:** `apt install massdns`, needs sudo - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** Debian package `massdns` - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** **yes** - a domain-list file as the positional argument (or stdin)
 
 #### Real `--help` (raw, full)
@@ -386,7 +386,7 @@ only), so a future adapter must parse text. Note the trailing dots on names.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://bind9.readthedocs.io/en/latest/manpages.html#dig
 - **Installed on this box:** `/usr/bin/dig`, `DiG 9.20.30-1-Debian`
-- **Install yourself:** `apt install dnsutils`, needs sudo - sources in docs/10_TOOL_SOURCES.md
+- **Where it comes from:** Debian package `dnsutils` (provides `dig`) - reference: docs/10_TOOL_SOURCES.md; reconkit does not install it
 - **Multi-domain input:** **yes** - `-f filename` (batch mode reads a file of queries)
 
 #### Real `--help` (raw, full)

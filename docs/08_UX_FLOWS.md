@@ -1,6 +1,6 @@
 # UX Flows
 
-Journey overview: **setup -> doctor -> install tools yourself -> scope -> passive -> live/ports -> diff -> export**.
+Journey overview: **setup -> doctor -> obtain the tools you need -> scope -> passive -> live/ports -> diff -> export**.
 
 ## Flow 1 - First run (setup)
 
@@ -12,14 +12,14 @@ Journey overview: **setup -> doctor -> install tools yourself -> scope -> passiv
 - **Success:** exit code 0 with warnings listed.
 - **Failure:** Python < 3.11 or an unreadable `config.yaml`: clear message, exit code 1. `doctor` runs on every platform; reconkit installs nothing anywhere, so there is no platform-specific install path (docs/10 §4).
 
-## Flow 2 - Install tools (yourself)
+## Flow 2 - Obtaining tools (your own job)
 
-reconkit installs nothing: `install`, `update` and `doctor --fix` were removed on 2026-11-17 (docs/MASTER_PLAN.md D4).
+reconkit installs nothing: `install`, `update` and `doctor --fix` were removed on 2026-11-17 (docs/MASTER_PLAN.md D4). How you obtain a tool is outside reconkit entirely, and this document does not prescribe a route.
 
 1. `reconkit doctor` lists every missing tool and the count in the footer line above.
-2. Look the tool up in docs/10_TOOL_SOURCES.md §1 (the same `source:` string as `tools.yaml`): an apt package, a `go install` line, a `pipx install` line, or a release page.
-3. Install it with your own tool: `sudo apt install <package>`, `go install <package>@latest`, `pipx install <tool>`, or download and unpack a release asset. No reconkit command runs any of these, and reconkit never uses `sudo`.
-4. Make sure the binary is on `PATH` (Go lands in `~/go/bin` by default), or copy it into `~/.reconkit/bin`, which is checked first (docs/10 §2).
+2. docs/10_TOOL_SOURCES.md §2 shows where each project lives (the same `source:` string as `tools.yaml`): provenance, not a procedure.
+3. Obtain whichever tool you want by whatever route you prefer. No reconkit command installs, downloads or updates anything, and reconkit never uses `sudo`.
+4. Make sure the binary is on `PATH`, or in `~/.reconkit/bin`, which is checked first (docs/10 §3).
 5. Re-run `reconkit doctor` to confirm. A tool that is present but is not the expected program shows `wrong program` in the `installed` column and counts as not ready.
 
 - **Loading state:** none. No process starts, so there is no progress line or summary table.

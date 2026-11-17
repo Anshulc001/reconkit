@@ -45,7 +45,7 @@ Implemented in `core/scope.py`. Rules:
 - reconkit **installs nothing** (removed 2026-11-17, docs/MASTER_PLAN.md D4): no downloads, no checksum handling, no `sudo`, no package-manager call, no rollback. `install`, `update` and `doctor --fix` do not exist.
 - `tools.yaml` `source:` strings are documentation for the operator. They are never executed, never parsed into a command line, and never fetched by reconkit.
 - No `curl | bash`. No running downloaded scripts - reconkit runs no installer script at all.
-- Installation is the operator's own action, outside reconkit's trust boundary. `doctor` only reads what is already on disk (lookup order and the "wrong program" rule: docs/10 sections 2-4).
+- Installation is the operator's own action, outside reconkit's trust boundary. `doctor` only reads what is already on disk (lookup order and the "wrong program" rule: docs/10 sections 3-4).
 
 ## 6. Secrets
 
@@ -57,12 +57,12 @@ Implemented in `core/scope.py`. Rules:
 
 ### 6.1 API Keys: Free Mode by Default
 
-This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 flags), `docs/09_TOOL_CONTRACTS.md` (§2 `keys` schema) and `docs/10_TOOL_SOURCES.md` (§6 `.env` setup).
+This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 flags) and `docs/09_TOOL_CONTRACTS.md` (§2 `keys` schema); key setup itself is `.env.example` and `SETUP.md`.
 
 1. **Free mode is the default.** Every `core` tool must produce useful results with zero keys. Enhanced mode turns on per tool as soon as that tool's key is set.
 2. **Keys come only from `.env`** (loaded at startup). Never from CLI flags, never logged, never in URLs or query strings; `redact()` covers them in errors, logs and `tool_runs.error`.
 3. **Only keys that are free to obtain are supported.** A tool whose only key is paid gets no key support at all (it runs free or is skipped).
-4. **`doctor` always shows a Keys table** (tool, set/missing, what it adds, sign-up URL). On the scan commands, `--no-keys` forces free mode and ignores `.env` (flag list in `docs/02_CLI_UX.md`). Nothing prompts for keys: the removed `install` prompt was the only one, and since 2026-11-17 the docs tell you to `cp .env.example .env` yourself (docs/10_TOOL_SOURCES.md §6). `.env` is never overwritten by reconkit.
+4. **`doctor` always shows a Keys table** (tool, set/missing, what it adds, sign-up URL). On the scan commands, `--no-keys` forces free mode and ignores `.env` (flag list in `docs/02_CLI_UX.md`). Nothing prompts for keys: the removed `install` prompt was the only one, and since 2026-11-17 the docs tell you to `cp .env.example .env` yourself (`SETUP.md`). `.env` is never overwritten by reconkit.
 5. **`tools.yaml` schema:** an optional `keys:` list per tool, each entry `{env, url, adds}`. A tool without keys has no `keys` entry. `keys` is the single source of truth for a tool's key environment variables: there is no separate `needs_key` field, and `registry` rejects an entry that still carries one. Tools that read keys from their own config file (`subfinder` reads `$HOME/.config/subfinder/provider-config.yaml`) still list `keys`; the adapter writes the values from the allowed env names into a temporary provider-config file (mode 0600, deleted in a `finally` block) and never puts the value in argv or a log.
 
 ## 7. Environment Variables

@@ -1,243 +1,149 @@
-# Tool Sources
+# Tool Reference
 
-reconkit **does not install tools**. `install`, `update` and `doctor --fix` were
-removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN.md D4): no
-downloads, no `sudo`, no rollback, no version pins. This document tells you
-where each binary comes from, how reconkit finds it, and how `doctor` decides it
-is usable.
+This is a reference of the tools reconkit uses. reconkit does not install any of
+them. To see which are present on your machine, run `reconkit doctor`. To get a
+missing tool, obtain it however you prefer - your distro's package manager, the
+upstream release page, your language's package ecosystem - this document does
+not tell you how.
 
-`tools.yaml` is still the registry. Each binary tool carries a `source:` string,
-which is a human-readable hint and is **never executed**. `doctor` prints the
-count of missing tools and points here; installing them is your package manager,
-`go install`, or a release download.
+## 1. What this document is
 
-## 1. Per-tool sources
+`tools.yaml` is the registry of every tool reconkit may run, and it is the only
+list. This document mirrors that registry for a human reader: one row per tool,
+its stage, what it does, and where the upstream project lives. The last column
+is provenance only - it is copied from the entry's `source:` string, is never
+executed, and is not a procedure. Nothing here tells you how to install
+anything, because installing is not something reconkit does or asks for.
 
-| Tool | Stage | Binary | Source (`tools.yaml` `source:`) |
+## 2. The tool table
+
+| Tool | Stage | What it does | Where the project lives |
 |---|---|---|---|
-| `subfinder` | subs | `subfinder` | https://github.com/projectdiscovery/subfinder/releases (or: go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest) |
-| `assetfinder` | subs | `assetfinder` | go install github.com/tomnomnom/assetfinder@latest |
-| `amass` | subs | `amass` | apt: amass |
-| `findomain` | subs | `findomain` | https://github.com/Findomain/Findomain/releases (findomain-linux.zip; no checksums are published) |
-| `chaos` | subs | `chaos` | https://github.com/projectdiscovery/chaos-client/releases (the archive member is chaos-client) |
-| `github_subdomains` | subs | `github-subdomains` | go install github.com/gwen001/github-subdomains@latest |
-| `dnsx` | dns | `dnsx` | https://github.com/projectdiscovery/dnsx/releases |
-| `puredns` | dns | `puredns` | go install github.com/d3mondev/puredns/v2@latest (also needs massdns) |
-| `massdns` | dns | `massdns` | apt: massdns |
-| `dig` | dns | `dig` | apt: dnsutils (provides dig) |
-| `httpx` | live | `httpx` | https://github.com/projectdiscovery/httpx/releases (Kali's apt package is httpx-toolkit; the python 'httpx' CLI is a different program) |
-| `httprobe` | live | `httprobe` | go install github.com/tomnomnom/httprobe@latest |
-| `tlsx` | live | `tlsx` | https://github.com/projectdiscovery/tlsx/releases |
-| `smap` | ports | `smap` | go install github.com/s0md3v/smap/cmd/smap@latest |
-| `naabu` | ports | `naabu` | https://github.com/projectdiscovery/naabu/releases (needs libpcap-dev; use connect scan -scan-type c when not root) |
-| `nmap` | ports | `nmap` | apt: nmap |
-| `rustscan` | ports | `rustscan` | https://github.com/bee-san/RustScan/releases (2.3.0 is the newest flat zip; 2.4.1 ships a nested .tar.gz.zip) |
-| `masscan` | ports | `masscan` | apt: masscan |
-| `httpx_tech` | tech | `httpx` | https://github.com/projectdiscovery/httpx/releases (same binary as httpx; this row reuses it with -td) |
-| `whatweb` | tech | `whatweb` | apt: whatweb |
-| `wafw00f` | tech | `wafw00f` | pipx install wafw00f |
-| `cdncheck` | tech | `cdncheck` | https://github.com/projectdiscovery/cdncheck/releases |
-| `webanalyze` | tech | `webanalyze` | go install github.com/rverton/webanalyze/cmd/webanalyze@latest |
-| `gau` | urls | `gau` | go install github.com/lc/gau/v2/cmd/gau@latest |
-| `waybackurls` | urls | `waybackurls` | go install github.com/tomnomnom/waybackurls@latest |
-| `katana` | urls | `katana` | https://github.com/projectdiscovery/katana/releases |
-| `hakrawler` | urls | `hakrawler` | go install github.com/hakluke/hakrawler@latest |
-| `gospider` | urls | `gospider` | go install github.com/jaeles-project/gospider@latest |
-| `subjs` | urls | `subjs` | go install github.com/lc/subjs@latest |
-| `unfurl` | urls | `unfurl` | go install github.com/tomnomnom/unfurl@latest |
-| `urlfinder` | urls | `urlfinder` | https://github.com/projectdiscovery/urlfinder/releases |
-| `nuclei` | vulns | `nuclei` | https://github.com/projectdiscovery/nuclei/releases |
-| `subzy` | vulns | `subzy` | go install github.com/PentestPad/subzy@latest |
-| `dnsreaper` | vulns | `dnsreaper` | https://github.com/punk-security/dnsReaper (install by hand: no setup.py/pyproject.toml and no PyPI package) |
-| `nikto` | vulns | `nikto` | apt: nikto |
-| `ffuf` | vulns | `ffuf` | go install github.com/ffuf/ffuf/v2@latest |
-| `gowitness` | shots | `gowitness` | go install github.com/sensepost/gowitness@latest |
-| `dalfox` | vulns | `dalfox` | go install github.com/hahwul/dalfox/v2@latest |
-| `crlfuzz` | vulns | `crlfuzz` | go install github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest |
-| `sqlmap` | vulns | `sqlmap` | apt: sqlmap |
+| `crtsh` | subs | Certificate Transparency log search for hostnames | in-tree adapter, no external binary |
+| `certspotter` | subs | Cert Spotter API search for issued certificates | in-tree adapter, no external binary |
+| `otx` | subs | AlienVault OTX passive DNS lookup (optional key) | in-tree adapter, no external binary |
+| `hackertarget` | subs | HackerTarget host-search API | in-tree adapter, no external binary |
+| `urlscan` | subs | urlscan.io search API (optional key) | in-tree adapter, no external binary |
+| `subfinder` | subs | Passive subdomain enumeration over many sources | https://github.com/projectdiscovery/subfinder/releases |
+| `assetfinder` | subs | Subdomain finder built on CT and other public sources | github.com/tomnomnom/assetfinder |
+| `amass` | subs | OWASP attack-surface and subdomain enumeration (passive by default in v5) | Debian package `amass` |
+| `findomain` | subs | Fast subdomain finder across several passive sources | https://github.com/Findomain/Findomain/releases |
+| `chaos` | subs | ProjectDiscovery Chaos dataset lookup (optional key) | https://github.com/projectdiscovery/chaos-client/releases |
+| `github_subdomains` | subs | GitHub code search for domains (optional key) | github.com/gwen001/github-subdomains |
+| `dnspython` | dns | Resolver used for A/CNAME/NS lookups and NXDOMAIN classification | in-tree adapter, no external binary |
+| `dnsx` | dns | Bulk DNS toolkit for A/CNAME resolution | https://github.com/projectdiscovery/dnsx/releases |
+| `puredns` | dns | Mass resolver and wildcard filter built on `massdns` | github.com/d3mondev/puredns (v2) |
+| `massdns` | dns | High-throughput bulk DNS resolver used by `puredns` | Debian package `massdns` |
+| `dig` | dns | BIND query tool used for CNAME/NS hygiene checks | Debian package `dnsutils` (provides `dig`) |
+| `pyprobe` | live | HTTP/TLS probe used for the ALIVE classification | in-tree adapter, no external binary |
+| `httpx` | live | HTTP probe: status, title, server, redirects | https://github.com/projectdiscovery/httpx/releases (Kali ships `httpx-toolkit`; the Python `httpx` CLI is a different program) |
+| `httprobe` | live | Probes a host list for working HTTP/HTTPS servers | github.com/tomnomnom/httprobe |
+| `tlsx` | live | TLS handshake data: SANs, CN, expiry, JARM | https://github.com/projectdiscovery/tlsx/releases |
+| `smap` | ports | Passive port data from internet-wide scan datasets | github.com/s0md3v/smap |
+| `pyscan` | ports | TCP connect scan gated by the scope CIDR predicate | in-tree adapter, no external binary |
+| `naabu` | ports | Fast SYN/connect port scanner | https://github.com/projectdiscovery/naabu/releases (needs `libpcap-dev`) |
+| `nmap` | ports | Port scan with service and version fingerprints | Debian package `nmap` |
+| `rustscan` | ports | Fast port scanner that hands open ports to `nmap` | https://github.com/bee-san/RustScan/releases |
+| `masscan` | ports | Very fast Internet-wide style port scanner (`opt_in`) | Debian package `masscan` |
+| `httpx_tech` | tech | Technology and CDN detection; reuses the `httpx` binary with `-td` | https://github.com/projectdiscovery/httpx/releases (same binary as `httpx`) |
+| `whatweb` | tech | Web technology and CMS fingerprinting | Debian package `whatweb` |
+| `wafw00f` | tech | WAF product fingerprinting | PyPI package `wafw00f` |
+| `cdncheck` | tech | CDN and WAF detection from resolved addresses | https://github.com/projectdiscovery/cdncheck/releases |
+| `webanalyze` | tech | Wappalyzer-style technology detection; needs `technologies.json` in the working directory | github.com/rverton/webanalyze |
+| `gau` | urls | Historical URLs from Wayback, Common Crawl and OTX | github.com/lc/gau (v2) |
+| `waybackurls` | urls | Historical URLs from the Wayback Machine | github.com/tomnomnom/waybackurls |
+| `katana` | urls | Crawler for endpoints, forms and JS files | https://github.com/projectdiscovery/katana/releases |
+| `hakrawler` | urls | Fast web crawler for links and scripts | github.com/hakluke/hakrawler |
+| `gospider` | urls | Web spider for links, scripts and sitemaps | github.com/jaeles-project/gospider |
+| `subjs` | urls | Finds JavaScript files referenced by a page | github.com/lc/subjs |
+| `unfurl` | urls | Parses and filters URLs into their parts | github.com/tomnomnom/unfurl |
+| `urlfinder` | urls | Passive URL discovery over several sources | https://github.com/projectdiscovery/urlfinder/releases |
+| `nuclei` | vulns | Template-based takeover and exposure checks | https://github.com/projectdiscovery/nuclei/releases |
+| `subzy` | vulns | Subdomain takeover detection | github.com/PentestPad/subzy |
+| `dnsreaper` | vulns | Subdomain takeover detection from DNS records | https://github.com/punk-security/dnsReaper (source only: no PyPI package) |
+| `nikto` | vulns | Web server misconfiguration and exposure scan (`opt_in`) | Debian package `nikto` |
+| `ffuf` | vulns | Content and parameter discovery (`opt_in`) | github.com/ffuf/ffuf (v2) |
+| `dalfox` | vulns | XSS scanner (`intrusive`) | github.com/hahwul/dalfox (v2) |
+| `crlfuzz` | vulns | CRLF injection scanner (`intrusive`) | github.com/dwisiswant0/crlfuzz |
+| `sqlmap` | vulns | SQL injection scanner (`intrusive`) | Debian package `sqlmap` |
+| `gowitness` | shots | Screenshots of live hosts (`opt_in`) | github.com/sensepost/gowitness |
 
-Eight entries need nothing installed, because they are adapters inside
-reconkit: `crtsh`, `certspotter`, `otx`, `hackertarget`, `urlscan` (HTTP) and
-`dnspython`, `pyprobe`, `pyscan` (Python). They have no `source:` and doctor
-shows them as ready with `n/a (no binary required)`.
+The `intrusive` tier is not selectable in this build (there is no `--intrusive`
+flag), so `dalfox`, `crlfuzz` and `sqlmap` are listed for completeness only.
 
-A Go install must land somewhere on `PATH` or in `~/.reconkit/bin`; `go install`
-uses `~/go/bin` by default. `webanalyze` additionally needs
-`webanalyze -update` once per working directory (it writes `technologies.json`
-into the current directory; a scan without it exits 1).
+## 3. How doctor checks a tool
 
-`nuclei` templates are refreshed with `nuclei -ut`; reconkit no longer runs that
-for you.
+`doctor` reads the registry and, for every entry, decides whether a usable copy
+is already on disk. It runs nothing but a tool's own version command and it
+writes nothing.
 
-**Version pins are accepted and ignored.** `config.yaml` `tool_versions` still
-loads (the schema keeps the key so an existing config is not a breaking change)
-but nothing reads it: there is no installer left to pin. `doctor` prints one
-warning when the block is non-empty. Remove it or leave it, either is fine.
+**Lookup order.** `~/.reconkit/bin/<binary>` first (the managed copy), then
+`PATH`. The directory is `config.bin_dir()` and is the only definition of the
+path; `adapters.base.managed_bin_dir()` returns the same value. A copy in
+`~/.reconkit/bin` wins over `PATH` on purpose, so a broken managed copy shadows
+a working binary and the mitigation is manual - remove or replace that file.
 
-## 2. Lookup order at run time
+**The version contract.** An entry may carry `version_cmd` (argv; its first
+element is the program that reports the version, defaulting to the tool's
+binary) and `version_regex`. `core.toolcheck.installed_copy()` resolves the copy
+and `installed_version()` runs `version_cmd` as the identity probe, reading
+`stdout`, falling back to `stderr`. With a `version_regex`, the pattern is
+searched in the whole output and the first capture group is the version (the
+whole match when the pattern has none), so `katana`'s ASCII logo and `nuclei`'s
+ANSI `[INF]` line do not become the version column. An uncompilable pattern is a
+`ConfigError` when the registry loads, before any command runs. The pattern
+describes a property of the tool, which is why it lives in `tools.yaml` next to
+`version_cmd`.
 
-1. `~/.reconkit/bin/<binary>` - the managed copy, checked first.
-2. `PATH`.
-
-The directory is `config.bin_dir()` and is the only definition of the path;
-`adapters.base.managed_bin_dir()` returns the same value.
+**A declared pattern is a requirement.** If `version_regex` is present and
+nothing matches, the copy is treated as not installed - `wrong program` when the
+file exists, `missing` when it does not (2026-11-17, V-UNEXPECTED item 1: a
+probe that runs but does not print the expected banner is a namesake). Only when
+the field is absent is the fallback the first non-empty line of the output. A
+probe may exit nonzero and still count, but only when its output names the
+program: `masscan --version` exits 1 and is accepted, while a nonzero exit with
+unrelated text stays `wrong program` (PIT-35). Every probe gets `HOME` in its
+child environment, never the parent environment (PIT-30).
 
 **The "wrong program" rule.** A same-named binary that is not the expected
-program must never be driven as if it were. Two layers enforce it:
+program must never be driven as if it were. Tools with an adapter enforce it in
+`BinaryAdapter.check_installed()`, which requires the tool's identity markers
+(ProjectDiscovery `httpx`, never the Python `httpx` CLI). A copy that exists but
+fails the check is `wrong program` (identity `failed`) and the engine skips the
+tool as `not installed`. Tools without an adapter go through the same
+`ToolSpec` path in `doctor`.
 
-- Tools with an adapter: `BinaryAdapter.check_installed()` runs the tool's
-  version command and requires its identity markers (for example ProjectDiscovery
-  `httpx`, never the Python `httpx` CLI). A copy that exists but fails the check
-  is reported by `doctor` as `wrong program` (identity `failed`) and the engine
-  skips the tool as `not installed`, so a namesake cannot be run by accident.
-- Tools without an adapter: `doctor` runs `version_cmd` (the program named by
-  its first element, defaulting to the tool binary, plus the remaining
-  arguments) against the resolved copy. A copy that exists but whose probe
-  fails is `wrong program`, never `installed`.
+**Presence-only tools (known limitation).** Twelve binary tools carry no
+`version_cmd`, because their real `-version` only prints Go `flag` usage, so
+there is nothing to run the name through: `crlfuzz`, `dalfox`, `dnsreaper`,
+`github_subdomains`, `gowitness`, `hakrawler`, `httprobe`, `sqlmap`, `subzy`,
+`unfurl`, `waybackurls`, `webanalyze`. For these, a **same-named program that is
+not the expected product is counted as installed**, and doctor's Version column
+shows the resolved path by design - not a missing version and not a defect.
+`httpx_tech` is not in this group: it carries `httpx -version` and a pattern, so
+the Python `httpx` CLI is `wrong program` there too. `smap`, `gospider`, `subjs`
+and `urlfinder` have real probes; the ProjectDiscovery tools, `wafw00f`,
+`findomain`, `puredns`, `dig`, `massdns`, `whatweb`, `nmap`, `masscan`, `gau`,
+`ffuf` and `nikto` report a version from their own banner.
 
-The managed copy wins over `PATH` on purpose: a broken copy in
-`~/.reconkit/bin` shadows a working binary on `PATH` (mitigation is manual -
-remove or replace the managed file).
+**Everything else doctor prints.** Entries with no `binary:` (all HTTP and
+Python adapters) are `yes` with `n/a (no binary required)`. Per-stage coverage
+counts usable tools (`subs 6/11 ready`). System packages come from
+`system_packages` plus every `requires_apt` (`libpcap-dev` for `naabu`);
+`dnsutils` is named only in the `dig` entry's `source:` and `ToolSpec` does not
+expose it, so it is not checked. The Keys table lists each documented key by
+name and whether it is set, never its value. The `Missing tools: N` footer
+appears only when something is missing, and `--json` writes one document with
+warnings at exit code `0`.
 
-## 3. How doctor computes installed / version / path / identity
+## 4. What reconkit does NOT do
 
-`doctor` implements docs/01 Feature 1 and docs/08 Flow 1, and changes nothing:
-
-- tool table: installed, version, resolved path, identity verified, tier
-  (rendering rules in docs/02 section 5);
-- per-stage coverage (`subs 6/11 ready`);
-- system packages (`system_packages` plus every tool's `requires_apt`, for
-  example `libpcap-dev`; `dnsutils` lives in the `dig` entry's `source:` string,
-  which `ToolSpec` does not expose), Python version, `scope.yaml` presence, DB
-  writability and `config.yaml` presence;
-- the Keys table (tool, set/missing, what it adds, sign-up URL), names only,
-  never values;
-- `Missing tools: N. Install them yourself (apt, go install, or release
-  download) — per-tool sources in docs/10_TOOL_SOURCES.md. Re-run doctor to
-  confirm.` when anything is missing;
-- `--json` writes one document; warnings keep exit code `0`. Python < 3.11 or an
-  unreadable `config.yaml` exits `1`.
-
-A tool's `installed` state comes from its adapter when it has one. Every other
-tool - the 36 without an adapter included - goes through the same `ToolSpec`
-path: `core.toolcheck.installed_copy()` resolves the managed copy first, then
-`PATH`, and `installed_version()` runs `version_cmd` as the identity probe. A
-tool with no `binary:` (every HTTP and Python adapter) is `yes` with
-`n/a (no binary required)`. A binary tool with no `version_cmd` reports the
-resolved path in the Version column by design (see below).
-
-**`version_regex` is how a banner-first tool reports its version.**
-`installed_version()` searches the whole `version_cmd` output with the tool's
-`version_regex` and returns the first capture group (or the whole match when the  pattern has no group), so `katana`'s ASCII logo and `nuclei`'s ANSI-coloured
-`[INF]` line no longer become the version column. When the field is absent, the
-fallback is unchanged: the first non-empty line of the output. When the field is
-present and **nothing matches, the copy is treated as not installed** (`wrong
-program` when it exists, `missing` when it does not) - since 2026-11-17 a
-declared pattern is a requirement, not a formatting hint, because a probe that
-runs but does not print the expected banner is a namesake (V-UNEXPECTED item 1:
-`httpx_tech` must not accept the Python `httpx` CLI). A pattern that does not
-compile is a `ConfigError` when the registry loads, before any command runs. The pattern describes a property of the
-tool, which is why it lives in `tools.yaml` next to `version_cmd`; the `katana`
-and `nuclei` patterns were taken from their real banners on Kali (12j).
-
-**The 2026-11-17 patterns (chaos, dnsx, httpx, tlsx, naabu, cdncheck, wafw00f).**
-The six ProjectDiscovery tools print their banner and `[INF] Current Version:
-<v>` line **to stderr** (stdout is empty); `installed_version()` already uses
-`stdout or stderr`, so no capture change was needed and the regex is searched
-over that text. Their shared pattern is `Current [Vv]ersion:
-(v?\d+\.\d+\.\d+)` (`Version` for chaos/dnsx/httpx/naabu, `version` for
-tlsx/cdncheck). `wafw00f --version` writes to stdout and wraps the value in ANSI
-(`... you have is \x1b[1;94mv2.4.2\x1b[0m`), so its pattern is `WAFW00F you have
-is[^\n]*?(v?\d+\.\d+\.\d+)`. All seven were derived from the real binaries on
-this box, not from documentation.
-
-**Presence-only tools.** A binary tool with no `version_cmd` is considered
-installed when its binary name resolves, because there is nothing to run the
-name through. This is a known limitation: a **same-named program that is not the
-expected product is counted as installed** for those tools. Twelve are in this
-group: `crlfuzz`, `dalfox`, `dnsreaper`, `github_subdomains`, `gowitness`,
-`hakrawler`, `httprobe`, `sqlmap`, `subzy`, `unfurl`, `waybackurls`,
-`webanalyze` (their real `-version` only prints Go flag usage, see below).
-`httpx_tech` **is not one of them**: since 2026-11-17 it carries its own
-`version_cmd` (`httpx -version`) and a `version_regex`, so a probe that does not
-print ProjectDiscovery's `Current Version:` banner - the Python `httpx` CLI, for
-example - is treated as not installed instead of taking the file's existence as
-proof.
-
-**Tools with no version output at all (2026-11-17).** `github_subdomains`,
-`webanalyze`, `waybackurls`, `unfurl` and `httprobe` print only Go `flag` usage:
-`github-subdomains -version` -> `flag provided but not defined: -version` plus
-`Usage of github-subdomains:` (exit 2), and the same shape for the others. They
-therefore carry no `version_cmd`, so `installed_version()` returns the resolved
-path and doctor's Version column shows that path **by design** - it is not a
-missing version and not a defect. The four with a real probe are `smap` (`-h`,
-stdout, first line `Smap 1.0.0-beta`), `gospider` (`--version`, stdout,
-`Version: v1.1.6`), `subjs` (`-version`, stdout, `subjs version: 1.0.1`) and
-`urlfinder` (`-version`, **stderr**, `[INF] Current Version: v0.0.3`); each
-carries the matching `version_cmd` and `version_regex`.
-
-A version probe may exit nonzero and still count, but only when its output names
-the program: `masscan --version` exits 1 and is accepted, while a nonzero exit
-with unrelated text stays `wrong program` (PIT-35). Every probe gets `HOME` in
-its child environment, never the parent environment (PIT-30).
-
-## 4. What reconkit will not do
-
-- **No downloads.** Nothing fetches a release, an archive or a checksum on your
-  behalf. `pip install reconkit` and the scan itself are the only network
-  actions reconkit owns (plus the adapters' own API calls).
-- **No sudo, no package manager.** `apt`, `pipx` and `go install` are yours.
-  reconkit never runs `sudo`, never prompts for a password, and never installs a
-  system package.
-- **No rollback, no `--dry-run`, no idempotency logic.** There is no managed
-  install to roll back and no `.prev` copy; replacing a tool is your call.
-- **No version pinning.** `tool_versions` is accepted and ignored (section 1).
-- **No automatic template or database refresh.** `nuclei -ut`,
-  `webanalyze -update` and tool self-updates are manual.
-- **No `curl | bash`.** This document names official release pages and package
-  names; it never asks you to pipe a script into a shell.
-- The only thing reconkit checks is what is already on disk (section 3), and a
-  scan skips a tool that is missing: `not installed` is a normal skip, not a
-  failure.
-
-## 5. System packages
-
-`system_packages` in `tools.yaml` is the authoritative list (python3,
-python3-venv, python3-pip, git, golang-go, libpcap-dev, jq, curl). `doctor`
-reports each as `installed`, `missing` or `unknown` (unknown off Debian-family
-Linux, where `/var/lib/dpkg/status` does not exist). Tools that declare
-`requires_apt` (only `naabu` -> `libpcap-dev`) add their package to the same
-list. The `dig` entry needs `dnsutils`; it is named in its `source:` string and
-is not checked by `doctor`.
-
-Python 3.11 or newer is required, from the interpreter that runs reconkit; never
-a pinned apt Python. Go tools installed with `go install` land in `~/go/bin`
-unless `GOBIN` says otherwise; either put that directory on `PATH` or copy the
-binary into `~/.reconkit/bin` (section 2). `scripts/bootstrap.sh` prepends
-`~/.reconkit/bin` to the venv `activate` script and to `PATH`.
-
-## 6. `.env` setup (API keys)
-
-Keys are optional; free mode needs none. All keys come from `.env` in the
-checkout (or the process environment for the engine's own load; the CLI reads
-`.env` only), never from `config.yaml` and never from a command line.
-
-```bash
-cp .env.example .env
-chmod 600 .env        # optional, recommended
-```
-
-Then fill in the keys you have. `doctor` shows each documented key by name and
-whether it is set, never its value. The sign-up URLs and what each key adds are
-in docs/05 section 6.1, and the per-tool key rows are in `tools.yaml` `keys:`.
-
-## 7. Tests
-
-- Registry parsing: `tools.yaml` loads into `ToolSpec` objects, including
-  `binary`, `version_cmd`, `version_regex` and `source`.
-- Every binary tool has a non-empty `source:` string; no HTTP/Python-only entry
-  has one (tests/test_tools_registry.py).
-- Version-pattern tests pin the real banners captured on 2026-11-17.
-- A malformed `version_regex` is a `ConfigError` at load time.
-- `doctor` is exercised with injected statuses; no test touches the network or
-  requires a tool to be installed.
+reconkit never downloads, installs, updates, or removes any tool. It runs tools
+that already exist on your system. If a selected tool is not present, the scan
+skips it with reason `not installed` and continues. The same rule covers the
+rest of the tool lifecycle: there is no download, no archive or checksum
+handling, no `sudo`, no package manager, no rollback, no version pin and no
+automatic template or database refresh (`nuclei -ut` and `webanalyze -update`
+are yours to run). Nothing in this repository names an official download page
+as a procedure or asks you to pipe a script into a shell; the `source:` strings
+are provenance and are never executed.

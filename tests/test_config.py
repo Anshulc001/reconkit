@@ -66,9 +66,8 @@ def test_webhook_block_loads() -> None:
 
 
 def test_unknown_top_level_key_is_rejected(tmp_path: Path) -> None:
-    # Append rather than string-replace: the real file's `tool_versions` value is
-    # no longer the literal `{}` (2026-11-17 rustscan pin), and a test that
-    # depends on one line's spelling silently stops testing the schema.
+    # Append rather than string-replace, so the test does not depend on one line's
+    # spelling in the real file: a replace silently stops testing the schema.
     text = CONFIG.read_text(encoding="utf-8") + "tool_delays: [1, 2]\n"
     path = tmp_path / "config.yaml"
     path.write_text(text, encoding="utf-8")

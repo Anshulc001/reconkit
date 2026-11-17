@@ -12,8 +12,9 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 - **httpx_tech false positive FIXED (2026-11-17, MASTER_PLAN D5, V-UNEXPECTED item 1; commit `fix: httpx_tech rejects Python httpx via version_regex miss rule`).** `httpx_tech` was presence-only, so with only Python's `/usr/bin/httpx` visible doctor said `yes` / `identity: ok` where the `httpx` adapter row correctly said `wrong program`. It now carries `version_cmd: [httpx, -version]` + `version_regex: 'Current Version:\s*v?([0-9]+\.[0-9]+\.[0-9]+)'`, and `installed_version()` treats a declared regex that does not match as `None` (not installed). Re-tested both ways: normal PATH -> `version: "1.12.0"`; Python-only PATH -> `wrong program` / `identity: failed`. 638 passed. The other 12 presence-only tools stay as they are and are now documented as a known limitation (docs/10 section 3).
 - **Installer removal COMPLETE (2026-11-17, MASTER_PLAN D4, owner request "user-requested removal of install/update commands").** `install`, `update`, `doctor --fix` and `src/reconkit/installer/` are deleted; `tools.yaml` `install:` blocks became inert `source:` strings; `doctor` uses `ToolSpec` through `core/toolcheck.py` and no longer imports the installer. Full evidence, every changed test and the 730 -> 635 count reconciliation are in REVIEW_LOG "Installer removal D4". Nothing else queued; next action: none.
 - **Install/doc backlog batch (2026-11-17, T1-T6 + one correction; the commands named here were removed later the same day by D4).** `reconkit install rustscan` works from its real 2.3.0 release (`f638c05`); the seven banner-first tools show a real version (`e0ef81d`); smap/gospider/subjs/urlfinder show one and the five Go-flag tools are documented path rows (`cb1fcd2`); `assetfinder -h` exit code corrected (`74c9102`, `-version` exit 2 corrected in `a037014`); amass v5 note (`24f64a3`); webanalyze `-update` recorded (`583e530`). Every one confirmed against the real binaries on this box.
-- **Next action:** none. The nested-archive item under "Open risks" is moot for reconkit (it installs nothing since D4) and stays only as a note about rustscan 2.4.1.
-- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 5) after D5: `638 passed`, `ruff check .` clean, `ruff format --check .` 57 files, `mypy src/reconkit` clean (29 source files). Pre-D5 was `635 passed`; pre-D4 `730 passed`, 67 files, 35 source files.
+- **Install residue removal S1-S7 COMPLETE (2026-11-17, cleanup only; commit `chore: remove install residue; docs/10 becomes tool reference (reconkit installs nothing)`).** Stale installer test bytecode deleted (5 `.pyc`; `__pycache__` dirs 73 -> 73); `config.yaml` `tool_versions` and its `AppConfig` field and `doctor` warning are gone; docs/10 is now a 149-line tool reference (48-row table, sections 1-4) with no install command anywhere; SETUP.md keeps only the editable self-install plus the doctor pointer; README, docs/01/02/05/08 and the seven tool manuals lost their install instructions; `tools.yaml`'s `source` comment is provenance-only, values unchanged. Full evidence in REVIEW_LOG "Install residue removal S1-S7".
+- **Next action:** none. The nested-archive item under "Open risks" is moot for reconkit (it installs nothing since D4) and stays only as a note about rustscan 2.4.1. Five follow-up items are named in the REVIEW_LOG S1-S7 entry's Findings (frozen doctor footer text, the 19 frozen `source:` values, nine "Install command: nothing to install" manual bullets, AGENTS.md's stale installer references, the historical rustscan transcript).
+- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 5) after S1-S7: `637 passed`, `ruff check .` clean, `ruff format --check .` 57 files, `mypy src/reconkit` clean (29 source files). Pre-S1 was `638 passed`; pre-D5 `635`; pre-D4 `730 passed`, 67 files, 35 source files.
 - Nothing is pushed: local `main` is ahead of `reconkit/main`, which is still `5fd1d9a`. Push only if the owner asks (`git push reconkit main`).
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in `engine.py`; adapters never import `store`/`scope`/`ui`/`cli`; `subjack` replaced by `subzy` + nuclei takeover templates; reconkit installs nothing, so there is no installer platform rule (D4, 2026-11-17); free mode is default, keys only from `.env`; the ports ceiling is permanent (12i).
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in `src/`; new lint/type suppressions; `shell=True`; the whole environment to a child; adapters importing store/scope/ui/cli; consensus outside `engine.py`; pushing.
@@ -422,6 +423,34 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   `== ["httpx", "-version"]` and `version_regex is not None`; reason: the row
   now carries a probe, which is the whole point of the fix). 635 -> 638
   collected.
+- **2026-11-17 (S1-S7, cleanup batch), `config.yaml` `tool_versions` is gone
+  completely.** The key, the `AppConfig` field and the doctor warning were
+  removed. Because `_StrictModel` uses `extra="forbid"`, a `config.yaml` that
+  still carries `tool_versions` now fails to load with exit 2 instead of being
+  accepted and ignored; docs/02 section 3 states that. This is the requested
+  cleanup, not an accident, but it is a behaviour change for an older config,
+  and the batch text said "no behavior changes" - so it is recorded here as the
+  one unavoidable exception. Deleted test:
+  `test_a_tool_versions_pin_is_reported_once_as_ignored`.
+- **2026-11-17 (S1-S7), docs/10's section numbers moved.** The file was rewritten
+  as a tool reference with four sections: 1 what it is, 2 the tool table, 3 how
+  doctor checks a tool, 4 what reconkit does NOT do. Old §1 (per-tool sources)
+  is now §2 and old §2 (lookup order) is now §3; old §3 (system packages) and
+  old §6 (`.env` setup) no longer exist as sections. Every in-repo reference was
+  re-pointed (`docs/01`, `docs/05`, `docs/08`, `docs/tool_manuals/README.md` and
+  four `src/` docstrings); `docs/05` now points key setup at `.env.example` and
+  `SETUP.md`, which still carries it.
+- **2026-11-17 (S1-S7), the batch's class-(c) sweep went past the named files.**
+  Sub-task 7 says a real-residue hit anywhere is fixed in the batch, so
+  `docs/08`'s "Flow 2 - Install tools" steps (which spelled `sudo apt install`,
+  `go install` and `pipx install`), 30 "**Install yourself:**" bullets across the
+  seven tool manuals, and `docs/tool_manuals/ports.md`'s "Why 2.3.0 is pinned"
+  block (which showed a `tool_versions` snippet for a key that no longer exists)
+  were rewritten to provenance-only wording. No other manual content changed.
+  The five items deliberately NOT changed are listed in the REVIEW_LOG entry's
+  Findings; the doctor footer text is the important one - the batch requires it
+  byte-identical, so it stays and still names `apt`/`go install`/release
+  download.
 
 ## Open risks
 
@@ -437,7 +466,7 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
 - **Historical (installer removed 2026-11-17, D4):** GitHub release lookups were unauthenticated (60 requests/hour per IP); a 403 failed every `github_release` tool. Nothing looks up a release any more.
 - **Historical (installer removed 2026-11-17, D4):** `update` re-ran `go install` for every `@latest` go_install tool and reported `installed` rather than `up to date`.
 - `installed_version()` returns the first line of the version text, so `katana` shows `__` and `nuclei` shows `[I…`, which also defeats `_same_version()` for them; `sqlmap` has no `version_cmd` and shows a bare path.
-- `BinaryAdapter.binary_path()` prefers any existing file in `~/.reconkit/bin` over `PATH`, so a broken managed copy shadows a working binary (deliberate, documented in docs/10 section 5; mitigation is manual).
+- `BinaryAdapter.binary_path()` prefers any existing file in `~/.reconkit/bin` over `PATH`, so a broken managed copy shadows a working binary (deliberate, documented in docs/10 section 3 since the 2026-11-17 rewrite; mitigation is manual).
 - Interactive Ctrl+C does not kill an already-running child (children lead their own process group, PIT-32); `killpg` remains UNTESTED on a real signal.
 - **Historical (installer removed 2026-11-17, D4):** `SUDO_DENIAL_MARKERS`, `_fetch_text` and the non-UTF-8 checksums rejection went with the installer; `requires` (puredns -> massdns) is no longer a field and survives only in the source note.
 - `doctor` does not check wordlists (no phase-2 adapter uses one); `dnsutils` is not checked because it appears only in the `dig` entry's `source:` string (it is not in `system_packages` or `requires_apt`).
@@ -476,8 +505,8 @@ Run in `/home/kali/Desktop/reconkit` with `.venv` active. These are the checks n
 cd /home/kali/Desktop/reconkit && source .venv/bin/activate
 python --version                          # expect 3.11+
 reconkit doctor                           # compare with `dpkg -l` / your .env; masscan identity is fixed (PIT-35)
-# install the missing tools yourself (reconkit installs nothing since 2026-11-17):
-#   docs/10_TOOL_SOURCES.md section 1 lists every apt package, go install line and release page
+# obtain any missing tool yourself (reconkit installs nothing since 2026-11-17):
+#   docs/10_TOOL_SOURCES.md section 2 is the reference - provenance per tool, not instructions
 reconkit doctor --json | python -m json.tool   # every tool ready; Keys rows reflect your .env
 
 # Real active run. Fill in_scope_cidrs in scope.yaml first, or pyscan will

@@ -238,7 +238,7 @@ def managed_bin_dir() -> Path:
 
     `config` can be imported at module level (it only reads config.yaml), and
     there is exactly one definition of the path: `config.bin_dir`. A test pins
-    the two to the same value (docs/10 section 2).
+    the two to the same value (docs/10 section 3).
     """
     from reconkit.config import bin_dir
 
