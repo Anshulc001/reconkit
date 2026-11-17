@@ -99,7 +99,7 @@ section 4.
 | `lite -d X` | passive only (quick) |
 | `run -d X` | passive mode: subs + dns + urls |
 | `run -d X --active` | active mode: subs + dns + live + tech + urls; resumable |
-| `run -d X --full` | full mode: all seven stages, `opt_in` enabled; implies `--active` and `--include-noisy` |
+| `run -d X --full` | full mode: all eight stages (the seven discovery stages plus `shots`), `opt_in` enabled; implies `--active` and `--include-noisy` |
 
 `passive` is the stage command: it runs the subs, dns and urls stages for one target, with passive tools only. `lite` is the workflow shortcut for exactly that passive pipeline and nothing active; adapters, flags and exit codes are the same. Only `run` includes active stages (and `run` is where `--full` applies).
 
@@ -166,7 +166,7 @@ The questions:
    Scan mode:
      passive  - subs, dns, urls stages; passive tools only
      active   - subs, dns, live, tech, urls stages; passive+active tools
-     full     - all stages (subs, dns, live, ports, tech, urls, vulns);
+     full     - all stages (subs, dns, live, ports, tech, urls, shots, vulns);
                 passive+active+intrusive
    Choice [passive/active/full]:
    ```
@@ -230,7 +230,7 @@ text the CLI prints (typer renders a yes/no question as `[Y/n]` or `[y/N]`).
    adds `live` + `ports` and sets `--active`. A `full` run skips this question.
 8. **Plan echo.** Two lines, for example:
    `plan: example.com; mode full; scope enforced (scope file); stages subs, dns,
-   live, ports, tech, urls, vulns; tools passive+active+intrusive; fields 12` and,
+   live, ports, tech, urls, shots, vulns; tools passive+active+intrusive; fields 12` and,
    when anything was injected,
    `inject: ports 80,443; status_codes 200,301; states ALIVE; headers 2;
    user_agent custom`.
@@ -263,7 +263,7 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 |---|---|
 | `-d, --domain` / `-l, --list` | Target or file of targets. Omitting both on a scan command starts the interactive mode (section 2b); that is the only trigger and it adds no flag |
 | `--active` | Run active stages: `subs`, `dns`, `live`. Passive stages still run. Uses passive and active tools; no intrusive/aggressive tools. A `scope.yaml`, when present, is enforced; with no scope file, active scanning is unrestricted. Full rule: section 2 |
-| `--full` | Run a full scan: all stages (`subs`, `dns`, `live`, `ports`, `tech`, `urls`, `vulns`), using passive, active and intrusive-tier tools (exploitation-class tools still need `--tools`). Implies `--active` and `--include-noisy` |
+| `--full` | Run a full scan: all stages (`subs`, `dns`, `live`, `ports`, `tech`, `urls`, `shots`, `vulns`), using passive, active and intrusive-tier tools (exploitation-class tools still need `--tools`). Implies `--active` and `--include-noisy`, so `opt_in` tools run, `shots`/`gowitness` included. `shots` is full-only: no other mode and no stage command requests it |
 | `--no-scope` | Ignore any scope file and behave as if none existed: active stages run unrestricted, a loud warning is printed, the run records `scope_mode = unrestricted_flag`, and scope.yaml is never modified. If `--scope PATH` is also given, `--no-scope` wins and a warning says `--scope PATH` was ignored. On a passive run it only warns and continues. Section 3.1 |
 | `--tools a,b` / `--exclude x,y` | Pick or skip adapters. A named tool bypasses tier gating but not the mode gate |
 | `--include-noisy` | Allow `opt_in` tier tools |

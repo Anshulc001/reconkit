@@ -59,6 +59,10 @@ STAGE_ORDER: tuple[Stage, ...] = (
     Stage.PORTS,
     Stage.TECH,
     Stage.URLS,
+    # Screenshots come after URL discovery (they need alive hosts and the crawl
+    # has already run) and before vulns, so a slow browser never delays the
+    # findings stage (D19).
+    Stage.SHOTS,
     Stage.VULNS,
 )
 
@@ -80,6 +84,9 @@ class ModeRules:
 MODE_STAGES: dict[str, tuple[Stage, ...]] = {
     "passive": (Stage.SUBS, Stage.DNS, Stage.URLS),
     "active": (Stage.SUBS, Stage.DNS, Stage.LIVE, Stage.TECH, Stage.URLS),
+    # `shots` is full-only (D19): it is in STAGE_ORDER, and therefore here, but
+    # in neither tuple above. gowitness is `opt_in`/`active`, so the tier and
+    # tool-mode rules in MODE_TOOLS still decide whether it runs.
     "full": STAGE_ORDER,
 }
 

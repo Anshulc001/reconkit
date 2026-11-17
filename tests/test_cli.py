@@ -678,6 +678,91 @@ def test_full_implies_include_noisy(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert options.include_noisy is True
 
 
+def _stage(document: dict[str, object], name: str) -> dict[str, object]:
+    stages = document["stages"]
+    assert isinstance(stages, list)
+    return next(stage for stage in stages if stage["stage"] == name)
+
+
+def test_gowitness_runs_in_full_with_include_noisy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D19: the orphaned `shots` stage now executes gowitness in a full run."""
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        app,
+        mode_args(
+            config,
+            "--full",
+            "--no-scope",
+            "--include-noisy",
+            "--json",
+            "--tools",
+            "pyprobe,httpx,tlsx,gowitness",
+        ),
+    )
+    assert result.exit_code == 0, result.stderr
+    shots = _stage(json.loads(result.stdout), "shots")
+    assert [(item["tool"], item["status"], len(item["records"])) for item in shots["results"]] == [
+        ("gowitness", "ok", 2)
+    ]
+
+
+def test_gowitness_runs_when_explicitly_named_via_tools_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tier gating is bypassed by an explicit name; the mode gate still holds.
+
+    `--tools` bypasses the tier rule (docs/02 section 3), so naming gowitness is
+    enough even without `--include-noisy`; the shots stage is still only in the
+    full mode table, which is what a `--active` run below proves.
+    """
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        app, mode_args(config, "--full", "--no-scope", "--json", "--tools", "gowitness")
+    )
+    assert result.exit_code == 0, result.stderr
+    shots = _stage(json.loads(result.stdout), "shots")
+    assert [item["tool"] for item in shots["results"]] == ["gowitness"]
+
+
+def test_full_runs_gowitness_without_the_noisy_flag_because_full_implies_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Documented deviation from the batch text: there is no full-mode tier skip.
+
+    `--full` sets `include_noisy = True` in the CLI (cli.py, docs/02 section 2),
+    and `--tools` bypasses the tier gate anyway, so `opt_in` is never the reason
+    gowitness does not run. The difference is pinned here rather than asserted
+    away: a `--full` run without `--include-noisy` still runs gowitness.
+    """
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        app,
+        mode_args(
+            config, "--full", "--no-scope", "--json", "--tools", "pyprobe,httpx,tlsx,gowitness"
+        ),
+    )
+    assert result.exit_code == 0, result.stderr
+    shots = _stage(json.loads(result.stdout), "shots")
+    assert [item["status"] for item in shots["results"]] == ["ok"]
+
+
+def test_active_mode_never_runs_the_shots_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D19: `shots` is full-only; `--active` does not even request the stage."""
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, mode_args(config, "--active", "--no-scope", "--json"))
+    assert result.exit_code == 0, result.stderr
+    document = json.loads(result.stdout)
+    assert all(stage["stage"] != "shots" for stage in document["stages"])
+
+
 def test_run_help_describes_stages_tool_modes_and_tiers() -> None:
     """The help strings state stages + tool modes + tiers, generated from the table.
 
@@ -690,8 +775,9 @@ def test_run_help_describes_stages_tool_modes_and_tiers() -> None:
     assert "Run active stages: subs, dns, live, tech, urls." in _ACTIVE_HELP
     assert "Uses passive and active tools" in _ACTIVE_HELP
     assert "no intrusive/aggressive tools" in _ACTIVE_HELP
-    assert "Run a full scan: all stages (subs, dns, live, ports, tech, urls, vulns)." in (
-        _FULL_HELP
+    assert (
+        "Run a full scan: all stages (subs, dns, live, ports, tech, urls, shots, vulns)."
+        in _FULL_HELP
     )
     assert "passive, active, and intrusive-tier tools" in _FULL_HELP
     assert "Implies --active and --include-noisy" in _FULL_HELP
@@ -728,6 +814,7 @@ def test_full_json_skips_exploitation_tools_and_does_not_tier_skip_opt_in(
         "ports",
         "tech",
         "urls",
+        "shots",
         "vulns",
     ]
 

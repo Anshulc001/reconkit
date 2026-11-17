@@ -125,7 +125,7 @@ workspaces/<domain>/
 ### Engine API (`engine.py`)
 
 - `Engine.open(config, *, db_path=..., scope_path=..., env_file=..., ...)` is the CLI-facing factory: it creates the `Store`, loads optional `.env` values inside the engine, and returns an `Engine`. `close()` closes the store. The constructor remains injectable for tests.
-- `Engine(config, store, now=...).run(target, ScanOptions(...))` runs the selected stages in the fixed order `subs, dns, live, ports, tech, urls, vulns`. `ScanOptions` carries `stages`, `tools`, `exclude`, `include_noisy`, `active`, `no_keys`, `mock`, `phase_timeout`, `min_sources` and `resume` (there is no `speed`; see section 7).
+- `Engine(config, store, now=...).run(target, ScanOptions(...))` runs the selected stages in the fixed order `subs, dns, live, ports, tech, urls, shots, vulns` (D19). `ScanOptions` carries `stages`, `tools`, `exclude`, `include_noisy`, `active`, `no_keys`, `mock`, `phase_timeout`, `min_sources` and `resume` (there is no `speed`; see section 7).
 - `Engine(..., progress=callable)` is an optional injected reporting callback. The
   engine calls it with one short string at stage start, once per finished tool and
   once per finished stage; it never prints, formats or decides anything. `None`
@@ -161,7 +161,8 @@ The engine owns the mode definition; nothing else restates it. `engine.py` has
 two module-level tables and one helper:
 
 - `MODE_STAGES`: `passive` = `(SUBS, DNS, URLS)`; `active` = `(SUBS, DNS,
-  LIVE, TECH, URLS)`; `full` = all seven stages in `STAGE_ORDER`. Every tuple is
+  LIVE, TECH, URLS)`; `full` = all eight stages in `STAGE_ORDER` (the seven
+  discovery stages plus `SHOTS`, which is full-only). Every tuple is
   in `STAGE_ORDER`, so help text and the interactive legend list the stages in
   the order they actually run; `URLS` always follows `LIVE` when `LIVE` runs.
   A mode's stage of a pipeline can therefore have no input: in `passive` the

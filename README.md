@@ -63,7 +63,7 @@ In Git Bash, use `./scripts/bootstrap.sh` and `source .venv/Scripts/activate` in
 | `live` | ALIVE / DNS_ONLY / SHUT_DOWN / DEAD; needs `--active` (uses any present scope file) |
 | `ports` | Port scan over each adapter's default port set (`--ports` overrides); needs `--active` |
 | `tech`, `urls`, `vulns` | Stage commands whose adapters are Phase 3; may report no usable tool |
-| `run` | `passive` (subs+dns+urls) by default; `--active` = subs+dns+live+tech+urls; `--full` = all seven stages with `opt_in` enabled. The mode table is in [docs/02_CLI_UX.md](docs/02_CLI_UX.md) |
+| `run` | `passive` (subs+dns+urls) by default; `--active` = subs+dns+live+tech+urls; `--full` = all eight stages (`shots` included) with `opt_in` enabled. The mode table is in [docs/02_CLI_UX.md](docs/02_CLI_UX.md) |
 | `diff` | New, gone, state-changed and port-changed items vs the previous run |
 | `status` | Recent scans (`--json` for scripts) |
 | `doctor` | Tool, version, path, per-stage coverage, system packages, key names |

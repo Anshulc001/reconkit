@@ -155,7 +155,7 @@ Phase 2 = working adapter in the first build. Phase 3 = listed in `tools.yaml`, 
 | tech | active | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze |
 | urls | passive/active | gau, waybackurls, katana, hakrawler, gospider, subjs, unfurl, urlfinder | gau, katana, waybackurls, hakrawler, gospider, subjs, unfurl, urlfinder |
 | vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) | nuclei, subzy |
-| shots | active | gowitness (opt_in) | - |
+| shots | active | gowitness (opt_in) | full mode only (D19) |
 
 Selection rules (2026-11-17: the mode tables in docs/02 section 2 and `MODE_STAGES`/`MODE_TOOLS` in `engine.py` are the source): use adapters that are installed (or http/python kind), allowed by tier for the mode (`allowed_tiers`: `opt_in` only with `--include-noisy` or a `full` run; `intrusive` only with `full` or an explicit `--tools` name), allowed by tool mode (an active tool in `passive` mode is skipped with `tool mode not included in passive mode` even when named), never `exploitation: true` unless named with `--tools`, and filtered by `--tools` / `--exclude`. `tools.yaml` may carry `exploitation: true` on an intrusive entry (`sqlmap`, `dalfox`, `crlfuzz`); the registry parses it into `ToolSpec.exploitation` (a non-bool is a `ConfigError`) and the engine skips such a tool automatically in every mode with `exploitation tool requires explicit --tools`. Missing tools are reported as `skipped`, never fatal unless no adapter remains (exit 4). A `needs_root` tool in a non-root process is skipped the same way with `requires root / sudo` (section 4a6). Every selection-time skip is recorded in `tool_runs` **and** reported to the caller: `stages[].skipped` in the `--json` document and the Tools table list each tool with its reason, and `summary.tools_skipped` counts them (docs/02 section 5), so a stage whose whole pool has no adapter cannot look like a stage that ran and found nothing. This is the selection-time rule: a binary that was present at selection but cannot be spawned at run time is a `failed` result instead (see the adapter contract in section 3), not a skip. **`naabu` is scope-mode dependent (owner decision 2026-11-17; supersedes the permanent block of 11c-G-7/12i):**
 
@@ -621,7 +621,7 @@ registry has **48 tools and 44 adapters**.
 | `dig` | `+noall +answer -f <workspace hosts file>` | one process per stage; labelled answers keep the name next to the address |
 | `massdns` | `-r <resolvers> -t A -o S -w <workspace file> <workspace hosts file>` | `S` (simple) lines; finds are read from `-w`, never stdout |
 | `puredns` | `resolve <hosts file> -r <resolvers> -b <massdns> -w <workspace file>` | shells out to massdns; `-b` is always the absolute path |
-| `gowitness` | `scan single -u <url> -s <screenshots dir> --screenshot-format png` | one process per URL (https, then http if no PNG); files plus JSONL manifest, **no DB rows** (D17) |
+| `gowitness` | `scan single -u <url> -s <screenshots dir> --screenshot-format png` | one process per URL (https, then http if no PNG); files plus JSONL manifest, **no DB rows** (D17); `shots` is `--full` only (D19) |
 | `nikto` | `-h <host> -nointeractive -Format json -output <workspace file>` | one process per host (`-h` takes one target); `severity="info"`, `kind="nikto"` |
 
 **`dig` stays next to `dnspython` on purpose.** `dnspython` is the resolver with
@@ -648,11 +648,23 @@ that folder, one `{"url", "path", "timestamp"}` object per line. There is no
 the engine (`RunContext.results_dir`, the configured `results_dir`), so `--config`
 and the reports agree and the adapter never reads `config.yaml` itself.
 
-**The `shots` stage is not reachable from the CLI yet.** `Stage.SHOTS` exists in
-`models.py` and `RAW_OUTPUT_DIRS`, but it is in neither `STAGE_ORDER` nor a
-`MODE_STAGES` row, so no mode and no `--tools` selection runs it; adding it is a
-mode-table change (owner ruling pending). The adapter is complete and tested so
-that wiring it is a one-line change.
+**The `shots` stage is full-only (D19, owner ruling).** `Stage.SHOTS` is in
+`STAGE_ORDER` between `urls` and `vulns` (screenshots need the alive hosts the
+live stage produced, and a slow browser must not delay the findings stage) and
+therefore in `MODE_STAGES["full"]`; it is in neither `passive` nor `active`, and
+there is no `shots` stage command. `gowitness` is `tier: opt_in`/`mode: active`,
+and a `full` run implies `--include-noisy`, so it runs there; `--tools gowitness`
+bypasses the tier gate in the same run.
+
+**gowitness requires a Chrome/Chromium binary on the box for PNG output.** Kali:
+`apt install chromium` (the operator installs it; docs/10 section 2 is
+provenance only). Without Chrome, gowitness returns 0 items with a clear error
+string (`failed to initialize chrome context`), not a failure - the adapter
+works, the screenshot step can't produce images. On this box `/usr/bin/chromium`
+is installed but gowitness execs `google-chrome` and the adapter never guesses a
+`--chrome-path`; even a manual run with `--chrome-path /usr/bin/chromium`
+reported `have-screenshot=false`, so the PNG/manifest path is proven by the
+adapter test with a stand-in binary, not by a real screenshot.
 
 Verified on this box (DiG 9.20.30, massdns 1.1.0, puredns v2.1.1,
 gowitness 3.2.2, Nikto 2.6.1):
@@ -714,7 +726,7 @@ what is printed and never what is stored.
 | nuclei, subzy | vulns | active | core | no | no / no / yes |
 | dnsreaper | vulns | active | core | no | **no adapter (D15)** |
 | nikto, ffuf | vulns | active | opt_in | no | no / no / yes |
-| gowitness | shots | active | opt_in | no | not a mode stage |
+| gowitness | shots | active | opt_in | no | full only (D19) |
 | dalfox, crlfuzz, sqlmap | vulns | active | intrusive | **yes** | never automatic; `--tools <name>` only |
 
 "Runs in full" means selected; an adapter that does not exist yet still reports

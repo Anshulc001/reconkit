@@ -263,7 +263,11 @@ async def test_stage_order_and_tool_rows(tmp_path: Path) -> None:
         "urls-fake",
         "vulns-fake",
     ]
-    assert [stage.stage for stage in summary.stages] == list(STAGE_ORDER)
+    # Pipeline order. `shots` has no spec in this fixture, so the stage selects
+    # nothing and produces no outcome (D19 wired the stage, not the fake tools).
+    assert [stage.stage for stage in summary.stages] == [
+        stage for stage in STAGE_ORDER if stage is not Stage.SHOTS
+    ]
     assert rec.built == []
     statuses = rows(engine.store, "SELECT tool, status FROM tool_runs ORDER BY id")
     assert [(row["tool"], row["status"]) for row in statuses] == [
@@ -2844,11 +2848,24 @@ async def test_active_mode_urls_stage_runs_after_live(tmp_path: Path) -> None:
 
 
 async def test_full_mode_unchanged_by_expansion() -> None:
-    """D10: the expansion touched passive/active only; full is still all seven."""
+    """D19: full is every stage, `shots` included since the stage was wired."""
     assert MODE_STAGES["full"] == STAGE_ORDER
-    assert len(MODE_STAGES["full"]) == 7
-    assert set(MODE_STAGES["full"]) == set(Stage) - {Stage.SHOTS}
+    assert len(MODE_STAGES["full"]) == 8
+    assert set(MODE_STAGES["full"]) == set(Stage)
     assert set(MODE_STAGES["passive"]) < set(MODE_STAGES["active"]) < set(MODE_STAGES["full"])
+
+
+def test_shots_stage_is_in_full_mode_only() -> None:
+    """D19: gowitness is runnable from `--full` and from nowhere else."""
+    assert Stage.SHOTS in MODE_STAGES["full"]
+    assert Stage.SHOTS not in MODE_STAGES["passive"]
+    assert Stage.SHOTS not in MODE_STAGES["active"]
+    # Pipeline position: after URL discovery, before the findings stage.
+    order = list(STAGE_ORDER)
+    assert order.index(Stage.URLS) < order.index(Stage.SHOTS) < order.index(Stage.VULNS)
+    # Every mode tuple is ordered by the one pipeline order.
+    for stages in MODE_STAGES.values():
+        assert list(stages) == [stage for stage in STAGE_ORDER if stage in stages]
 
 
 async def test_full_runs_all_tool_modes_and_enables_opt_in_and_intrusive(tmp_path: Path) -> None:

@@ -3608,6 +3608,65 @@ install residue. No new feature, no behaviour change, no code-logic change.
   `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` (unchanged
   from the previous batch; no scope edit was made).
 
+## Wire the shots stage into full mode (2026-11-17, D19)
+
+- Docs read / goal: `AGENTS.md` (0/0b/0c, rules 3/7/9), RESUME + PIT table, `docs/02`
+  section 2 and the `--full` row, `docs/03` section 5b, `docs/09` section 4/4a8, `docs/04`
+  section 3.1. Goal: make the completed gowitness adapter reachable; the stage existed in
+  `models.py`/`RAW_OUTPUT_DIRS` but in neither `STAGE_ORDER` nor `MODE_STAGES`.
+- Plan: (1) add `Stage.SHOTS` to `STAGE_ORDER` after `URLS` and before `VULNS`, (2) leave the
+  explicit `passive`/`active` tuples untouched (full is the `STAGE_ORDER` alias, so it gains the
+  stage automatically), (3) no persistence branch - screenshots stay files (D17), (4) tests,
+  proofs, docs, one commit.
+- Why between `urls` and `vulns`: a screenshot needs the alive hosts the `live` stage produced
+  and benefits from the crawl `urls` already did; putting a browser after the findings stage
+  would delay `vulns` for the slowest tool in the pipeline. `_stage_hosts` already returns the
+  alive set for any non-subs/dns/live stage, so no host-plumbing change was needed.
+- **S1 (intent):** owner ruling - shots in full only, opt_in tier, active mode, no passive/active.
+  Implemented exactly that; no stage command, no new flag, no schema or model change.
+- **S2 (minimal diff):** `src/reconkit/engine.py` (two hunks: the tuple + a comment) and one
+  4-line gowitness fix. No other production file changed.
+- **S3 (behaviour):** `reconkit run -d testfire.net --full --no-scope --include-noisy --mock
+  --tools pyprobe,httpx,tlsx,gowitness` -> `pyprobe ok 2`, `httpx ok 2`, `tlsx ok 4`,
+  `gowitness shots ok 2`, exit 0. The same command with `--active` instead shows no `shots`
+  stage and no gowitness row. A mock-run gap was found and fixed: `gowitness.run()` returned
+  "no hosts to scan"-style `ok 0` before the base mock path, so a `--mock` run reported 0 items
+  even though the fixture has two; `ctx.mock` is now checked first (`test_gowitness_*
+  writes_screenshots_and_manifest` still covers the real path, and the CLI test pins `ok 2`).
+- **S4 (edge cases):** empty host list (no ALIVE host) -> stage runs, `ok 0`, no manifest, no
+  crash; `--active` never requests the stage; `--exclude gowitness` leaves the stage with a
+  skip and the run exits 0 (skip reason is a tier/mode reason only when the stage is requested);
+  resume: `_resume_plan` keys on the same `Stage` enum, so a completed shots stage is not
+  re-run; `RAW_OUTPUT_DIRS[SHOTS] = "meta"` was already there, so raw output has a home.
+- **S5 (scope/security):** gowitness is `mode: active`, so the engine's existing scope gate
+  (`_active_hosts`) applies to the hosts it receives - no new path skips `require_active`. The
+  adapter still never guesses `--chrome-path`, sends the honest User-Agent through the browser
+  default, and writes only under `results/<target>/<UTC stamp>/`. No sudo, no new dependency.
+- **S6 (docs):** docs/02 (`--full` row, mode table, interactive legend, plan echo), docs/03
+  (stage order + `MODE_STAGES`), docs/05 (opt_in bullet), docs/08 (mode choice), docs/09
+  (stage table, section 4a8, gowitness row + the Chrome note), README, MASTER_PLAN **D19**,
+  PROGRESS RESUME/deviations/baseline, this entry. `docs/01` needed nothing.
+- **S7 (verification):** baseline before the change: `811 passed`, ruff clean, 90 files
+  formatted, mypy clean (62 files), `scope.yaml` sha256 `d45a3c90…` unchanged. After:
+  `816 passed`, ruff clean, 90 files formatted, mypy clean, same `scope.yaml` hash. Test
+  changes disclosed: three existing expectations moved (`test_full_mode_unchanged_by_expansion`
+  7 -> 8 stages, `test_stage_order_and_tool_rows` excludes the spec-less `shots` stage,
+  `tests/test_interactive_scan.py` full-mode stage tuple gained `SHOTS`,
+  `test_run_help_describes_stages_tool_modes_and_tiers` gained `shots` in the help text,
+  `test_full_json_skips_exploitation_tools_and_does_not_tier_skip_opt_in` gained the `shots`
+  stage row); five tests added: `test_shots_stage_is_in_full_mode_only`,
+  `test_gowitness_runs_in_full_with_include_noisy`,
+  `test_gowitness_runs_when_explicitly_named_via_tools_flag`,
+  `test_full_runs_gowitness_without_the_noisy_flag_because_full_implies_it`,
+  `test_active_mode_never_runs_the_shots_stage`.
+- **The tier-gate proof the batch asked for cannot exist, and that is recorded rather than
+  faked.** `--full` sets `include_noisy = True` (cli.py) and `--tools <name>` bypasses the tier
+  gate, so `gowitness` is never skipped for `opt_in` in a full run; a stage-specific gate would
+  have been an invented rule contradicting docs/02. D19 states the conflict and the ruling
+  question.
+- Next action: none. Still 44 of 48 adapted; the remaining four are `dnsreaper` (D15) and the
+  three exploitation-class tools (`sqlmap`, `dalfox`, `crlfuzz`).
+
 ## Adapter wave 8: dns (dig, massdns, puredns), shots (gowitness), vulns (nikto) (2026-11-17, D16/D17)
 
 - Docs read / goal: AGENTS (rules 1/4/7, section 7 recipe), RESUME, docs/09 sections 3/4/4a8/5,

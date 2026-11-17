@@ -93,6 +93,10 @@ class GowitnessAdapter(BinaryAdapter):
 
     async def run(self, ctx: RunContext) -> ToolResult:
         started = time.perf_counter()
+        # `--mock` reads the fixture through the base flow: no files, no manifest,
+        # and a record per fixture line (the documented "ok N item(s)" proof).
+        if ctx.mock:
+            return await super().run(ctx)
         hosts = self._hosts(ctx)
         if not hosts:
             return ToolResult(

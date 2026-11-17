@@ -482,6 +482,7 @@ def test_full_mode_requests_every_stage_including_vulns(
         Stage.PORTS,
         Stage.TECH,
         Stage.URLS,
+        Stage.SHOTS,
         Stage.VULNS,
     )
     assert options.full is True and options.active is True

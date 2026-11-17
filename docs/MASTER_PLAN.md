@@ -803,8 +803,29 @@ artifact of an opt-in active stage, and `reconkit status`/`diff` do not show it.
 The adapter learns the results root from the engine through a new
 `RunContext.results_dir` field (plumbing, not a record model), so `--config` and
 the reports stay in agreement. gowitness itself defaults to `jpeg`, so the
-adapter passes `--screenshot-format png`. `Stage.SHOTS` is still in no
-`MODE_STAGES` row: wiring the stage is a mode-table change and needs a ruling.
+adapter passes `--screenshot-format png`. (The stage was wired into `full` by
+D19.)
+
+D19. 2026-11-17 - The `shots` stage is wired into full mode (owner requested:
+"wire the shots stage so gowitness becomes runnable"). `Stage.SHOTS` was
+orphaned - it existed in `models.py` and `RAW_OUTPUT_DIRS` but in neither
+`STAGE_ORDER` nor a `MODE_STAGES` row, so no mode and no `--tools` selection
+could reach the completed gowitness adapter. It now sits in `STAGE_ORDER`
+between `urls` and `vulns` (a screenshot needs the alive hosts the live stage
+produced, and a slow browser must not delay the findings stage), and therefore
+in `MODE_STAGES["full"]`; `passive` and `active` do not list it and there is no
+`shots` stage command. No other stage, tier, flag or table changed.
+
+Disclosed conflict: the batch expected `gowitness` to be "skipped (opt_in tier
+requires --include-noisy)" in a `--full` run. That cannot happen in this build,
+for two independent reasons, both pre-existing and documented: `--full` sets
+`include_noisy = True` in the CLI (docs/02 section 2: "implies --active and
+--include-noisy"), and `--tools <name>` bypasses the tier gate by design
+(docs/02 section 3). No stage-specific gate was invented to manufacture the
+skip; the actual behaviour is pinned by
+`test_full_runs_gowitness_without_the_noisy_flag_because_full_implies_it`. If
+the owner wants screenshots to stay behind an explicit flag in full mode, that
+is a separate ruling and a new rule in `MODE_TOOLS`.
 
 =====================================================
 LATER BUG FIXES (any session)
