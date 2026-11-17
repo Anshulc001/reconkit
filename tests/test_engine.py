@@ -358,6 +358,45 @@ async def test_naabu_is_selectable_in_active_mode(tmp_path: Path) -> None:
     assert {reason for _spec, reason in passive_skipped} == {"requires --active"}
 
 
+async def test_an_uninstalled_tool_is_skipped_and_the_others_still_run(tmp_path: Path) -> None:
+    """Baseline for the 2026-11-17 installer-removal refactor (docs/09 selection).
+
+    A tool whose binary is absent is recorded as `skipped (not installed)` and
+    every installed tool in the same stage still runs. This is the guarantee
+    that must survive deleting `installer/`: no install command, no change to
+    what a scan does with a missing binary.
+    """
+    rec = Recorder()
+    specs = {
+        "subs-fake": tool("subs-fake", Stage.SUBS),
+        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
+        "naabu": tool("naabu", Stage.PORTS, mode=Mode.ACTIVE),
+        "pyscan": tool("pyscan", Stage.PORTS, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "subs-fake": adapter("subs-fake", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("www.example.com")]),
+        "naabu": adapter("naabu", Stage.PORTS, rec),
+        "pyscan": adapter("pyscan", Stage.PORTS, rec),
+    }
+    engine = make_engine(
+        tmp_path,
+        specs,
+        adapters,
+        scope_text=None,
+        installed=lambda candidate: candidate.name != "pyscan",
+    )
+    summary = await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True),
+    )
+    assert rec.names == ["subs-fake", "live-fake", "naabu"]
+    assert [(skip.tool, skip.reason) for skip in summary.skipped] == [("pyscan", "not installed")]
+    statuses = rows(engine.store, "SELECT tool, status, error FROM tool_runs ORDER BY id")
+    assert ("pyscan", "skipped", "not installed") in [tuple(row) for row in statuses]
+    assert ("naabu", "ok", None) in [tuple(row) for row in statuses]
+
+
 async def test_active_ports_stage_receives_the_cidr_predicate(tmp_path: Path) -> None:
     """Regression: 11c-G-7.
 

@@ -53,8 +53,9 @@ every tool still gets its own `##` section with the same fixed fields, so a
 Installed on this box (managed directory `~/.reconkit/bin` first, then `PATH`):
 **40 of the 40** documented tools have their binary (or are `http`/`python`
 kinds with no binary). `rustscan` used to be the one missing binary; the
-registry now pins 2.3.0 with its real asset name (2026-11-17), so
-`reconkit install rustscan` installs it (amd64 only; the note in
+registry now names 2.3.0 with its real asset name (2026-11-17) and
+`reconkit install rustscan` installed it until the command was removed later
+that day; install it yourself from the 2.3.0 flat zip (amd64 only; the note in
 `docs/tool_manuals/ports.md` explains why the latest release cannot be used).
 Six of the installed ones still have no runnable path here without a key, a root
 shell or a one-time data file: `chaos` (`PDCP_API_KEY`), `github_subdomains`
@@ -133,10 +134,11 @@ These are discrepancies found while verifying. Phase 1 is documentation only, so
 each one is recorded and left alone.
 
 1. **`rustscan` (closed 2026-11-17).** The placeholder is gone: the registry
-   pins 2.3.0 with its real asset name and `reconkit install rustscan` installs
-   it. The latest release (2.4.1) ships a nested `.tar.gz.zip`, so 2.4.1 stays
-   uninstallable until nested-archive extraction exists; see the rustscan entry
-   in `docs/tool_manuals/ports.md` and `docs/10` section 3.
+   names 2.3.0 with its real asset name. `reconkit install rustscan` installed it
+   until the install command was removed later that day; it is yours to install
+   now. The latest release (2.4.1) ships a nested `.tar.gz.zip`, so 2.4.1 needs
+   a manual unpack; see the rustscan entry in `docs/tool_manuals/ports.md` and
+   `docs/10_TOOL_SOURCES.md` section 1.
 2. **Seven tools' version column shows ASCII art (closed 2026-11-17).**
    `chaos`, `dnsx`, `httpx`, `tlsx`, `naabu`, `cdncheck` and `wafw00f` now carry
    a `version_regex` derived from their real banners, so `doctor` prints `0.5.2`,

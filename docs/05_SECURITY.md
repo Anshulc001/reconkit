@@ -40,11 +40,12 @@ Implemented in `core/scope.py`. Rules:
 - Child environment is minimal: pass only variables a tool needs (its API key names from the registry). Adapters must also pass `HOME` explicitly for tools that read config or credentials from it (`subfinder`, `httpx`, `nuclei`); verify each tool's own `--help` output before relying on a variable, never guess.
 - Output size limits per tool to avoid memory exhaustion.
 
-## 5. Installer Safety (details in docs/10_TOOL_INSTALLER.md)
+## 5. Tool Sources (details in docs/10_TOOL_SOURCES.md)
 
-- Sources only from `tools.yaml`; GitHub releases over HTTPS; checksum verification when published; fail closed.
-- No `curl | bash`. No running downloaded scripts.
-- sudo only for `apt`, shown to the user with a confirmation prompt. Never run the whole program as root. sudo runs non-interactively (`sudo -n`); if it needs a password the install is skipped with "run `sudo -v` and retry", because reconkit never handles a sudo password itself.
+- reconkit **installs nothing** (removed 2026-11-17, docs/MASTER_PLAN.md D4): no downloads, no checksum handling, no `sudo`, no package-manager call, no rollback. `install`, `update` and `doctor --fix` do not exist.
+- `tools.yaml` `source:` strings are documentation for the operator. They are never executed, never parsed into a command line, and never fetched by reconkit.
+- No `curl | bash`. No running downloaded scripts - reconkit runs no installer script at all.
+- Installation is the operator's own action, outside reconkit's trust boundary. `doctor` only reads what is already on disk (lookup order and the "wrong program" rule: docs/10 sections 2-4).
 
 ## 6. Secrets
 
@@ -56,12 +57,12 @@ Implemented in `core/scope.py`. Rules:
 
 ### 6.1 API Keys: Free Mode by Default
 
-This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 flags, install prompt), `docs/09_TOOL_CONTRACTS.md` (§2 `keys` schema) and `docs/10_TOOL_INSTALLER.md` (§1 install prompt).
+This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 flags), `docs/09_TOOL_CONTRACTS.md` (§2 `keys` schema) and `docs/10_TOOL_SOURCES.md` (§6 `.env` setup).
 
 1. **Free mode is the default.** Every `core` tool must produce useful results with zero keys. Enhanced mode turns on per tool as soon as that tool's key is set.
 2. **Keys come only from `.env`** (loaded at startup). Never from CLI flags, never logged, never in URLs or query strings; `redact()` covers them in errors, logs and `tool_runs.error`.
 3. **Only keys that are free to obtain are supported.** A tool whose only key is paid gets no key support at all (it runs free or is skipped).
-4. **`doctor` always shows a Keys table** (tool, set/missing, what it adds, sign-up URL). On the scan commands, `--no-keys` forces free mode and ignores `.env` (flag list in `docs/02_CLI_UX.md`). `install` on an interactive TTY asks once: "Free only, or add keys?". Choosing keys copies `.env.example` to `.env` (never overwrites) and prints the path plus the Keys table; when `.env` already exists it is kept, the message says so, and the table still prints. Declining the prompt prints nothing and leaves `.env` alone. If `.env.example` is missing, the message says nothing was copied, no table is printed, and no `.env` is created. With no TTY on stdin it never prompts and defaults to free (implemented in Part 10).
+4. **`doctor` always shows a Keys table** (tool, set/missing, what it adds, sign-up URL). On the scan commands, `--no-keys` forces free mode and ignores `.env` (flag list in `docs/02_CLI_UX.md`). Nothing prompts for keys: the removed `install` prompt was the only one, and since 2026-11-17 the docs tell you to `cp .env.example .env` yourself (docs/10_TOOL_SOURCES.md §6). `.env` is never overwritten by reconkit.
 5. **`tools.yaml` schema:** an optional `keys:` list per tool, each entry `{env, url, adds}`. A tool without keys has no `keys` entry. `keys` is the single source of truth for a tool's key environment variables: there is no separate `needs_key` field, and `registry` rejects an entry that still carries one. Tools that read keys from their own config file (`subfinder` reads `$HOME/.config/subfinder/provider-config.yaml`) still list `keys`; the adapter writes the values from the allowed env names into a temporary provider-config file (mode 0600, deleted in a `finally` block) and never puts the value in argv or a log.
 
 ## 7. Environment Variables
@@ -91,7 +92,7 @@ This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 fla
 - [ ] Active stages call the scope gate; tests prove refusal
 - [ ] No `shell=True` anywhere (`ruff` rule + grep test)
 - [ ] Targets validated before reaching subprocess
-- [ ] Installer uses registry sources and verifies checksums
+- [ ] No install/download path exists; `tools.yaml` `source:` stays inert text
 - [ ] No secrets in logs, DB, errors or exports
 - [ ] No hidden throttling: no pacer, delay or rate-limiter path remains
 - [ ] Opt-in and intrusive tiers gated

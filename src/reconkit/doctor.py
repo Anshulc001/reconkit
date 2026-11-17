@@ -1,4 +1,4 @@
-"""Environment and tool readiness checks (docs/10_TOOL_INSTALLER.md)."""
+"""Environment and tool readiness checks (docs/10_TOOL_SOURCES.md)."""
 
 from __future__ import annotations
 
@@ -12,10 +12,9 @@ from dotenv import dotenv_values
 
 from reconkit.adapters import ADAPTERS
 from reconkit.adapters.registry import ToolSpec, load_system_packages, load_tools
-from reconkit.config import DEFAULT_CONFIG_PATH, AppConfig
+from reconkit.config import DEFAULT_CONFIG_PATH, AppConfig, bin_dir
 from reconkit.core.scope import DEFAULT_SCOPE_PATH
-from reconkit.installer.github_release import installed_copy, installed_version
-from reconkit.installer.registry import InstallPlan, bin_dir, load_plans
+from reconkit.core.toolcheck import installed_copy, installed_version
 from reconkit.models import InstallStatus, Stage, Tier
 
 MIN_PYTHON = (3, 11)
@@ -92,25 +91,24 @@ class DoctorReport:
     warnings: tuple[str, ...]
 
 
-def default_status(spec: ToolSpec, plans: Mapping[str, InstallPlan] | None = None) -> InstallStatus:
-    """Adapter identity check first, else the install plan's own binary probe.
+def default_status(spec: ToolSpec) -> InstallStatus:
+    """Adapter identity check first, else the tool's own binary probe.
 
-    Most tools still have no adapter (they are `phase: 3`), so asking adapters
-    alone reported every one of them as missing even after a clean install. The
-    fallback is the same resolution an install uses: the managed copy first,
-    then `PATH`, and the plan's `version_cmd` as the identity probe.
+    Most tools have no adapter (they are `phase: 3`), so asking adapters alone
+    reported every one of them as missing even after a clean install. The
+    fallback is the documented lookup: the managed copy first, then `PATH`, with
+    `version_cmd` as the identity probe (docs/10 section 3).
     """
     adapter = ADAPTERS.get(spec.name)
     if adapter is not None:
         return adapter().check_installed()
-    plan = (load_plans() if plans is None else plans).get(spec.name)
-    if plan is None or plan.method == "none":
+    if spec.binary is None:
         return InstallStatus(installed=False)
     directory = bin_dir()
-    copy = installed_copy(plan, directory)
+    copy = installed_copy(spec, directory)
     if copy is None:
         return InstallStatus(installed=False)
-    version = installed_version(plan, directory)
+    version = installed_version(spec, directory)
     if version is None:
         return InstallStatus(installed=False, path=copy)
     return InstallStatus(installed=True, version=version, path=copy)
@@ -233,12 +231,7 @@ def collect_report(
     if status_of is not None:
         tools = tuple(_tool_check(spec, status_of) for spec in ordered)
     else:
-        plans = load_plans(tools_path)
-
-        def plan_status(spec: ToolSpec) -> InstallStatus:
-            return default_status(spec, plans)
-
-        tools = tuple(_tool_check(spec, plan_status) for spec in ordered)
+        tools = tuple(_tool_check(spec, default_status) for spec in ordered)
 
     coverage: list[StageCoverage] = []
     for stage in order:
@@ -283,6 +276,13 @@ def collect_report(
         for check in tools
         if check.installed == WRONG_PROGRAM
     ]
+    if config.tool_versions:
+        # Accepted-and-ignored since the installer was removed (2026-11-17, D4):
+        # nothing reads a pin any more, so say so once instead of silently ignoring it.
+        warnings.append(
+            "tool_versions in config.yaml is accepted and ignored: reconkit no longer "
+            "installs or pins tools (docs/10_TOOL_SOURCES.md section 1)."
+        )
 
     current = tuple(python_version) if python_version is not None else tuple(sys.version_info[:3])
     scope_file = Path(scope_path) if scope_path is not None else DEFAULT_SCOPE_PATH

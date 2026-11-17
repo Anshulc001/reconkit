@@ -3116,6 +3116,129 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Sudo:** none. **Not verified:** an actual `webanalyze` scan against a host
   (network; and the tech stage has no adapter yet).
 
+## Installer removal D4 (2026-11-17): install/update deleted, doctor no longer needs installer/  (commit subject `refactor: remove install/update commands; doctor no longer depends on installer`; hash filled by the next commit)
+
+- **Docs read / goal:** docs/01 §6, docs/02 §2/§3/§6, docs/03 §4/§5/§9/§13,
+  docs/05 §5/§6.1, docs/07 inventory, docs/08 Flows 1-2, docs/10 in full,
+  `tools.yaml`, `config.yaml`. Goal: owner-requested removal of the install and
+  update commands (reason: "user-requested removal of install/update commands");
+  `doctor` keeps reporting exactly what it reported before. Recorded as
+  MASTER_PLAN D4 and mirrored in PROGRESS.
+- **Decision, module placement:** the read-only half of the installer
+  (`installed_copy`, `installed_version`) moved to the new
+  `src/reconkit/core/toolcheck.py`, not `config.py`. `config.py` is the strict
+  config loader and must not import `adapters.registry` or run subprocesses;
+  docs/03's module map has a `core/` row for shared, tested utilities. `bin_dir()`
+  went to `config.py` as the locked decision says, because it is a filesystem
+  location and `adapters.base` can import it without a cycle.
+- **Decision, `ToolSpec` fields:** `binary: str | None`, `version_cmd:
+  list[str] | None`, `version_regex: str | None`, `source: str | None`, all
+  loaded and validated in `adapters/registry._spec` (a non-compiling
+  `version_regex` is still a `ConfigError` at load). `requires` (puredns ->
+  massdns) is dropped: it had no consumer and the fact now lives in the source
+  note.
+- **Before / after, `reconkit doctor --no-color`:** identical for 47 of 48 rows,
+  the coverage line and every other table. The one difference is
+  `httpx_tech`: before `missing | - | - | n/a`, after `yes | <path to httpx> |
+  <path> | ok`, and the footer count went 4 -> 3.
+  Reason: the old `default_status` returned "not installed" for any plan with
+  `method: none`, which included a tool with no install block at all
+  (`httpx_tech`). The locked rule is "adapter first, else the ToolSpec's
+  version_cmd/version_regex/binary", and `httpx_tech` carries `binary: httpx`,
+  which is installed - so it is now probed like every other binary row. The old
+  behaviour was not preservable without adding a fifth field (an
+  "is-installable" flag) that the locked decisions do not include. This is the
+  one accepted behaviour change; docs/10 §1 now says the row reuses `httpx`.
+- **Proof: `reconkit --help`** lost exactly two lines (`install`, `update`); all
+  other commands and their formatting are byte-identical (`diff` of the two
+  captures shows only those two deletions).
+- **Proof: `grep -rn 'from reconkit.installer' src/`** -> empty.
+  `grep -rn 'install' src/reconkit/cli.py` -> one hit, the aggressive-mode help
+  text "plus naabu when installed", which is not a command reference.
+  `grep -c 'install:' tools.yaml` -> 0. `grep -c 'source:' tools.yaml` -> 40
+  (all 40 binary rows; the 8 http/python adapters have no source).
+  `tests/test_tools_registry.py::test_every_binary_tool_has_a_non_empty_source`
+  pins it.
+- **Tests changed (name / old / new / reason):**
+  1. `tests/test_install_cli.py` (39 node ids) - **deleted**; every test
+     imported `reconkit.installer` or drove `install`/`update`/`--fix`, which no
+     longer exist. Exception moved, not deleted:
+     `test_managed_bin_dir_has_one_source_of_truth` -> `tests/test_config.py`
+     (same name; now asserts `adapters.base.managed_bin_dir() ==
+     config.bin_dir() == ~/.reconkit/bin` and the `home` override).
+  2. `tests/test_installer_backends.py` (28), `tests/test_installer_github_release.py`
+     (18), `tests/test_installer_verify.py` (10) - **deleted**; the modules they
+     covered (apt/pipx/go_install/release download/checksum/archive) are gone.
+  3. `tests/test_installer_registry.py` (34) - **file deleted**, 22 node ids moved
+     to `tests/test_tools_registry.py` (listed below) and 12 re-expressed.
+  4. `tests/test_cli.py::test_every_non_scan_command_has_help` - old: 12
+     parametrized cases including `install --help` and `update --help`; new: 10
+     cases; reason: those commands no longer exist (2 node ids removed).
+  5. `tests/test_doctor.py::test_fix_runs_the_installer` - **deleted**; there is
+     no `--fix` and no installer to call.
+  6. `tests/test_doctor.py::test_missing_tools_keep_exit_code_zero` - old:
+     asserted `Missing tools: 2. Run: reconkit install --all`; new: asserts the
+     new footer sentence, the docs/10 pointer, and that `reconkit install --all`
+     is absent; reason: the footer string changed.
+  7. `tests/test_doctor.py::test_every_tool_present_reports_no_missing_tools` -
+     unchanged assertions, but `report_for()` now builds its config from
+     `NOPIN_CONFIG` (`CONFIG` with `tool_versions` emptied) because the real
+     pin now adds one warning; the pin's warning is tested by the new test 8.
+  8. **New** `tests/test_doctor.py::test_a_tool_versions_pin_is_reported_once_as_ignored`
+     - one warning naming docs/10 when `tool_versions` is non-empty.
+  9. **New** `tests/test_engine.py::test_an_uninstalled_tool_is_skipped_and_the_others_still_run`
+     - the baseline guarantee (Sub-task 1): `pyscan` not installed -> skip row
+     `not installed` in `summary.skipped` and `tool_runs`, `naabu` still runs.
+  10. `tests/test_installer_registry.py` -> `tests/test_tools_registry.py`, 22
+      node ids **unchanged in intent, adapted in assertion source**:
+      `test_version_args_come_from_version_cmd` -> `test_version_cmd_comes_from_the_registry`
+      (now `ToolSpec.version_cmd == ["subfinder", "-version"]`),
+      `test_massdns_version_command_is_the_package_manager` (now one
+      `version_cmd` list), `test_requires_and_requires_apt_are_carried` ->
+      `test_requires_apt_is_carried` (the dead `requires` assertion dropped),
+      `test_version_regex_is_parsed_from_the_registry`, the seven-banner, four-probe
+      and five-no-probe parametrizations (now `load_tools()[name]`),
+      `test_a_broken_version_regex_is_a_config_error` (now `load_tools`), and
+      `test_version_regex_survives_the_plan_copy` ->
+      `test_version_regex_survives_registry_loading` (there is no plan copy left).
+  11. The 12 deleted plan/method tests, re-expressed as source validation
+      (all in `tests/test_tools_registry.py`):
+      `test_every_tool_gets_a_known_method_and_binary` ->
+      `test_every_binary_tool_has_a_non_empty_source`;
+      `test_github_release_plan_keeps_its_fallback` ->
+      `test_a_release_source_names_its_repository`;
+      `test_tool_without_install_block_is_a_none_plan` ->
+      `test_a_shared_binary_tool_still_has_a_source`;
+      `test_version_pin_rewrites_the_go_package` ->
+      `test_go_sources_are_pinned_to_nothing`;
+      `test_version_pin_applies_to_a_plain_go_package` ->
+      `test_tools_yaml_carries_no_version_pin_field`;
+      `test_unknown_method_is_a_config_error` -> `test_an_empty_source_is_a_config_error`;
+      `test_go_install_without_a_package_is_a_config_error` ->
+      `test_a_non_string_source_is_a_config_error`;
+      `test_github_release_without_a_repo_is_a_config_error` ->
+      `test_a_list_source_is_a_config_error`;
+      `test_unknown_tool_is_a_config_error` (kept, now `get_spec`);
+      `test_resolve_plan_without_fallback_is_one_step` ->
+      `test_a_builtin_adapter_has_no_source`;
+      `test_member_and_checksum_override_are_parsed_from_the_registry` ->
+      `test_the_source_notes_are_preserved`;
+      `test_a_duplicate_plan_copy_keeps_the_override_fields` ->
+      `test_a_source_survives_registry_loading`.
+- **Test-count reconciliation:** 730 collected at b6697ff + 1 new engine test
+  = 731; then -38 (`test_install_cli.py`, the moved bin-dir test excluded),
+  -28, -18, -10 (the three backend files), -12 (registry: 34 out, 22 re-homed),
+  -2 (`test_cli.py` help cases), -1 + 1 (`test_doctor.py`: fix test out,
+  warning test in), +12 (the re-expressed source tests) = **635 collected / 635
+  passed**.
+- **S1-S7:** `635 passed in 9.81s`; `ruff check .` -> `All checks passed!`;
+  `ruff format --check .` -> `57 files already formatted`; `mypy src/reconkit`
+  -> `Success: no issues found in 29 source files` (35 -> 29: the six installer
+  modules are gone, `core/toolcheck.py` added).
+- **Sudo / network:** none. No test touches the network or a real binary.
+  **Not verified:** a real `doctor` run on Windows (no Windows box here); the
+  removed commands are gone on every platform by construction.
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

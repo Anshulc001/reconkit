@@ -32,7 +32,12 @@ class ToolKey:
 
 @dataclass(frozen=True)
 class ToolSpec:
-    """One tools.yaml entry: the only source of tool metadata."""
+    """One tools.yaml entry: the only source of tool metadata.
+
+    `binary`/`version_cmd`/`version_regex` are what doctor probes (docs/10
+    section 3); `source` is a human-readable install hint, never executed
+    (reconkit installs nothing since 2026-11-17).
+    """
 
     name: str
     stage: Stage
@@ -42,6 +47,10 @@ class ToolSpec:
     phase: int
     keys: tuple[ToolKey, ...] = ()
     requires_apt: tuple[str, ...] = ()
+    binary: str | None = None
+    version_cmd: list[str] | None = None
+    version_regex: str | None = None
+    source: str | None = None
 
 
 def _document(file: Path) -> dict[str, Any]:
@@ -132,7 +141,44 @@ def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
         phase=phase,
         keys=_keys(name, entry),
         requires_apt=tuple(requires_apt),
+        binary=_optional_text(name, entry, "binary"),
+        version_cmd=_version_cmd(name, entry),
+        version_regex=_version_regex(name, entry),
+        source=_optional_text(name, entry, "source"),
     )
+
+
+def _optional_text(name: str, entry: dict[str, Any], field: str) -> str | None:
+    """An optional non-empty string field; a blank or non-string value is invalid."""
+    value = entry.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"tool {name!r} in tools.yaml has an invalid {field!r}")
+    return value.strip()
+
+
+def _version_cmd(name: str, entry: dict[str, Any]) -> list[str] | None:
+    raw = entry.get("version_cmd")
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or not all(isinstance(part, str) and part for part in raw):
+        raise ConfigError(f"tool {name!r} in tools.yaml has an invalid version_cmd")
+    return list(raw)
+
+
+def _version_regex(name: str, entry: dict[str, Any]) -> str | None:
+    """An optional version pattern; it must compile or the registry is invalid."""
+    value = entry.get("version_regex")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"tool {name!r} in tools.yaml has an invalid version_regex")
+    try:
+        re.compile(value)
+    except re.error:
+        raise ConfigError(f"tool {name!r} in tools.yaml has an invalid version_regex") from None
+    return value.strip()
 
 
 def _keys(name: str, entry: dict[str, Any]) -> tuple[ToolKey, ...]:

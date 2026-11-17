@@ -24,6 +24,10 @@ from reconkit.ui import render_doctor
 
 REPO = Path(__file__).resolve().parents[1]
 CONFIG = load_config(REPO / "config.yaml")
+# The real config pins rustscan in `tool_versions`, which now adds one warning
+# (accepted-and-ignored, 2026-11-17). Tests that assert the warning list use
+# NOPIN_CONFIG; the pin's own warning is tested on its own below.
+NOPIN_CONFIG = CONFIG.model_copy(update={"tool_versions": {}})
 
 TOOLS_YAML = """\
 version: 1
@@ -53,7 +57,7 @@ def report_for(
 ) -> DoctorReport:
     mapping = statuses or {}
     return collect_report(
-        config=CONFIG,
+        config=NOPIN_CONFIG,
         tools_path=write_tools(tmp_path),
         env=env if env is not None else {},
         scope_path=tmp_path / "scope.yaml",
@@ -201,11 +205,30 @@ def test_json_document_has_the_documented_shape(tmp_path: Path) -> None:
     assert "placeholder-value" not in stream.getvalue()
 
 
+def test_a_tool_versions_pin_is_reported_once_as_ignored(tmp_path: Path) -> None:
+    """2026-11-17: the pin has no consumer, so doctor says so once."""
+    report = collect_report(
+        config=CONFIG,
+        tools_path=write_tools(tmp_path),
+        env={},
+        scope_path=tmp_path / "scope.yaml",
+        dpkg_status=tmp_path / "dpkg-status",
+        status_of=lambda spec: InstallStatus(installed=False),
+    )
+    ignored = [warning for warning in report.warnings if "tool_versions" in warning]
+    assert len(ignored) == 1
+    assert "docs/10_TOOL_SOURCES.md" in ignored[0]
+
+
 def test_missing_tools_keep_exit_code_zero(tmp_path: Path) -> None:
     report = report_for(tmp_path)
     stream = io.StringIO()
     assert render_doctor(report, stderr=stream) == 0
-    assert "Missing tools: 2. Run: reconkit install --all" in stream.getvalue()
+    assert "Missing tools: 2. Install them yourself (apt, go install, or release download)" in (
+        stream.getvalue()
+    )
+    assert "docs/10_TOOL_SOURCES.md" in stream.getvalue()
+    assert "reconkit install --all" not in stream.getvalue()
 
 
 def test_python_too_old_exits_one(monkeypatch, tmp_path: Path) -> None:
@@ -214,21 +237,6 @@ def test_python_too_old_exits_one(monkeypatch, tmp_path: Path) -> None:
     result = CliRunner().invoke(app, ["doctor", "--config", str(REPO / "config.yaml")])
     assert result.exit_code == 1
     assert "too old" in result.output
-
-
-def test_fix_runs_the_installer(monkeypatch) -> None:
-    calls: list[object] = []
-
-    def fake_install_selected(plans, **kwargs):
-        calls.append((list(plans), kwargs))
-        return [], 0
-
-    monkeypatch.setattr(doctor, "ADAPTERS", {})
-    monkeypatch.setattr("reconkit.cli.install_selected", fake_install_selected)
-    result = CliRunner().invoke(app, ["doctor", "--fix", "--config", str(REPO / "config.yaml")])
-    assert result.exit_code == 0
-    assert "--fix is not available yet" not in result.output
-    assert calls, "--fix did not call the installer"
 
 
 def test_unreadable_config_exits_one(tmp_path: Path) -> None:

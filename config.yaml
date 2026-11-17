@@ -28,12 +28,13 @@ wildcard_check:
   enabled: true
   probes: 3
 
-# Pin tool versions to avoid parser breakage after upstream changes. Empty = latest.
-# Example: tool_versions: { nuclei: "3.3.0" }
-# rustscan is pinned: the latest release (2.4.1) is a nested .tar.gz.zip that the
-# single-layer extractor cannot read (see tools.yaml rustscan notes).
+# Accepted and ignored (installer removed 2026-11-17, docs/MASTER_PLAN.md D4):
+# there is no consumer for a version pin any more, so this block has no effect.
+# Keep it, remove it, or leave entries - loading config.yaml is unchanged either way.
 tool_versions: { rustscan: "2.3.0" }
 
+# Accepted and ignored for the same reason: doctor looks in ~/.reconkit/bin and
+# then PATH, and reconkit downloads nothing. Kept so an existing config still loads.
 install:
   dir: "~/.reconkit/bin"
   verify_checksums: true

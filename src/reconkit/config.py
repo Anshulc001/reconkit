@@ -16,6 +16,18 @@ from reconkit.errors import ConfigError
 DEFAULT_CONFIG_PATH = Path("config.yaml")
 
 
+def bin_dir(home: Path | None = None) -> Path:
+    """The managed binary directory: `~/.reconkit/bin` (docs/10 section 2).
+
+    Hard-coded on purpose: doctor's lookup and every adapter's binary resolution
+    check this path first, and the value must not depend on which config file a
+    command happened to load. The `install.dir` config key is accepted and
+    ignored since the installer was removed (2026-11-17, MASTER_PLAN D4).
+    """
+    base = Path.home() if home is None else home
+    return base / ".reconkit" / "bin"
+
+
 class _StrictModel(BaseModel):
     """Reject unknown keys so a typo in config.yaml is an error, not a silent no-op."""
 

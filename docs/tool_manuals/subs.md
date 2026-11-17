@@ -220,7 +220,7 @@ Exit 0 with a JSON object carrying `results` and `total`.
 - **Adapter in this build:** `src/reconkit/adapters/subfinder.py`
 - **Official source used:** https://github.com/projectdiscovery/subfinder
 - **Installed on this box:** `/home/kali/go/bin/subfinder`, `[INF] Current Version: v2.17.0`
-- **Install command:** `reconkit install subfinder` (github_release, fallback `go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest`)
+- **Install yourself:** from the GitHub release, fallback `go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest` - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **yes** - `-dL, -list string` (file containing list of domains)
 
 #### Real `--help` (raw, full)
@@ -327,7 +327,7 @@ demo.testfire.net
 - **Adapter in this build:** `src/reconkit/adapters/assetfinder.py`
 - **Official source used:** https://github.com/tomnomnom/assetfinder
 - **Installed on this box:** `/home/kali/.reconkit/bin/assetfinder` (no version flag; identity probe is `-h`)
-- **Install command:** `reconkit install assetfinder` (`go install github.com/tomnomnom/assetfinder@latest`)
+- **Install yourself:** `go install github.com/tomnomnom/assetfinder@latest` - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **no** - the domain is a single positional argument; run once per domain
 
 #### Real `--help` (raw, full)
@@ -368,7 +368,7 @@ testfire.net
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/Findomain/Findomain
 - **Installed on this box:** `/home/kali/.reconkit/bin/findomain`, `findomain 11.0.0`
-- **Install command:** `reconkit install findomain` (github_release `findomain-linux.zip`, `verify_checksums: false` - the release publishes no checksums asset)
+- **Install yourself:** from the GitHub release `findomain-linux.zip`, `verify_checksums: false` - the release publishes no checksums asset - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **yes** - `-f, --file <FILES>`
 
 #### Real `--help` (raw, full)
@@ -596,7 +596,7 @@ my-store.testfire.net
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/projectdiscovery/chaos-client
 - **Installed on this box:** `/home/kali/.reconkit/bin/chaos`, `[INF] Current Version: 0.5.2`
-- **Install command:** `reconkit install chaos` (github_release `chaos-client`, member `chaos-client`)
+- **Install yourself:** from the GitHub release `chaos-client`, member `chaos-client` - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **yes** - `-dL string` (file containing domains)
 
 #### Real `--help` (raw, full)
@@ -665,7 +665,7 @@ needed - a user with a free key can run it.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/gwen001/github-subdomains
 - **Installed on this box:** `/home/kali/.reconkit/bin/github-subdomains` (no version flag; `-h` prints usage)
-- **Install command:** `reconkit install github_subdomains` (`go install github.com/gwen001/github-subdomains@latest`)
+- **Install yourself:** `go install github.com/gwen001/github-subdomains@latest` - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **no** - `-d string` takes one domain
 
 #### Real `--help` (raw, full)
@@ -746,7 +746,7 @@ entry already declares `GITHUB_TOKEN`; nothing to fix.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/owasp-amass/amass
 - **Installed on this box:** `/usr/bin/amass`, `v5.1.3`
-- **Install command:** `reconkit install amass` (`apt install amass`, needs sudo)
+- **Install yourself:** `apt install amass`, needs sudo - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** not in the top-level `-h`; subcommand flags not verified here
 
 #### Real `--help` (raw, full)

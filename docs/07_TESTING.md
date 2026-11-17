@@ -37,7 +37,7 @@ The `live` marker is registered in `pyproject.toml`, but no live test is checked
 tests/
   conftest.py            # temp dirs, temp DB, fake scope files, fake clock
   fixtures/              # sanitized real tool output, one directory per tool
-  fakebin/               # tiny fake executables for runner/installer tests
+  fakebin/               # tiny fake executables for runner/version-probe tests
   test_adapters.py       # HTTP adapters: parsing, caps, keys, mock mode
   test_binary_adapters.py
   test_python_adapters.py
@@ -46,8 +46,7 @@ tests/
   test_store.py  test_wildcard_workspace.py  test_ui.py  test_cli.py
   test_registry.py  test_package.py
   test_doctor.py
-  test_installer_registry.py  test_installer_backends.py
-  test_installer_github_release.py  test_installer_verify.py  test_install_cli.py
+  test_tools_registry.py  # tools.yaml -> ToolSpec, version probes, source: strings
   test_no_shell_true.py  # scans src for shell=True / os.system
 ```
 
@@ -78,7 +77,8 @@ Expected: other results kept, run status `partial`, exit code 5.
 
 ## 6. Coverage
 
-- No coverage threshold is enforced. The suite prioritizes the scope gate, subprocess safety, consensus, store diff and installer verification.
+- No coverage threshold is enforced. The suite prioritizes the scope gate, subprocess safety, consensus, store diff and tool detection (the registry probe and `doctor`).
+- `test_tools_registry.py` replaced the five installer test files on 2026-11-17: it keeps the 22 registry/probe tests (adapted from `InstallPlan` to `ToolSpec`) and re-expresses the 12 deleted plan/method tests as `source:` validation. `tests/test_config.py` gained the one-source-of-truth test for `bin_dir()`.
 
 ## 7. Commands
 

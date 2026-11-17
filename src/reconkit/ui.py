@@ -19,7 +19,6 @@ from rich.text import Text
 
 from reconkit.doctor import DoctorReport, KeyCheck
 from reconkit.engine import DiffSnapshot, HostSnapshot, RunSnapshot, ScanSummary
-from reconkit.installer.github_release import InstallOutcome
 from reconkit.models import Confidence, HostState, ToolResult, ToolStatus
 
 _STATE_STYLES: dict[HostState, str] = {
@@ -850,55 +849,16 @@ def render_doctor(
         out.print(keys)
     if report.missing:
         out.print(
-            Text(f"Missing tools: {report.missing}. Run: reconkit install --all", style="yellow")
+            Text(
+                f"Missing tools: {report.missing}. Install them yourself (apt, go install, "
+                "or release download) — per-tool sources in docs/10_TOOL_SOURCES.md. "
+                "Re-run doctor to confirm.",
+                style="yellow",
+            )
         )
     for warning in report.warnings:
         out.print(Text(f"warning: {warning}", style="yellow"))
     return 0
-
-
-def _install_result(outcome: InstallOutcome, *, dry_run: bool) -> str:
-    if outcome.method == "none" and outcome.ok:
-        return "nothing to install"
-    if dry_run and outcome.ok:
-        return "would install"
-    if outcome.skipped:
-        return "skipped"
-    if outcome.up_to_date:
-        first = outcome.steps[0] if outcome.steps else ""
-        return "up to date" if "is current" in first else "already installed"
-    return "installed" if outcome.ok else "failed"
-
-
-def _install_detail(outcome: InstallOutcome) -> str:
-    if outcome.error:
-        return outcome.error
-    if outcome.destination:
-        return outcome.destination
-    return outcome.steps[-1] if outcome.steps else ""
-
-
-def render_install(
-    outcomes: Iterable[InstallOutcome],
-    *,
-    dry_run: bool,
-    console: Console | None = None,
-) -> None:
-    """One row per tool: tool, method, result, detail (docs/10 section 1)."""
-    target = console or make_console()
-    table = Table(box=None, show_header=True, header_style="bold", pad_edge=False)
-    table.add_column("tool")
-    table.add_column("method")
-    table.add_column("result")
-    table.add_column("detail")
-    for outcome in outcomes:
-        table.add_row(
-            outcome.tool,
-            outcome.method or "-",
-            _install_result(outcome, dry_run=dry_run),
-            _install_detail(outcome),
-        )
-    target.print(table)
 
 
 def render_keys(checks: Iterable[KeyCheck], *, console: Console | None = None) -> None:

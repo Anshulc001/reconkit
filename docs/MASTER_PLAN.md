@@ -595,6 +595,24 @@ D3. 2026-11-17 - All speed/throttle control is removed.
     per-tool caps are not throttling and remain. This supersedes plan rule 3 of
     docs/05 for the pacing part only; the scope gate is untouched.
 
+D4. 2026-11-17 - The installer is removed; reconkit does not install tools.
+    Reason: "user-requested removal of install/update commands."
+    `src/reconkit/installer/` is deleted (registry plans, apt/pipx/go_install
+    backends, GitHub release download, checksum/archive verification), and with
+    it `reconkit install`, `reconkit update`, `doctor --fix`, the `.env` key
+    prompt, `InstallError`/`InstallSkipped`, and the install UI. `tools.yaml`
+    `install:` blocks become inert `source:` strings (per-tool instructions in
+    docs/10_TOOL_SOURCES.md); `ToolSpec` gains `binary`, `version_cmd`,
+    `version_regex` and `source`, and the read-only lookup/probe that `doctor`
+    needs moves to `core/toolcheck.py` (`bin_dir()` lives in `config.py`).
+    `doctor` is unchanged in what it checks: adapter identity first, then the
+    managed copy / `PATH` lookup and the `version_cmd` probe. Exit code 6 is
+    retired. `config.yaml` `tool_versions` and the `install:` block are
+    accepted and ignored (`doctor` warns once about a non-empty
+    `tool_versions`); no pin has a consumer. This supersedes Part 10's installer
+    scope and the install half of docs/10; the tool registry, the scope gate and
+    the scan path are untouched.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

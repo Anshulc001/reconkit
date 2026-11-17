@@ -234,13 +234,13 @@ class BaseToolAdapter(ABC):
 
 
 def managed_bin_dir() -> Path:
-    """`~/.reconkit/bin` from the installer; imported lazily to avoid a cycle.
+    """`~/.reconkit/bin`, the first place every binary lookup looks.
 
-    adapters -> installer.registry -> adapters.registry -> adapters.base would
-    import in a loop, so the import happens at call time. There is exactly one
-    definition of the path (installer.registry.bin_dir) and a test pins the two.
+    `config` can be imported at module level (it only reads config.yaml), and
+    there is exactly one definition of the path: `config.bin_dir`. A test pins
+    the two to the same value (docs/10 section 2).
     """
-    from reconkit.installer.registry import bin_dir
+    from reconkit.config import bin_dir
 
     return bin_dir()
 

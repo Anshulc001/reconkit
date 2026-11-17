@@ -148,8 +148,6 @@ def test_every_scan_command_has_help(command: str) -> None:
         ["diff", "--help"],
         ["status", "--help"],
         ["doctor", "--help"],
-        ["install", "--help"],
-        ["update", "--help"],
         ["db", "--help"],
         ["db", "list", "--help"],
         ["db", "export", "--help"],

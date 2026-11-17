@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from reconkit.config import AppConfig, load_config
+from reconkit.config import AppConfig, bin_dir, load_config
 from reconkit.errors import ConfigError
 
 CONFIG = Path(__file__).resolve().parents[1] / "config.yaml"
@@ -18,6 +18,19 @@ def test_load_real_config() -> None:
     assert config.confidence.high_min_sources == 3
     assert config.results_dir
     assert config.user_agent
+
+
+def test_managed_bin_dir_has_one_source_of_truth(tmp_path: Path) -> None:
+    """Moved from tests/test_install_cli.py:373 when `installer/` was deleted.
+
+    `adapters.base.managed_bin_dir` (the first place a binary lookup looks) and
+    `config.bin_dir` must stay the same path, and that path is `~/.reconkit/bin`.
+    """
+    from reconkit.adapters.base import managed_bin_dir
+
+    assert managed_bin_dir() == bin_dir()
+    assert managed_bin_dir() == Path.home() / ".reconkit" / "bin"
+    assert bin_dir(tmp_path) == tmp_path / ".reconkit" / "bin"
 
 
 def test_config_has_no_speed_fields() -> None:

@@ -17,9 +17,7 @@
 ### Setup and health
 | Command | Purpose | Phase |
 |---|---|---|
-| `doctor [--fix]` | Tools, versions, system packages, API key names + Keys table, per-stage coverage | 2 |
-| `install [TOOL...\|--all] [--dry-run]` | Install missing tools into `~/.reconkit/bin`; interactive TTY asks once about API keys (docs/05 §6.1) | 2 |
-| `update [TOOL...\|--all] [--dry-run]` | Update tools (and nuclei templates) | 2 |
+| `doctor` | Tools, versions, system packages, API key names + Keys table, per-stage coverage | 2 |
 | `scope check -d DOMAIN` | Show whether a target is allowed by `scope.yaml` | 2 |
 | `scope import` | Build `scope.yaml` from a bug bounty program | 3 |
 
@@ -177,7 +175,9 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | `--no-color`, `-v/--verbose`, `-q/--silent` | Output control |
 | `--config PATH`, `--scope PATH`, `--db PATH` | Override file locations |
 
-`install` and `update` are the exception: their only options are `--all`, `--dry-run`, `--config` and `--no-color` (verified from `--help`). None of the target, key or JSON flags above apply to them.
+`install`, `update` and `doctor --fix` no longer exist (removed 2026-11-17, docs/MASTER_PLAN.md D4). Installing tools is your package manager, `go install` or a release download; the per-tool sources are in docs/10_TOOL_SOURCES.md.
+
+`config.yaml` `tool_versions` is **accepted and ignored** for the same reason: there is no download left to pin. Keeping the key means an older config still loads; `doctor` prints one warning when the block is non-empty. The `install:` block (`dir`, `verify_checksums`) is accepted and ignored too.
 
 There is no `--speed` and no `--delay`: both were removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN.md D3). Tools start together and run at their own natural pace; nothing in reconkit throttles, delays or reshuffles them.
 
@@ -204,7 +204,7 @@ new.example.com    UNKNOWN    -       -        certspotter, hackertarget  MEDIUM
 
 ### Doctor output
 
-`doctor` prints one row per tool: `tool`, `stage`, `tier`, `installed`, `version`, `path`, `identity`. A `kind: http` or `kind: python` tool needs no binary, so `version` and `path` print `n/a (no binary required)` and `installed` is always `yes`; only `kind: binary` tools can be missing. A binary that exists but fails its identity check prints `wrong program` in `installed` (with its `path`) and counts as not ready. Below the table: per-stage coverage (`subs 6/11 ready`), system packages, the Keys table (names and sign-up URLs, never values), and `Missing tools: N. Run: reconkit install --all` when anything is missing. `--json` writes one document with `type`, `python`, `python_ok`, `config`, `scope`, `db`, `tools`, `stages`, `system_packages`, `keys`, `missing`, `warnings` and `exit_code`, and keeps warnings at exit `0` (docs/10 section 5a).
+`doctor` prints one row per tool: `tool`, `stage`, `tier`, `installed`, `version`, `path`, `identity`. A `kind: http` or `kind: python` tool needs no binary, so `version` and `path` print `n/a (no binary required)` and `installed` is always `yes`; only `kind: binary` tools can be missing. A binary that exists but fails its identity check prints `wrong program` in `installed` (with its `path`) and counts as not ready. Below the table: per-stage coverage (`subs 6/11 ready`), system packages, the Keys table (names and sign-up URLs, never values), and `Missing tools: N. Install them yourself (apt, go install, or release download) — per-tool sources in docs/10_TOOL_SOURCES.md. Re-run doctor to confirm.` when anything is missing. A non-empty `config.yaml` `tool_versions` adds one `warning:` line saying the pin is accepted and ignored. `--json` writes one document with `type`, `python`, `python_ok`, `config`, `scope`, `db`, `tools`, `stages`, `system_packages`, `keys`, `missing`, `warnings` and `exit_code`, and keeps warnings at exit `0` (docs/10 section 3).
 
 ### JSON (`--json`)
 
@@ -220,7 +220,7 @@ The `hosts` objects always carry `state`, `confidence` and `sources`; the top-le
 
 `stages[].skipped` lists every tool the engine selected out before it ran, as `{"tool":"<name>","reason":"<why>"}` objects - `no adapter yet (phase N)`, `requires --active`, `not installed`, or the naabu scope-mode skip from docs/05 rule 6 (resolution failed or resolved outside `in_scope_cidrs`). A stage that has no adapter for any tool in its pool therefore shows its skips instead of an empty `results` array, so `results: []` means "ran, found nothing" only when `skipped` is empty too. `summary.tools_skipped` counts these rows along with any executed tool whose status is `skipped`; it is the total, not a per-tool count of executed results.
 
-`diff --json` writes one document with `type: diff`, the run ids it compared (`baseline_run_id`, `previous_run_id`, `latest_run_id`; `baseline_run_id` is `null` until a third completed discovery run exists), and arrays `new`, `gone`, `pending_gone`, `state_changes`, `ports_opened` and `ports_closed`. `pending_gone` holds the hosts that are missing from the latest run only: the same list the human output prints under "not reported as GONE yet", so a script can apply its own tolerance without re-querying. `gone` follows the two-consecutive-miss rule above. `status --json` writes one document with `type: status` and a `runs` array; each run carries `id`, `target`, `stage`, `status`, `started_at` and `finished_at` (the `speed` field was removed with speed control on 2026-11-17). `install`/`update`/`scope check`/the `db` and `export` stubs do not accept `--json` in this build.
+`diff --json` writes one document with `type: diff`, the run ids it compared (`baseline_run_id`, `previous_run_id`, `latest_run_id`; `baseline_run_id` is `null` until a third completed discovery run exists), and arrays `new`, `gone`, `pending_gone`, `state_changes`, `ports_opened` and `ports_closed`. `pending_gone` holds the hosts that are missing from the latest run only: the same list the human output prints under "not reported as GONE yet", so a script can apply its own tolerance without re-querying. `gone` follows the two-consecutive-miss rule above. `status --json` writes one document with `type: status` and a `runs` array; each run carries `id`, `target`, `stage`, `status`, `started_at` and `finished_at` (the `speed` field was removed with speed control on 2026-11-17). `scope check` and the `db` and `export` stubs do not accept `--json` in this build.
 
 ### Colors (Rich theme)
 
@@ -286,10 +286,10 @@ One folder per domain per run, never reused:
 | 3 | Scope violation when a scope file is present (target not allowed, unauthorized, or expired). A **missing** scope file is not a violation: it means unrestricted active scanning of the operator's targets (section 2) |
 | 4 | No usable tool for the stage |
 | 5 | Partial success (some tools failed or timed out, or a requested stage executed no tools) |
-| 6 | Every requested tool failed to install or update |
+| 6 | Retired 2026-11-17: was "every requested tool failed to install or update" |
 | 130 | Interrupted by user (state saved, resumable) |
 
-Code `6` belongs to `install`/`update` only: it is returned by `installer.github_release.exit_code()` (0 when every tool installed, 5 for a partial install, 6 when nothing did). The scan path's enum (`engine.ExitCode`) deliberately stops at 5 plus 130 and cannot emit 6; a scan in which every tool failed is code 4. Do not add a scan-level 6.
+Code `6` is retired (2026-11-17, docs/MASTER_PLAN.md D4): it belonged to `install`/`update` only, and both commands are gone. No command can emit it, and the scan path's enum (`engine.ExitCode`) never could - a scan in which every tool failed is code 4. Do not reuse 6.
 
 **A requested stage that executed zero tools is a partial run (code 5).** Zero executed tools means every tool in that stage's pool was selected out before running - `no adapter yet (phase N)`, `requires --active`, `not installed`, or the docs/05 rule 6 block - so the stage created a `scan_runs` row and `tool_runs` skip rows but no result. Two things follow, both from one engine decision:
 

@@ -31,7 +31,7 @@ reconkit is a single-process Python CLI. It does not reimplement recon: it **orc
 CLI (Typer)            parse flags, load config, call engine, render output
 Engine (asyncio)       stage pipeline, adapter selection, merge, confidence, resume
 Adapters (per tool)    check_installed / build_command / run / parse_output -> normalized records
-Core services          scope gate, runner (subprocess), store (SQLite), workspace, installer, doctor
+Core services          scope gate, runner (subprocess), store (SQLite), workspace, toolcheck, doctor
 ```
 
 - **CLI:** no business logic. Validates input, calls the engine, prints results. It configures console redaction once per process (`configure_redaction()` from `core/store.py`, seeded from `.env` the same way `Engine.open` loads it) and prints every error line through `redact()`, including the `-v` traceback (section 5, "Redaction API").
@@ -62,14 +62,14 @@ reconkit/
       store.py        # SQLite access + diff queries + redact()/configure_redaction()
       workspace.py    # workspaces/<target>/... raw files
       wildcard.py     # wildcard DNS detection
+      toolcheck.py    # installed_copy()/installed_version() - read-only tool probe
     adapters/
       base.py         # BaseToolAdapter
       registry.py     # loads tools.yaml, maps names to adapter classes
       crtsh.py certspotter.py otx.py hackertarget.py
       subfinder.py assetfinder.py dnspython.py
       pyprobe.py httpx_tool.py pyscan.py naabu.py
-    installer/
-      registry.py github_release.py go_install.py apt.py pipx.py verify.py
+  # installer/ was deleted on 2026-11-17 (docs/MASTER_PLAN.md D4)
   tests/
     fixtures/<tool>/  conftest.py  test_*.py
   workspaces/         # generated (git-ignored)
@@ -217,7 +217,7 @@ Speed control was removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN
 - Only `core/store.py` imports `sqlite3`.
 - Redaction has one implementation and one value source (`core/store.py`). `cli.py` imports exactly the helpers `configure_redaction` and `redact` from `core.store` - never `Store`, never `sqlite3` - so console output and stored text are masked identically. A second pattern list or a second secret source is a bug.
 - Only `ui.py` prints to the terminal (adapters and engine return data or raise).
-- Registry (`tools.yaml`) is the only source of tool names, install sources and tiers.
+- Registry (`tools.yaml`) is the only source of tool names, per-tool `source:` hints and tiers. reconkit installs nothing, so a `source:` string is documentation, never a command.
 
 ## 10. Key Technical Decisions
 
@@ -228,7 +228,7 @@ Speed control was removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN
 | Native Linux checkout (Kali/Ubuntu), separate Windows checkout | Real Linux tools; fast disk; no CRLF/locking issues | WSL2-only workflow; `/mnt/c` |
 | Natural-pace execution | The owner asked for no throttling (2026-11-17, D3); every tool runs at its own rate | Speed presets, delays, shuffling, rate limiter |
 | Adapter + registry | Add a tool without touching core | Hard-coded pipelines |
-| Own `~/.reconkit/bin` | No sudo, no global breakage, correct `httpx` | System PATH only |
+| Own `~/.reconkit/bin` (checked first) | No sudo, no global breakage, correct `httpx` | System PATH only |
 
 ## 11. Performance
 
@@ -251,7 +251,7 @@ Single machine, thousands of hosts per target. Beyond that is out of scope (see 
 | Tool crashes or exits non-zero | Record `failed` with stderr summary; keep other results |
 | Tool timeout | Kill process group, keep partial output if parseable, record `timeout` |
 | HTTP source returns 429/5xx | `failed` result carrying the status; no retry (only a connection error retries once) |
-| No adapter available for a stage | Exit code 4 with install hint |
+| No adapter available for a stage | Exit code 4 (the message names the stage and its missing tools) |
 | `scope.yaml` expired/mismatch (file present) | Refuse active stage, exit code 3 |
 | `scope.yaml` absent | Active/full scanning runs unrestricted against the operator's targets and discovered hosts (docs/05 rule 2); no scope object is built |
 | DB locked or corrupt | Clear error; never silently continue; suggest `--db` path |

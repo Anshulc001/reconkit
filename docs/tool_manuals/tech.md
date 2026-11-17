@@ -70,7 +70,7 @@ https://testfire.net [200] [] [Altoro Mutual] [Apache Tomcat,Java]
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/urbanadventurer/WhatWeb
 - **Installed on this box:** `/usr/bin/whatweb`, `WhatWeb version 0.6.4`
-- **Install command:** `reconkit install whatweb` (`apt install whatweb`, needs sudo)
+- **Install yourself:** `apt install whatweb`, needs sudo - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **yes** - `--input-file=FILE, -i`
 
 #### Real `--help` (raw, full)
@@ -274,7 +274,7 @@ when writing to a pipe unless `--color=never` is added, which a parser will need
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/EnableSecurity/wafw00f
 - **Installed on this box:** `/usr/bin/wafw00f`, `WAFW00F : v2.4.2`
-- **Install command:** `reconkit install wafw00f` (`pipx install wafw00f`)
+- **Install yourself:** `pipx install wafw00f` - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **yes** - `-i INPUT, --input-file=INPUT`
 
 #### Real `--help` (raw, full)
@@ -367,7 +367,7 @@ handful of probe requests, so it belongs to the active side.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/projectdiscovery/cdncheck
 - **Installed on this box:** `/home/kali/.reconkit/bin/cdncheck`, `[INF] Current version: v1.4.0`
-- **Install command:** `reconkit install cdncheck` (github_release)
+- **Install yourself:** from the GitHub release - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **yes** - `-i, -input string[]` (list of ip / dns)
 
 #### Real `--help` (raw, full)
@@ -462,7 +462,7 @@ for parseable output; without it the banner is the only thing on stdout.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/rverton/webanalyze
 - **Installed on this box:** `/home/kali/.reconkit/bin/webanalyze`, `v0.3.9`
-- **Install command:** `reconkit install webanalyze` (`go install github.com/rverton/webanalyze/cmd/webanalyze@latest`)
+- **Install yourself:** `go install github.com/rverton/webanalyze/cmd/webanalyze@latest` - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** not verified - see the note; `-hosts` was not confirmed
 
 #### Real `--help` (raw, full)

@@ -32,7 +32,7 @@ Tools from the `vulns` stage are deliberately absent - see
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/lc/gau
 - **Installed on this box:** `/home/kali/.reconkit/bin/gau`, `gau version: 2.2.4`
-- **Install command:** `reconkit install gau` (`go install github.com/lc/gau/v2/cmd/gau@latest`)
+- **Install yourself:** `go install github.com/lc/gau/v2/cmd/gau@latest` - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **yes, as multiple positional arguments** (no list-file flag)
 
 #### Real `--help` (raw, full)
@@ -116,7 +116,7 @@ config`. That is normal, not a failure.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/tomnomnom/waybackurls
 - **Installed on this box:** `/home/kali/.reconkit/bin/waybackurls` (no version flag; `-h` prints usage)
-- **Install command:** `reconkit install waybackurls` (`go install github.com/tomnomnom/waybackurls@latest`)
+- **Install yourself:** `go install github.com/tomnomnom/waybackurls@latest` - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **yes, as multiple positional arguments or stdin**
 
 #### Real `--help` (raw, full)
@@ -183,7 +183,7 @@ Queries the Wayback CDX API; no traffic to the target.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/projectdiscovery/katana
 - **Installed on this box:** `/home/kali/go/bin/katana`, `[INF] Current version: v1.8.0`
-- **Install command:** `reconkit install katana` (github_release, `checksums_pattern: katana-{version}-checksums.txt`)
+- **Install yourself:** from the GitHub release, `checksums_pattern: katana-{version}-checksums.txt` - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **yes** - `-u, -list string[]` (target url / list)
 
 #### Real `--help` (raw, full)
@@ -371,7 +371,7 @@ D3), so reconkit no longer passes `-rl` and the limit above was typed by hand.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/hakluke/hakrawler
 - **Installed on this box:** `/home/kali/.reconkit/bin/hakrawler` (no version flag; `--help` prints usage and `-h` takes an argument)
-- **Install command:** `reconkit install hakrawler` (`go install github.com/hakluke/hakrawler@latest`)
+- **Install yourself:** `go install github.com/hakluke/hakrawler@latest` - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **yes, via stdin** - one URL per line
 
 #### Real `--help` (raw, full)
@@ -449,7 +449,7 @@ given scope, so the empty result is correct behaviour, not a failure. Note
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/jaeles-project/gospider
 - **Installed on this box:** `/home/kali/.reconkit/bin/gospider`, `v1.1.6`
-- **Install command:** `reconkit install gospider` (`go install github.com/jaeles-project/gospider@latest`)
+- **Install yourself:** `go install github.com/jaeles-project/gospider@latest` - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** not verified from `-h`; `-S`/`--site` takes a list
 
 #### Real `--help` (raw, full)
@@ -540,7 +540,7 @@ a tag such as `[url] -` in the default format, which a parser must strip.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/lc/subjs
 - **Installed on this box:** `/home/kali/.reconkit/bin/subjs`, `subjs version: 1.0.1`
-- **Install command:** `reconkit install subjs` (`go install github.com/lc/subjs@latest`)
+- **Install yourself:** `go install github.com/lc/subjs@latest` - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **yes, via stdin**
 
 #### Real `--help` (raw, full)
@@ -596,7 +596,7 @@ Version command is `-version`.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/tomnomnom/unfurl
 - **Installed on this box:** `/home/kali/.reconkit/bin/unfurl` (no version flag; `-h` prints usage)
-- **Install command:** `reconkit install unfurl` (`go install github.com/tomnomnom/unfurl@latest`)
+- **Install yourself:** `go install github.com/tomnomnom/unfurl@latest` - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **yes, via stdin**
 
 #### Real `--help` (raw, full)
@@ -686,7 +686,7 @@ name per line, which is what a parameter-candidate feature would consume.
 - **Adapter in this build:** none yet (phase 3, no adapter)
 - **Official source used:** https://github.com/projectdiscovery/urlfinder
 - **Installed on this box:** `/home/kali/.reconkit/bin/urlfinder`, `[INF] Current Version: v0.0.3`
-- **Install command:** `reconkit install urlfinder` (github_release)
+- **Install yourself:** from the GitHub release - sources in docs/10_TOOL_SOURCES.md
 - **Multi-domain input:** **yes** - `-d, -list string[]` (target domain / list)
 
 #### Real `--help` (raw, full)

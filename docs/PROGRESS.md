@@ -9,11 +9,12 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 - All four owner tasks (2026-11-17) are implemented, tested and committed: D1 `c99eaee`, D2 `6642ee4`, D3 `6a2db4d`, the interactive-mode fix `10b3a48`, Task 4 docs with this entry. Nothing else is queued; Part 13's uncertainties stay under "Open risks".
 - The verification follow-up (2026-11-17) closes the eight findings from the accepted 4-task batch (`F1`-`F8`, report section V-UNEXPECTED) in one commit: `--active` help text, the owner verification commands, five historical pacing markers, the core package docstring, two dead `pyproject` ignores, the AGENTS `config.yaml` row, two tool manuals and the D3 test counts. Documentation and help text only - no behaviour, flag, schema or test change.
 - **Owner-requested behavior changes (2026-11-17):** D1 (no scope file = unrestricted active scanning) is committed (`c99eaee`), D2 (naabu is scope-mode dependent) is committed (`6642ee4`), D3 (all speed/throttle control removed) is committed with this entry, and Task 4 (the end-to-end interactive-flow section in docs/02) is the next action.
-- **Install/doc backlog batch COMPLETE (2026-11-17, T1-T6 + one correction).** `reconkit install rustscan` works from its real 2.3.0 release (`f638c05`); the seven banner-first tools show a real version (`e0ef81d`); smap/gospider/subjs/urlfinder show one and the five Go-flag tools are documented path rows (`cb1fcd2`); `assetfinder -h` exit code corrected (`74c9102`, `-version` exit 2 corrected in `a037014`); amass v5 note (`24f64a3`); webanalyze `-update` recorded (`583e530`). Every one confirmed against the real binaries on this box.
-- **Next action:** none queued by this batch. The only follow-up created is the open item **nested-archive extraction** (rustscan 2.4.1), noted under "Open risks" - do not implement it without the owner.
-- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 5): `730 passed`, `ruff check .` clean, `ruff format --check .` 67 files, `mypy src/reconkit` clean (35 source files).
+- **Installer removal COMPLETE (2026-11-17, MASTER_PLAN D4, owner request "user-requested removal of install/update commands").** `install`, `update`, `doctor --fix` and `src/reconkit/installer/` are deleted; `tools.yaml` `install:` blocks became inert `source:` strings; `doctor` uses `ToolSpec` through `core/toolcheck.py` and no longer imports the installer. Full evidence, every changed test and the 730 -> 635 count reconciliation are in REVIEW_LOG "Installer removal D4". Nothing else queued; next action: none.
+- **Install/doc backlog batch (2026-11-17, T1-T6 + one correction; the commands named here were removed later the same day by D4).** `reconkit install rustscan` works from its real 2.3.0 release (`f638c05`); the seven banner-first tools show a real version (`e0ef81d`); smap/gospider/subjs/urlfinder show one and the five Go-flag tools are documented path rows (`cb1fcd2`); `assetfinder -h` exit code corrected (`74c9102`, `-version` exit 2 corrected in `a037014`); amass v5 note (`24f64a3`); webanalyze `-update` recorded (`583e530`). Every one confirmed against the real binaries on this box.
+- **Next action:** none. The nested-archive item under "Open risks" is moot for reconkit (it installs nothing since D4) and stays only as a note about rustscan 2.4.1.
+- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 5) after D4: `635 passed`, `ruff check .` clean, `ruff format --check .` 57 files, `mypy src/reconkit` clean (29 source files). The pre-D4 baseline was `730 passed`, 67 files, 35 source files.
 - Nothing is pushed: local `main` is ahead of `reconkit/main`, which is still `5fd1d9a`. Push only if the owner asks (`git push reconkit main`).
-- Already decided, do not reopen: no scope-bypass flag; consensus lives in `engine.py`; adapters never import `store`/`scope`/`ui`/`cli`; `subjack` replaced by `subzy` + nuclei takeover templates; installer targets Debian-family Linux only; free mode is default, keys only from `.env`; the ports ceiling is permanent (12i).
+- Already decided, do not reopen: no scope-bypass flag; consensus lives in `engine.py`; adapters never import `store`/`scope`/`ui`/`cli`; `subjack` replaced by `subzy` + nuclei takeover templates; reconkit installs nothing, so there is no installer platform rule (D4, 2026-11-17); free mode is default, keys only from `.env`; the ports ceiling is permanent (12i).
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in `src/`; new lint/type suppressions; `shell=True`; the whole environment to a child; adapters importing store/scope/ui/cli; consensus outside `engine.py`; pushing.
 - Read first: `AGENTS.md`, this block, the last 3 per-part entries in `REVIEW_LOG` (they are above the archive section), and the current part in `docs/MASTER_PLAN.md`.
 
@@ -47,7 +48,7 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 | f | `89ba34f`, `80ddd93`, `ee06075` | done - all phase-2 adapters |
 | g | `36cd3a4` (+ Part 7) | done - wildcard, workspace, engine, confidence, resume, exit codes |
 | h | Part 8 commit | done - `ui.py` + `cli.py` |
-| i | `9c4319b`, `5df7e98`, `66b117c` | done - `doctor.py` + `installer/` |
+| i | `9c4319b`, `5df7e98`, `66b117c` | done - `doctor.py` + `installer/` (`installer/` deleted 2026-11-17, MASTER_PLAN D4; the commits stay in history) |
 | j / 11 | `cc70b15` ... close-out | done - audit, fixes, report delivered |
 | 12 | one commit per item | 12a, 12b, 12c, 12d, 12e, 12f, 12g, 12h, 12i, 12j, 12k done - Part 12 complete |
 | 13 | one commit | interactive scan mode, stderr progress, per-domain saved reports - done 2026-11-16 |
@@ -83,10 +84,11 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   revisit later": no manual, no install, no test. Reading the task's "vulnerability
   scanning tools" as the stage `tools.yaml` itself calls "Takeover and exposure/
   misconfiguration checks" is an interpretation the owner may narrow.
-- **2026-11-16 (Phase 1):** `reconkit install gowitness` was run (go_install, no
-  sudo) so the tool could be documented; `rustscan` was attempted and failed on
-  the registry placeholder asset name, which is flagged in the manuals README
-  instead of being patched. No sudo command was run in either phase.
+- **2026-11-16 (Phase 1; the command named here was removed 2026-11-17 by
+  D4):** `reconkit install gowitness` was run (go_install, no sudo) so the tool
+  could be documented; `rustscan` was attempted and failed on the registry
+  placeholder asset name, which is flagged in the manuals README instead of
+  being patched. No sudo command was run in either phase.
 - **2026-11-16 (Part 13 / Phase 2), new config key:** `results_dir: results` in
   `config.yaml` and `AppConfig.results_dir` (with a default, so a config file
   written before Part 13 still loads). Store directory for the saved reports;
@@ -362,6 +364,35 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   section are marked closed. No code or test changed (no `webanalyze` adapter
   exists; the step cannot be automated by doctor without writing into the
   user's CWD, which the installer does not do).
+- **2026-11-17 (owner-requested removal D4), the installer is gone.**
+  `reconkit install`, `reconkit update`, `doctor --fix`, the `.env` key prompt
+  and `src/reconkit/installer/` (plans, apt/pipx/go_install backends, GitHub
+  release download, checksum/archive verification) are deleted; so are
+  `InstallError`/`InstallSkipped`, `render_install`/`_install_result`/
+  `_install_detail` and the import of `InstallOutcome` in `ui.py`. `tools.yaml`
+  `install:` blocks became inert `source:` strings (40 of them, one per binary
+  tool; the 8 http/python adapters have none) and the `x-pd-release` anchor is
+  gone; `ToolSpec` gained `binary`, `version_cmd`, `version_regex`, `source`.
+  `installed_copy`/`installed_version` moved to `core/toolcheck.py` and take a
+  `ToolSpec`; `bin_dir()` moved to `config.py`, and `adapters/base.
+  managed_bin_dir()` imports it from there. `doctor` computes rows from
+  `ToolSpec` only; exit code 6 is retired; `config.yaml` `tool_versions` and the
+  `install:` block stay in the schema as accepted-and-ignored, and `doctor`
+  prints one warning when `tool_versions` is non-empty. **One row changed:**
+  `httpx_tech` was always `missing` because its plan was `method: none`; it now
+  probes its shared `httpx` binary, so on this box it reads `yes`. That is the
+  locked "ToolSpec.binary" rule, not an accident - see REVIEW_LOG for why the
+  old behaviour could not be kept without an extra field. Tests: 39 in
+  `tests/test_install_cli.py` deleted (one moved to `tests/test_config.py` as
+  `test_managed_bin_dir_has_one_source_of_truth`), 28 + 18 + 10 in the three
+  installer backend files deleted, `tests/test_installer_registry.py` replaced
+  by `tests/test_tools_registry.py` (22 adapted, 12 re-expressed as `source:`
+  validation), `test_fix_runs_the_installer` deleted, two `install/update
+  --help` cases removed from `test_cli.py`, the doctor footer assertion and
+  `report_for()` updated, plus two new tests
+  (`test_an_uninstalled_tool_is_skipped_and_the_others_still_run`,
+  `test_a_tool_versions_pin_is_reported_once_as_ignored`). 730 -> 635 collected.
+  Full name/old/new/reason list in REVIEW_LOG "Installer removal D4".
 - **2026-11-17 (verification follow-up F8), the D3 test-count wording uses the
   measured figures.** The D3 entry above now says 32 test functions deleted and
   4 renamed (44 collected node ids removed, 12 added, 745 -> 713), then one
@@ -376,16 +407,16 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
 - **Pre-existing, not caused by Part 13 and not fixed:** `reconkit run --active --mock` stores every host as `UNKNOWN` (the mock live adapter returns records the engine reads as inconclusive). Verified on the flag path before Part 13 existed; the interactive `active`/`full` modes inherit it. Needs its own ruling.
 - **Part 13, accepted:** the saved report contains only values already stored in the run's DB (no recomputation), so a stored `title` that happened to contain a provider key would appear in `report.txt`/`report.json` exactly as it already appears in the SQLite file. Files are written 0600 inside `results_dir`.
 - Six typed `render_error(str(exc))` sites in `cli.py` (scope check, `diff`, `status`, `doctor`, `install`) still bypass `redact()`; every message is built from our own values today, so no leak is known. Needs its own ruling.
-- `libpcap-dev` is absent and `sudo` needs a password here, so the apt prerequisite step has never run live; `naabu` is already installed, which also means `install --all` does not attempt it.
-- The sudo-authenticated half of the installer has never run end to end: `massdns`, `amass`, `dig`, `nmap`, `whatweb` and `libpcap-dev` have only ever been exercised as `skipped`.
+- **Historical (installer removed 2026-11-17, D4):** `libpcap-dev` is absent and `sudo` needs a password here, so the apt prerequisite step never ran live; `naabu` is already installed, which also meant `install --all` did not attempt it.
+- **Historical (installer removed 2026-11-17, D4):** the sudo-authenticated half of the installer never ran end to end: `massdns`, `amass`, `dig`, `nmap`, `whatweb` and `libpcap-dev` were only ever exercised as `skipped`.
 - **Windows acceptance criteria are unverified anywhere with the current code**: no Windows run since the copy, `uname -a` is Linux, and the Windows `Popen` arguments (PIT-32) were only read in CPython source.
-- GitHub release lookups are unauthenticated (60 requests/hour per IP); a 403 fails every `github_release` tool. An authenticated lookup is a Part 11 planning decision, not built.
-- `update` re-runs `go install` for every `@latest` go_install tool and reports `installed` rather than `up to date` (byte-identical result; needs a version-probe mechanism).
+- **Historical (installer removed 2026-11-17, D4):** GitHub release lookups were unauthenticated (60 requests/hour per IP); a 403 failed every `github_release` tool. Nothing looks up a release any more.
+- **Historical (installer removed 2026-11-17, D4):** `update` re-ran `go install` for every `@latest` go_install tool and reported `installed` rather than `up to date`.
 - `installed_version()` returns the first line of the version text, so `katana` shows `__` and `nuclei` shows `[I…`, which also defeats `_same_version()` for them; `sqlmap` has no `version_cmd` and shows a bare path.
 - `BinaryAdapter.binary_path()` prefers any existing file in `~/.reconkit/bin` over `PATH`, so a broken managed copy shadows a working binary (deliberate, documented in docs/10 section 5; mitigation is manual).
 - Interactive Ctrl+C does not kill an already-running child (children lead their own process group, PIT-32); `killpg` remains UNTESTED on a real signal.
-- `SUDO_DENIAL_MARKERS` includes `no tty present` and `askpass`, neither reproduced live; `_fetch_text`'s 64 KiB default and the non-UTF-8 checksums rejection have no dedicated tests; `requires` (puredns -> massdns) is parsed but not auto-installed.
-- `doctor` does not check wordlists (no phase-2 adapter uses one); `dnsutils` is not checked because it appears only in the `dig` install block.
+- **Historical (installer removed 2026-11-17, D4):** `SUDO_DENIAL_MARKERS`, `_fetch_text` and the non-UTF-8 checksums rejection went with the installer; `requires` (puredns -> massdns) is no longer a field and survives only in the source note.
+- `doctor` does not check wordlists (no phase-2 adapter uses one); `dnsutils` is not checked because it appears only in the `dig` entry's `source:` string (it is not in `system_packages` or `requires_apt`).
 - `scope.yaml` cannot express out-of-scope CIDRs; `in_scope_cidrs` is the only IP gate.
 - Unverifiable tool facts, named: OTX's response shape was never observed live (anonymous 429, synthetic fixture); `assetfinder`'s identity probe is inferred from Go `flag` source; `rustscan`'s asset naming and `--version` are now verified against the real 2.3.0/2.4.1 releases and a real binary (2026-11-17, T1 below), so its entry is no longer in this list.
 - `subfinder` provider keys cover only certspotter, chaos, github and virustotal; no real `subfinder` run has accepted the generated provider file yet.
@@ -399,16 +430,16 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   (T1), the seven ASCII-art version columns (T2), the path-instead-of-version
   rows (T3), `assetfinder -h` exiting 0 (T4), `amass` v5.1.3 versus the v4 note
   (T5) and `webanalyze -update` (T6).
-- **Open item, 2026-11-17 (T1 follow-up):** `reconkit`'s extractor unwraps one
-  archive layer only, so `rustscan` 2.4.1 (`x86_64-linux-rustscan.tar.gz.zip`)
-  cannot be installed and the registry pins 2.3.0 instead. Nested-archive
-  extraction is a future installer capability, not built in this batch; the
-  pin is amd64-only because 2.4.1's `x86_64`/`aarch64` asset names do not match
-  the `{arch}` values `amd64`/`arm64`.
+- **Historical, 2026-11-17 (T1 follow-up, moot after D4):** `reconkit`'s
+  extractor unwrapped one archive layer only, so `rustscan` 2.4.1
+  (`x86_64-linux-rustscan.tar.gz.zip`) could not be installed and the registry
+  pinned 2.3.0. The installer was removed the same day, so 2.4.1 now needs a
+  manual unpack; the registry keeps a 2.3.0 note in `source:` and the
+  `tool_versions` pin is accepted-and-ignored.
 
 ## Notes for later tasks
 
-- Where things live (the detailed per-function map is in the `REVIEW_LOG` archive): `errors.py` exceptions + exit codes; `models.py` enums and records; `config.py` strict loader; `core/runner.py` the only `subprocess` user (`run_exec`, `validate_target`, `validate_host`); `core/scope.py` the gate; `core/store.py` the only `sqlite3` user (schema/migrations, writes, diff reads, `redact`); `core/pacing.py` the `Pacer`/`RateLimiter` (removed 2026-11-17, MASTER_PLAN D3 - no such module now); `core/workspace.py` raw files; `core/wildcard.py`; `adapters/` one module per tool plus `base.py`/`registry.py`; `engine.py` the pipeline, state rule and consensus; `ui.py` rendering; `cli.py` Typer wiring; `doctor.py`; `installer/`.
+- Where things live (the detailed per-function map is in the `REVIEW_LOG` archive): `errors.py` exceptions + exit codes; `models.py` enums and records; `config.py` strict loader; `core/runner.py` the only `subprocess` user (`run_exec`, `validate_target`, `validate_host`); `core/scope.py` the gate; `core/store.py` the only `sqlite3` user (schema/migrations, writes, diff reads, `redact`); `core/pacing.py` the `Pacer`/`RateLimiter` (removed 2026-11-17, MASTER_PLAN D3 - no such module now); `core/workspace.py` raw files; `core/wildcard.py`; `adapters/` one module per tool plus `base.py`/`registry.py`; `engine.py` the pipeline, state rule and consensus; `ui.py` rendering; `cli.py` Typer wiring; `doctor.py`; `core/toolcheck.py` the installed-copy/version probe (the installer was deleted 2026-11-17, MASTER_PLAN D4 - no such package now).
 - `tool_runs` row-frequency: one per executed or skipped tool. `host_status_history`: one row per host per status pass (Part 9 change; docs/04 section 5).
 - Fixtures are synthetic unless noted, written to the documented shapes, in `tests/fixtures/<tool>/`: `dnspython`, `pyprobe`, `pyscan` (JSON), `subfinder`, `assetfinder` (text), `httpx`, `naabu` (JSONL), plus real trimmed `crtsh`/`certspotter`/`hackertarget` responses and the synthetic `otx` one. No adapter test touches the network or a real binary.
 - Key sources and sign-up URLs live in docs/05 section 6.1, docs/09 and the archived PROGRESS section (subfinder provider config: `docs.projectdiscovery.io/opensource/subfinder/install`, fetched 2026-11-13). Never guess a key name, flag or field; verify it and cite the URL and date (PIT-25).
@@ -421,7 +452,8 @@ Run in `/home/kali/Desktop/reconkit` with `.venv` active. These are the checks n
 cd /home/kali/Desktop/reconkit && source .venv/bin/activate
 python --version                          # expect 3.11+
 reconkit doctor                           # compare with `dpkg -l` / your .env; masscan identity is fixed (PIT-35)
-reconkit install --all --no-color         # needs sudo for apt; installs the registry tools
+# install the missing tools yourself (reconkit installs nothing since 2026-11-17):
+#   docs/10_TOOL_SOURCES.md section 1 lists every apt package, go install line and release page
 reconkit doctor --json | python -m json.tool   # every tool ready; Keys rows reflect your .env
 
 # Real active run. Fill in_scope_cidrs in scope.yaml first, or pyscan will

@@ -6,21 +6,21 @@ A command-line reconnaissance orchestrator for **authorized** security testing. 
 - Passive first: active scans need `--active` **and** a matching `scope.yaml`
 - Multi-tool stages with source attribution (HIGH / MEDIUM / LOW)
 - Host states: ALIVE, DNS_ONLY, SHUT_DOWN, DEAD, tracked across scans
-- Self-installer for Kali/Ubuntu: `reconkit install --all` (tools go to `~/.reconkit/bin`)
+- Tool inventory, not installation: `reconkit doctor` lists what is installed and what is missing; per-tool sources are in [docs/10_TOOL_SOURCES.md](docs/10_TOOL_SOURCES.md)
 - State in SQLite, raw output in `workspaces/<target>/`
 
 > `scope.yaml` is a safety guard against mistakes, not permission. Use reconkit only on systems you own or have explicit written authorization to test.
 
 ## Status
 
-Phase 2 (working core) is complete: passive discovery (`subs`, `dns`), `live`, `ports`, `diff`, `status`, `doctor`, `install` and `update` are implemented on Linux and covered by the test suite. Phase 3 adapters and workflows are being added one at a time. These commands exist but are **Phase 3 stubs** in this build and exit `1` with a "not wired" message: `db list`, `db export`, `export`, `scope import`.
+Phase 2 (working core) is complete: passive discovery (`subs`, `dns`), `live`, `ports`, `diff`, `status` and `doctor` are implemented on Linux and covered by the test suite. `install`, `update` and `doctor --fix` were removed on 2026-11-17: reconkit no longer installs tools, it only reports what you have. Phase 3 adapters and workflows are being added one at a time. These commands exist but are **Phase 3 stubs** in this build and exit `1` with a "not wired" message: `db list`, `db export`, `export`, `scope import`.
 
 ## Requirements
 
 | Platform | What works |
 |---|---|
-| Kali / Ubuntu (native or WSL2) | Everything, including the real tools and installer. Python 3.11+, `git`, `sudo` for apt packages. |
-| Windows | `doctor`, `--mock` runs and the pure-Python passive flow. `reconkit install` / `update` refuse with `Use WSL2 Kali (see SETUP.md)` and exit `1`; run real tools from a Linux checkout (native Kali/Ubuntu also works). |
+| Kali / Ubuntu (native or WSL2) | Everything, including the real tools (installed by you). Python 3.11+, `git`, and your own `apt`/`go install` access for tools. |
+| Windows | `doctor`, `--mock` runs and the pure-Python passive flow. Real tools need a Linux checkout (native Kali/Ubuntu or WSL2); reconkit installs nothing on any platform, so there is no install command to refuse. |
 
 ## Quick start (Kali / Ubuntu)
 
@@ -29,11 +29,12 @@ cd /path/to/reconkit
 ./scripts/bootstrap.sh
 source .venv/bin/activate
 
-reconkit doctor
+reconkit doctor                        # what is installed, what is missing
+# install the missing tools yourself: apt, go install or a release download.
+# Every tool's source is in docs/10_TOOL_SOURCES.md (and tools.yaml `source:`).
+# Optional: cp .env.example .env and add the API keys you have.
 cp scope.example.yaml scope.yaml      # edit with YOUR authorized targets
 reconkit passive -d example.com --mock
-reconkit install --all --dry-run
-reconkit install --all
 reconkit passive -d <authorized-domain>
 reconkit diff -d <authorized-domain>
 ```
@@ -51,7 +52,7 @@ reconkit doctor
 reconkit passive -d example.com --mock
 ```
 
-In Git Bash, use `./scripts/bootstrap.sh` and `source .venv/Scripts/activate` instead. Do not run `reconkit install` on Windows: it prints `Use WSL2 Kali (see SETUP.md)` and exits `1`. A native Kali/Ubuntu machine is equally valid for the full tool install; the message names WSL2 because that is the built-in hint.
+In Git Bash, use `./scripts/bootstrap.sh` and `source .venv/Scripts/activate` instead. There is no install command to run on Windows or anywhere else: install the real tools yourself on a Linux checkout, using the per-tool sources in [docs/10_TOOL_SOURCES.md](docs/10_TOOL_SOURCES.md).
 
 ## Commands
 
@@ -66,13 +67,12 @@ In Git Bash, use `./scripts/bootstrap.sh` and `source .venv/Scripts/activate` in
 | `diff` | New, gone, state-changed and port-changed items vs the previous run |
 | `status` | Recent scans (`--json` for scripts) |
 | `doctor` | Tool, version, path, per-stage coverage, system packages, key names |
-| `install`, `update` | Install/update tools from `tools.yaml`; `--all` selects core tools |
 | `scope check -d X` | Show whether a target is allowed by `scope.yaml` |
 | `db list`, `db export` | **Phase 3 stub**: exits `1`; no data is read |
 | `export -d X --format json\|md\|html` | **Phase 3 stub**: exits `1`; no report is written |
 | `scope import` | **Phase 3 stub**: exits `1` |
 
-Scan flags include `--tools`, `--exclude`, `--include-noisy`, `--min-sources`, `--phase-timeout`, `--mock`, `--resume`, `--no-keys`, `--json`, `--no-color`, `-q/--silent`, `-v/--verbose`, and `--config/--scope/--db`. `--json` is available on the scan commands, `doctor`, `diff` and `status`, not on `install`/`update` or the Phase 3 stubs. There is no flag that skips the scope gate.
+Scan flags include `--tools`, `--exclude`, `--include-noisy`, `--min-sources`, `--phase-timeout`, `--mock`, `--resume`, `--no-keys`, `--json`, `--no-color`, `-q/--silent`, `-v/--verbose`, and `--config/--scope/--db`. `--json` is available on the scan commands, `doctor`, `diff` and `status`, not on the Phase 3 stubs. There is no flag that skips the scope gate.
 
 ## Example (real mock run)
 
@@ -98,12 +98,12 @@ No changes since run #1.
 | docs/02_CLI_UX.md | Commands, flags, output, exit codes |
 | docs/03_ARCHITECTURE.md | Layers, structure, concurrency, consensus |
 | docs/04_DATABASE.md | SQLite schema |
-| docs/05_SECURITY.md | Scope gate, subprocess and installer safety |
+| docs/05_SECURITY.md | Scope gate, subprocess and tool-source safety |
 | docs/06_CODE_STYLE.md | Code conventions |
 | docs/07_TESTING.md | Test strategy |
 | docs/08_UX_FLOWS.md | User journeys |
 | docs/09_TOOL_CONTRACTS.md | Adapter contract and stage registry |
-| docs/10_TOOL_INSTALLER.md | Installer design |
+| docs/10_TOOL_SOURCES.md | Where every tool comes from, lookup order, doctor's checks |
 | tools.yaml / config.yaml / scope.example.yaml | Registry, settings, scope template |
 
 ## Legal disclaimer

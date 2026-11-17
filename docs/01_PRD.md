@@ -5,7 +5,7 @@
 - **Product name:** reconkit
 - **One-line description:** A CLI that runs several recon tools per stage, cross-checks their results, and tracks what changed between scans.
 - **Product type:** Command-line tool (single-user, local-first)
-- **Primary platform:** Linux (Kali or Ubuntu), native. Windows is a separate checkout for mock/passive use and `doctor`; `install`/`update` refuse there (docs/10 §2).
+- **Primary platform:** Linux (Kali or Ubuntu), native. Windows is a separate checkout for mock/passive use and `doctor`; reconkit installs nothing anywhere, so there is no platform-specific install path (docs/10 §4).
 
 ## 2. Problem
 
@@ -15,7 +15,7 @@
 
 ## 3. Goals
 
-- **Primary:** One lightweight command-line tool that installs its own tools, runs several tools per stage, scores results by how many tools agree, and shows only what is new or changed.
+- **Primary:** One lightweight command-line tool that inventories the recon tools you have installed, runs several of them per stage, scores results by how many tools agree, and shows only what is new or changed.
 - **Secondary:**
   - Polite by default: slow, randomized timing so APIs and targets are not hammered.
   - Safe by default: passive unless explicitly active, and active only inside `scope.yaml`.
@@ -33,7 +33,7 @@
 
 ## 5. User Stories
 
-- As a tester, I want `reconkit install --all` so that I do not install 20 tools by hand.
+- As a tester, I want `reconkit doctor` to tell me exactly which of the 20 tools I still need, and where to get each one, so that I can install them myself without guessing.
 - As a tester, I want `reconkit doctor` so that I know which stages are fully covered.
 - As a tester, I want passive discovery from several sources so that no single source hides assets.
 - As a tester, I want every result to show which tools found it so that I can trust or verify it.
@@ -44,14 +44,14 @@
 
 ## 6. Core Features
 
-### Feature 1 - Installer (`install`, `update`, `doctor --fix`)
-- **Purpose:** Install and update tools into `~/.reconkit/bin` from the registry.
+### Feature 1 - Tool inventory (`doctor`)
+- **Purpose:** Report which registry tools are installed, which version is on disk, and where the missing ones come from - without installing anything (removed 2026-11-17, docs/MASTER_PLAN.md D4).
 - **Acceptance criteria:**
-  - Downloads only from sources listed in `tools.yaml`; verifies checksums when available.
-  - `--dry-run` prints actions without changing anything.
-  - sudo is used only for `apt` packages, with a confirmation prompt.
-  - Missing or failed tools are reported, never silently ignored.
-- **Edge cases:** no internet, GitHub rate limit, release asset renamed, already installed, unsupported architecture, not Linux.
+  - One row per tool: installed, version, resolved path and identity, with the adapter's own check first and the registry's `version_cmd`/`binary` probe otherwise.
+  - A same-named program that fails the identity probe is reported as `wrong program`, never as installed.
+  - A missing tool is reported by count, with the instruction to install it yourself (apt, `go install`, or release download) and a pointer to the per-tool table in docs/10_TOOL_SOURCES.md.
+  - Every binary tool in `tools.yaml` carries a non-empty `source:` string; reconkit never executes it.
+- **Edge cases:** tool present but not executable, version command fails, wrong `httpx` program found, a tool installed by hand outside `~/.reconkit/bin`, no tools installed at all.
 
 ### Feature 2 - Doctor
 - **Purpose:** Report readiness per stage.
@@ -102,7 +102,7 @@
   - `diff` shows only new, gone, state-changed and port-changed items vs the previous run.
   - `status --json` reports phase, counts and elapsed time of running or finished scans.
   - `db list`, `db export` and `export` are Phase 3 stubs in this build: they exit 1 and write nothing (docs/02).
-  - `--json` is supported on the scan commands, `doctor`, `diff` and `status`; it is not accepted by `install`, `update` or the stubs.
+  - `--json` is supported on the scan commands, `doctor`, `diff` and `status`; it is not accepted by the stubs.
 
 ### Feature 9 - Workflows (`lite`, `run`)
 - `lite` = passive pipeline. `run` = passive, live, ports, then selected checks, with per-phase timeouts and resume of an interrupted run.
@@ -122,7 +122,7 @@
 
 **Phase 2 (working core) - Must have:**
 - Skeleton, config, scope gate, SQLite store, consensus engine, `--mock`.
-- Commands: `doctor`, `install`, `update`, `passive`, `live`, `ports`, `diff`, `status`; `db list`, `db export`, `export` and `scope import` are explicit Phase 3 stubs (exit 1) in this build, and docs/02 marks them as such.
+- Commands: `doctor`, `passive`, `live`, `ports`, `diff`, `status`; `db list`, `db export`, `export` and `scope import` are explicit Phase 3 stubs (exit 1) in this build, and docs/02 marks them as such. (`install`, `update` and `doctor --fix` existed in Phase 2 and were removed on 2026-11-17.)
 - Adapters: crtsh, certspotter, otx, hackertarget, subfinder, assetfinder, dnspython, pyprobe, httpx, pyscan, naabu.
 - Tests passing on Linux and on plain Windows (fixtures).
 
@@ -148,7 +148,7 @@
 
 ## 12. Open Questions
 
-No blocking product questions. Release asset names were verified against real releases during Part 10 (docs/10 §3c) and `nuclei` stays Phase 3. Which optional keys a user configures first remains a deployment preference, not a product decision; free mode needs none.
+No blocking product questions. Tool sources were verified against real releases during Part 10 and are listed in docs/10_TOOL_SOURCES.md §1; `nuclei` stays Phase 3. Which optional keys a user configures first remains a deployment preference, not a product decision; free mode needs none.
 
 ## 13. Definition of Done
 

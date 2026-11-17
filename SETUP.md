@@ -2,8 +2,8 @@
 
 reconkit has two supported ways to run:
 
-- **Kali or Ubuntu (native or WSL2):** the full tool set, real scans and the installer.
-- **Windows:** `doctor`, `--mock` runs and the pure-Python passive flow. `reconkit install` and `update` refuse on Windows and exit `1`.
+- **Kali or Ubuntu (native or WSL2):** the full tool set and real scans. You install the tools yourself with `apt`, `go install` or a release download ([docs/10_TOOL_SOURCES.md](docs/10_TOOL_SOURCES.md)).
+- **Windows:** `doctor`, `--mock` runs and the pure-Python passive flow. reconkit installs nothing on any platform.
 
 You need **Python 3.11 or newer** on both. Do the steps once, then activate the virtual environment in every new terminal.
 
@@ -66,18 +66,29 @@ reconkit doctor
 
 `doctor` prints one row per tool (installed, version, path), per-stage coverage, system packages, `scope.yaml` presence, the database path and the API key names that are set. Missing tools are shown as `missing`; a same-named but wrong program is shown as `wrong program`.
 
-### 6. Install the recon tools
+### 6. Install the recon tools (yourself)
+
+reconkit does not install tools: `install`, `update` and `doctor --fix` were removed on 2026-11-17 (docs/MASTER_PLAN.md D4). `reconkit doctor` tells you what is missing; you install it.
 
 ```bash
-sudo -v                            # cache your sudo ticket first (optional but recommended)
-reconkit install --all --dry-run   # show every action; changes nothing
-reconkit install --all             # install core tools into ~/.reconkit/bin
+reconkit doctor          # read the Missing tools line and the table's installed/version columns
 ```
 
-- `apt` packages (nmap, massdns, ...) ask for confirmation before running `sudo -n apt-get install`.
-- reconkit never reads or stores your sudo password. If the cached ticket has expired, an apt tool is skipped with a hint; run `sudo -v` again and retry.
-- Without a terminal (CI, a pipe), sudo confirmations are declined automatically and only those tools are skipped.
-- On an interactive terminal, `install` also asks once whether to add API keys. Free mode needs none; choosing keys copies `.env.example` to `.env` (never overwrites) and prints the Keys table.
+For each missing tool, docs/10_TOOL_SOURCES.md §1 gives its exact source, the same string `tools.yaml` carries in `source:`:
+
+- **apt packages** (nmap, massdns, amass, whatweb, nikto, masscan, sqlmap, dnsutils for `dig`): `sudo apt install -y <package>`. reconkit never runs `sudo` and never asks for your password.
+- **Go tools** (subfinder, assetfinder, dnsx, gau, katana, nuclei, ...): `go install <package>@latest`. Binaries land in `~/go/bin`; put that directory on `PATH` or copy the binary into `~/.reconkit/bin` (checked first).
+- **Release downloads** (httpx, tlsx, naabu, rustscan, chaos, ...): fetch the Linux asset from the project's releases page and place the binary on `PATH` or in `~/.reconkit/bin`.
+- **Python tools**: `wafw00f` is `pipx install wafw00f`; `dnsreaper` has no package and is installed by hand from its repository.
+
+Re-run `reconkit doctor` to confirm. `webanalyze` needs `webanalyze -update` once per working directory, and `nuclei` templates are refreshed with `nuclei -ut`.
+
+API keys are optional (free mode needs none). Copy the template and fill in what you have; reconkit never writes `.env`:
+
+```bash
+cp .env.example .env
+chmod 600 .env     # optional
+```
 
 ### 7. Define your scope
 
@@ -136,25 +147,18 @@ reconkit passive -d example.com --mock
 
 If PowerShell blocks the activation script, run `.venv\Scripts\activate.bat` from `cmd.exe`, or call `.venv\Scripts\reconkit.exe` directly.
 
-### 3. The installer refuses on Windows
+### 3. Real tools need Linux, but there is no install command
 
-```text
-$ reconkit install --all
-Use WSL2 Kali (see SETUP.md)
-```
-
-That is expected and exits `1`. `install` and `update` only run on Linux. Use a native Kali/Ubuntu checkout or WSL2 Kali for the full tool install; a native Linux box does not require WSL2.
+reconkit installs nothing, on Windows or anywhere else: `install`, `update` and `doctor --fix` were removed on 2026-11-17. To run the real tools, use a native Kali/Ubuntu checkout or WSL2 Kali and install them yourself with the sources in [docs/10_TOOL_SOURCES.md](docs/10_TOOL_SOURCES.md). A native Linux box does not require WSL2.
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
 | `reconkit: command not found` | The venv is not active in this terminal: `source .venv/bin/activate` (Linux/Git Bash) or `.venv\Scripts\Activate.ps1` (PowerShell). Or run `.venv/bin/reconkit`. |
-| `Use WSL2 Kali (see SETUP.md)` | You ran `install`/`update` on Windows. Run them from a Linux checkout. |
-| `sudo: a password is required` during install | Run `sudo -v` in the same terminal, then retry. reconkit does not ask for the password itself. |
+| A tool shows `missing` after you installed it | Put it on `PATH` or in `~/.reconkit/bin` (checked first), then re-run `reconkit doctor`. Go tools land in `~/go/bin` by default. |
 | `naabu` fails with a `pcap.h` error | `sudo apt install -y libpcap-dev` and retry; `doctor` lists it under system packages. |
-| `httpx` runs the wrong program | The installer places ProjectDiscovery's binary in `~/.reconkit/bin`; `bootstrap.sh` puts that directory first in the activated venv's `PATH`. Re-activate and run `reconkit doctor`. |
-| Every `github_release` tool fails with HTTP 403 | Unauthenticated GitHub release lookups are limited to 60/hour per IP. Wait for the reset time and retry. |
+| `httpx` runs the wrong program | Two different programs share the name. Put ProjectDiscovery's binary in `~/.reconkit/bin` (checked first); `bootstrap.sh` puts that directory first in the activated venv's `PATH`. Re-activate and run `reconkit doctor`. |
 | `database is locked` or very slow scans | Move the project off `/mnt/c/...` to the Linux filesystem. |
 | Python is older than 3.11 | Install `uv` or a newer Python, then re-run `./scripts/bootstrap.sh`. |
 

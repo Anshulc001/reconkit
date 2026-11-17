@@ -1,27 +1,30 @@
 # UX Flows
 
-Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports -> diff -> export**.
+Journey overview: **setup -> doctor -> install tools yourself -> scope -> passive -> live/ports -> diff -> export**.
 
 ## Flow 1 - First run (setup)
 
 1. User follows SETUP.md (native Kali/Ubuntu for real tools, or Windows for mock/passive use and `doctor`).
 2. `reconkit doctor`
 3. Output: table of tools (installed/missing + version), per-stage coverage, system packages, Python version, `scope.yaml` found?, API key names set/unset.
-4. Suggestion line: `Missing tools: 14. Run: reconkit install --all`
+4. Footer line: `Missing tools: 14. Install them yourself (apt, go install, or release download) — per-tool sources in docs/10_TOOL_SOURCES.md. Re-run doctor to confirm.`
 
 - **Success:** exit code 0 with warnings listed.
-- **Failure:** Python < 3.11 or an unreadable `config.yaml`: clear message, exit code 1. `doctor` also runs on native Windows; only `install` and `update` refuse there (docs/10 §2).
+- **Failure:** Python < 3.11 or an unreadable `config.yaml`: clear message, exit code 1. `doctor` runs on every platform; reconkit installs nothing anywhere, so there is no platform-specific install path (docs/10 §4).
 
-## Flow 2 - Install tools
+## Flow 2 - Install tools (yourself)
 
-1. `reconkit install --all --dry-run` prints one row per tool with `tool`, `method`, `result` and `detail` (the detail carries the destination, release URL or apt command).
-2. `reconkit install --all` asks to confirm sudo for apt packages (`libpcap-dev`, `nmap`, ...).
-3. Per tool: download, verify checksum, place in `~/.reconkit/bin`, run version command.
-4. Final: summary table. `doctor` is a separate command; the installer does not re-run it.
+reconkit installs nothing: `install`, `update` and `doctor --fix` were removed on 2026-11-17 (docs/MASTER_PLAN.md D4).
 
-- **Loading state:** a single final table; the installer has no live per-tool progress line.
-- **Error state:** `subfinder_...zip: checksum mismatch (expected ..., got ...)` (fails closed), continues with others, exit code 5.
-- **Empty state:** every row still prints, each as `already installed` with its version or path; there is no separate "everything installed" line.
+1. `reconkit doctor` lists every missing tool and the count in the footer line above.
+2. Look the tool up in docs/10_TOOL_SOURCES.md §1 (the same `source:` string as `tools.yaml`): an apt package, a `go install` line, a `pipx install` line, or a release page.
+3. Install it with your own tool: `sudo apt install <package>`, `go install <package>@latest`, `pipx install <tool>`, or download and unpack a release asset. No reconkit command runs any of these, and reconkit never uses `sudo`.
+4. Make sure the binary is on `PATH` (Go lands in `~/go/bin` by default), or copy it into `~/.reconkit/bin`, which is checked first (docs/10 §2).
+5. Re-run `reconkit doctor` to confirm. A tool that is present but is not the expected program shows `wrong program` in the `installed` column and counts as not ready.
+
+- **Loading state:** none. No process starts, so there is no progress line or summary table.
+- **Error state:** your package manager's or download's error; reconkit is not involved. If a namesake binary is first on `PATH`, doctor's `wrong program` row names the path it found.
+- **Empty state:** nothing is missing, so doctor prints no `Missing tools:` line at all.
 
 ## Flow 3 - Define scope
 
@@ -40,7 +43,7 @@ Journey overview: **setup -> doctor -> install -> scope -> passive -> live/ports
 
 - **Success:** exit 0.
 - **Partial:** some tools skipped/failed, or a requested stage executed no tools (warning names it), exit 5, results still saved.
-- **Failure:** no usable tool for stage: exit 4, hint to run install.
+- **Failure:** no usable tool for stage: exit 4; the message names the stage and the tools that are not installed.
 - **Empty:** message listing which tools returned nothing.
 
 ## Flow 5 - Live and shut-down detection (active)
