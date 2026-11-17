@@ -248,7 +248,7 @@ Single machine, thousands of hosts per target. Beyond that is out of scope (see 
 | What if | Expected behavior |
 |---|---|
 | Tool missing | Skip, report `skipped (not installed)`; stage continues. This is the selection-time rule; a binary that was found at selection but cannot be spawned at run time is `failed` with its message instead |
-| Adapter cannot enforce IP scope | Skip at selection time with a `blocked:` reason; the stage continues. docs/05 rule 6 requires every resolved address to be inside `in_scope_cidrs`: `pyscan` filters its own resolver answers through `RunContext.ip_allowed`, and an adapter whose resolver is inside the tool (`naabu`) cannot apply the check, so it must not run |
+| Adapter resolver lives inside the tool (`naabu`) | Scope-mode branch (docs/05 rule 6, 2026-11-17): no scope file - it runs unrestricted on hostnames; scope file present - the engine resolves and verifies each target itself and hands it only in-scope IPs, omitting targets whose resolution fails or resolves out of scope (all omitted = `blocked:` skip, stage continues) |
 | Tool crashes or exits non-zero | Record `failed` with stderr summary; keep other results |
 | Tool timeout | Kill process group, keep partial output if parseable, record `timeout` |
 | HTTP source returns 429/5xx | `failed` result carrying the status; no retry (only a connection error retries once) |

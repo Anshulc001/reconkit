@@ -1207,6 +1207,12 @@ Every restore below was checked with `sha256sum`; the digests before and after e
 - **Not verified:** no real binary and no target were used; the test launches a stand-in in the managed directory.
 - **Why 11d-e missed it:** that entry claimed subfinder/assetfinder were the only two `build_command` implementations. Corrected in `docs/PROGRESS.md` (11c-G-6).
 
+> **SUPERSEDED 2026-11-17 (owner request D2, `docs/MASTER_PLAN.md`):** the
+> permanent `naabu` block recorded here was replaced by the scope-mode branch -
+> no scope file: naabu runs unrestricted; scope file present: the engine
+> resolves and verifies the IPs itself and hands naabu only those. The entries
+> below are kept verbatim as history; they are not current behaviour.
+
 ## Part 11c-G-7 - the IP/CIDR scope rule is unenforced (docs only)
 
 - **Symptom:** docs/05 rule 6 requires an IP to be inside `in_scope_cidrs` before it is probed, and to be skipped entirely when no CIDRs are defined. The code contains the predicate for that rule and never uses it.
@@ -2710,6 +2716,32 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Raw check output:** `738 passed in 16.56s`; `ruff check .` -> `All checks passed!`; `ruff format --check .` -> `69 files already formatted` (after `ruff format` on the two files it flagged); `mypy src/reconkit` -> `Success: no issues found in 36 source files`.
 - **Not verified:** a real-network active run without a scope file; Windows.
 - **Next part must know:** `allow_all_ip` is the no-scope IP predicate; do not reintroduce a `None` there.
+
+## Task 2 (2026-11-17): naabu is scope-mode dependent
+
+- **Docs read / goal:** docs/05 rule 6, docs/09 sections 3-4 and the tool-flags table, docs/03 section 13, docs/02 ports paragraph and section 2b, `naabu -h`. Goal: remove the unconditional 11c-G-7 block; no scope file = unrestricted active tool; scope file present = engine resolves, verifies against `in_scope_cidrs`, and passes only IPs to naabu; passive never runs it.
+- **Real `naabu -h` evidence (pasted, v2.7.0, `/usr/bin/naabu`):** `-host string[]              hosts to scan ports for (comma-separated)`; `-list, -l string            list of hosts to scan ports (file)`; `-exclude-hosts, -eh ...`; `-rev-ptr                       Reverse PTR lookup for input ips`. A real local run `naabu -host 127.0.0.1 -p 18080 -silent -json -no-stdin -duc -nc -scan-type c` printed `{"ip":"127.0.0.1","timestamp":"2026-11-17T08:23:04.956815908Z","port":18080,"protocol":"tcp","tls":false}` - IP input accepted, `host` omitted from the record. `-host 127.0.0.1,127.0.0.2` was also accepted (exit 0).
+- **Decisions and assumptions:** the engine, not the adapter, decides the mode. `Engine._naabu_verified_ips()` runs only when `scope_present(self.scope_path)` and `not opts.mock`; it uses `self._resolve` (new injectable constructor arg, default `adapters.pyscan.default_resolve`, the existing resolver `pyscan` already uses) and the same `ip_allowed` predicate from docs/05 rule 6. It replaces `hosts` for the naabu tool context only, through the same `model_copy(update=...)` path as `env`. A dropped target is never retried as a name. `PortRecord.fqdn` becomes the IP in that branch (naabu omits `host` for IP input), which is documented in docs/09 rather than papered over.
+- **Docs changed first:** docs/05 rule 6; docs/09 `RunContext` bullet, naabu bullet, ports row, selection-rules paragraph, naabu flags-table note; docs/02 ports paragraph and aggressive notice; docs/03 failure table; `docs/MASTER_PLAN.md` D2 (11c-G-7 marked SUPERSEDED, not deleted); the two 11c-G-7 REVIEW_LOG headings got a superseded banner.
+- **Files touched:** `src/reconkit/engine.py` (removed `IP_GATE_BLOCKED`, added `NAABU_NO_IPS`, `Resolve`, `_resolve`, `_naabu_verified_ips`, per-tool `hosts` override), `src/reconkit/adapters/naabu.py` (`_input()` IP-or-host normalization, docstring), `src/reconkit/cli.py` (aggressive notice), tests, docs.
+- **Requirement -> test table:**
+  | Requirement | Test |
+  |---|---|
+  | (a) no scope file + active -> naabu unrestricted, no resolve step, no exit 3 | `test_no_scope_file_runs_naabu_on_hostnames_unrestricted` (also asserts the resolver was never called) |
+  | (b) scope present -> IPs only, all verified | `test_scope_file_passes_naabu_only_verified_ips`, `test_naabu_accepts_verified_ip_inputs` |
+  | (c) resolution fails -> target omitted | `test_scope_file_omits_a_target_whose_resolution_fails` |
+  | (d) resolved IP out of scope -> target omitted | `test_scope_file_omits_a_target_that_resolves_out_of_scope` |
+  | nothing verifies -> naabu skipped with reason | `test_scope_file_skips_naabu_when_no_target_verifies` |
+  | (e) passive -> never runs, with and without a scope file | `test_passive_mode_never_runs_naabu_with_or_without_a_scope_file` |
+- **Changed tests (disclosure):**
+  - `tests/test_engine.py::test_naabu_stays_blocked_because_it_resolves_inside_the_binary` -> `test_naabu_is_selectable_in_active_mode`. It asserted the unconditional 11c-G-7 skip; now asserts naabu is selected and that passive still skips it with `requires --active`. Reason: the owner removed that block.
+  - `tests/test_interactive_scan.py::test_aggressive_yes_adds_the_ports_stages`: assertion text follows the reworded aggressive notice ("aggressive: TCP connect scanning by pyscan", "naabu runs only on IPs reconkit resolved and verified", "service/version detection is not wired"). Reason: the old text said naabu was permanently blocked.
+  - `tests/test_interactive_scan.py::test_aggressive_no_leaves_the_plan_alone`: now `chdir`s to `tmp_path` and writes a present `scope.yaml` that denies the target, instead of depending on the checkout's git-ignored `scope.yaml`. Reason: since Task 1 an absent file no longer refuses, so the old test would pass for the wrong reason (or fail on a fresh clone).
+  - `tests/test_interactive_scan.py::test_no_scope_file_never_lets_an_active_tool_run` -> `test_a_present_scope_file_blocks_an_out_of_scope_interactive_target`. Same reason; it now proves a present file still blocks.
+- **Mutation proof:** making the resolve-and-verify condition `and False` produced `4 failed, 87 deselected` (`test_scope_file_passes_naabu_only_verified_ips`, both omission tests, `test_scope_file_skips_naabu_when_no_target_verifies`); restored from backup.
+- **Raw check output:** `745 passed in 16.69s`; `ruff check .` -> `All checks passed!`; `ruff format --check .` -> `69 files already formatted`; `mypy src/reconkit` -> `Success: no issues found in 36 source files`.
+- **Not verified:** a real scope-file-present naabu scan was run only against a local listener (127.0.0.1); the full CLI demonstration is in the final report.
+- **Next part must know:** `NAABU_NO_IPS` is the only naabu skip reason left; `allow_all_ip` (Task 1) means the no-scope branch never resolves.
 
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 

@@ -413,6 +413,21 @@ def test_naabu_command_and_ports() -> None:
     ]
 
 
+def test_naabu_accepts_verified_ip_inputs() -> None:
+    """docs/05 rule 6 (2026-11-17): the scope-present branch hands naabu IPs.
+
+    `naabu -h` documents `-host string[] hosts to scan ports for
+    (comma-separated)`, and a real run with `-host 127.0.0.1` accepts an IP
+    literal. The adapter must pass such inputs through normalized, never as a
+    hostname it invented.
+    """
+    argv = NaabuAdapter().build_command(
+        make_ctx(hosts=["203.0.113.5", "203.0.113.6", "2001:0db8::5"], ports=[443])
+    )
+    assert argv[argv.index("-host") + 1] == "203.0.113.5,203.0.113.6,2001:db8::5"
+    assert "example.com" not in argv
+
+
 @pytest.mark.parametrize("adapter", [HttpxAdapter(), NaabuAdapter()])
 def test_flag_like_host_is_rejected_before_argv(adapter: HttpxAdapter | NaabuAdapter) -> None:
     from reconkit.errors import ToolFailed

@@ -122,6 +122,25 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   coverage against a real file. New: `test_no_scope_file_runs_active_stages_unrestricted`,
   `test_a_present_scope_file_is_enforced_exactly_as_before`,
   `test_no_scope_file_never_loads_or_derives_a_scope_object`.
+- **2026-11-17 (owner-requested deviation D2), naabu is scope-mode dependent.**
+  No scope file: naabu is an ordinary active tool (no pre-resolution gate, no
+  IP-only restriction, no skip). Scope file present: the engine resolves each
+  in-scope target itself (`adapters.pyscan.default_resolve`, injectable), checks
+  every address against `in_scope_cidrs` via the same `ip_allowed` predicate
+  `pyscan` uses, and passes naabu only verified IPs through `-host` - never a
+  bare domain. Resolution failure / out-of-scope target is omitted; if nothing
+  verifies, naabu is a recorded `blocked:` skip. Passive: never runs. 11c-G-7's
+  permanent block is superseded (MASTER_PLAN D2). Real `naabu -h` confirms
+  `-host string[]  hosts to scan ports for (comma-separated)`; a real
+  `127.0.0.1` scan confirms IP input. Changed tests: `test_naabu_stays_blocked_because_it_resolves_inside_the_binary`
+  -> `test_naabu_is_selectable_in_active_mode` (asserted the removed block);
+  `test_aggressive_yes_adds_the_ports_stages` (assertion text follows the
+  reworded notice); `test_aggressive_no_leaves_the_plan_alone` (now supplies a
+  present scope file instead of relying on the checkout's git-ignored one);
+  `test_no_scope_file_never_lets_an_active_tool_run` ->
+  `test_a_present_scope_file_blocks_an_out_of_scope_interactive_target` (same
+  reason). New: the six `test_*_naabu*`/`test_scope_file_*` cases in
+  `tests/test_engine.py`, `test_naabu_accepts_verified_ip_inputs`.
 - **2026-11-16 (Part 13), a multi-domain file does not use a tool's own list
   flag:** the interactive file path reuses `-l` (one full scan per domain), even
   though `subfinder -dL`, `dnsx -l`, `httpx -l`, `tlsx -l`, `naabu -list`,
@@ -151,7 +170,7 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
 - Unverifiable tool facts, named: OTX's response shape was never observed live (anonymous 429, synthetic fixture); `assetfinder`'s identity probe is inferred from Go `flag` source; `rustscan`'s `-V` and asset pattern come from Kali's package page, not a binary run.
 - `subfinder` provider keys cover only certspotter, chaos, github and virustotal; no real `subfinder` run has accepted the generated provider file yet.
 - 11c-bis-1: `--help` renders switches as value-taking (`--json <bool>`); `typer>=0.12` has no upper bound and no test pins the rendering. 11c-bis-2: `reconkit --json doctor` accepts a global `--json` and silently ignores it.
-- `naabu` is skipped permanently and ports confidence cannot exceed LOW (12i, accepted ceiling - not a defect to fix).
+- **Superseded 2026-11-17 (D2):** `naabu` is no longer permanently skipped. It runs unrestricted with no scope file, and on engine-verified IPs when a scope file is present; ports confidence can now exceed LOW when both `pyscan` and `naabu` report a port. The 12i "pyscan-only / LOW ceiling" risk is historical.
 - Wildcard matches are a mark only: docs/09's "exclude from counts" names no count and no code filters it.
 - `tech`, `urls` and `vulns` have no adapter for any tool in their pools, so no real tool in those stages has ever been driven by `reconkit`; they exit 5 with the 12k warning. (2026-11-16: every phase-3 binary in `tech`/`urls`/`shots` was run by hand for the manuals - the tools work, only the adapters are missing.)
 - 2026-11-16, for the owner: `docs/tool_manuals/README.md` lists six registry

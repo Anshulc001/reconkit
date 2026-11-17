@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import threading
 import time
@@ -185,6 +186,7 @@ def make_engine(
     scope_text: str | None = SCOPE,
     now: Callable[[], str] | None = None,
     installed: Callable[[type[BaseToolAdapter]], bool] | None = None,
+    resolve: Callable[[str], object] | None = None,
 ) -> Engine:
     config = load_config(CONFIG, speed="fast")
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -207,6 +209,7 @@ def make_engine(
         clock=lambda: 0.0,
         installed=installed,
         now=now,
+        resolve=resolve,
     )
 
 
@@ -332,15 +335,13 @@ async def test_active_without_flag_skips_and_scope_drops_host(tmp_path: Path) ->
     assert live_stage.dropped_hosts == ["api.example.com"]
 
 
-async def test_naabu_stays_blocked_because_it_resolves_inside_the_binary(
-    tmp_path: Path,
-) -> None:
-    """Regression: 11c-G-7.
+async def test_naabu_is_selectable_in_active_mode(tmp_path: Path) -> None:
+    """Changed from `test_naabu_stays_blocked_because_it_resolves_inside_the_binary`.
 
-    `pyscan` enforces docs/05 rule 6 itself, so it is selectable. `naabu` resolves
-    inside its own process, where no adapter can filter the address, so it must stay
-    skipped at selection time with a clear reason instead of running unchecked.
-    `--mock` connects to nothing, so fixture runs keep it selectable.
+    That test asserted the unconditional 11c-G-7 block. The owner replaced it on
+    2026-11-17 (MASTER_PLAN D2): `naabu` is now an ordinary active tool at
+    selection time in both scope modes, and the IP verification happens in the
+    scope-file-present branch instead. Passive mode still skips it.
     """
     rec = Recorder()
     specs = {
@@ -355,19 +356,14 @@ async def test_naabu_stays_blocked_because_it_resolves_inside_the_binary(
     selected, skipped = await engine._select(
         Stage.PORTS, ScanOptions(active=True, tools=["pyscan", "naabu"])
     )
-    assert [spec.name for spec, _ in selected] == ["pyscan"]
-    assert [(spec.name, reason) for spec, reason in skipped] == [
-        (
-            "naabu",
-            "blocked: resolves inside the binary, so in_scope_cidrs cannot be enforced (11c-G-7)",
-        )
-    ]
-
-    selected, skipped = await engine._select(
-        Stage.PORTS, ScanOptions(active=True, mock=True, tools=["pyscan", "naabu"])
-    )
-    assert {spec.name for spec, _ in selected} == {"pyscan", "naabu"}
+    assert [spec.name for spec, _ in selected] == ["pyscan", "naabu"]
     assert skipped == []
+
+    passive, passive_skipped = await engine._select(
+        Stage.PORTS, ScanOptions(active=False, tools=["pyscan", "naabu"])
+    )
+    assert passive == []
+    assert {reason for _spec, reason in passive_skipped} == {"requires --active"}
 
 
 async def test_active_ports_stage_receives_the_cidr_predicate(tmp_path: Path) -> None:
@@ -2348,3 +2344,190 @@ async def test_no_scope_file_never_loads_or_derives_a_scope_object(
     assert predicates[0]("203.0.113.9") is True
     assert predicates[0]("10.0.0.1") is True
     assert not (tmp_path / "scope.yaml").exists()
+
+
+# --------------------------------------- naabu scope modes (docs/05 rule 6, 2026-11-17)
+
+SCOPE_WITH_CIDRS = SCOPE.replace(
+    "max_speed: fast",
+    "in_scope_cidrs:\n  - 203.0.113.0/24\nmax_speed: fast",
+)
+
+
+def ports_engine(
+    tmp_path: Path,
+    rec: Recorder,
+    *,
+    scope_text: str | None,
+    resolve: Callable[[str], object],
+) -> Engine:
+    specs = {
+        "subs": tool("subs", Stage.SUBS),
+        "live": tool("live", Stage.LIVE, mode=Mode.ACTIVE),
+        "pyscan": tool("pyscan", Stage.PORTS, mode=Mode.ACTIVE),
+        "naabu": tool("naabu", Stage.PORTS, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "subs": adapter(
+            "subs", Stage.SUBS, rec, records=[sub("example.com"), sub("www.example.com")]
+        ),
+        "live": adapter(
+            "live",
+            Stage.LIVE,
+            rec,
+            records=[alive("example.com"), alive("www.example.com")],
+        ),
+        "pyscan": adapter("pyscan", Stage.PORTS, rec),
+        "naabu": adapter("naabu", Stage.PORTS, rec),
+    }
+    return make_engine(
+        tmp_path,
+        specs,
+        adapters,
+        scope_text=scope_text,
+        installed=lambda _adapter: True,
+        resolve=resolve,
+    )
+
+
+async def test_no_scope_file_runs_naabu_on_hostnames_unrestricted(tmp_path: Path) -> None:
+    """(a) No scope file: naabu is an ordinary active tool, no resolve step."""
+    rec = Recorder()
+    resolved: list[str] = []
+
+    async def resolve(host: str) -> list[str]:
+        resolved.append(host)
+        return ["203.0.113.5"]
+
+    engine = ports_engine(tmp_path, rec, scope_text=None, resolve=resolve)
+    summary = await engine.run(
+        "example.com",
+        ScanOptions(
+            stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, speed="slow", mock=True
+        ),
+    )
+
+    assert "naabu" in rec.names
+    naabu_hosts = rec.hosts[rec.names.index("naabu")]
+    assert set(naabu_hosts) == {"example.com", "www.example.com"}
+    assert not any(host[0].isdigit() for host in naabu_hosts)
+    # No pre-resolution gate: the no-scope path never resolves anything itself.
+    assert resolved == []
+    assert summary.exit_code is not ExitCode.SCOPE
+    naabu_stage = next(stage for stage in summary.stages if stage.stage is Stage.PORTS)
+    assert naabu_stage.skipped == []
+
+
+async def test_scope_file_passes_naabu_only_verified_ips(tmp_path: Path) -> None:
+    """(b) Scope file present: naabu gets IPs only, every one inside in_scope_cidrs."""
+    rec = Recorder()
+    answers = {
+        "example.com": ["203.0.113.5"],
+        "www.example.com": ["203.0.113.6"],
+    }
+
+    async def resolve(host: str) -> list[str]:
+        return answers[host]
+
+    engine = ports_engine(tmp_path, rec, scope_text=SCOPE_WITH_CIDRS, resolve=resolve)
+    await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, speed="slow"),
+    )
+
+    naabu_hosts = rec.hosts[rec.names.index("naabu")]
+    # The alive set has no order; the content is what matters.
+    assert set(naabu_hosts) == {"203.0.113.5", "203.0.113.6"}
+    assert "example.com" not in naabu_hosts
+    assert "www.example.com" not in naabu_hosts
+    for address in naabu_hosts:
+        ipaddress.ip_address(address)
+        assert ipaddress.ip_address(address) in ipaddress.ip_network("203.0.113.0/24")
+
+
+async def test_scope_file_omits_a_target_whose_resolution_fails(tmp_path: Path) -> None:
+    """(c) Resolution failure: that target is left out, never passed as a domain."""
+    rec = Recorder()
+
+    async def resolve(host: str) -> list[str]:
+        if host == "www.example.com":
+            raise OSError("temporary failure in name resolution")
+        return ["203.0.113.5"]
+
+    engine = ports_engine(tmp_path, rec, scope_text=SCOPE_WITH_CIDRS, resolve=resolve)
+    summary = await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, speed="slow"),
+    )
+
+    naabu_hosts = rec.hosts[rec.names.index("naabu")]
+    assert naabu_hosts == ["203.0.113.5"]
+    assert "www.example.com" not in naabu_hosts
+    assert any("1 target(s) skipped" in warning for warning in summary.warnings)
+
+
+async def test_scope_file_omits_a_target_that_resolves_out_of_scope(tmp_path: Path) -> None:
+    """(d) Out-of-scope address: that target is left out of the naabu call."""
+    rec = Recorder()
+    answers = {
+        "example.com": ["203.0.113.5"],
+        "www.example.com": ["198.51.100.9"],
+    }
+
+    async def resolve(host: str) -> list[str]:
+        return answers[host]
+
+    engine = ports_engine(tmp_path, rec, scope_text=SCOPE_WITH_CIDRS, resolve=resolve)
+    summary = await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, speed="slow"),
+    )
+
+    naabu_hosts = rec.hosts[rec.names.index("naabu")]
+    assert naabu_hosts == ["203.0.113.5"]
+    assert "198.51.100.9" not in naabu_hosts
+    assert "www.example.com" not in naabu_hosts
+    assert any("1 target(s) skipped" in warning for warning in summary.warnings)
+
+
+async def test_scope_file_skips_naabu_when_no_target_verifies(tmp_path: Path) -> None:
+    """No verified address anywhere: naabu is a recorded skip, not a domain fallback."""
+    rec = Recorder()
+
+    async def resolve(host: str) -> list[str]:
+        return ["198.51.100.9"]
+
+    engine = ports_engine(tmp_path, rec, scope_text=SCOPE_WITH_CIDRS, resolve=resolve)
+    summary = await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, speed="slow"),
+    )
+
+    assert "naabu" not in rec.names
+    assert "pyscan" in rec.names
+    stage = next(item for item in summary.stages if item.stage is Stage.PORTS)
+    assert [(skip.tool, skip.reason) for skip in stage.skipped] == [
+        (
+            "naabu",
+            "blocked: no in-scope IP for any target "
+            "(resolution failed or the address is outside in_scope_cidrs)",
+        )
+    ]
+
+
+async def test_passive_mode_never_runs_naabu_with_or_without_a_scope_file(
+    tmp_path: Path,
+) -> None:
+    """(e) Passive mode: naabu skipped in both scope modes ("requires --active")."""
+    rec = Recorder()
+
+    async def resolve(host: str) -> list[str]:
+        return ["203.0.113.5"]
+
+    for name, scope_text in (("no_scope", None), ("scope", SCOPE_WITH_CIDRS)):
+        engine = ports_engine(tmp_path / name, rec, scope_text=scope_text, resolve=resolve)
+        selected, skipped = await engine._select(
+            Stage.PORTS, ScanOptions(active=False, tools=("naabu",))
+        )
+        assert selected == []
+        assert [(spec.name, reason) for spec, reason in skipped] == [("naabu", "requires --active")]

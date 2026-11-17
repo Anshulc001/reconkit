@@ -307,11 +307,30 @@ def test_aggressive_yes_adds_the_ports_stages(
         input="example.com\nn\npassive\nall\ny\n",
     )
     assert result.exit_code == 0, result.stderr
-    assert "aggressive: pyscan TCP connect scan" in result.stderr
-    assert "version detection is not wired" in result.stderr
+    # 2026-11-17: the message now names both port adapters and the scope-mode
+    # branch for naabu (docs/05 rule 6); the deferred-version-detection notice
+    # is unchanged.
+    assert "aggressive: TCP connect scanning by pyscan" in result.stderr
+    assert "naabu runs only on IPs reconkit resolved and verified" in result.stderr
+    assert "service/version detection is not wired" in result.stderr
     (options,) = calls
     assert options.stages == (Stage.SUBS, Stage.DNS, Stage.LIVE, Stage.PORTS)
     assert options.active is True
+
+
+def present_scope_that_denies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real scope file at the default `./scope.yaml` that does not allow the target.
+
+    2026-11-17: an *absent* scope file no longer refuses anything, so these two
+    tests must provide a present file to exercise the gate. `chdir` makes the
+    default `./scope.yaml` deterministic instead of depending on whatever the
+    checkout's git-ignored file happens to contain.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "scope.yaml").write_text(
+        "authorization: engagement\nin_scope:\n  - other.example\nallow_active: true\n",
+        encoding="utf-8",
+    )
 
 
 def test_aggressive_no_leaves_the_plan_alone(
@@ -319,11 +338,12 @@ def test_aggressive_no_leaves_the_plan_alone(
 ) -> None:
     """Answering `no` adds nothing, so `active` stays subs+dns+live.
 
-    The run then exits 3, because answering `no` to the scope question leaves no
-    usable scope file and the unchanged gate refuses the active stage. That is
-    the point: `no` is not a bypass.
+    A scope file *is* present at the default location and does not list the
+    target, so the unchanged gate refuses the active stage and the run exits 3.
+    (An absent file would now be unrestricted - docs/05 rule 2, 2026-11-17.)
     """
     config = make_config(tmp_path)
+    present_scope_that_denies(tmp_path, monkeypatch)
     as_tty(monkeypatch)
     result = CliRunner().invoke(
         app, interactive_args(config), input="example.com\nn\nactive\nall\nn\n"
@@ -335,11 +355,17 @@ def test_aggressive_no_leaves_the_plan_alone(
     assert "scope" in " ".join(result.stderr.split()).lower()
 
 
-def test_no_scope_file_never_lets_an_active_tool_run(
+def test_a_present_scope_file_blocks_an_out_of_scope_interactive_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The `no` answer is not a scope bypass (docs/02 section 2b point 2)."""
+    """Renamed from `test_no_scope_file_never_lets_an_active_tool_run`.
+
+    That test asserted that answering `no` could never let an active tool run.
+    As of 2026-11-17 an absent scope file means unrestricted active scanning, so
+    the only thing that can still block is a *present* file. This proves it does.
+    """
     config = make_config(tmp_path)
+    present_scope_that_denies(tmp_path, monkeypatch)
     as_tty(monkeypatch)
     result = CliRunner().invoke(
         app,

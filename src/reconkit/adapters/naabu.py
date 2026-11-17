@@ -1,7 +1,14 @@
 """naabu binary adapter (docs/09_TOOL_CONTRACTS.md).
 
 Connect scan only (`-scan-type c`), so it works without root. Port order is the
-engine's; naabu receives one validated host list and one port list.
+engine's; naabu receives one validated input list and one port list.
+
+Input is scope-mode dependent (docs/05 rule 6, 2026-11-17): with no scope file
+the engine passes the ordinary hostnames; with a scope file present it passes
+only IP addresses it resolved and verified itself, never a bare domain. The
+adapter accepts both forms because both are legitimate, and `-host` takes a
+comma-separated list of either (`naabu -h`: `-host string[] hosts to scan ports
+for (comma-separated)`).
 """
 
 from __future__ import annotations
@@ -28,7 +35,7 @@ class NaabuAdapter(BinaryAdapter):
         seen: set[str] = set()
         for raw in ctx.hosts:
             try:
-                host = validate_host(raw)
+                host = _input(raw)
             except (TypeError, ValueError):
                 raise ToolFailed(f"naabu: invalid host {raw!r}") from None
             if host not in seen:
@@ -89,6 +96,17 @@ class NaabuAdapter(BinaryAdapter):
                 seen.add(key)
                 records.append(record)
         return records
+
+
+def _input(value: object) -> str:
+    """Normalize one naabu input: an IP literal stays an IP, else a valid host."""
+    if not isinstance(value, str):
+        raise TypeError("naabu input must be a string")
+    text = value.strip()
+    try:
+        return str(ipaddress.ip_address(text))
+    except ValueError:
+        return validate_host(text)
 
 
 def _fqdn(value: object) -> str:

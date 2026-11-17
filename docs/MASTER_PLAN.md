@@ -567,6 +567,20 @@ D1. 2026-11-17 - No scope file means unrestricted active scanning.
     read. This changes plan rule 2 of docs/05 for the no-file case only; there
     is still no flag that weakens a real scope file.
 
+D2. 2026-11-17 - naabu is scope-mode dependent; entry 11c-G-7 is SUPERSEDED
+    (not deleted).
+    Reason: "user-requested: naabu unrestricted in active/full with no scope
+    file; scope-file-present uses resolve-and-verify-IP path."
+    No scope file: naabu runs unrestricted like any other active tool - no
+    pre-resolution gate, no IP-only restriction, no special-case skip. Scope
+    file present: reconkit resolves each already-in-scope target itself, checks
+    every address against `in_scope_cidrs`, and passes naabu only the verified
+    IP address(es) via `-host` - never a bare domain; a target whose resolution
+    fails or resolves out of scope is skipped, with no hostname fallback, and
+    naabu is skipped entirely if no target verifies. Passive mode: naabu does
+    not run. 11c-G-7's permanent block (12i) is superseded by this decision; its
+    historical entries in docs/REVIEW_LOG stay as written.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

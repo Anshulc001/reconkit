@@ -51,7 +51,7 @@
 
 The interactive mode's scope question and the `--help` text both say this in the same words (section 2b).
 
-**The ports ceiling is permanent, not a pending decision.** `pyscan` is the only selectable ports adapter in this build, `naabu` is skipped at selection time (its resolver runs inside the child, so docs/05 rule 6 cannot filter the address it connects to), and every other ports tool is phase 3 with no adapter. Ports confidence therefore cannot exceed `LOW`, and the open/closed disagreement rule cannot fire. The owner accepted this as the permanent shape of the ports stage on 2026-11-14 (12i, option c): no pre-resolve redesign and no second IP-connecting adapter is planned. The stage still does its job; what it cannot do is cross-tool confirmation.
+**Ports run `pyscan` and `naabu`; every other ports tool is phase 3 with no adapter.** `naabu` is scope-mode dependent (owner decision 2026-11-17, superseding the 12i permanent block): with **no scope file** it runs unrestricted like any other active tool, receiving the discovered hostnames; with a **scope file present** the engine resolves each in-scope target itself, verifies every address against `in_scope_cidrs`, and passes `naabu` only those verified IPs - never a bare domain - skipping any target whose resolution fails or resolves out of scope (docs/05 rule 6, docs/09 section 4). Because two port adapters can now run, a port both report can reach `MEDIUM` confidence; a single-scanner result stays `LOW` and the open/closed disagreement rule only fires when both report. When `naabu` is absent or its targets cannot be verified, `pyscan` alone is the fallback and the ceiling is `LOW` again.
 
 ### State and output
 | Command | Purpose |
@@ -112,10 +112,11 @@ The five questions:
    hosts; no value is ever guessed for a host the run did not observe.
 5. **Aggressive scanning.** A separate yes/no asked whatever the answer to 3 was.
    `yes` adds the active `live` and `ports` stages (and sets `--active`), and it
-   states plainly what that means in this build: `pyscan` only, a TCP connect
-   scan inside `in_scope_cidrs`, confidence capped at `LOW`; **service/version
-   detection is not wired** (`nmap -sV` has no adapter, `naabu` is permanently
-   blocked). `no` changes nothing.
+   states plainly what that means in this build: TCP connect scanning by
+   `pyscan` and (`naabu` when installed) - with no scope file `naabu` runs on the
+   hostnames, with a scope file it runs only on IPs the engine resolved and
+   verified against `in_scope_cidrs`; **service/version detection is not wired**
+   (`nmap -sV` has no adapter). `no` changes nothing.
 
 After the last answer the CLI echoes the resolved plan (targets, stages, active
 or not, field numbers) and runs the ordinary engine once per target. Results also

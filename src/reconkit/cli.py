@@ -251,9 +251,10 @@ def _ask_aggressive(*, no_color: bool) -> bool:
     if answer:
         # docs/02 section 2b: state the real capability, never a guess.
         render_message(
-            "aggressive: pyscan TCP connect scan inside in_scope_cidrs only; "
-            "confidence is capped at LOW and service/version detection is not wired "
-            "in this build (nmap -sV has no adapter, naabu is permanently blocked).",
+            "aggressive: TCP connect scanning by pyscan, plus naabu when installed "
+            "(with a scope file, naabu runs only on IPs reconkit resolved and "
+            "verified against in_scope_cidrs); service/version detection is not "
+            "wired in this build (nmap -sV has no adapter).",
             no_color=no_color,
         )
     return answer

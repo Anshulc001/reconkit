@@ -10,6 +10,7 @@ from distinct tools, applies the unconditional host-state rule, and records one
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import secrets
 import time
@@ -25,6 +26,7 @@ from dotenv import dotenv_values
 
 from reconkit.adapters import ADAPTERS
 from reconkit.adapters.base import BaseToolAdapter
+from reconkit.adapters.pyscan import default_resolve
 from reconkit.adapters.registry import ToolSpec, load_tools
 from reconkit.config import AppConfig, SpeedName, resolve_speed
 from reconkit.core.pacing import Clock, Pacer, RateLimiter
@@ -76,15 +78,14 @@ RAW_OUTPUT_DIRS: dict[Stage, str] = {
 SkipReason = str
 Selected = list[tuple[ToolSpec, type[BaseToolAdapter]]]
 Skipped = list[tuple[ToolSpec, SkipReason]]
-# docs/05 rule 6: an active tool may only touch an address inside `in_scope_cidrs`.
-# `pyscan` enforces it itself through `RunContext.ip_allowed`, so it selects normally.
-# `naabu` resolves inside its own process, where no adapter can filter the address,
-# so it stays skipped at selection time like a missing binary. `--mock` is exempt
-# because it never connects.
-IP_GATE_BLOCKED: dict[str, str] = {
-    "naabu": "blocked: resolves inside the binary, so in_scope_cidrs cannot be enforced (11c-G-7)",
-}
+# docs/05 rule 6, naabu branch (2026-11-17): with a scope file present the engine
+# resolves each in-scope target itself and hands naabu only verified addresses.
+NAABU_NO_IPS = (
+    "blocked: no in-scope IP for any target "
+    "(resolution failed or the address is outside in_scope_cidrs)"
+)
 Sleep = Callable[[float], Awaitable[None]]
+Resolve = Callable[[str], Awaitable[list[str]]]
 InstalledCheck = Callable[[type[BaseToolAdapter]], bool]
 
 
@@ -408,6 +409,7 @@ class Engine:
         env: Mapping[str, str] | None = None,
         rng: Any = None,
         sleep: Sleep | None = None,
+        resolve: Resolve | None = None,
         clock: Clock | None = None,
         installed: InstalledCheck | None = None,
         now: Now | None = None,
@@ -427,6 +429,9 @@ class Engine:
         self.env = dict(env or {})
         self._rng = rng if rng is not None else secrets.SystemRandom()
         self._sleep = sleep if sleep is not None else asyncio.sleep
+        # docs/05 rule 6: the engine, not naabu, resolves names when a scope file
+        # is present; injected so tests never touch DNS.
+        self._resolve = resolve if resolve is not None else default_resolve
         self._clock = clock
         self._installed = installed
         self._now = now if now is not None else utc_now
@@ -596,6 +601,20 @@ class Engine:
                     selected, skipped = self._skip_active(selected, skipped, scope_error)
                 else:
                     ip_allowed = await asyncio.to_thread(self._ip_allowed)
+            # docs/05 rule 6: with a scope file present, naabu receives only
+            # addresses the engine resolved and verified; with no scope file it
+            # runs unrestricted like every other active tool.
+            tool_hosts: dict[str, list[str]] = {}
+            if (
+                stage is Stage.PORTS
+                and not opts.mock
+                and ip_allowed is not None
+                and scope_present(self.scope_path)
+                and any(spec.name == "naabu" for spec, _ in selected)
+            ):
+                selected, skipped, tool_hosts = await self._naabu_verified_ips(
+                    selected, skipped, hosts, ip_allowed
+                )
 
             run_id = self.store.create_scan_run(
                 target_id,
@@ -634,6 +653,7 @@ class Engine:
                         pacer,
                         opts,
                         ip_allowed,
+                        tool_hosts,
                         results,
                         done,
                     ),
@@ -829,6 +849,63 @@ class Engine:
             return hosts, [], str(exc)
         return check.hosts, dropped, None
 
+    async def _naabu_verified_ips(
+        self,
+        selected: Selected,
+        skipped: Skipped,
+        hosts: list[str],
+        ip_allowed: Callable[[str], bool],
+    ) -> tuple[Selected, Skipped, dict[str, list[str]]]:
+        """Resolve and verify naabu's input when a scope file is present.
+
+        docs/05 rule 6 (2026-11-17): naabu resolves inside its own process, so
+        the engine resolves each already-in-scope target itself, keeps every
+        address `ip_allowed` accepts, and hands naabu only those addresses -
+        never a bare domain. A target whose resolution fails or yields no
+        in-scope address is left out of the scan; when nothing is left, naabu is
+        removed from the selection with a `blocked:` reason.
+        """
+        naabu = next(((spec, adapter) for spec, adapter in selected if spec.name == "naabu"), None)
+        tool_hosts: dict[str, list[str]] = {}
+        if naabu is None:
+            return selected, skipped, tool_hosts
+        verified: list[str] = []
+        seen: set[str] = set()
+        dropped = 0
+        for host in hosts:
+            try:
+                addresses = await self._resolve(host)
+            except (OSError, ValueError):
+                dropped += 1
+                continue
+            kept = 0
+            for address in addresses:
+                try:
+                    ipaddress.ip_address(address)
+                    permitted = ip_allowed(address)
+                except (TypeError, ValueError):
+                    continue
+                if not permitted:
+                    continue
+                kept += 1
+                if address not in seen:
+                    seen.add(address)
+                    verified.append(address)
+            if kept == 0:
+                dropped += 1
+        if not verified:
+            kept_selected = [(spec, adapter) for spec, adapter in selected if spec.name != "naabu"]
+            return kept_selected, [*skipped, (naabu[0], NAABU_NO_IPS)], tool_hosts
+        if dropped:
+            note = (
+                f"naabu scope check: {dropped} target(s) skipped "
+                "(resolution failed or the address is outside in_scope_cidrs)"
+            )
+            if note not in self._warnings:
+                self._warnings.append(note)
+        tool_hosts["naabu"] = verified
+        return selected, skipped, tool_hosts
+
     def _note_empty_stage(self, stage: Stage, skipped: Skipped) -> None:
         """docs/02 section 6: a stage that executed no tools says so, once."""
         reasons = sorted({reason for _spec, reason in skipped})
@@ -909,10 +986,6 @@ class Engine:
             if spec.mode is Mode.ACTIVE and not opts.active:
                 skipped.append((spec, "requires --active"))
                 continue
-            blocked_reason = None if opts.mock else IP_GATE_BLOCKED.get(spec.name)
-            if blocked_reason is not None:
-                skipped.append((spec, blocked_reason))
-                continue
             if not opts.mock and not await asyncio.to_thread(self._is_installed, adapter):
                 skipped.append((spec, "not installed"))
                 continue
@@ -950,6 +1023,7 @@ class Engine:
         pacer: Pacer,
         opts: ScanOptions,
         ip_allowed: Callable[[str], bool] | None,
+        tool_hosts: dict[str, list[str]],
         results: list[ToolResult],
         done: set[str],
     ) -> RunContext:
@@ -980,7 +1054,11 @@ class Engine:
         async def one(spec: ToolSpec, adapter: type[BaseToolAdapter]) -> None:
             async with semaphore:
                 await pacer.before_tool(mode.value)
-                tool_ctx = ctx.model_copy(update={"env": self._tool_env(spec, opts)})
+                overrides: dict[str, object] = {"env": self._tool_env(spec, opts)}
+                if spec.name in tool_hosts:
+                    # docs/05 rule 6: naabu's verified IPs replace the name list.
+                    overrides["hosts"] = tool_hosts[spec.name]
+                tool_ctx = ctx.model_copy(update=overrides)
                 result = await self._run_one(run_id, adapter, tool_ctx, workspace)
             results.append(result)
             done.add(spec.name)
