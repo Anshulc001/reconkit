@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.text import Text
 
 import reconkit.ui as ui
-from reconkit.engine import ExitCode, ScanSummary, StageOutcome
+from reconkit.engine import CompletionGap, ExitCode, ScanSummary, StageOutcome
 from reconkit.models import (
     Confidence,
     HostState,
@@ -122,11 +122,15 @@ def test_json_output_is_one_valid_document_with_documented_schema() -> None:
         "resumed",
         "scope_denied",
         "scope_mode",
+        "completion",
         "warnings",
         "hosts",
         "stages",
         "summary",
     }
+    # Added 2026-11-17 with the owner's completion ruling: a run with no gaps
+    # still carries the key, so consumers never branch on its absence.
+    assert document["completion"] == {"status": "complete", "gaps": []}
     assert set(document["hosts"][0]) == {
         "fqdn",
         "state",
@@ -406,6 +410,44 @@ def test_progress_is_suppressed_only_in_silent_mode() -> None:
     assert "subs: running 3 tool(s)" in stream.getvalue()
     ui.render_progress("subs: running 3 tool(s)", console=console, elapsed_s=4.0)
     assert "(4s)" in stream.getvalue()
+
+
+def test_the_gaps_block_goes_to_stderr_and_the_json_carries_completion() -> None:
+    """Added 2026-11-17: the owner's completion block (docs/02 section 6)."""
+    summary = sample_summary()
+    summary.mode = "full"
+    summary.gaps = [
+        CompletionGap(Stage.TECH, "no adapter yet (phase 3)", 5),
+        CompletionGap(Stage.URLS, "not installed", 2),
+    ]
+
+    code, raw, err = render_text(summary=summary, json_output=True)
+    assert code == 0
+    # stdout stays one clean document; the block is stderr-only.
+    assert raw.count("\n") == 1
+    assert json.loads(raw)["completion"] == {
+        "status": "complete_with_gaps",
+        "gaps": [
+            {"stage": "tech", "reason": "no adapter yet (phase 3)"},
+            {"stage": "urls", "reason": "not installed"},
+        ],
+    }
+    assert "⚠ full scan completed with gaps — 2 stage(s)" in err
+    assert "tech: 5 tool(s) skipped (no adapter yet (phase 3))" in err
+    assert "urls: 2 tool(s) skipped (not installed)" in err
+    assert "this is not a failure" in err
+    assert "reconkit doctor" in err
+
+    code, _, err = render_text(summary=summary)
+    assert code == 0
+    assert "completed with gaps" in err
+
+
+def test_a_complete_run_prints_no_gaps_block() -> None:
+    """The block is silent for every run that has no gaps (byte-identical output)."""
+    _, raw, err = render_text(json_output=True)
+    assert "completed with gaps" not in err
+    assert json.loads(raw)["completion"]["status"] == "complete"
 
 
 def test_ui_does_not_import_store_scope_adapters_or_cli() -> None:

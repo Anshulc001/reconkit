@@ -154,8 +154,8 @@ The questions:
    `full` additionally sets `--full` and `--include-noisy`. Exploitation-class
    tools still require `--tools`. Because `tech`, `urls` and `vulns` have no
    adapter in this build, a `full` choice requests stages that report their
-   skips, warn, and make the run partial (`5`, section 6) - the same rule as a
-   flag-based `run --full`, stated before the run starts.
+   skips and warn, then finish as **completion gaps** (exit `0`, section 6) -
+   the same rule as a flag-based `run --full`, stated before the run starts.
 4. **Report fields.** A numbered menu built from fields `reconkit` actually
    stores (host state, confidence, discovery sources, source count, IPs, status
    code, title, redirect location, open ports, technology, and the `UNKNOWN`
@@ -335,10 +335,12 @@ new.example.com    UNKNOWN    -       -        certspotter, hackertarget  MEDIUM
 One JSON document is written to stdout; tables and progress stay on stderr. The fixed shape is:
 
 ```json
-{"type":"summary","target":"example.com","exit_code":0,"resumed":false,"scope_denied":false,"scope_mode":"enforced","warnings":[],"hosts":[{"fqdn":"api.example.com","state":"ALIVE","confidence":"HIGH","sources":["crtsh","subfinder","otx"],"status_code":200,"ports":[80,443],"detail":null}],"stages":[{"stage":"subs","run_id":1,"resumed":false,"dropped_hosts":[],"results":[],"skipped":[]}],"summary":{"hosts":1,"alive":1,"dns_only":0,"shut_down":0,"dead":0,"unknown":0,"tools_ok":1,"tools_failed":0,"tools_skipped":0,"tools_timeout":0}}
+{"type":"summary","target":"example.com","exit_code":0,"resumed":false,"scope_denied":false,"scope_mode":"enforced","completion":{"status":"complete","gaps":[]},"warnings":[],"hosts":[{"fqdn":"api.example.com","state":"ALIVE","confidence":"HIGH","sources":["crtsh","subfinder","otx"],"status_code":200,"ports":[80,443],"detail":null}],"stages":[{"stage":"subs","run_id":1,"resumed":false,"dropped_hosts":[],"results":[],"skipped":[]}],"summary":{"hosts":1,"alive":1,"dns_only":0,"shut_down":0,"dead":0,"unknown":0,"tools_ok":1,"tools_failed":0,"tools_skipped":0,"tools_timeout":0}}
 ```
 
 The `hosts` objects always carry `state`, `confidence` and `sources`; the top-level `summary` object carries the counts. `scope_mode` is the same value written to `scan_runs` (section 3.1).
+
+`completion` is always present (section 6): `status` is `complete` or `complete_with_gaps`, and `gaps` lists one object per requested stage that had no runnable tool, `{"stage": "urls", "reason": "no adapter yet (phase 3)"}`. A consumer that only cares whether the run was usable reads `status`; one that wants to explain the shortfall reads `gaps`.
 
 With a filter flag (`--only-alive`, `--only-states`, `--status-codes`) the
 `hosts` array is already filtered and a top-level `filter` object is added:
@@ -420,27 +422,39 @@ One folder per domain per run, never reused:
 | 2 | Usage error (bad flags) |
 | 3 | Scope violation when a scope file is present (target not allowed, unauthorized, or expired). A **missing** scope file is not a violation: it means unrestricted active scanning of the operator's targets (section 2) |
 | 4 | No usable tool for the stage |
-| 5 | Partial success (some tools failed or timed out, or a requested stage executed no tools) |
+| 5 | Partial success (some tools failed or timed out, or a requested stage executed no tools because deliberate rules excluded every tool) |
 | 6 | Retired 2026-11-17: was "every requested tool failed to install or update" |
 | 130 | Interrupted by user (state saved, resumable) |
 
 Code `6` is retired (2026-11-17, docs/MASTER_PLAN.md D4): it belonged to `install`/`update` only, and both commands are gone. No command can emit it, and the scan path's enum (`engine.ExitCode`) never could - a scan in which every tool failed is code 4. Do not reuse 6.
 
-**A requested stage that executed zero tools is a partial run (code 5).** Zero executed tools means every tool in that stage's pool was selected out before running - `no adapter yet (phase N)`, `tool mode not included in <mode> mode`, `tier not included in <mode> mode`, `exploitation tool requires explicit --tools`, `not installed`, or the docs/05 rule 6 block - so the stage created a `scan_runs` row and `tool_runs` skip rows but no result. Two things follow, both from one engine decision:
+**A requested stage that executed zero tools is either a completion gap (code 0) or a partial run (code 5), depending on why.** Zero executed tools means every tool in that stage's pool was selected out before running, so the stage created a `scan_runs` row and `tool_runs` skip rows but no result. The engine splits the causes in `Engine._completion_gaps()`:
 
-- The engine appends one warning per such stage, `"<stage> stage executed no tools: N tool(s) skipped (<reasons>)"`. It is the existing warning channel: the human output prints it as `warning: ...`, `--json` lists it in `warnings`, and `-q`/`--silent` suppress only the text, not the exit code.
-- The run exits 5. Several empty stages add one warning each and still exit 5; no warning overwrites another.
+- **Absence -> gap (exit 0).** The only reasons are `no adapter yet (phase N)` or `not installed`: the scan used every tool that was available. The run exits `0`, and two channels carry the honesty: one warning per stage, `"<stage> stage executed no tools: N tool(s) skipped (<reasons>)"`, and one gaps **block** on stderr (below).
+- **Any other cause -> still 5.** `tier not included in <mode> mode`, `tool mode not included in <mode> mode`, `exploitation tool requires explicit --tools`, or the docs/05 rule 6 block are deliberate exclusions or a scope decision, not "the tool was not there". A stage emptied that way keeps exit `5`.
+- A stage that is a gap **and** another stage with a failed tool still exits `5`: a gap never masks a failure.
 
-This is an additional cause of 5, not a replacement: stages that did run tools keep their existing result (0 when every selected tool succeeded, 5 when some failed or timed out).
+The gaps block is printed by `ui.render_completion_gaps()` and is **stderr-only**, so `--json` stdout stays one clean document. It prints nothing at all when there are no gaps, which keeps every ordinary run's output byte-identical. `--silent` suppresses it like every other message; the exit code and `completion` in `--json` are unaffected.
+
+```text
+⚠ full scan completed with gaps — 3 stage(s) had no runnable tools
+  tech: 5 tool(s) skipped (no adapter yet (phase 3))
+  urls: 8 tool(s) skipped (no adapter yet (phase 3))
+  vulns: 5 tool(s) skipped (no adapter yet (phase 3))
+  run 'reconkit doctor' to see what is installed; see docs/10_TOOL_SOURCES.md for provenance.
+  this is not a failure — the scan used every tool that was available.
+```
+
+The count on each line is the number of tools skipped for an absence reason, so a stage whose pool also contains exploitation-class tools reports only the absent ones (that is why `vulns` reads 5, not 8). The same data is in `--json` as `completion` (section 5). This replaced the 2026-11-17 rule that made every zero-tool stage exit 5 (owner ruling, `docs/MASTER_PLAN.md` D9).
 
 **Precedence, highest first** (one decision site, `Engine._exit_code`):
 
 1. `3` - scope denied (passive results already collected are kept).
-2. `4` - the run has at least one new stage and selected no tool at all (a run resumed entirely from completed stages still exits 0), **or** every selected tool in the run failed. This wins over the empty-stage rule: a run where nothing usable ran or every tool failed is 4 even if another stage was empty.
-3. `5` - at least one requested stage executed zero tools, **or** at least one selected tool failed/timed out.
-4. `0` - otherwise. A resumed run whose requested stages were all already completed keeps 0.
+2. `4` - the run has at least one new stage and selected no tool at all (a run resumed entirely from completed stages still exits 0), **or** every selected tool in the run failed. This wins over the empty-stage rule: a run where nothing usable ran or every tool failed is 4 even if another stage was empty, and a `--full` run on a box with nothing installed is 4, not 0 - "no usable tool" is still its own signal.
+3. `5` - at least one requested stage executed zero tools for a non-absence reason, **or** at least one selected tool failed/timed out.
+4. `0` - otherwise, including every run whose zero-tool stages were all absence gaps. A resumed run whose requested stages were all already completed keeps 0.
 
-When **every** requested stage is empty, the run follows rule 2 and exits `4`, not 5: no tool ran anywhere, which is the documented meaning of "no usable tool". A stage dropped by `--tools`/`--exclude` is *not* an empty stage - the engine never creates a stage outcome for it, so it neither warns nor changes the exit code; the same applies to `ports` when there are no hosts to scan (the stage is skipped before it builds a pool).
+When **every** requested stage is empty, the run follows rule 2 and exits `4`, not 0 or 5: no tool ran anywhere, which is the documented meaning of "no usable tool". A stage dropped by `--tools`/`--exclude` is *not* an empty stage - the engine never creates a stage outcome for it, so it neither warns nor changes the exit code; the same applies to `ports` when there are no hosts to scan (the stage is skipped before it builds a pool).
 
 If passive stages have already completed and an active stage is denied by scope, the run still exits `3`; the passive results already collected are kept and reported.
 

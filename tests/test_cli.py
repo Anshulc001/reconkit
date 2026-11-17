@@ -700,7 +700,9 @@ def test_full_json_skips_exploitation_tools_and_does_not_tier_skip_opt_in(
     config = make_config(tmp_path)
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(app, mode_args(config, "--full", "--json"))
-    assert result.exit_code in (0, 5), result.stderr
+    # Changed 2026-11-17 from `in (0, 5)`: a stage that had no runnable tool is
+    # a completion gap, not a partial run, so full exits 0 (docs/02 section 6).
+    assert result.exit_code == 0, result.stderr
     document = json.loads(result.stdout)
     skipped = {
         item["tool"]: item["reason"] for stage in document["stages"] for item in stage["skipped"]
@@ -718,6 +720,59 @@ def test_full_json_skips_exploitation_tools_and_does_not_tier_skip_opt_in(
         "urls",
         "vulns",
     ]
+
+
+def test_a_full_run_reports_the_gaps_of_stages_with_no_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Added 2026-11-17: full exits 0 and names the stages that had no tool."""
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, mode_args(config, "--full", "--json"))
+
+    assert result.exit_code == 0, result.stderr
+    document = json.loads(result.stdout)
+    assert document["completion"] == {
+        "status": "complete_with_gaps",
+        "gaps": [
+            {"stage": "tech", "reason": "no adapter yet (phase 3)"},
+            {"stage": "urls", "reason": "no adapter yet (phase 3)"},
+            {"stage": "vulns", "reason": "no adapter yet (phase 3)"},
+        ],
+    }
+    # The human block is stderr-only: stdout stays one clean document.
+    assert result.stdout.count("\n") == 1
+    assert "⚠ full scan completed with gaps — 3 stage(s)" in result.stderr
+    assert "urls: 8 tool(s) skipped (no adapter yet (phase 3))" in result.stderr
+    assert "this is not a failure" in result.stderr
+
+
+def test_a_partial_stage_still_exits_five(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Added 2026-11-17: a stage that had tools but one failed keeps exit 5.
+
+    The gap ruling only covers stages with no runnable tool; a real failure is
+    still a partial run (docs/02 section 6).
+    """
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    engine_run = Engine.run
+    calls = {"n": 0}
+
+    async def flaky(self: Engine, target: str, options: ScanOptions | None = None) -> ScanSummary:
+        summary = await engine_run(self, target, options)
+        calls["n"] += 1
+        return summary
+
+    def broken(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("pyscan fixture is unreadable")
+
+    monkeypatch.setattr(Engine, "run", flaky)
+    # pyscan is a ports-stage tool, so the stage only exists under --full.
+    monkeypatch.setattr("reconkit.adapters.pyscan.PyscanAdapter.run", broken)
+    result = CliRunner().invoke(app, mode_args(config, "--full"))
+
+    assert calls["n"] == 1
+    assert result.exit_code == 5, result.stderr
 
 
 def test_only_alive_and_only_states_filter_the_json_hosts(
@@ -796,7 +851,8 @@ def test_ports_injection_reaches_the_port_stage(
     config = make_config(tmp_path)
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(app, mode_args(config, "--full", "--ports", "80,443", "--json"))
-    assert result.exit_code in (0, 5), result.stderr
+    # Changed 2026-11-17 from `in (0, 5)`: zero-adapter stages are gaps, not 5.
+    assert result.exit_code == 0, result.stderr
     # pyscan runs in mock and must see exactly the injected ports; its mock
     # fixture output is parsed unchanged, so the proof is the run params.
     document = json.loads(result.stdout)

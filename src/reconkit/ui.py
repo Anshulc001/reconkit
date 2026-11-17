@@ -208,6 +208,12 @@ def summary_document(
         "resumed": summary.resumed,
         "scope_denied": summary.scope_denied,
         "scope_mode": summary.scope_mode,
+        # docs/02 section 5 (owner ruling 2026-11-17): a stage that had no
+        # runnable tool is a gap, not a failure; the exit code stays 0.
+        "completion": {
+            "status": summary.completion_status,
+            "gaps": [{"stage": gap.stage.value, "reason": gap.reason} for gap in summary.gaps],
+        },
         "warnings": list(summary.warnings),
         "hosts": [_host_document(row) for row in rows],
         "stages": [
@@ -713,13 +719,17 @@ def render(
 
     rows = list(hosts)
     if json_output:
-        return write_json(
+        code = write_json(
             summary,
             rows,
             stream=stdout,
             filter_info=filter_info,
             injections=injections,
         )
+        # The block is stderr-only, so stdout stays a single clean document.
+        if not silent:
+            render_completion_gaps(summary, console=make_console(stderr, no_color=no_color))
+        return code
     if silent:
         return int(summary.exit_code)
 
@@ -758,7 +768,40 @@ def render(
         target.print(Text(summary_line))
     for warning in summary.warnings:
         target.print(Text(f"warning: {warning}", style="yellow"))
+    render_completion_gaps(summary, console=target)
     return int(summary.exit_code)
+
+
+def render_completion_gaps(
+    summary: ScanSummary,
+    *,
+    console: Console | None = None,
+    no_color: bool = False,
+) -> None:
+    """Render the completion-gaps block on stderr (docs/02 section 6).
+
+    Silence means nothing: with no gaps, not a single line is printed, so an
+    ordinary run's output is byte-identical to before the 2026-11-17 ruling.
+    """
+    if not summary.gaps:
+        return
+    target = console if console is not None else make_console(no_color=no_color)
+    count = len(summary.gaps)
+    target.print(
+        Text(
+            f"⚠ {summary.mode} scan completed with gaps — {count} stage(s) had no runnable tools",
+            style="yellow",
+        )
+    )
+    for gap in summary.gaps:
+        target.print(Text(f"  {gap.stage.value}: {gap.skipped} tool(s) skipped ({gap.reason})"))
+    target.print(
+        Text(
+            "  run 'reconkit doctor' to see what is installed; see "
+            "docs/10_TOOL_SOURCES.md for provenance."
+        )
+    )
+    target.print(Text("  this is not a failure — the scan used every tool that was available."))
 
 
 def doctor_document(report: DoctorReport) -> dict[str, object]:

@@ -52,7 +52,8 @@ reconkit installs nothing: `install`, `update` and `doctor --fix` were removed o
 6. Footer: counts per state and tool statuses. It does not print workspace or DB paths.
 
 - **Success:** exit 0.
-- **Partial:** some tools skipped/failed, or a requested stage executed no tools (warning names it), exit 5, results still saved.
+- **Complete with gaps:** a requested stage had no runnable tool at all (`no adapter yet (phase N)`, `not installed`). Exit 0; one warning per stage plus the `⚠ ... completed with gaps` block on stderr, and `completion.status = complete_with_gaps` in `--json`. The scan used every tool that was available.
+- **Partial:** some tools failed or timed out, or a requested stage was emptied by a deliberate rule (tier, tool mode, exploitation, scope). Exit 5, warning names the stage, results still saved.
 - **Failure:** no usable tool for stage: exit 4; the message names the stage and the tools that are not installed.
 - **Empty:** message listing which tools returned nothing.
 

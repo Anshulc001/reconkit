@@ -655,7 +655,8 @@ D7. 2026-11-17 - Standing pre-approvals established.
     doc mirrors code; regression tests; `tools.yaml` version fields from real
     output; install-residue removal; `tool_versions` stays removed; interactive
     `scope.yaml` writes with an explicit `y`; `--no-scope`; `--full` narrowing
-    `--active`; consistency audits. Still requires a ruling: AGENTS scope-rule
+    `--active`; consistency audits; adapter implementations wave 1+ (own S1-S7,
+    real `--help` pasted, own fixture). Still requires a ruling: AGENTS scope-rule
     changes beyond `--no-scope`; exploitation-tools-auto-fire; new CLI flags not
     in a batch prompt; `scope.yaml` edits outside interactive `[a]`; new
     dependencies; unfreezing F1/F2; widening active scanning; confidence and
@@ -683,6 +684,16 @@ D8. 2026-11-17 - Scan modes are one table: stages + tool modes + tiers.
     `--only-states` / `--status-codes` filters, `--ports` / `--header` /
     `--user-agent` / `--redact-headers` injectables, the extended interactive
     Q&A, and the out-of-scope `[a]/[b]/[c]/[d]` prompt.
+
+D9. 2026-11-17 - Zero-tool stages caused by absence are gaps, not failures.
+    Reason: "user-requested: --full exits 0 with a warning block when stages
+    lack adapters." A requested stage that executed no tools exits 0 when every
+    one of its skips was `no adapter yet (phase N)` or `not installed`: the scan
+    used every tool that was available. The honesty moves into a stderr block
+    (and `--json` `completion`); exit 5 stays reserved for real partials (a
+    failed/timed-out tool, or a stage emptied by tier/tool-mode/exploitation/
+    scope rules). "Nothing usable at all" still exits 4. Supersedes the
+    12k rule in docs/02 section 6 that made every zero-tool stage exit 5.
 
 =====================================================
 LATER BUG FIXES (any session)

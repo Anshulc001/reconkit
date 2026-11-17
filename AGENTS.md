@@ -55,6 +55,7 @@ Pre-approved without asking:
 8. The `--no-scope` flag, per the scope-bypass amendment in rule 2.
 9. `--full` narrowing CLI `--active` to subs+dns+live (dated deviation).
 10. Consistency audits across help text, docs and code; fix stale text in the same batch and disclose in the F-map.
+11. Adapter implementations (wave 1 onwards) following the existing adapter pattern - no approval needed per adapter, but each adapter gets its own S1-S7, its real `--help` pasted, and a test fixture.
 
 Still requires an owner ruling:
 

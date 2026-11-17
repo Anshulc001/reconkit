@@ -28,6 +28,7 @@ from reconkit.engine import (
     MODE_STAGES,
     MODE_TOOLS,
     STAGE_ORDER,
+    CompletionGap,
     DnsSignal,
     Engine,
     ExitCode,
@@ -1599,8 +1600,16 @@ def empty_stage_warnings(summary: ScanSummary) -> list[str]:
     return [warning for warning in summary.warnings if "executed no tools" in warning]
 
 
-async def test_an_empty_stage_warns_by_name_and_makes_the_run_partial(tmp_path: Path) -> None:
-    """Regression: PIT-40 - zero executed tools means exit 5 and a warning."""
+async def test_a_stage_with_no_adapter_warns_by_name_and_is_a_gap_not_a_failure(
+    tmp_path: Path,
+) -> None:
+    """Changed 2026-11-17 from `test_an_empty_stage_warns_by_name_and_makes_the_run_partial`.
+
+    Old: a zero-tool stage always made the run partial (exit 5), PIT-40.
+    New: owner ruling - when the only cause is an absent tool (no adapter yet,
+    not installed) the run used every tool available, so it exits 0 and the
+    gap is reported in `summary.gaps` plus the existing warning.
+    """
     rec = Recorder()
     specs = {"alpha": tool("alpha", Stage.SUBS), "ghost": tool("ghost", Stage.TECH)}
     adapters = {"alpha": adapter("alpha", Stage.SUBS, rec, records=[sub("www.example.com")])}
@@ -1608,7 +1617,7 @@ async def test_an_empty_stage_warns_by_name_and_makes_the_run_partial(tmp_path: 
         "example.com", ScanOptions(stages=(Stage.SUBS, Stage.TECH), mock=True)
     )
 
-    assert summary.exit_code is ExitCode.PARTIAL
+    assert summary.exit_code is ExitCode.SUCCESS
     tech = next(stage for stage in summary.stages if stage.stage is Stage.TECH)
     assert tech.results == []
     assert [skip.tool for skip in tech.skipped] == ["ghost"]
@@ -1616,6 +1625,69 @@ async def test_an_empty_stage_warns_by_name_and_makes_the_run_partial(tmp_path: 
     assert len(notes) == 1
     assert "tech" in notes[0]
     assert "1 tool(s) skipped" in notes[0]
+    assert summary.gaps == [CompletionGap(Stage.TECH, "no adapter yet (phase 2)", 1)]
+    assert summary.completion_status == "complete_with_gaps"
+
+
+async def test_a_stage_of_uninstalled_tools_is_a_gap(tmp_path: Path) -> None:
+    """The second absence reason: an adapter exists but the tool is not installed."""
+    rec = Recorder()
+    specs = {"alpha": tool("alpha", Stage.SUBS), "beta": tool("beta", Stage.LIVE)}
+    adapters = {
+        "alpha": adapter("alpha", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "beta": adapter("beta", Stage.LIVE, rec, records=[]),
+    }
+    missing = adapters["beta"]
+    summary = await make_engine(
+        tmp_path, specs, adapters, installed=lambda adapter: adapter is not missing
+    ).run("example.com", ScanOptions(stages=(Stage.SUBS, Stage.LIVE), mock=False, active=True))
+
+    assert summary.exit_code is ExitCode.SUCCESS
+    assert summary.gaps == [CompletionGap(Stage.LIVE, "not installed", 1)]
+
+
+async def test_a_stage_emptied_by_a_tier_rule_is_not_a_gap(tmp_path: Path) -> None:
+    """A deliberate exclusion is not an absence: no adapter was missing.
+
+    The stage's only tool is intrusive, so `passive` mode skips it for the tier.
+    That is still a stage that ran nothing -> exit 5, never a gap.
+    """
+    rec = Recorder()
+    specs = {
+        "alpha": tool("alpha", Stage.SUBS),
+        "brute": tool("brute", Stage.TECH, tier=Tier.INTRUSIVE, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "alpha": adapter("alpha", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "brute": adapter("brute", Stage.TECH, rec, records=[]),
+    }
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.TECH), mock=True)
+    )
+
+    assert summary.gaps == []
+    assert summary.completion_status == "complete"
+    assert summary.exit_code is ExitCode.PARTIAL
+
+
+async def test_gaps_and_a_failed_tool_together_stay_partial(tmp_path: Path) -> None:
+    """Exit 5 is reserved for real partials: a gap must not mask a failure."""
+    rec = Recorder()
+    specs = {
+        "alpha": tool("alpha", Stage.SUBS),
+        "beta": tool("beta", Stage.SUBS),
+        "ghost": tool("ghost", Stage.TECH),
+    }
+    adapters = {
+        "alpha": adapter("alpha", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "beta": adapter("beta", Stage.SUBS, rec, error=RuntimeError("boom")),
+    }
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.TECH), mock=True)
+    )
+
+    assert summary.exit_code is ExitCode.PARTIAL
+    assert [gap.stage for gap in summary.gaps] == [Stage.TECH]
 
 
 async def test_every_requested_stage_empty_is_no_tool_not_partial(tmp_path: Path) -> None:

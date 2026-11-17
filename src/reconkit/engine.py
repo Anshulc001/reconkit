@@ -381,6 +381,20 @@ class ToolSkip:
     reason: str
 
 
+@dataclass(frozen=True)
+class CompletionGap:
+    """A requested stage that could not run anything because the tool was absent.
+
+    docs/02 section 6 (owner ruling 2026-11-17): "no adapter yet (phase N)" and
+    "not installed" mean the scan used every tool that was available - a gap,
+    not a partial failure. Every other zero-tool cause stays a partial run.
+    """
+
+    stage: Stage
+    reason: str
+    skipped: int = 0
+
+
 @dataclass
 class StageOutcome:
     stage: Stage
@@ -402,6 +416,15 @@ class ScanSummary:
     scope_denied: bool = False
     # enforced / no_file / unrestricted_flag (docs/04 section 4, schema 6).
     scope_mode: str = "no_file"
+    # passive / active / full, for the gaps block headline (docs/02 section 6).
+    mode: str = "passive"
+    # Requested stages that ran nothing because no tool exists or none is installed.
+    gaps: list[CompletionGap] = field(default_factory=list)
+
+    @property
+    def completion_status(self) -> str:
+        """`complete` or `complete_with_gaps` (docs/02 section 5, `completion`)."""
+        return "complete_with_gaps" if self.gaps else "complete"
 
     @property
     def results(self) -> list[ToolResult]:
@@ -630,6 +653,7 @@ class Engine:
             target_id=target_id,
             resumed=resumed,
             scope_mode=self._scope_mode(opts),
+            mode=opts.mode,
         )
         discovered: set[str] = set()
         alive: set[str] = set()
@@ -784,6 +808,7 @@ class Engine:
             if not results:
                 self._note_empty_stage(stage, skipped)
 
+        summary.gaps = self._completion_gaps(summary)
         summary.exit_code = self._exit_code(
             summary, selected_total=selected_total, failed_total=failed_total
         )
@@ -797,7 +822,10 @@ class Engine:
 
         Precedence: scope (3) over no-usable-tool (4) over partial (5). A
         requested stage that executed zero tools is one more source of 5, never
-        a replacement for the existing failed/timeout source.
+        a replacement for the existing failed/timeout source - unless the only
+        cause was an absent tool (no adapter, not installed). Those are
+        `summary.gaps`: the run used every tool that was available, so it exits
+        0 and the gaps block carries the honesty (owner ruling 2026-11-17).
         """
         if summary.scope_denied:
             return ExitCode.SCOPE
@@ -806,9 +834,33 @@ class Engine:
             return ExitCode.NO_TOOL if new_stages else ExitCode.SUCCESS
         if failed_total == selected_total:
             return ExitCode.NO_TOOL
-        if failed_total or self._empty_stages(summary):
+        explained = {gap.stage for gap in summary.gaps}
+        unexplained = [stage for stage in self._empty_stages(summary) if stage not in explained]
+        if failed_total or unexplained:
             return ExitCode.PARTIAL
         return ExitCode.SUCCESS
+
+    @staticmethod
+    def _is_gap_reason(reason: str) -> bool:
+        """The two absence-only skip reasons (docs/02 section 6)."""
+        return reason.startswith("no adapter") or reason == "not installed"
+
+    def _completion_gaps(self, summary: ScanSummary) -> list[CompletionGap]:
+        """Zero-tool stages whose only cause was an absent tool, one per stage.
+
+        A stage emptied by `--tools`, `--exclude`, a tier/tool-mode rule, the
+        exploitation rule or the scope gate is *not* a gap: those are deliberate
+        exclusions, and the scope case is exit 3 anyway.
+        """
+        gaps: list[CompletionGap] = []
+        for outcome in summary.stages:
+            if outcome.resumed or outcome.results:
+                continue
+            absent = [skip for skip in outcome.skipped if self._is_gap_reason(skip.reason)]
+            if absent:
+                reasons = ", ".join(sorted({skip.reason for skip in absent}))
+                gaps.append(CompletionGap(outcome.stage, reasons, len(absent)))
+        return gaps
 
     @staticmethod
     def _empty_stages(summary: ScanSummary) -> list[Stage]:
