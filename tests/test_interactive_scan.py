@@ -182,10 +182,55 @@ def test_a_numeric_selection_keeps_menu_order(
     assert document["fields"] == ["hostname", "confidence"]
 
 
+def test_the_mode_is_asked_until_a_valid_answer_is_typed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """2026-11-17 (owner request): no default mode, no assumed passive.
+
+    A wrong word and an empty line are both rejected and the question is asked
+    again; only the third answer starts the scan.
+    """
+    config = make_config(tmp_path)
+    calls: list[ScanOptions] = []
+
+    async def fake_run(
+        self: Engine, target: str, options: ScanOptions | None = None
+    ) -> ScanSummary:
+        calls.append(options or ScanOptions())
+        return ScanSummary(target=target, target_id=1)
+
+    monkeypatch.setattr(Engine, "run", fake_run)
+    as_tty(monkeypatch)
+    result = CliRunner().invoke(
+        app,
+        interactive_args(config),
+        input="example.com\nn\nsideways\n\nactive\nall\nn\n",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert result.stderr.count("Scan mode: passive, active or full") == 3
+    assert "invalid scan mode 'sideways'" in result.stderr
+    (options,) = calls
+    assert options.stages == (Stage.SUBS, Stage.DNS, Stage.LIVE)
+    assert options.active is True
+
+
+def test_no_mode_answer_means_no_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """End of input at the mode question cancels: the engine is never run."""
+    config = make_config(tmp_path)
+
+    async def explode(*_args: object, **_kwargs: object) -> ScanSummary:
+        raise AssertionError("a cancelled scan must not start")
+
+    monkeypatch.setattr(Engine, "run", explode)
+    as_tty(monkeypatch)
+    result = CliRunner().invoke(app, interactive_args(config), input="example.com\nn\n")
+    assert result.exit_code == 2
+    assert "interactive scan cancelled" in result.stderr
+
+
 @pytest.mark.parametrize(
     ("answers", "message"),
     [
-        ("example.com\nn\nsideways\nall\nn\n", "invalid scan mode"),
         ("example.com\nn\npassive\n99\nn\n", "out of range"),
         ("example.com\nn\npassive\nabc\nn\n", "expected a number or 'all'"),
         ("example.com\nn\npassive\n,\nn\n", "no report fields selected"),

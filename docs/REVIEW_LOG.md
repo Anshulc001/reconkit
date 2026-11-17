@@ -2717,6 +2717,15 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Not verified:** a real-network active run without a scope file; Windows.
 - **Next part must know:** `allow_all_ip` is the no-scope IP predicate; do not reintroduce a `None` there.
 
+### Task 1a follow-up (2026-11-17): the scan mode has no default
+
+- **What was wrong:** Task 1a asked that interactive mode "must not proceed until a valid choice is made. No silent default, no assuming passive." The question existed, but `_ask_mode()` still passed typer `default="passive"` (Enter meant passive) and raised `ConfigError` on any other word. Nothing proved the prompt was actually asked.
+- **Fix:** `_ask_mode(*, no_color)` loops: it renders the same prompt, accepts only `passive`/`active`/`full`, prints `invalid scan mode '...' ; expected passive, active or full` through `render_error`, and asks again. EOF/`Abort` still becomes `interactive scan cancelled` (exit 2) in `_run_scan`, so a missing answer cancels instead of defaulting.
+- **Docs first:** `docs/02` section 2b point 3 now says there is no default and the question is re-asked.
+- **Changed test (disclosure):** the `("example.com\nn\nsideways\nall\nn\n", "invalid scan mode")` row was removed from `test_a_bad_answer_is_a_usage_error` (it asserted the removed exit-on-bad-word behaviour) and replaced by `test_the_mode_is_asked_until_a_valid_answer_is_typed` (wrong word, then an empty line, then `active`: exactly three prompt renders and the run starts) and `test_no_mode_answer_means_no_scan` (input ends at the mode question: exit 2, `Engine.run` never called). The other three parametrized cases are untouched.
+- **Raw check output:** `33 passed in 1.99s` (`pytest -q tests/test_interactive_scan.py`); full gate before the commit is in the commit log line below.
+- **Not verified:** no real terminal capture of the re-ask loop beyond `CliRunner` input.
+
 ## Task 2 (2026-11-17): naabu is scope-mode dependent
 
 - **Docs read / goal:** docs/05 rule 6, docs/09 sections 3-4 and the tool-flags table, docs/03 section 13, docs/02 ports paragraph and section 2b, `naabu -h`. Goal: remove the unconditional 11c-G-7 block; no scope file = unrestricted active tool; scope file present = engine resolves, verifies against `in_scope_cidrs`, and passes only IPs to naabu; passive never runs it.

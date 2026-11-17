@@ -94,7 +94,10 @@ The five questions:
    unrestricted against the target(s) you named and everything discovered under
    them (docs/05 rule 2) - answering `no` is not a bypass of a real file, it is
    the documented meaning of having none.
-3. **Scan mode.** `passive` = `subs` + `dns`; `active` = `subs` + `dns` + `live`
+3. **Scan mode.** No default: the question is asked and re-asked until one of the
+   three words is typed (an empty line or any other word prints
+   `invalid scan mode '...'` and asks again). The scan never starts on an
+   assumed mode. `passive` = `subs` + `dns`; `active` = `subs` + `dns` + `live`
    (passive plus alive/status-code); `full` = `subs` + `dns` + `live` + `ports` +
    `tech` + `urls`. `active` and `full` set `--active`, so the scope gate applies
    unchanged. `vulns` is never requested by this mode (recon-only build). Because

@@ -123,6 +123,19 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   coverage against a real file. New: `test_no_scope_file_runs_active_stages_unrestricted`,
   `test_a_present_scope_file_is_enforced_exactly_as_before`,
   `test_no_scope_file_never_loads_or_derives_a_scope_object`.
+- **2026-11-17 (D1 follow-up), interactive mode never assumes a scan mode.**
+  The `Scan mode: passive, active or full` question had typer's `default="passive"`
+  and turned a bad word into exit 2; the owner's wording is "must not proceed
+  until a valid choice is made, no silent default, no assuming passive". It now
+  prints `invalid scan mode '...'` and asks again until one of the three words is
+  typed, and end of input at that question cancels with exit 2 before any engine
+  run. docs/02 section 2b point 3 states it. Changed test: the
+  `("example.com\nn\nsideways\nall\nn\n", "invalid scan mode")` case was removed
+  from the `test_a_bad_answer_is_a_usage_error` parametrization and replaced by
+  `test_the_mode_is_asked_until_a_valid_answer_is_typed` (three prompt renders,
+  the run starts on the third answer) and `test_no_mode_answer_means_no_scan`
+  (EOF at the mode question, engine never called); the other three parametrized
+  cases are unchanged.
 - **2026-11-17 (owner-requested deviation D2), naabu is scope-mode dependent.**
   No scope file: naabu is an ordinary active tool (no pre-resolution gate, no
   IP-only restriction, no skip). Scope file present: the engine resolves each

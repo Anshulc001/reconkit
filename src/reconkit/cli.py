@@ -207,13 +207,22 @@ def _ask_scope() -> Path | None:
     return path
 
 
-def _ask_mode() -> tuple[tuple[Stage, ...], bool]:
-    """Question 3: passive, active or full."""
-    answer = str(typer.prompt("Scan mode: passive, active or full", default="passive", err=True))
-    mode = answer.strip().lower()
-    if mode not in _MODE_STAGES:
-        raise ConfigError(f"invalid scan mode {answer!r}; expected passive, active or full")
-    return _MODE_STAGES[mode], mode != "passive"
+def _ask_mode(*, no_color: bool) -> tuple[tuple[Stage, ...], bool]:
+    """Question 3: passive, active or full.
+
+    2026-11-17 (owner request): there is no default and no assumed mode. The
+    prompt repeats until one of the three words is typed, so a run can never
+    start on an empty answer with an implicitly chosen mode.
+    """
+    while True:
+        answer = str(typer.prompt("Scan mode: passive, active or full", err=True))
+        mode = answer.strip().lower()
+        if mode in _MODE_STAGES:
+            return _MODE_STAGES[mode], mode != "passive"
+        render_error(
+            f"invalid scan mode {answer!r}; expected passive, active or full",
+            no_color=no_color,
+        )
 
 
 def _ask_fields(*, no_color: bool) -> tuple[ReportField, ...]:
@@ -264,7 +273,7 @@ def _interactive_plan(*, no_color: bool) -> _InteractivePlan:
     """Ask the five questions and resolve them into ordinary scan inputs."""
     domain, list_file = _ask_target()
     scope_path = _ask_scope()
-    stages, active = _ask_mode()
+    stages, active = _ask_mode(no_color=no_color)
     fields = _ask_fields(no_color=no_color)
     aggressive = _ask_aggressive(no_color=no_color)
     if aggressive:
