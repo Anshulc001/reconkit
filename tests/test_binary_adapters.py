@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -78,6 +79,7 @@ def make_ctx(
     mock: bool = False,
     headers: dict[str, str] | None = None,
     user_agent: str | None = None,
+    resolvers: Path | None = None,
     target: str = "example.com",
 ) -> RunContext:
     return RunContext(
@@ -90,6 +92,7 @@ def make_ctx(
         env=env or {},
         headers=headers or {},
         user_agent=user_agent,
+        resolvers=resolvers,
     )
 
 
@@ -229,6 +232,18 @@ NO_HOME_NEEDED: dict[str, str] = {
     "github_subdomains": (
         "the tool reads its token from -t or GITHUB_TOKEN only; the adapter passes "
         "-d and -o, so no HOME config path is touched"
+    ),
+    "dig": (
+        "the adapter passes only +noall +answer -f <hosts file>; dig reads no HOME "
+        "config in that invocation and uses no key"
+    ),
+    "massdns": (
+        "the adapter passes -r/-t/-o/-w and a hosts file; massdns reads no HOME "
+        "config and uses no key"
+    ),
+    "nikto": (
+        "the adapter passes -h/-nointeractive/-Format/-output; nikto's config and "
+        "database come from its install prefix, not HOME, and no key is used"
     ),
 }
 
@@ -2307,3 +2322,190 @@ def test_github_subdomains_reads_the_output_file(tmp_path: Path) -> None:
     output = tmp_path / f"github-subdomains-{os.getpid()}.txt"
     output.write_text("dev.testfire.net\n", encoding="utf-8")
     assert adapter.read_output(ctx) == "dev.testfire.net\n"
+
+
+# -------------------------------------- dns / shots / vulns (wave 8)
+
+import reconkit.adapters.gowitness as gowitness_module  # noqa: E402
+from reconkit.adapters.dig import DigAdapter  # noqa: E402
+from reconkit.adapters.gowitness import GowitnessAdapter  # noqa: E402
+from reconkit.adapters.massdns import DEFAULT_RESOLVERS, MassdnsAdapter  # noqa: E402
+from reconkit.adapters.nikto import NiktoAdapter  # noqa: E402
+from reconkit.adapters.puredns import PurednsAdapter  # noqa: E402
+
+
+def test_dig_adapter_parses_a_records() -> None:
+    records = DigAdapter().parse_output(fixture("adapters", "dig.synthetic.txt"))
+    by_host = {record.fqdn: record for record in records}
+    assert by_host["testfire.net"].ips == ["65.61.137.117"]
+    assert by_host["demo.testfire.net"].ips == ["65.61.137.117"]
+    assert by_host["www.testfire.net"].cnames == ["testfire.net"]
+    assert all(record.source == "dig" for record in records)
+
+
+def test_dig_uses_a_hosts_file_not_repeated_arguments(tmp_path: Path) -> None:
+    adapter = DigAdapter(finder=lambda _name: "/usr/bin/dig")
+    ctx = make_ctx(hosts=["testfire.net", "www.testfire.net"])
+    ctx.workspace = tmp_path
+    with adapter.prepare(ctx):
+        command = adapter.build_command(ctx)
+        assert command[1:3] == ["+noall", "+answer"]
+        assert command[3] == "-f"
+        assert Path(command[4]).read_text(encoding="utf-8") == "testfire.net\nwww.testfire.net\n"
+    assert not Path(command[4]).exists()
+
+
+def test_dig_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome(stdout="DiG 9.20.30-1-Debian\n"))
+    assert DigAdapter(finder=lambda _name: "/x").check_installed().installed is True
+    fake_exec(monkeypatch, outcome(stdout="nslookup 1.0\n"))
+    assert DigAdapter(finder=lambda _name: "/x").check_installed().installed is False
+
+
+def test_massdns_adapter_parses_output() -> None:
+    records = MassdnsAdapter().parse_output(fixture("adapters", "massdns.synthetic.txt"))
+    by_host = {record.fqdn: record for record in records}
+    assert by_host["testfire.net"].ips == ["65.61.137.117"]
+    assert by_host["www.testfire.net"].cnames == ["testfire.net"]
+    assert all(record.source == "massdns" for record in records)
+
+
+def test_massdns_uses_bundled_resolvers(tmp_path: Path) -> None:
+    adapter = MassdnsAdapter(finder=lambda _name: "/usr/bin/massdns")
+    ctx = make_ctx(hosts=["testfire.net"])
+    ctx.workspace = tmp_path
+    assert ctx.resolvers is None
+    with adapter.prepare(ctx):
+        command = adapter.build_command(ctx)
+    assert DEFAULT_RESOLVERS.is_file()
+    assert str(DEFAULT_RESOLVERS) in command
+    assert command[command.index("-o") + 1] == "S"
+
+
+def test_massdns_resolvers_flag_overrides(tmp_path: Path) -> None:
+    adapter = MassdnsAdapter(finder=lambda _name: "/usr/bin/massdns")
+    custom = tmp_path / "my-resolvers.txt"
+    custom.write_text("1.1.1.1\n", encoding="utf-8")
+    ctx = make_ctx(hosts=["testfire.net"], resolvers=custom)
+    ctx.workspace = tmp_path
+    with adapter.prepare(ctx):
+        command = adapter.build_command(ctx)
+    assert str(custom) in command
+    assert str(DEFAULT_RESOLVERS) not in command
+
+
+def test_massdns_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(
+        monkeypatch,
+        outcome(
+            stdout="massdns \nUsage: massdns [options] [domainlist]\n -r --resolvers text file\n"
+        ),
+    )
+    assert MassdnsAdapter(finder=lambda _name: "/x").check_installed().installed is True
+    fake_exec(monkeypatch, outcome(stdout="dnsx 1.0\n"))
+    assert MassdnsAdapter(finder=lambda _name: "/x").check_installed().installed is False
+
+
+def test_puredns_adapter_parses_output() -> None:
+    records = PurednsAdapter().parse_output(fixture("adapters", "puredns.synthetic.txt"))
+    assert [record.fqdn for record in records] == [
+        "testfire.net",
+        "www.testfire.net",
+        "demo.testfire.net",
+    ]
+    assert all(record.source == "puredns" for record in records)
+
+
+def test_puredns_points_at_the_resolved_massdns_binary(tmp_path: Path) -> None:
+    adapter = PurednsAdapter(finder=lambda _name: "/usr/bin/puredns")
+    ctx = make_ctx(hosts=["testfire.net"])
+    ctx.workspace = tmp_path
+    with adapter.prepare(ctx):
+        command = adapter.build_command(ctx)
+    assert command[1] == "resolve"
+    assert "-b" in command
+    assert command[command.index("-b") + 1].endswith("massdns")
+
+
+def test_puredns_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome(stdout="puredns version v2.1.1\n"))
+    assert PurednsAdapter(finder=lambda _name: "/x").check_installed().installed is True
+    fake_exec(monkeypatch, outcome(stdout="massdns \n"))
+    assert PurednsAdapter(finder=lambda _name: "/x").check_installed().installed is False
+
+
+def test_nikto_adapter_parses_findings() -> None:
+    records = NiktoAdapter().parse_output(fixture("adapters", "nikto.synthetic.json"))
+    assert [(record.fqdn, record.title, record.evidence) for record in records] == [
+        (
+            "testfire.net",
+            "Web Server returns a valid response with junk HTTP methods "
+            "which may cause false positives.",
+            "testfire.net:80/",
+        ),
+        ("testfire.net", "/admin/: Admin login page/section found.", "testfire.net:80/admin/"),
+    ]
+    assert all(isinstance(record, FindingRecord) for record in records)
+    assert all(record.severity == "info" and record.kind == "nikto" for record in records)
+
+
+def test_nikto_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome(stdout="Nikto 2.6.1 (LW 2.5)\n"))
+    assert NiktoAdapter(finder=lambda _name: "/x").check_installed().installed is True
+    fake_exec(monkeypatch, outcome(stdout="nmap 7.99\n"))
+    assert NiktoAdapter(finder=lambda _name: "/x").check_installed().installed is False
+
+
+def test_nikto_runs_once_per_host_with_json_output(tmp_path: Path) -> None:
+    adapter = NiktoAdapter(finder=lambda _name: "/usr/bin/nikto")
+    ctx = make_ctx(hosts=["testfire.net", "www.testfire.net"])
+    ctx.workspace = tmp_path
+    command = adapter._command(ctx, "testfire.net", 0)
+    assert command[1:3] == ["-h", "testfire.net"]
+    assert command[command.index("-Format") + 1] == "json"
+    assert command[command.index("-output") + 1].endswith(".json")
+
+
+def test_gowitness_writes_screenshots_and_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Screenshots are per-run files plus a JSONL manifest (D17, no DB row)."""
+    adapter = GowitnessAdapter(finder=lambda _name: "/usr/bin/gowitness")
+    results_root = tmp_path / "results"
+    ctx = make_ctx(hosts=["testfire.net"])
+    monkeypatch.setattr(adapter, "run_dir", lambda _ctx: results_root / "testfire.net" / "run1")
+    shots = results_root / "testfire.net" / "run1" / "screenshots"
+
+    def on_call(argv: list[str]) -> None:
+        target = Path(argv[argv.index("-s") + 1])
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "testfire.net.png").write_bytes(b"\x89PNG\r\n")
+
+    def fake(argv: list[str], **_kwargs: object) -> ExecResult:
+        on_call(argv)
+        return outcome(stdout="")
+
+    # gowitness calls run_exec from its own module namespace, not base's.
+    monkeypatch.setattr(gowitness_module, "run_exec", fake)
+    result = asyncio.run(adapter.run(ctx))
+    assert result.status is ToolStatus.OK
+    assert [record.url for record in result.records] == ["https://testfire.net"]
+    manifest = results_root / "testfire.net" / "run1" / "screenshots.jsonl"
+    entry = json.loads(manifest.read_text(encoding="utf-8").strip())
+    assert set(entry) == {"url", "path", "timestamp"}
+    assert entry["url"] == "https://testfire.net"
+    assert entry["path"].endswith("testfire.net.png")
+    assert shots.is_dir()
+
+
+def test_gowitness_manifest_format_is_one_json_object_per_line() -> None:
+    manifest = '{"path": "/tmp/a.png", "timestamp": "2026-11-17T00:00:00+00:00", "url": "https://a.example"}\n'
+    entry = json.loads(manifest.strip())
+    assert sorted(entry) == ["path", "timestamp", "url"]
+
+
+def test_gowitness_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome(stdout="gowitness: 3.2.2\ngit hash: dev\n"))
+    assert GowitnessAdapter(finder=lambda _name: "/x").check_installed().installed is True
+    fake_exec(monkeypatch, outcome(stdout="screenshot-tool 1.0\n"))
+    assert GowitnessAdapter(finder=lambda _name: "/x").check_installed().installed is False

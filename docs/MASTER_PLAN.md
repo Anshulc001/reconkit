@@ -787,6 +787,25 @@ tool at selection with `requires <NAME>` (recorded, not a gap, run stays
 complete), the same mechanism as masscan's `needs_root` - not a runtime
 `ToolStatus.SKIPPED`, which counts as a failed tool and exits 5.
 
+D16. 2026-11-17 - Bundled resolver list for massdns/puredns (owner approved).
+massdns and puredns both need a resolver file and the build downloads nothing
+at runtime (rule 4), so `src/reconkit/data/resolvers.txt` ships 16 public
+resolvers as package data, and the new `--resolvers PATH` flag replaces it. A
+missing file is a failed tool result, never a silent fallback to the system
+resolver. `puredns` also gets `-b <absolute massdns>` because a child process
+sees only the env keys the engine passes.
+
+D17. 2026-11-17 - Screenshots are per-run files, not DB records (owner
+approved). gowitness writes `results/<target>/<UTC stamp>/screenshots/*.png`
+plus a `screenshots.jsonl` manifest (`{"url", "path", "timestamp"}` per line).
+No `ScreenshotRecord`, no table, no schema bump: a screenshot is a per-run
+artifact of an opt-in active stage, and `reconkit status`/`diff` do not show it.
+The adapter learns the results root from the engine through a new
+`RunContext.results_dir` field (plumbing, not a record model), so `--config` and
+the reports stay in agreement. gowitness itself defaults to `jpeg`, so the
+adapter passes `--screenshot-format png`. `Stage.SHOTS` is still in no
+`MODE_STAGES` row: wiring the stage is a mode-table change and needs a ruling.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

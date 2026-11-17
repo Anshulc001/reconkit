@@ -9,6 +9,7 @@ from reconkit.adapters.cdncheck import CdncheckAdapter
 from reconkit.adapters.certspotter import CertspotterAdapter
 from reconkit.adapters.chaos import ChaosAdapter
 from reconkit.adapters.crtsh import CrtshAdapter
+from reconkit.adapters.dig import DigAdapter
 from reconkit.adapters.dnspython import DnsPythonAdapter
 from reconkit.adapters.dnsx import DnsxAdapter
 from reconkit.adapters.ffuf import FfufAdapter
@@ -16,6 +17,7 @@ from reconkit.adapters.findomain import FindomainAdapter
 from reconkit.adapters.gau import GauAdapter
 from reconkit.adapters.github_subdomains import GithubSubdomainsAdapter
 from reconkit.adapters.gospider import GospiderAdapter
+from reconkit.adapters.gowitness import GowitnessAdapter
 from reconkit.adapters.hackertarget import HackertargetAdapter
 from reconkit.adapters.hakrawler import HakrawlerAdapter
 from reconkit.adapters.httprobe import HttprobeAdapter
@@ -23,10 +25,13 @@ from reconkit.adapters.httpx_tech import HttpxTechAdapter
 from reconkit.adapters.httpx_tool import HttpxAdapter
 from reconkit.adapters.katana import KatanaAdapter
 from reconkit.adapters.masscan import MasscanAdapter
+from reconkit.adapters.massdns import MassdnsAdapter
 from reconkit.adapters.naabu import NaabuAdapter
+from reconkit.adapters.nikto import NiktoAdapter
 from reconkit.adapters.nmap import NmapAdapter
 from reconkit.adapters.nuclei import NucleiAdapter
 from reconkit.adapters.otx import OtxAdapter
+from reconkit.adapters.puredns import PurednsAdapter
 from reconkit.adapters.pyprobe import PyprobeAdapter
 from reconkit.adapters.pyscan import PyscanAdapter
 from reconkit.adapters.rustscan import RustscanAdapter
@@ -83,6 +88,11 @@ ADAPTERS: dict[str, type[BaseToolAdapter]] = {
     "findomain": FindomainAdapter,
     "chaos": ChaosAdapter,
     "github_subdomains": GithubSubdomainsAdapter,
+    "dig": DigAdapter,
+    "massdns": MassdnsAdapter,
+    "puredns": PurednsAdapter,
+    "gowitness": GowitnessAdapter,
+    "nikto": NiktoAdapter,
 }
 
 __all__ = ["ADAPTERS", "BaseToolAdapter", "BinaryAdapter", "HttpAdapter"]

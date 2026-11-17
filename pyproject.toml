@@ -40,7 +40,7 @@ where = ["src"]
 # The ffuf adapter ships with an inline content-discovery wordlist (D13,
 # 2026-11-17); it must be importable data, not a file next to the checkout.
 [tool.setuptools.package-data]
-reconkit = ["data/wordlists/*.txt"]
+reconkit = ["data/*.txt", "data/wordlists/*.txt"]
 
 [tool.ruff]
 line-length = 100

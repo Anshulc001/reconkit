@@ -67,11 +67,13 @@ contradiction elsewhere, this table wins - file it as a doc bug.**
 What "full = all" means today, honestly: every stage is requested and every
 `core` and `opt_in` tool is eligible. The `intrusive` tier is enabled, but its
 three tools are `exploitation: true` and therefore still skip unless named;
-and the `subs`, `dns`, `ports`, `vulns` and `shots` pools still carry tools with
-no adapter yet (phase 3); `tech` and `urls` are fully adapted since adapter wave
-4 (2026-11-17). Those tools report `no adapter yet (phase 3)`, and a stage left
-with only those is a completion gap (exit `0`), not a partial run. The per-tool
-mode/tier table is in docs/09 section 4.
+and the `vulns` pool still carries one tool with no adapter (`dnsreaper`, D15).
+`subs`, `dns`, `live`, `ports`, `tech` and `urls` are fully adapted since
+adapter waves 6-8 (2026-11-17); `shots` has an adapter (`gowitness`) but the
+stage is in no mode table yet, so no mode runs it. An adapter-less tool reports
+`no adapter yet (phase 3)`, and a stage left with only those is a completion gap
+(exit `0`), not a partial run. The per-tool mode/tier table is in docs/09
+section 4.
 
 ### Setup and health
 | Command | Purpose | Phase |
@@ -272,6 +274,7 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | `--header "Name: Value"` | Add an HTTP header for `httpx` and `pyprobe`; repeatable. A tool without `-H` logs `--header not applied to <tool> (no -H support)` and does not fail |
 | `--user-agent STR` | Override the default User-Agent for `httpx` and `pyprobe` |
 | `--ffuf-wordlist PATH` | Wordlist for `ffuf` content discovery, replacing the packaged `common.txt` (about 110 paths, D13). The file must exist and be readable; a missing file is a failed `ffuf` result, never a silent fallback |
+| `--resolvers PATH` | Resolver list for `massdns` and `puredns`, replacing the packaged `src/reconkit/data/resolvers.txt` (16 public resolvers, D16). The file must exist and be readable; a missing file is a failed `massdns`/`puredns` result, never a silent fallback to the system resolver |
 | `--redact-headers` / `--show-headers` | Hide (default) or reveal header values in JSON and UI output |
 | `--min-sources N` | Hide results confirmed by fewer than N tools |
 | `--phase-timeout SEC` | Stage time limit. `--timeout-<stage>` is deferred; `--phase-timeout` is the only stage-timeout control in this build. |
@@ -370,9 +373,9 @@ when `--status-codes` was used). The database write is unchanged: filters only
 change what is printed.
 
 With an injectable flag (`--ports`, `--status-codes`, `--header`, `--user-agent`,
-`--ffuf-wordlist`) a top-level `injections` object is added:
-`{"ports":[80,443],"status_codes":[200,301],"headers":{"X-Test":"***"},"user_agent":"reconkit-test","ffuf_wordlist":"/path/common.txt"}`
-(`ffuf_wordlist` is `null` unless the flag was given).
+`--ffuf-wordlist`, `--resolvers`) a top-level `injections` object is added:
+`{"ports":[80,443],"status_codes":[200,301],"headers":{"X-Test":"***"},"user_agent":"reconkit-test","ffuf_wordlist":"/path/common.txt","resolvers":"/path/resolvers.txt"}`
+(`ffuf_wordlist` and `resolvers` are `null` unless the flag was given).
 Header values are redacted as `***` unless `--show-headers` was given. `ToolResult` objects under `stages[].results` use the schemas in docs/09.
 
 `hosts[].detail` is the bounded, redacted reason recorded with that host's latest status row (docs/04 section 5): `null` unless the latest pass could not decide a better state, in which case it is a one-line string of at most 200 characters with the run's known secrets redacted. It is the machine-readable half of a diagnostic the human table does not show - a script can tell a TLS failure apart from another cause without probing the host again.

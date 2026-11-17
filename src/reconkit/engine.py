@@ -370,6 +370,8 @@ class ScanOptions:
     redact_headers: bool = True
     # `--ffuf-wordlist` (D13): a user list replaces the packaged default.
     ffuf_wordlist: Path | None = None
+    # `--resolvers` (D16): a resolver list replaces the packaged default.
+    resolvers: Path | None = None
 
     @property
     def mode(self) -> str:
@@ -1218,6 +1220,8 @@ class Engine:
             headers=dict(opts.headers),
             user_agent=opts.user_agent,
             ffuf_wordlist=opts.ffuf_wordlist,
+            resolvers=opts.resolvers,
+            results_dir=Path(self.config.results_dir),
         )
 
         async def one(spec: ToolSpec, adapter: type[BaseToolAdapter]) -> None:

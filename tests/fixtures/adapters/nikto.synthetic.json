@@ -1,0 +1,26 @@
+[
+   {
+      "end_time" : "2026-11-17 15:10:27 -0500",
+      "host" : "testfire.net",
+      "ip" : "65.61.137.117",
+      "port" : 80,
+      "server_banner" : null,
+      "start_time" : "2026-11-17 15:09:24 -0500",
+      "vulnerabilities" : [
+         {
+            "id" : "999967",
+            "method" : "OCEIBMAP",
+            "msg" : "Web Server returns a valid response with junk HTTP methods which may cause false positives.",
+            "references" : "",
+            "url" : "/"
+         },
+         {
+            "id" : "000424",
+            "method" : "GET",
+            "msg" : "/admin/: Admin login page/section found.",
+            "references" : "",
+            "url" : "/admin/"
+         }
+      ]
+   }
+]

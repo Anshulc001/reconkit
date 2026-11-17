@@ -157,6 +157,17 @@ CREATE TABLE monitor_changes (            -- Phase 3: not created in this build
 );
 ```
 
+### 3.1 Not stored: screenshots (D17)
+
+`gowitness` screenshots are **files, not rows**. They live under
+`results/<target>/<UTC stamp>/screenshots/*.png`, with a
+`screenshots.jsonl` manifest beside that folder listing
+`{"url", "path", "timestamp"}` per line. There is no `screenshots` table and no
+model for them: a screenshot is a per-run artifact of an opt-in active stage,
+not host state, so `reconkit status` and `reconkit diff` do not show it and no
+migration adds a column for it. If a later phase wants screenshot history, it
+gets its own table, migration and diff rule first.
+
 ## 4. Relationships
 
 - `targets` 1-N `scan_runs`, `subdomains`, `urls`, `findings`

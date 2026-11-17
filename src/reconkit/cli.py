@@ -121,6 +121,10 @@ _FFUF_WORDLIST_HELP = (
     "Wordlist for ffuf content discovery. Default: the packaged common.txt "
     "(about 110 paths). The file must exist and be readable."
 )
+_RESOLVERS_HELP = (
+    "Resolver list for massdns and puredns. Default: the packaged resolvers.txt "
+    "(16 public resolvers). The file must exist and be readable."
+)
 _REDACT_HELP = "Hide header values in JSON and UI output (default on)."
 _SHOW_HEADERS_HELP = "Reveal header values in JSON output (overrides --redact-headers)."
 _HEADER_NAME = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
@@ -687,6 +691,7 @@ def _run_scan(
     user_agent: str | None = None,
     redact_headers: bool = True,
     ffuf_wordlist: Path | None = None,
+    resolvers: Path | None = None,
 ) -> int:
     engine: Engine | None = None
     try:
@@ -828,7 +833,7 @@ def _run_scan(
                 if status_codes:
                     filter_info["status_codes"] = list(status_codes)
             injections: dict[str, object] | None = None
-            if ports or status_codes or headers or user_agent or ffuf_wordlist:
+            if ports or status_codes or headers or user_agent or ffuf_wordlist or resolvers:
                 injections = {
                     "ports": list(ports),
                     "status_codes": list(status_codes),
@@ -837,6 +842,7 @@ def _run_scan(
                     },
                     "user_agent": user_agent,
                     "ffuf_wordlist": None if ffuf_wordlist is None else str(ffuf_wordlist),
+                    "resolvers": None if resolvers is None else str(resolvers),
                 }
             for name in sorted({result.tool for result in summary.results}):
                 if headers and name not in _HEADER_TOOLS:
@@ -939,6 +945,7 @@ def _scan_command(
     ffuf_wordlist: Annotated[
         Path | None, typer.Option("--ffuf-wordlist", help=_FFUF_WORDLIST_HELP)
     ] = None,
+    resolvers: Annotated[Path | None, typer.Option("--resolvers", help=_RESOLVERS_HELP)] = None,
     no_keys: Annotated[bool, typer.Option("--no-keys", help="Force free mode.")] = False,
     resume: Annotated[
         bool, typer.Option("--resume", help="Continue the latest unfinished run.")
@@ -976,6 +983,7 @@ def _scan_command(
             user_agent=user_agent,
             redact_headers=redact_headers,
             ffuf_wordlist=ffuf_wordlist,
+            resolvers=resolvers,
             no_keys=no_keys,
             resume=resume,
             no_color=no_color,

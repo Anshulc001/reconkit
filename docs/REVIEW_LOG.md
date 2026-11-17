@@ -3608,6 +3608,77 @@ install residue. No new feature, no behaviour change, no code-logic change.
   `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` (unchanged
   from the previous batch; no scope edit was made).
 
+## Adapter wave 8: dns (dig, massdns, puredns), shots (gowitness), vulns (nikto) (2026-11-17, D16/D17)
+
+- Docs read / goal: AGENTS (rules 1/4/7, section 7 recipe), RESUME, docs/09 sections 3/4/4a8/5,
+  docs/02 (flags table + `injections`), docs/04 (new section 3.1), docs/05 rule 4,
+  `docs/tool_manuals/dns.md` + `shots.md`, tools.yaml. Goal: close the last three stages and
+  reconcile the registry count before reporting it.
+- **Count reconciled first, with raw numbers:** `yaml.safe_load(tools.yaml)["tools"]` -> 48 and
+  `len(ADAPTERS)` -> 44 with `missing = ['crlfuzz', 'dalfox', 'dnsreaper', 'sqlmap']`, no adapter
+  without a registry row. The earlier "39 of 48" was wrong: wave 6's report counted only the
+  stages it had touched. Final: **44 of 48 adapted**, remaining = `dnsreaper` (D15) plus the
+  three intrusive tools (`sqlmap`, `dalfox`, `crlfuzz`, `exploitation: true`, no `--intrusive`
+  flag in this build).
+- Real evidence, one line each: `dig -v` -> `DiG 9.20.30-1-Debian`, and
+  `dig +noall +answer -f hosts.txt` printed `testfire.net. 75048 IN A 65.61.137.117` /
+  `www.testfire.net. 72983 IN CNAME testfire.net.` (`+short` rejected: no name to attribute);
+  `massdns --version` prints only `massdns ` (no number) so identity is `--help`, and a real
+  run with the packaged resolvers printed `demo.testfire.net. A 65.61.137.117` etc. in `-o S`;
+  `puredns --version` -> `puredns version v2.1.1`, `resolve/-r/-b/-w` from its `--help`;
+  `gowitness version` -> `gowitness: 3.2.2` under a banner, `scan single -u <url> -s <dir>` plus
+  the **global** flags `--screenshot-format` (default **jpeg**) and `--screenshot-path`; a real
+  `nikto -h testfire.net -nointeractive -Format json -output out.json` exited 0 and wrote the
+  JSON array.
+- Behaviour: `dig` one `+noall +answer -f <ws file>` process; `massdns -r <resolvers> -t A -o S
+  -w <ws file> <ws file>` with finds read from `-w`; `puredns resolve <ws file> -r <resolvers>
+  -b <abs massdns> -w <ws file>` (`-b` is mandatory because a child gets only the engine's env
+  keys); `nikto` one process per host (it cannot take a list) with `severity="info"`,
+  `kind="nikto"`; `gowitness` one process per URL (`https://` then `http://`), PNG under
+  `results/<target>/<UTC stamp>/screenshots/`, `screenshots.jsonl` manifest beside it.
+- **Three findings that changed the code:**
+  1. `gowitness` writes **jpeg** by default. `--screenshot-format` is a global flag and not in
+     the brief, but D17 promises `.png` files and a `*.png` glob over jpeg output silently finds
+     nothing, so the adapter passes `png`. Without this the manifest would have stayed empty on
+     every box, including one with Chrome.
+  2. The results root cannot be read by the adapter. `load_config()` inside the adapter raised
+     `ConfigError: cannot read config file config.yaml` when the CWD had none, and would ignore
+     `--config` anyway, so the engine now passes `RunContext.results_dir` (plumbing, not a
+     record model) and the adapter reads `ctx.results_dir`.
+  3. `nikto` and `gowitness` call `run_exec` from their own module namespace, so the existing
+     `fake_exec` helper (which patches `adapters.base`) does not reach them; the two tests patch
+     the module symbol instead.
+- **`dig` kept, not skipped as redundant** (brief asked for a decision, not a silent skip):
+  `dnspython` is the resolver with the wildcard probe and dangling-CNAME logic, `dig` is an
+  independent second DNS source for the same names, which is what raises a `DNS_ONLY` host from
+  LOW to MEDIUM (docs/09 section 5). It is A/AAAA/CNAME only and says so in its docstring.
+- **`stage: shots` is unreachable from the CLI.** `Stage.SHOTS` exists in `models.py` and
+  `RAW_OUTPUT_DIRS` but is in neither `STAGE_ORDER` nor a `MODE_STAGES` row, so no mode and no
+  `--tools` selection runs it. Adding it is a mode-table change (the documented stop rule), so
+  the adapter is written, tested and registered, and the one-line wiring is reported instead of
+  done.
+- Proofs, pasted raw in the report: `reconkit doctor` -> `dig yes/ok`, `massdns yes/ok`,
+  `puredns yes/ok`, `nikto yes/ok`, `gowitness yes/ok`; mock run
+  `--tools pyprobe,httpx,tlsx,dig,massdns,puredns,nikto` -> `dig ok 3`, `massdns ok 3`,
+  `puredns ok 3`, `nikto ok 2`, exit 0 (the first attempt with `pyprobe` only showed
+  `nikto failed: no hosts to scan`, which is the documented behaviour of every `vulns` adapter
+  when no host is ALIVE, not a Part 2 defect); gowitness manifest proven with a stand-in binary
+  because this box has no Chrome (`failed to initialize chrome context: exec: "google-chrome":
+  executable file not found in $PATH`).
+- **Deferred masscan sudo proof done:** `sudo -n true` -> `sudo: a password is required`, so
+  `echo kali | sudo -S env PATH=<venv>:$PATH reconkit run -d testfire.net --full --no-scope
+  --include-noisy --tools subfinder,pyprobe,httpx,tlsx,masscan --mock` -> `masscan ports ok 3`,
+  exit 0. Non-root control in the same session: `masscan skipped` / `requires root / sudo`.
+  The first two sudo attempts ran no ports stage at all (no ALIVE host: `httpx` alone does not
+  mark one without `tlsx`), which is why the tool list grew - recorded, not hidden.
+- Gate: 811 passed, `ruff check .` clean, `ruff format --check .` 90 files, `mypy src/reconkit`
+  clean (62 source files). Deviations: D16 (bundled resolvers + `--resolvers`), D17 (screenshots
+  as files, `RunContext.results_dir`). Test changes disclosed: two existing expectations moved -
+  `DOCUMENTED_OPTIONS` gained `--resolvers` and the `--full` vulns order now lists `nikto`
+  between `subzy` and `ffuf`.
+- Next action: owner ruling on wiring the `shots` stage into a mode table; nothing else in the
+  adapter programme is open.
+
 ## Adapter wave 7: subs stage - urlscan, amass, findomain, chaos, github_subdomains (2026-11-17, D15/D18)
 
 - Docs read / goal: AGENTS (rules 1/5/7), RESUME, docs/09 sections 3/4/4a7, docs/02

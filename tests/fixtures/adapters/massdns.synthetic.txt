@@ -1,0 +1,3 @@
+demo.testfire.net. A 65.61.137.117
+testfire.net. A 65.61.137.117
+www.testfire.net. CNAME testfire.net.

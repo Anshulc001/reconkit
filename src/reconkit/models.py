@@ -144,6 +144,12 @@ class RunContext(BaseModel):
     # `--ffuf-wordlist` (docs/02 section 3): a user-supplied list replaces the
     # packaged default for content discovery. `None` means "use the packaged one".
     ffuf_wordlist: Path | None = None
+    # `--resolvers` (D16): a resolver list for massdns/puredns. `None` means the
+    # packaged `src/reconkit/data/resolvers.txt`.
+    resolvers: Path | None = None
+    # The configured results root, so a per-run artifact adapter (gowitness,
+    # D17) writes under the same `results/` the reports use.
+    results_dir: Path | None = None
     # docs/05 rule 6: the loaded scope's `in_scope_cidrs` check, handed down by the
     # engine so an adapter can refuse a resolved address without importing `scope`.
     # `None` means "no permission": an adapter that connects to a resolved address

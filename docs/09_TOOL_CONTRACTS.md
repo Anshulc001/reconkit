@@ -608,6 +608,77 @@ findomain 11.0.0, chaos 0.5.2, github-subdomains with no version flag):
 script - it is `main.py` + `requirements.txt` and would need a script-launching
 adapter kind. `subzy` covers takeover; revisit only if that kind is added.
 
+### 4a8. Adapter wave 8 (2026-11-17): dns - dig, massdns, puredns; shots - gowitness; vulns - nikto
+
+`dig`, `massdns` and `puredns` are `dns` / `passive` / `core` and return
+`SubdomainRecord`s with addresses; `nikto` is `vulns` / `active` / `opt_in` and
+returns `FindingRecord`s; `gowitness` is `shots` / `active` / `opt_in` and
+returns `UrlRecord`s for the URLs it actually screenshotted. After this wave the
+registry has **48 tools and 44 adapters**.
+
+| Tool | Invocation | Notes |
+|---|---|---|
+| `dig` | `+noall +answer -f <workspace hosts file>` | one process per stage; labelled answers keep the name next to the address |
+| `massdns` | `-r <resolvers> -t A -o S -w <workspace file> <workspace hosts file>` | `S` (simple) lines; finds are read from `-w`, never stdout |
+| `puredns` | `resolve <hosts file> -r <resolvers> -b <massdns> -w <workspace file>` | shells out to massdns; `-b` is always the absolute path |
+| `gowitness` | `scan single -u <url> -s <screenshots dir> --screenshot-format png` | one process per URL (https, then http if no PNG); files plus JSONL manifest, **no DB rows** (D17) |
+| `nikto` | `-h <host> -nointeractive -Format json -output <workspace file>` | one process per host (`-h` takes one target); `severity="info"`, `kind="nikto"` |
+
+**`dig` stays next to `dnspython` on purpose.** `dnspython` is the resolver with
+the wildcard probe and dangling-CNAME logic; `dig` is an independent second DNS
+source for the same names, which is what lifts a `DNS_ONLY` host's confidence
+from LOW to MEDIUM (section 5). It is deliberately narrow - A/AAAA/CNAME only -
+and it is faster over a list because `-f` resolves the whole file in one
+process.
+
+**Resolvers are packaged (D16).** `massdns` and `puredns` need a resolver list;
+the build ships `src/reconkit/data/resolvers.txt` (16 public resolvers, no
+download at runtime) and `--resolvers PATH` replaces it. A missing file is a
+failed result, never a silent fallback to the system resolver. `puredns` also
+needs `massdns`: the adapter resolves it with the same lookup every tool uses
+(`~/.reconkit/bin` first, then `PATH`) and passes `-b <abs path>`, because a
+child process sees only the env keys the engine passes and a bare `massdns`
+would not be found.
+
+**Screenshots are per-run files, not database rows (D17).** `gowitness` writes
+`results/<target>/<UTC stamp>/screenshots/*.png` plus `screenshots.jsonl` beside
+that folder, one `{"url", "path", "timestamp"}` object per line. There is no
+`screenshots` table and no `ScreenshotRecord`; `reconkit status` and
+`reconkit diff` do not show screenshots. The adapter gets the results root from
+the engine (`RunContext.results_dir`, the configured `results_dir`), so `--config`
+and the reports agree and the adapter never reads `config.yaml` itself.
+
+**The `shots` stage is not reachable from the CLI yet.** `Stage.SHOTS` exists in
+`models.py` and `RAW_OUTPUT_DIRS`, but it is in neither `STAGE_ORDER` nor a
+`MODE_STAGES` row, so no mode and no `--tools` selection runs it; adding it is a
+mode-table change (owner ruling pending). The adapter is complete and tested so
+that wiring it is a one-line change.
+
+Verified on this box (DiG 9.20.30, massdns 1.1.0, puredns v2.1.1,
+gowitness 3.2.2, Nikto 2.6.1):
+
+- `dig +noall +answer -f hosts.txt` printed
+  `testfire.net. 75048 IN A 65.61.137.117` and
+  `www.testfire.net. 72983 IN CNAME testfire.net.`; `+short` was rejected as a
+  parse source because it drops the name and an address can then not be
+  attributed to a host.
+- a real massdns run with the packaged resolvers printed
+  `demo.testfire.net. A 65.61.137.117`, `testfire.net. A 65.61.137.117`,
+  `www.testfire.net. CNAME testfire.net.`; `massdns --version` prints only
+  `massdns ` (no number), so the identity probe is `--help`.
+- `gowitness` 3.2.2 takes `scan single -u <url> -s <dir>`; **its screenshot
+  format defaults to `jpeg`**, so the adapter passes `--screenshot-format png`
+  (D17 files are `.png`). A real run on this box answered the probe (status 200)
+  but reported `failed to initialize chrome context: exec: "google-chrome":
+  executable file not found in $PATH`, so it honestly produced no file and the
+  result carries `no screenshot (no browser available?)` as its error text. The
+  adapter never guesses a `--chrome-path`.
+- `nikto -h` lists `-Format+` with `json JSON Format`, so **the JSON path is the
+  one taken** and the pre-approved plain-text fallback was not needed. A real run
+  wrote `[{"host", "ip", "port", "vulnerabilities": [{"id": "999967", ...}]}]`.
+  Every finding is `severity="info"`: a Nikto message is a lead for the
+  operator, not a confirmed exploit, and the tier is already `opt_in`.
+
 ### 4b. Per-tool support for the injected parameters
 
 | Parameter | `httpx` | `pyprobe` | `pyscan` | `naabu` | Every other adapter |
@@ -640,7 +711,8 @@ what is printed and never what is stored.
 | cdncheck | tech | passive | core | no | no (stage not in passive) / yes / yes |
 | gau, waybackurls, unfurl, urlfinder | urls | passive | core | no | yes / yes / yes |
 | katana, hakrawler, gospider, subjs | urls | active | core | no | no (tool mode) / yes / yes |
-| nuclei, subzy, dnsreaper | vulns | active | core | no | no / no / yes |
+| nuclei, subzy | vulns | active | core | no | no / no / yes |
+| dnsreaper | vulns | active | core | no | **no adapter (D15)** |
 | nikto, ffuf | vulns | active | opt_in | no | no / no / yes |
 | gowitness | shots | active | opt_in | no | not a mode stage |
 | dalfox, crlfuzz, sqlmap | vulns | active | intrusive | **yes** | never automatic; `--tools <name>` only |

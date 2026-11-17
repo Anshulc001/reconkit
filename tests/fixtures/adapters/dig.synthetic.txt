@@ -1,0 +1,3 @@
+testfire.net.	75048	IN	A	65.61.137.117
+www.testfire.net.	72983	IN	CNAME	testfire.net.
+demo.testfire.net.	81560	IN	A	65.61.137.117

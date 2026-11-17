@@ -46,6 +46,7 @@ DOCUMENTED_OPTIONS = {
     "--redact-headers",
     "--show-headers",
     "--ffuf-wordlist",
+    "--resolvers",
     "--no-keys",
     "--resume",
     "--no-color",
@@ -776,7 +777,7 @@ def test_a_full_run_has_no_gaps_when_every_mode_stage_has_a_tool(
     assert result.stdout.count("\n") == 1
     assert "completed with gaps" not in result.stderr
     vulns = next(stage for stage in document["stages"] if stage["stage"] == "vulns")
-    assert [item["tool"] for item in vulns["results"]] == ["nuclei", "subzy", "ffuf"]
+    assert [item["tool"] for item in vulns["results"]] == ["nuclei", "subzy", "nikto", "ffuf"]
 
 
 def test_a_partial_stage_still_exits_five(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
