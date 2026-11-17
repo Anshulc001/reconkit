@@ -214,10 +214,10 @@ what is printed and never what is stored.
 | smap | ports | passive | core | no | no (stage not in passive) / yes / yes |
 | pyscan, naabu, nmap, rustscan | ports | active | core | no | no / yes / yes |
 | masscan | ports | active | opt_in | no | no / `--include-noisy` only / yes |
-| httpx_tech, whatweb, wafw00f, webanalyze | tech | active | core | no | no / no (stage not in active) / yes |
-| cdncheck | tech | passive | core | no | no / no / yes |
-| gau, waybackurls, unfurl, urlfinder | urls | passive | core | no | no / no / yes |
-| katana, hakrawler, gospider, subjs | urls | active | core | no | no / no / yes |
+| httpx_tech, whatweb, wafw00f, webanalyze | tech | active | core | no | no (stage not in passive) / yes / yes |
+| cdncheck | tech | passive | core | no | no (stage not in passive) / yes / yes |
+| gau, waybackurls, unfurl, urlfinder | urls | passive | core | no | yes / yes / yes |
+| katana, hakrawler, gospider, subjs | urls | active | core | no | no (tool mode) / yes / yes |
 | nuclei, subzy, dnsreaper | vulns | active | core | no | no / no / yes |
 | nikto, ffuf | vulns | active | opt_in | no | no / no / yes |
 | gowitness | shots | active | opt_in | no | not a mode stage |
@@ -225,6 +225,17 @@ what is printed and never what is stored.
 
 "Runs in full" means selected; an adapter that does not exist yet still reports
 `no adapter yet (phase 3)`.
+
+**Mode expansion (2026-11-17, D10).** `passive` now includes the `urls` stage
+and `active` now includes `tech` and `urls` (docs/02 section 1 is the source of
+truth). Two consequences for this table:
+
+- a `mode: active` urls tool in `passive` mode is still skipped at selection with
+  `tool mode not included in passive mode`, so the expanded `urls` stage runs its
+  passive tools only; that is the "no (tool mode)" cell above.
+- the input to the stage follows the tool, not the stage: passive urls tools
+  receive the discovered domain list, active urls tools and every `tech` tool
+  receive the alive hosts (docs/02 section 1, docs/03 section 5b).
 
 ## 5. Consensus and Confidence Rules
 

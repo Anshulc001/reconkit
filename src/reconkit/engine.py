@@ -78,9 +78,9 @@ class ModeRules:
 # Scan-mode stages, the first of the two mode tables (docs/02 section 2).
 # Every surface that needs "which stages does mode X run" reads this dict.
 MODE_STAGES: dict[str, tuple[Stage, ...]] = {
-    "passive": (Stage.SUBS, Stage.DNS),
-    "active": (Stage.SUBS, Stage.DNS, Stage.LIVE),
-    "full": (Stage.SUBS, Stage.DNS, Stage.LIVE, Stage.PORTS, Stage.TECH, Stage.URLS, Stage.VULNS),
+    "passive": (Stage.SUBS, Stage.DNS, Stage.URLS),
+    "active": (Stage.SUBS, Stage.DNS, Stage.LIVE, Stage.TECH, Stage.URLS),
+    "full": STAGE_ORDER,
 }
 
 # Scan-mode tool modes and tiers, the second mode table. `opt_in` is added at
@@ -692,6 +692,14 @@ class Engine:
             # addresses the engine resolved and verified; with no scope file it
             # runs unrestricted like every other active tool.
             tool_hosts: dict[str, list[str]] = {}
+            # A `mode: passive` urls tool queries an archive by domain, so it gets
+            # the discovered names; an active one crawls the alive hosts it was
+            # handed (docs/02 section 1). Same override mechanism as naabu below.
+            if stage is Stage.URLS:
+                domains = self._clean_hosts([target, *discovered], target)
+                for spec, _reason in selected:
+                    if spec.mode is Mode.PASSIVE:
+                        tool_hosts[spec.name] = domains
             if (
                 stage is Stage.PORTS
                 and not opts.mock

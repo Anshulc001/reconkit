@@ -11,9 +11,9 @@ Journey overview: **setup -> doctor -> obtain the tools you need -> scope -> pas
 
 **Choosing a scan mode (2026-11-17).** The first real scan is one of three
 modes, defined in the "Scan modes (source of truth)" table in docs/02 section 2:
-`passive` (default: `subs` + `dns`, passive tools only), `active` (`+ live`,
-passive and active tools), `full` (all seven stages, `opt_in` enabled, implies
-`--active` and `--include-noisy`). Exploitation-class tools never run
+`passive` (default: `subs` + `dns` + `urls`, passive tools only), `active` (the
+same plus `live` and `tech`, passive and active tools), `full` (all seven stages,
+`opt_in` enabled, implies `--active` and `--include-noisy`). Exploitation-class tools never run
 automatically in any mode. Without a target flag on a terminal the same choice
 is question 3 (docs/02 section 2b). With no `scope.yaml` an active/full run is
 unrestricted; with one present, a blocked target prints the pre-flight block and

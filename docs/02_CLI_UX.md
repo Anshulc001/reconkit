@@ -25,12 +25,30 @@ same two dicts.
 
 | Mode | Stages | Tool modes included | Tool tiers included | CLI | Interactive |
 |---|---|---|---|---|---|
-| `passive` | `subs`, `dns` | passive only | `core`, `opt_in`* | (default) | `passive` |
-| `active` | `subs`, `dns`, `live` | passive + active | `core`, `opt_in`* | `--active` | `active` |
+| `passive` | `subs`, `dns`, `urls` | passive only | `core`, `opt_in`* | (default) | `passive` |
+| `active` | `subs`, `dns`, `live`, `tech`, `urls` | passive + active | `core`, `opt_in`* | `--active` | `active` |
 | `full` | all: `subs`, `dns`, `live`, `ports`, `tech`, `urls`, `vulns` | passive + active | `core`, `opt_in`, `intrusive` | `--full` | `full` |
 
 \*`opt_in` requires `--include-noisy`, unless the mode is `full` (which implies
 it). `--full` also implies `--active`.
+
+Stages still run in the fixed `STAGE_ORDER` (`subs`, `dns`, `live`, `ports`,
+`tech`, `urls`, `vulns`); a mode only decides which of them are in scope. So in
+`passive` the order is `subs`, `dns`, `urls`, and in `active` it is `subs`,
+`dns`, `live`, `tech`, `urls` - `urls` always runs after `live` when `live` runs.
+
+**What a urls tool receives depends on its `mode:`** (2026-11-17, D10):
+
+- a **passive** urls tool (`gau`, `waybackurls`) is an archive query by domain,
+  so it receives the discovered domain list (`<target>` plus every discovered
+  host under it) in every mode. That is what makes `urls` runnable without the
+  `live` stage.
+- an **active** urls tool (`katana`, and later `hakrawler`, `gospider`, `subjs`)
+  crawls what answered, so it receives the alive hosts, as before. In `passive`
+  mode it is skipped at selection with `tool mode not included in passive mode`
+  before any input question arises.
+
+The `tech` stage takes the alive hosts and runs only in `active` and `full`.
 
 Two rules cut across the table:
 
@@ -63,7 +81,7 @@ per-tool mode/tier table is in docs/09 section 4.
 ### Stages (single stage per command)
 | Command | Mode | Needs `--active` | Phase |
 |---|---|---|---|
-| `passive` | subs + dns (the passive mode) | no | 2 |
+| `passive` | subs + dns + urls, passive tools only (the passive mode) | no | 2 |
 | `subs` / `dns` | single passive stage | no | 2 |
 | `live` | ALIVE / DNS_ONLY / SHUT_DOWN / DEAD | yes | 2 |
 | `ports` | open ports, services (`pyscan` only; LOW is the ceiling - accepted permanently, docs/09 section 5) | yes | 2 |
@@ -75,11 +93,11 @@ per-tool mode/tier table is in docs/09 section 4.
 | Command | Pipeline |
 |---|---|
 | `lite -d X` | passive only (quick) |
-| `run -d X` | passive mode: subs + dns |
-| `run -d X --active` | active mode: subs + dns + live; resumable |
+| `run -d X` | passive mode: subs + dns + urls |
+| `run -d X --active` | active mode: subs + dns + live + tech + urls; resumable |
 | `run -d X --full` | full mode: all seven stages, `opt_in` enabled; implies `--active` and `--include-noisy` |
 
-`passive` is the stage command: it runs the subs and dns stages for one target. `lite` is the workflow shortcut for exactly that passive pipeline and nothing active; adapters, flags and exit codes are the same. Only `run` includes active stages (and `run` is where `--full` applies).
+`passive` is the stage command: it runs the subs, dns and urls stages for one target, with passive tools only. `lite` is the workflow shortcut for exactly that passive pipeline and nothing active; adapters, flags and exit codes are the same. Only `run` includes active stages (and `run` is where `--full` applies).
 
 `--active` is a usage error (exit `2`) on every passive-only command - the bare form, `lite`, `passive`, `subs` and `dns` - because none of them runs an active stage and accepting the flag would promise work the command cannot do. The message names `run` as the active workflow. Use `run -d X --active`, or an active stage command (`live`, `ports`, `tech`, `urls`, `vulns`), for active stages.
 
@@ -142,20 +160,20 @@ The questions:
 
    ```
    Scan mode:
-     passive  - subs + dns stages; passive tools only
-     active   - subs + dns + live stages; passive and active tools;
-                no intrusive/aggressive tools
+     passive  - subs, dns, urls stages; passive tools only
+     active   - subs, dns, live, tech, urls stages; passive+active tools
      full     - all stages (subs, dns, live, ports, tech, urls, vulns);
-                passive, active, and intrusive-tier tools
+                passive+active+intrusive
    Choice [passive/active/full]:
    ```
 
    `active` and `full` set `--active`, so the scope gate applies unchanged.
    `full` additionally sets `--full` and `--include-noisy`. Exploitation-class
-   tools still require `--tools`. Because `tech`, `urls` and `vulns` have no
-   adapter in this build, a `full` choice requests stages that report their
-   skips and warn, then finish as **completion gaps** (exit `0`, section 6) -
-   the same rule as a flag-based `run --full`, stated before the run starts.
+   tools still require `--tools`. Because the `tech` and `vulns` stages have no
+   adapter in this build, an `active` or `full` choice requests stages that
+   report their skips and warn, then finish as **completion gaps** (exit `0`,
+   section 6) - the same rule as a flag-based `run --active`/`--full`, stated
+   before the run starts.
 4. **Report fields.** A numbered menu built from fields `reconkit` actually
    stores (host state, confidence, discovery sources, source count, IPs, status
    code, title, redirect location, open ports, technology, and the `UNKNOWN`

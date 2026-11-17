@@ -3,7 +3,7 @@
 A command-line reconnaissance orchestrator for **authorized** security testing. It runs several tools per stage, cross-checks their results, scores confidence by how many tools agree, and tracks what changed between scans in SQLite.
 
 - Natural pace: no speed preset, delay or artificial throttling; tools run at their own rate
-- Passive first: `passive` (subs+dns) by default; `--active` adds `live`; `--full` runs every stage. A `scope.yaml`, when present, is enforced - with no scope file (or with `--no-scope`) active scanning runs unrestricted
+- Passive first: `passive` (subs+dns+urls, passive tools only) by default; `--active` adds `live` and `tech`; `--full` runs every stage. A `scope.yaml`, when present, is enforced - with no scope file (or with `--no-scope`) active scanning runs unrestricted
 - Multi-tool stages with source attribution (HIGH / MEDIUM / LOW)
 - Host states: ALIVE, DNS_ONLY, SHUT_DOWN, DEAD, tracked across scans
 - Tool inventory, not installation: `reconkit doctor` lists what is installed and what is missing; per-tool sources are in [docs/10_TOOL_SOURCES.md](docs/10_TOOL_SOURCES.md)
@@ -58,12 +58,12 @@ In Git Bash, use `./scripts/bootstrap.sh` and `source .venv/Scripts/activate` in
 
 | Command | What it does |
 |---|---|
-| `passive` / `lite` | Passive subs + dns pipeline for one target; no scope file needed |
+| `passive` / `lite` | Passive subs + dns + urls pipeline for one target (passive tools only); no scope file needed |
 | `subs`, `dns` | Run one passive stage |
 | `live` | ALIVE / DNS_ONLY / SHUT_DOWN / DEAD; needs `--active` (uses any present scope file) |
 | `ports` | Port scan over each adapter's default port set (`--ports` overrides); needs `--active` |
 | `tech`, `urls`, `vulns` | Stage commands whose adapters are Phase 3; may report no usable tool |
-| `run` | `passive` (subs+dns) by default; `--active` = subs+dns+live; `--full` = all seven stages with `opt_in` enabled. The mode table is in [docs/02_CLI_UX.md](docs/02_CLI_UX.md) |
+| `run` | `passive` (subs+dns+urls) by default; `--active` = subs+dns+live+tech+urls; `--full` = all seven stages with `opt_in` enabled. The mode table is in [docs/02_CLI_UX.md](docs/02_CLI_UX.md) |
 | `diff` | New, gone, state-changed and port-changed items vs the previous run |
 | `status` | Recent scans (`--json` for scripts) |
 | `doctor` | Tool, version, path, per-stage coverage, system packages, key names |

@@ -158,8 +158,18 @@ workspaces/<domain>/
 The engine owns the mode definition; nothing else restates it. `engine.py` has
 two module-level tables and one helper:
 
-- `MODE_STAGES`: `passive` = `(SUBS, DNS)`; `active` = `(SUBS, DNS, LIVE)`;
-  `full` = all seven stages in `STAGE_ORDER`.
+- `MODE_STAGES`: `passive` = `(SUBS, DNS, URLS)`; `active` = `(SUBS, DNS,
+  LIVE, TECH, URLS)`; `full` = all seven stages in `STAGE_ORDER`. Every tuple is
+  in `STAGE_ORDER`, so help text and the interactive legend list the stages in
+  the order they actually run; `URLS` always follows `LIVE` when `LIVE` runs.
+  A mode's stage of a pipeline can therefore have no input: in `passive` the
+  `urls` stage has no alive host, which is exactly why passive urls tools are fed
+  the domain list (see the next bullet).
+- `_run_tools` gives a tool its own input list through `RunContext.hosts`: for the
+  `urls` stage a `mode: passive` tool (`gau`, `waybackurls`) receives
+  `[target, *discovered]` filtered to hosts under the target, while a
+  `mode: active` tool keeps the alive hosts. The override travels in the same
+  `tool_hosts` map `naabu` uses, so there is one mechanism, not two.
 - `MODE_TOOLS`: a `ModeRules(tool_modes, tiers)` per mode. `passive` =
   `{PASSIVE}` / `{CORE}`; `active` = `{PASSIVE, ACTIVE}` / `{CORE}`; `full` =
   `{PASSIVE, ACTIVE}` / `{CORE, OPT_IN, INTRUSIVE}`.

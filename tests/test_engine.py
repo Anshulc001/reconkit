@@ -2733,8 +2733,8 @@ allow_active: true
 def test_mode_stages_and_mode_tools_dicts_are_the_single_source_of_truth() -> None:
     """docs/02 section 2: the two tables are the only place a mode is defined."""
     assert MODE_STAGES == {
-        "passive": (Stage.SUBS, Stage.DNS),
-        "active": (Stage.SUBS, Stage.DNS, Stage.LIVE),
+        "passive": (Stage.SUBS, Stage.DNS, Stage.URLS),
+        "active": (Stage.SUBS, Stage.DNS, Stage.LIVE, Stage.TECH, Stage.URLS),
         "full": STAGE_ORDER,
     }
     assert MODE_TOOLS["passive"].tool_modes == frozenset({Mode.PASSIVE})
@@ -2749,6 +2749,106 @@ def test_mode_stages_and_mode_tools_dicts_are_the_single_source_of_truth() -> No
     assert ScanOptions(full=True).mode == "full"
     assert ScanOptions(active=True).mode == "active"
     assert ScanOptions().mode == "passive"
+
+
+async def test_passive_mode_runs_passive_urls_tools(tmp_path: Path) -> None:
+    """D10: `passive` runs the urls stage, with passive urls tools only.
+
+    gau/waybackurls query an archive by domain, so they are handed the discovered
+    names; katana is an active crawler and is skipped at selection, never fed.
+    """
+    rec = Recorder()
+    specs = {
+        "subs-fake": tool("subs-fake", Stage.SUBS),
+        "gau-like": tool("gau-like", Stage.URLS),
+        "katana-like": tool("katana-like", Stage.URLS, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "subs-fake": adapter("subs-fake", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "gau-like": adapter("gau-like", Stage.URLS, rec, records=[]),
+        "katana-like": adapter("katana-like", Stage.URLS, rec, records=[]),
+    }
+    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+
+    summary = await engine.run("example.com", ScanOptions(stages=MODE_STAGES["passive"]))
+
+    assert [stage.stage for stage in summary.stages] == [Stage.SUBS, Stage.URLS]
+    assert "gau-like" in rec.names
+    assert "katana-like" not in rec.names
+    assert rec.hosts[rec.names.index("gau-like")] == ["example.com", "www.example.com"]
+    urls_stage = summary.stages[1]
+    assert [(skip.tool, skip.reason) for skip in urls_stage.skipped] == [
+        ("katana-like", "tool mode not included in passive mode")
+    ]
+
+
+async def test_active_mode_runs_urls_and_tech_stages(tmp_path: Path) -> None:
+    """D10: `active` includes the tech and urls stages (after live)."""
+    rec = Recorder()
+    specs = {
+        "subs-fake": tool("subs-fake", Stage.SUBS),
+        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
+        "webanalyze-like": tool("webanalyze-like", Stage.TECH, mode=Mode.ACTIVE),
+        "cdncheck-like": tool("cdncheck-like", Stage.TECH),
+        "katana-like": tool("katana-like", Stage.URLS, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "subs-fake": adapter("subs-fake", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("www.example.com")]),
+        "webanalyze-like": adapter("webanalyze-like", Stage.TECH, rec, records=[]),
+        "cdncheck-like": adapter("cdncheck-like", Stage.TECH, rec, records=[]),
+        "katana-like": adapter("katana-like", Stage.URLS, rec, records=[]),
+    }
+    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+
+    summary = await engine.run("example.com", ScanOptions(active=True))
+
+    assert [stage.stage for stage in summary.stages] == [
+        Stage.SUBS,
+        Stage.LIVE,
+        Stage.TECH,
+        Stage.URLS,
+    ]
+    assert {"webanalyze-like", "cdncheck-like", "katana-like"} <= set(rec.names)
+    # tech and the active crawler both see the alive host, in that order.
+    tech_index = rec.names.index("webanalyze-like")
+    urls_index = rec.names.index("katana-like")
+    assert rec.hosts[tech_index] == ["www.example.com"]
+    assert rec.hosts[urls_index] == ["www.example.com"]
+    assert tech_index < urls_index
+
+
+async def test_active_mode_urls_stage_runs_after_live(tmp_path: Path) -> None:
+    """Stage order is STAGE_ORDER, so urls never runs before live in any mode."""
+    rec = Recorder()
+    specs = {
+        "subs-fake": tool("subs-fake", Stage.SUBS),
+        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
+        "katana-like": tool("katana-like", Stage.URLS, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "subs-fake": adapter("subs-fake", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("www.example.com")]),
+        "katana-like": adapter("katana-like", Stage.URLS, rec, records=[]),
+    }
+    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+
+    summary = await engine.run("example.com", ScanOptions(active=True))
+
+    order = [stage.stage for stage in summary.stages]
+    assert order.index(Stage.LIVE) < order.index(Stage.URLS)
+    assert rec.names.index("live-fake") < rec.names.index("katana-like")
+    assert list(MODE_STAGES["active"]) == [
+        stage for stage in STAGE_ORDER if stage in MODE_STAGES["active"]
+    ]
+
+
+async def test_full_mode_unchanged_by_expansion() -> None:
+    """D10: the expansion touched passive/active only; full is still all seven."""
+    assert MODE_STAGES["full"] == STAGE_ORDER
+    assert len(MODE_STAGES["full"]) == 7
+    assert set(MODE_STAGES["full"]) == set(Stage) - {Stage.SHOTS}
+    assert set(MODE_STAGES["passive"]) < set(MODE_STAGES["active"]) < set(MODE_STAGES["full"])
 
 
 async def test_full_runs_all_tool_modes_and_enables_opt_in_and_intrusive(tmp_path: Path) -> None:

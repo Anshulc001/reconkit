@@ -431,7 +431,8 @@ def test_root_invocation_without_a_command_runs_the_passive_pipeline(tmp_path: P
     )
     assert result.exit_code == 0
     document = json.loads(result.stdout)
-    assert [stage["stage"] for stage in document["stages"]] == ["subs", "dns"]
+    # D10 (2026-11-17): the passive pipeline now ends with the urls stage.
+    assert [stage["stage"] for stage in document["stages"]] == ["subs", "dns", "urls"]
 
 
 def test_diff_and_status_after_two_mock_runs(tmp_path: Path) -> None:
@@ -677,7 +678,7 @@ def test_run_help_describes_stages_tool_modes_and_tiers() -> None:
     """
     from reconkit.cli import _ACTIVE_HELP, _FULL_HELP, _NO_SCOPE_HELP
 
-    assert "Run active stages: subs, dns, live." in _ACTIVE_HELP
+    assert "Run active stages: subs, dns, live, tech, urls." in _ACTIVE_HELP
     assert "Uses passive and active tools" in _ACTIVE_HELP
     assert "no intrusive/aggressive tools" in _ACTIVE_HELP
     assert "Run a full scan: all stages (subs, dns, live, ports, tech, urls, vulns)." in (

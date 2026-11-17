@@ -72,6 +72,10 @@ _SCAN_COMMANDS = (
 _ACTIVE_ONLY = frozenset({"live", "ports", "tech", "urls", "vulns"})
 # The passive-only stage tuple is the mode table's entry, never a copy.
 _PASSIVE_STAGES = MODE_STAGES["passive"]
+# Commands that run no active stage at all, so `--active` promises nothing.
+# `urls` is deliberately absent: its active tools need `--active`, and its
+# passive tools run without it since the 2026-11-17 mode expansion.
+_PASSIVE_ONLY_COMMANDS = frozenset({"subs", "dns", "passive", "lite"})
 
 
 def _stage_list(mode: str) -> str:
@@ -82,7 +86,7 @@ def _stage_list(mode: str) -> str:
 # docs/02 section 2. Each help string states the mode's stages, tool modes and
 # tiers, and is generated from MODE_STAGES so it cannot drift from the engine.
 _ACTIVE_HELP = (
-    f"Run active stages: {_stage_list('active')}. Passive stages (subs, dns) "
+    f"Run active stages: {_stage_list('active')}. The passive stages "
     "still run. Uses passive and active tools; no intrusive/aggressive tools. "
     "A scope.yaml, when present, is enforced; with no scope file, active "
     "scanning is unrestricted."
@@ -308,6 +312,23 @@ def _tools_label(mode: str) -> str:
     return "passive only"
 
 
+def _mode_legend() -> str:
+    """The interactive legend, generated from `MODE_STAGES` (docs/02 section 2b).
+
+    Same words as the "Scan modes (source of truth)" table: the stage list is
+    `_stage_list()` and the tool modes come from `_tools_label()`, so the prompt
+    cannot drift from the engine.
+    """
+    lines = ["Scan mode:"]
+    for mode in ("passive", "active", "full"):
+        stages = _stage_list(mode)
+        if mode == "full":
+            lines.append(f"  {mode:<8} — all stages ({stages}); {_tools_label(mode)}")
+        else:
+            lines.append(f"  {mode:<8} — {stages} stages; {_tools_label(mode)} tools")
+    return "\n".join(lines)
+
+
 def _stdin_is_tty() -> bool:
     """True only when a real terminal is on stdin (docs/02 section 2b).
 
@@ -353,15 +374,7 @@ def _ask_mode(*, no_color: bool) -> tuple[tuple[Stage, ...], bool, str]:
     assumed mode; the prompt repeats until one of the three words is typed.
     """
     while True:
-        render_message(
-            "Scan mode:\n"
-            "  passive  — subs + dns stages; passive tools only\n"
-            "  active   — subs + dns + live stages; passive and active tools; "
-            "no intrusive/aggressive tools\n"
-            "  full     — all stages (subs, dns, live, ports, tech, urls, vulns); "
-            "passive, active, and intrusive-tier tools",
-            no_color=no_color,
-        )
+        render_message(_mode_legend(), no_color=no_color)
         answer = str(typer.prompt("Choice [passive/active/full]", err=True))
         mode = answer.strip().lower()
         if mode in MODE_STAGES:
@@ -699,6 +712,12 @@ def _run_scan(
         is_active = active if plan is None else (plan.active or active)
         if command in _ACTIVE_ONLY and not is_active:
             raise ConfigError(f"{command} requires --active")
+        # Only the flag path: an interactive run decides its own mode (and may
+        # legitimately choose active from the bare command).
+        if plan is None and command in _PASSIVE_ONLY_COMMANDS and is_active:
+            raise ConfigError(
+                f"{command!r} is passive-only; --active needs: reconkit run -d X --active"
+            )
         # docs/02 section 2: the passive-only commands run no active stage, so
         # accepting --active would promise work the command cannot do.
         stages = plan.stages if plan is not None else _stages(command, is_active, full)
@@ -733,10 +752,6 @@ def _run_scan(
                     no_scope = True
                 elif action == "retarget" and replacement is not None:
                     targets = [replacement]
-        if is_active and all(stage in _PASSIVE_STAGES for stage in stages):
-            raise ConfigError(
-                f"{command!r} is passive-only; --active needs: reconkit run -d X --active"
-            )
         if json_output and len(targets) > 1:
             raise ConfigError("--json accepts one target per invocation; use -d")
         # Progress goes to stderr for every scan, --json included; only --silent

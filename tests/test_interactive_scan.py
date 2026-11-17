@@ -140,8 +140,8 @@ def test_interactive_passive_writes_one_folder_per_domain(
     result = CliRunner().invoke(app, interactive_args(config), input=PASSIVE_ANSWERS)
     assert result.exit_code == 0, result.stderr
     assert (
-        "plan: example.com; mode passive; scope no scope file; stages subs, dns; "
-        "tools passive only" in " ".join(result.stderr.split())
+        "plan: example.com; mode passive; scope no scope file; "
+        "stages subs, dns, urls; tools passive only" in " ".join(result.stderr.split())
     )
 
     (domain_dir,) = (tmp_path / "results").iterdir()
@@ -217,7 +217,13 @@ def test_the_mode_is_asked_until_a_valid_answer_is_typed(
     assert result.stderr.count("Choice [passive/active/full]") == 3
     assert "invalid scan mode 'sideways'" in result.stderr
     (options,) = calls
-    assert options.stages == (Stage.SUBS, Stage.DNS, Stage.LIVE)
+    assert options.stages == (
+        Stage.SUBS,
+        Stage.DNS,
+        Stage.LIVE,
+        Stage.TECH,
+        Stage.URLS,
+    )
     assert options.active is True
 
 
@@ -329,7 +335,7 @@ def test_a_multi_domain_file_scans_each_domain_separately(
     assert result.exit_code == 0, result.stderr
     assert [target for target, _ in calls] == ["example.com", "testfire.net"]
     assert all(isinstance(target, str) and "," not in target for target, _ in calls)
-    assert all(options.stages == (Stage.SUBS, Stage.DNS) for _, options in calls)
+    assert all(options.stages == (Stage.SUBS, Stage.DNS, Stage.URLS) for _, options in calls)
     folders = sorted(path.name for path in (tmp_path / "results").iterdir())
     assert folders == ["example.com", "testfire.net"]
 
@@ -365,7 +371,15 @@ def test_aggressive_yes_adds_the_ports_stages(
     assert "naabu runs only on IPs reconkit resolved and verified" in result.stderr
     assert "service/version detection is not wired" in result.stderr
     (options,) = calls
-    assert options.stages == (Stage.SUBS, Stage.DNS, Stage.LIVE, Stage.PORTS)
+    # passive stages (with urls since D10) + the aggressive live/ports stages,
+    # still in STAGE_ORDER.
+    assert options.stages == (
+        Stage.SUBS,
+        Stage.DNS,
+        Stage.LIVE,
+        Stage.PORTS,
+        Stage.URLS,
+    )
     assert options.active is True
 
 
@@ -400,8 +414,9 @@ def test_aggressive_no_leaves_the_plan_alone(
         input="example.com\nn\nactive\nall\nn\n\nall\n\nn\nn\nn\n",
     )
     assert (
-        "plan: example.com; mode active; scope no scope file; stages subs, dns, live; "
-        "tools passive+active" in " ".join(result.stderr.split())
+        "plan: example.com; mode active; scope no scope file; "
+        "stages subs, dns, live, tech, urls; tools passive+active"
+        in " ".join(result.stderr.split())
     )
     plan_line = result.stderr.split("plan:")[1].splitlines()[0]
     assert Stage.PORTS.value not in plan_line

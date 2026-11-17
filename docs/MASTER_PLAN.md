@@ -695,6 +695,19 @@ D9. 2026-11-17 - Zero-tool stages caused by absence are gaps, not failures.
     scope rules). "Nothing usable at all" still exits 4. Supersedes the
     12k rule in docs/02 section 6 that made every zero-tool stage exit 5.
 
+D10. 2026-11-17 - Mode table expansion: passive includes passive urls, active
+    includes urls and tech. Reason: "owner ruling: passive urls in passive mode,
+    active urls + tech in active mode." `MODE_STAGES` is `passive` =
+    `(SUBS, DNS, URLS)`, `active` = `(SUBS, DNS, LIVE, TECH, URLS)`, `full` =
+    `STAGE_ORDER`; `MODE_TOOLS` is unchanged (`opt_in` stays a flag). Tuples are
+    in `STAGE_ORDER`, so a run's order always equals the documented order
+    (urls after live, tech before urls). Consequence the expansion exposed: the
+    urls stage is fed the alive hosts, and a passive run has none, so a
+    `mode: passive` urls tool now receives `[target, *discovered]` instead; an
+    active one still gets the alive hosts, and in passive mode it is skipped at
+    selection with `tool mode not included in passive mode`. The interactive
+    legend is generated from the table, and docs/02 section 1 is the source.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================
