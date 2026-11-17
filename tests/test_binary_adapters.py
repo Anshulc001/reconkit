@@ -1538,13 +1538,13 @@ def test_wafw00f_handles_no_waf_case() -> None:
 
 
 def test_wafw00f_and_cdncheck_merge_or_replace_waf(tmp_path: Path) -> None:
-    """Documents the real WAF rule: one name, first in the pass, latest pass wins.
+    """WAF is one name chosen by `waf_priority`, not by who finished first (D12).
 
-    `Engine._persist_tech` (engine.py:1712) keeps the FIRST non-None `waf` in
-    `results` order and unions every tech list; `Store.update_host_extras`
-    (store.py:612) then replaces the stored `waf` with the new pass's name. So
-    two WAF tools never produce a merged string, and the winner between them
-    depends on completion order - reported as an open item in docs/09.
+    Wave 4 found the old rule kept the first non-None `waf` in `results` order
+    and the latest pass across runs, so `cdncheck` or `httpx_tech` could beat
+    `wafw00f` (or a rerun could flip the winner). The owner ruling made it
+    priority-based: wafw00f 100 > cdncheck 80 > whatweb 50 > httpx_tech 20, and
+    an equal priority keeps the first writer. Tech still merges as a list.
     """
     db = Store(tmp_path / "recon.db")
     try:
@@ -1557,7 +1557,7 @@ def test_wafw00f_and_cdncheck_merge_or_replace_waf(tmp_path: Path) -> None:
         engine = Engine(
             load_config(CONFIG),
             db,
-            specs={},
+            specs={name: get_spec(name) for name in ("wafw00f", "cdncheck")},
             adapters={},
             scope_path=None,
             workspace_root=tmp_path / "workspaces",
@@ -1589,17 +1589,17 @@ def test_wafw00f_and_cdncheck_merge_or_replace_waf(tmp_path: Path) -> None:
         )
         engine._persist_tech(target_id, run_id, [cdncheck, wafw00f], "testfire.net")
         stored = db._conn.execute(
-            "SELECT tech_json, waf FROM host_status_history ORDER BY id DESC LIMIT 1"
+            "SELECT tech_json, waf, waf_priority FROM host_status_history ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        assert stored["waf"] == "cloudflare"  # first non-None in results order
+        assert (stored["waf"], stored["waf_priority"]) == ("Cloudflare", 100)
         assert stored["tech_json"] == '["google"]'
-        # The same two tools finishing in the other order flip the winner, and the
-        # tech list still merges: completion order decides, not tool priority.
+        # The tools finishing in the other order produce exactly the same row:
+        # the priority decides, and the tech list still merges.
         engine._persist_tech(target_id, run_id, [wafw00f, cdncheck], "testfire.net")
         stored = db._conn.execute(
-            "SELECT tech_json, waf FROM host_status_history ORDER BY id DESC LIMIT 1"
+            "SELECT tech_json, waf, waf_priority FROM host_status_history ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        assert stored["waf"] == "Cloudflare"
+        assert (stored["waf"], stored["waf_priority"]) == ("Cloudflare", 100)
         assert stored["tech_json"] == '["google"]'
     finally:
         db.close()

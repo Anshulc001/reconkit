@@ -16,7 +16,7 @@ from pathlib import Path
 
 from reconkit.errors import ConfigError
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 REDACTED = "***"
 # docs/04 section 5: the stored reason is one line of at most this many characters.
 DETAIL_MAX_CHARS = 200
@@ -157,6 +157,13 @@ _SCHEMA_V6 = """
 ALTER TABLE scan_runs ADD COLUMN scope_mode TEXT NOT NULL DEFAULT 'enforced';
 """
 
+# docs/04 section 11 (2026-11-17, MASTER_PLAN D12): the priority of the tool
+# whose detection the `waf` column holds, so a merge keeps the most
+# authoritative name instead of the newest one. Existing rows read 0.
+_SCHEMA_V7 = """
+ALTER TABLE host_status_history ADD COLUMN waf_priority INTEGER NOT NULL DEFAULT 0;
+"""
+
 _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, _SCHEMA_V1),
     (2, _SCHEMA_V2),
@@ -164,6 +171,7 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (4, _SCHEMA_V4),
     (5, _SCHEMA_V5),
     (6, _SCHEMA_V6),
+    (7, _SCHEMA_V7),
 )
 
 _COUNT_SQL: dict[str, str] = {
@@ -615,6 +623,7 @@ class Store:
         *,
         tech: Sequence[str] = (),
         waf: str | None = None,
+        waf_priority: int = 0,
     ) -> bool:
         """Add technologies/WAF to the latest status row; never inserts a row.
 
@@ -622,11 +631,16 @@ class Store:
         row of its own: a technology match is not a liveness verdict, so it must
         not create, replace or re-date one (docs/04 section 5). Returns True when
         a row was updated, False when the host has no status row yet.
+
+        `waf` and `waf_priority` are merged together (docs/MASTER_PLAN.md D12):
+        the stored name is only replaced by a strictly higher priority, and any
+        first detection fills an empty column. Equal priorities keep the stored
+        name, so completion order and rerun order can never change it.
         """
         if not tech and waf is None:
             return False
         row = self._conn.execute(
-            "SELECT id, tech_json, waf FROM host_status_history"
+            "SELECT id, tech_json, waf, waf_priority FROM host_status_history"
             " WHERE subdomain_id = ? ORDER BY id DESC LIMIT 1",
             (subdomain_id,),
         ).fetchone()
@@ -636,10 +650,14 @@ class Store:
         for name in tech:
             if name not in merged:
                 merged.append(name)
-        stored_waf = waf if waf is not None else row["waf"]
+        stored_waf = row["waf"]
+        stored_priority = int(row["waf_priority"] or 0)
+        if waf is not None and (stored_waf is None or waf_priority > stored_priority):
+            stored_waf = waf
+            stored_priority = waf_priority
         self._conn.execute(
-            "UPDATE host_status_history SET tech_json = ?, waf = ? WHERE id = ?",
-            (json.dumps(merged), stored_waf, int(row["id"])),
+            "UPDATE host_status_history SET tech_json = ?, waf = ?, waf_priority = ? WHERE id = ?",
+            (json.dumps(merged), stored_waf, stored_priority, int(row["id"])),
         )
         self._commit()
         return True

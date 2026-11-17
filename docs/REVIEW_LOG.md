@@ -3606,6 +3606,102 @@ install residue. No new feature, no behaviour change, no code-logic change.
   `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` (unchanged
   from the previous batch; no scope edit was made).
 
+## D12: deterministic WAF merge via tool priority (2026-11-17)
+
+- Docs read / goal: `AGENTS.md` (0. Session start, 0b task loop, hard rules),
+  RESUME, PIT-51/52 (the tech-persistence and parser guards), docs/04 sections
+  5/11, docs/09 §4a4 (the wave-4 merge answer this supersedes), the wave-4
+  REVIEW_LOG entry, `tools.yaml`. Owner ruling: two WAF tools must not flip the
+  stored name by finishing order.
+- Baseline: `736 passed`, `ruff check .` clean, `ruff format --check .` 73 files,
+  `mypy src/reconkit` clean (45 source files), tree clean at `10f1cf8`,
+  `scope.yaml` sha256 `d45a3c9...eeee8b`.
+- **Yes, this is a schema change: 6 -> 7.** Something has to remember the
+  priority of the name currently in `waf`, otherwise a later lower-priority
+  pass cannot tell whether it may overwrite it. A JSON sidecar was the
+  alternative and was rejected: one int per row is smaller than a second
+  encoding of the same fact, and it can be indexed/filtered like any column.
+  Migration, unchanged from the pattern of schemas 2/4/6:
+
+  ```sql
+  ALTER TABLE host_status_history ADD COLUMN waf_priority INTEGER NOT NULL DEFAULT 0;
+  ```
+
+- **Before** (`Store.update_host_extras`, `store.py`, wave 4):
+
+  ```python
+  stored_waf = waf if waf is not None else row["waf"]
+  self._conn.execute(
+      "UPDATE host_status_history SET tech_json = ?, waf = ? WHERE id = ?",
+      (json.dumps(merged), stored_waf, int(row["id"])),
+  )
+  ```
+
+  Any non-None detection replaced the stored name, so the last pass always won
+  and `_persist_tech`'s first-non-None rule picked the winner by
+  `asyncio.gather` completion order.
+- **After**:
+
+  ```python
+  stored_waf = row["waf"]
+  stored_priority = int(row["waf_priority"] or 0)
+  if waf is not None and (stored_waf is None or waf_priority > stored_priority):
+      stored_waf = waf
+      stored_priority = waf_priority
+  self._conn.execute(
+      "UPDATE host_status_history SET tech_json = ?, waf = ?, waf_priority = ?"
+      " WHERE id = ?",
+      (json.dumps(merged), stored_waf, stored_priority, int(row["id"])),
+  )
+  ```
+
+  and `Engine._persist_tech` now keeps the pass's highest-`waf_priority` record
+  (`self.specs[tool].waf_priority`, 0 when the tool is unknown to the run's
+  specs) instead of the first non-None one, passing the winning priority to the
+  store. Equal priorities keep the first writer: within a pass the first record
+  in `results`, across passes the stored value. An empty column is always
+  filled, so a priority-0 tool still records the only detection available.
+- Priorities (`tools.yaml`, validated `int >= 0`, non-int/bool/negative is a
+  `ConfigError`): `wafw00f` 100, `cdncheck` 80, `whatweb` 50, `httpx_tech` 20,
+  every other entry 0 (including `httpx`, whose `cdn_name` a dedicated detector
+  then corrects).
+- **Deterministic proof, three fresh databases** (seeded with one pre-existing
+  `DNS_ONLY` row for `testfire.net` so the tech stage has a row to annotate -
+  it never inserts one, D11), same command each time
+  (`--tools pyprobe,wafw00f,httpx_tech --active --mock`):
+
+  ```
+  -- fresh DB run 1 --   testfire.net  Cloudflare  100
+  -- fresh DB run 2 --   testfire.net  Cloudflare  100
+  -- fresh DB run 3 --   testfire.net  Cloudflare  100
+  ```
+
+  Before this change the same fixtures and tools stored `cloudflare` from
+  `httpx_tech` (wave-4 entry, `cloudflare` in that table) because it finished
+  first; now `wafw00f`'s `Cloudflare` always wins. `httpx_tech` still reports
+  `cloudflare` in its own record and the JSON output - only the stored column is
+  arbitrated.
+- **On a truly empty database the brief's command stores no WAF at all**, even
+  after this change: the mock liveness fixtures are `example.com`-shaped while
+  the tech fixtures are `testfire.net`, so no `testfire.net` status row exists
+  and `update_host_extras` returns False (D11: annotate, never insert). That is
+  the documented behaviour, not a regression; the run still exits 0 and prints
+  `wafw00f ok 1 item(s)`.
+- Tests: 6 new, `736 -> 742`; one wave-4 test updated (`test_wafw00f_and_...`
+  previously asserted the order-dependent winner, which is exactly what the
+  ruling removed - it now asserts `Cloudflare`/100 in both orders with the real
+  registry priorities), and the four migration tests moved their pinned version
+  from 6 to 7. Named guards: `test_waf_priority_deterministic_merge` (all six
+  orders of wafw00f/cdncheck/httpx_tech end `Cloudflare`/100),
+  `test_waf_priority_zero_preserves_first_writer`,
+  `test_v6_database_migrates_the_waf_priority_column`,
+  `test_waf_priorities_are_declared_in_the_registry`, plus the two
+  invalid-priority `ConfigError` tests.
+- Gate: `742 passed`, ruff clean, 73 files formatted, mypy clean (45 files).
+  Docs updated first: docs/MASTER_PLAN.md D12, docs/04 sections 3/11, docs/09
+  §4a4, PROGRESS.
+- Next action: Part 2 (adapter wave 5).
+
 ## Adapter wave 4: unfurl, wafw00f, whatweb, httpx_tech (2026-11-17)
 
 - Docs read / goal: `AGENTS.md` (0d item 11), RESUME, PIT-14/30/50/51/52,

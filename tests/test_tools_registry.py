@@ -386,3 +386,39 @@ def test_an_invalid_exploitation_flag_is_a_config_error(tmp_path: Path) -> None:
     path.write_text(text, encoding="utf-8")
     with pytest.raises(ConfigError, match="invalid exploitation flag"):
         load_tools(path)
+
+
+def test_waf_priorities_are_declared_in_the_registry() -> None:
+    """D12: the WAF-capable tools carry their priority in tools.yaml."""
+    specs = load_tools()
+    assert specs["wafw00f"].waf_priority == 100
+    assert specs["cdncheck"].waf_priority == 80
+    assert specs["whatweb"].waf_priority == 50
+    assert specs["httpx_tech"].waf_priority == 20
+    # Everything else makes no WAF priority claim.
+    assert specs["httpx"].waf_priority == 0
+    assert specs["webanalyze"].waf_priority == 0
+
+
+def test_a_non_integer_waf_priority_is_a_config_error(tmp_path: Path) -> None:
+    bad = tmp_path / "tools.yaml"
+    bad.write_text(
+        "tools:\n"
+        "  wafw00f: {stage: tech, kind: binary, tier: core, mode: active,"
+        " phase: 3, waf_priority: high}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="waf_priority"):
+        load_tools(bad)
+
+
+def test_a_negative_waf_priority_is_a_config_error(tmp_path: Path) -> None:
+    bad = tmp_path / "tools.yaml"
+    bad.write_text(
+        "tools:\n"
+        "  wafw00f: {stage: tech, kind: binary, tier: core, mode: active,"
+        " phase: 3, waf_priority: -1}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="waf_priority"):
+        load_tools(bad)

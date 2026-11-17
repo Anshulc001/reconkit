@@ -720,6 +720,22 @@ D11. 2026-11-17 - Tech-stage persistence and stdin input (forced by adapter wave
     table or a second persistence path) was rejected as a schema change the
     columns do not need.
 
+D12. 2026-11-17 - Deterministic WAF merge via tool priority (owner ruling,
+    supersedes the wave-4 open item). Wave 4 found that the single
+    `host_status_history.waf` column was filled by whichever WAF-capable tool
+    finished first inside a pass (`asyncio.gather` completion order) and by the
+    latest pass across runs, so two tools on the same host could flip the stored
+    name between runs. Owner ruling: priority-based deterministic merge. Each
+    `tools.yaml` entry may carry `waf_priority` (int, default 0); the merge keeps
+    the highest-priority detection, so `wafw00f` (100) beats `cdncheck` (80),
+    `whatweb` (50) and `httpx_tech` (20) no matter who finishes first, and no
+    rerun can change the result. Equal priorities keep the first writer (inside
+    a pass: first record; across passes: the stored value), and the first
+    detection always fills an empty column. That needs somewhere to remember the
+    priority of the stored name, so the ruling carries a schema change -
+    `host_status_history.waf_priority INTEGER NOT NULL DEFAULT 0`, schema 6 -> 7 -
+    and `Store.update_host_extras` compares priorities instead of overwriting.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

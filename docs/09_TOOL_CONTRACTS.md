@@ -288,6 +288,10 @@ SAN discovery are the only stored facts. The SANs reach `subdomains` through
 | `whatweb` | tech | `--quiet --log-json=- --no-errors --color=never -a 1 <url...>` | `HostStatusRecord(UNKNOWN, tech=[plugin names])` |
 | `httpx_tech` | tech | inherits `httpx`'s command: `-json -silent -td ...` (one URL per host) | `HostStatusRecord(UNKNOWN, tech=<tech>, waf=<cdn_name>)`, no record when both are empty |
 
+`waf_priority` per tool (D12): `wafw00f` 100, `cdncheck` 80, `whatweb` 50,
+`httpx_tech` 20; every other entry defaults to 0 (for example the `httpx`
+`cdn_name`, which a dedicated detector then corrects).
+
 **`unfurl` is `mode: passive` in `tools.yaml`** (the registry is the source of
 truth, as for `gau` and `urlfinder`), so it runs in all three modes even though
 this brief listed it as active; that is a reported deviation, not a code change.
@@ -343,17 +347,18 @@ Two rules apply, and they are not symmetric:
   `Store.update_host_extras` (store.py:612) keeps the row's existing list and
   appends names it does not have. Two tech tools therefore add up, order is
   first-writer-first, and no tool can remove another's finding.
-- **`waf` is a single string - last writer wins across the pass boundary, first
-  writer wins inside one pass.** `update_host_extras` replaces the stored `waf`
-  with the name the new pass supplies; `_persist_tech` keeps the first non-None
-  `waf` in `results` order, and `results` is completion order (`asyncio.gather`),
-  not a tool priority. So on the same host `httpx_tech` (`cdn_name`) and
-  `wafw00f` cannot merge: whichever finished first names the WAF and the other
-  detection is dropped, and a rerun can flip the winner. The live mock proof in
-  docs/REVIEW_LOG.md shows exactly this (`cloudflare` from `httpx_tech` stored,
-  `Cloudflare` from `wafw00f` dropped). This is reported as an open item for a
-  ruling: merging would need a list field on `host_status_history`, which is a
-  schema change and was explicitly out of scope here.
+- **`waf` is a single string, merged deterministically by `waf_priority`**
+  (D12, owner ruling 2026-11-17). Every `tools.yaml` entry may carry
+  `waf_priority` (int, default 0): `wafw00f` 100, `cdncheck` 80, `whatweb` 50,
+  `httpx_tech` 20, everything else 0. The highest priority always wins, so
+  completion order can never change the stored name and a rerun cannot flip it.
+  Equal priorities keep the first writer - inside a pass the first record in
+  `results` order, across passes the value already stored; the first detection
+  always fills an empty column. `Store.update_host_extras` therefore compares
+  against the stored `waf_priority` (schema 7) instead of overwriting, and
+  `_persist_tech` picks the pass's highest-priority detection before calling it.
+  The three names are still not merged into a list: a list column was rejected
+  as a wider schema change than the ruling asked for.
 
 ### 4b. Per-tool support for the injected parameters
 

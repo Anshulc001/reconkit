@@ -55,6 +55,11 @@ class ToolSpec:
     # automatically in any mode, `full` included; only an explicit `--tools`
     # naming runs one (docs/09, AGENTS "recon only").
     exploitation: bool = False
+    # Deterministic WAF merge (docs/MASTER_PLAN.md D12): the stored `waf` keeps
+    # the detection of the highest priority, so completion order and rerun order
+    # cannot change it. 0 = the tool makes no claim (every tool but the four
+    # WAF-capable ones).
+    waf_priority: int = 0
 
 
 def _document(file: Path) -> dict[str, Any]:
@@ -150,6 +155,7 @@ def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
         version_regex=_version_regex(name, entry),
         source=_optional_text(name, entry, "source"),
         exploitation=_exploitation(name, entry),
+        waf_priority=_waf_priority(name, entry),
     )
 
 
@@ -184,6 +190,14 @@ def _version_regex(name: str, entry: dict[str, Any]) -> str | None:
     except re.error:
         raise ConfigError(f"tool {name!r} in tools.yaml has an invalid version_regex") from None
     return value.strip()
+
+
+def _waf_priority(name: str, entry: dict[str, Any]) -> int:
+    """Optional non-negative integer `waf_priority`; anything else is invalid."""
+    value = entry.get("waf_priority", 0)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ConfigError(f"tool {name!r} in tools.yaml has an invalid waf_priority")
+    return value
 
 
 def _exploitation(name: str, entry: dict[str, Any]) -> bool:

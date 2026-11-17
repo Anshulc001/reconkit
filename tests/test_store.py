@@ -151,7 +151,7 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 6
+        assert migrated.schema_version == SCHEMA_VERSION == 7
         assert "cnames_json" in columns
         assert "dangling_cname" in columns
         assert "detail" in columns
@@ -258,7 +258,7 @@ def test_v3_database_migrates_the_additive_detail_column(tmp_path: Path) -> None
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 6
+        assert migrated.schema_version == SCHEMA_VERSION == 7
         columns = {
             str(row["name"])
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
@@ -686,7 +686,7 @@ def test_v2_database_migrates_provenance_with_backfill(tmp_path: Path) -> None:
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(subdomains)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 6
+        assert migrated.schema_version == SCHEMA_VERSION == 7
         assert "provenance" in columns
         rows = {
             str(row["fqdn"]): str(row["provenance"])
@@ -921,13 +921,22 @@ def test_v4_database_migrates_by_removing_the_speed_column(tmp_path: Path) -> No
         );
         INSERT INTO scan_runs (id, target_id, stage, speed, status, started_at, params_json)
           VALUES (7, 1, 'subs', 'slow', 'completed', '2026-11-16T10:00:00Z', '{"scan_key":"k"}');
+        -- A real v4 database has every v1 table; schema 7 alters this one.
+        CREATE TABLE host_status_history (
+          id           INTEGER PRIMARY KEY,
+          subdomain_id INTEGER NOT NULL,
+          run_id       INTEGER NOT NULL,
+          state        TEXT NOT NULL,
+          waf          TEXT,
+          checked_at   TEXT NOT NULL
+        );
         """
     )
     conn.close()
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 6
+        assert migrated.schema_version == SCHEMA_VERSION == 7
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(scan_runs)")
         }
@@ -946,3 +955,81 @@ def test_create_scan_run_writes_no_speed_column(store: Store) -> None:
     run_id = store.create_scan_run(target_id, "subs")
     row = store._conn.execute("SELECT * FROM scan_runs WHERE id = ?", (run_id,)).fetchone()
     assert "speed" not in row.keys()
+
+
+def test_v6_database_migrates_the_waf_priority_column(tmp_path: Path) -> None:
+    """Schema 7 adds the stored priority; rows written before it read 0 (D12)."""
+    db_path = tmp_path / "v6.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE schema_version (version INTEGER NOT NULL);
+        INSERT INTO schema_version (version) VALUES (6);
+        CREATE TABLE host_status_history (
+          id           INTEGER PRIMARY KEY,
+          subdomain_id INTEGER NOT NULL,
+          run_id       INTEGER NOT NULL,
+          state        TEXT NOT NULL,
+          waf          TEXT,
+          checked_at   TEXT NOT NULL
+        );
+        INSERT INTO host_status_history (id, subdomain_id, run_id, state, waf, checked_at)
+          VALUES (4, 1, 1, 'ALIVE', 'cloudflare', '2026-11-17T10:00:00Z');
+        """
+    )
+    conn.close()
+
+    migrated = Store(db_path)
+    try:
+        assert migrated.schema_version == SCHEMA_VERSION == 7
+        columns = {
+            str(row["name"]): row
+            for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
+        }
+        assert "waf_priority" in columns
+        assert columns["waf_priority"]["dflt_value"] == "0"
+        row = migrated._conn.execute("SELECT waf, waf_priority FROM host_status_history").fetchone()
+        assert (row["waf"], row["waf_priority"]) == ("cloudflare", 0)
+    finally:
+        migrated.close()
+
+
+def _waf_row(store: Store, sub_id: int) -> tuple[str | None, int]:
+    row = store._conn.execute(
+        "SELECT waf, waf_priority FROM host_status_history"
+        " WHERE subdomain_id = ? ORDER BY id DESC LIMIT 1",
+        (sub_id,),
+    ).fetchone()
+    return row["waf"], int(row["waf_priority"])
+
+
+def test_waf_priority_zero_preserves_first_writer(store: Store) -> None:
+    """D12: priority 0 fills an empty column but never overrides a detection.
+
+    Regression: docs/MASTER_PLAN.md D12 - before the priority column any later
+    write replaced the stored name, so the winner depended on completion order.
+    """
+    target_id, run_id = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "a.example.com", run_id=run_id)
+    store.append_host_status(sub_id, run_id, "ALIVE")
+
+    # Nothing stored yet: even a priority-0 tool writes its own detection.
+    assert store.update_host_extras(sub_id, waf="cloudflare", waf_priority=0) is True
+    assert _waf_row(store, sub_id) == ("cloudflare", 0)
+
+    # A higher priority replaces it and remembers its own priority.
+    assert store.update_host_extras(sub_id, waf="Cloudflare", waf_priority=100) is True
+    assert _waf_row(store, sub_id) == ("Cloudflare", 100)
+
+    # A priority-0 tool and an equal-priority tool both leave the row alone.
+    store.update_host_extras(sub_id, waf="akamai", waf_priority=0)
+    assert _waf_row(store, sub_id) == ("Cloudflare", 100)
+    store.update_host_extras(sub_id, waf="imperva", waf_priority=100)
+    assert _waf_row(store, sub_id) == ("Cloudflare", 100)
+
+    # Tech merging is unaffected by the priority rule.
+    store.update_host_extras(sub_id, tech=["Java"], waf_priority=0)
+    row = store._conn.execute(
+        "SELECT tech_json, waf FROM host_status_history ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert (row["tech_json"], row["waf"]) == ('["Java"]', "Cloudflare")

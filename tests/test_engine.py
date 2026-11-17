@@ -3027,3 +3027,60 @@ async def test_tech_stage_drops_a_host_outside_the_target(tmp_path: Path) -> Non
     await engine.run("example.com", ScanOptions(active=True))
 
     assert "elsewhere.test" not in {item["fqdn"] for item in engine.store.host_rows(1)}
+
+
+def test_waf_priority_deterministic_merge(tmp_path: Path) -> None:
+    """D12: the highest `waf_priority` wins whatever order the tools finish in.
+
+    Regression: docs/MASTER_PLAN.md D12. `results` is completion order, so the
+    old first-non-None rule let a lower-priority tool name the WAF whenever it
+    happened to finish first - the stored value could flip between runs.
+    """
+    from dataclasses import replace
+    from itertools import permutations
+
+    names = {"wafw00f": "Cloudflare", "cdncheck": "cloudflare", "httpx_tech": "cloudflare"}
+    specs = {
+        "wafw00f": replace(tool("wafw00f", Stage.TECH), waf_priority=100),
+        "cdncheck": replace(tool("cdncheck", Stage.TECH), waf_priority=80),
+        "httpx_tech": replace(tool("httpx_tech", Stage.TECH), waf_priority=20),
+    }
+    stored: set[tuple[str | None, int]] = set()
+    for order in permutations(names):
+        db = Store(tmp_path / f"{'-'.join(order)}.db")
+        try:
+            target_id = db.create_target("example.com")
+            run_id = db.create_scan_run(target_id, "live")
+            sub_id = db.upsert_subdomain(target_id, "www.example.com", run_id=run_id)
+            db.append_host_status(sub_id, run_id, "ALIVE")
+            engine = Engine(
+                load_config(CONFIG),
+                db,
+                specs=specs,
+                adapters={},
+                scope_path=None,
+                workspace_root=tmp_path / "workspaces",
+            )
+            results = [
+                ToolResult(
+                    tool=name,
+                    status=ToolStatus.OK,
+                    records=[
+                        HostStatusRecord(
+                            fqdn="www.example.com",
+                            source=name,
+                            state=HostState.UNKNOWN,
+                            waf=names[name],
+                        )
+                    ],
+                )
+                for name in order
+            ]
+            engine._persist_tech(target_id, run_id, results, "example.com")
+            row = db._conn.execute("SELECT waf, waf_priority FROM host_status_history").fetchone()
+            stored.add((row["waf"], int(row["waf_priority"])))
+        finally:
+            db.close()
+
+    # Every one of the six orders ends with wafw00f's detection and its priority.
+    assert stored == {("Cloudflare", 100)}

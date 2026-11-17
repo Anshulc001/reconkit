@@ -1697,20 +1697,32 @@ class Engine:
         creates a status row and never touches `state`, because matching a
         technology says nothing about whether the host is up. Two tech tools
         contribute to one row, so the union of their findings is what is stored.
+
+        The WAF is one string and merges by `waf_priority` (D12): the pass keeps
+        its highest-priority detection, and a tie keeps the first record, so the
+        value never depends on which tool happened to finish first.
         """
-        groups: dict[str, dict[str, set[str] | str | None]] = {}
+        groups: dict[str, dict[str, set[str] | str | int | None]] = {}
         for result in results:
             if result.status is not ToolStatus.OK:
                 continue
             for record in result.records:
                 if not isinstance(record, HostStatusRecord):
                     continue
-                group = groups.setdefault(record.fqdn, {"tech": set(), "waf": None})
+                group = groups.setdefault(
+                    record.fqdn, {"tech": set(), "waf": None, "waf_priority": -1}
+                )
                 tech = group["tech"]
                 if isinstance(tech, set):
                     tech.update(record.tech)
-                if group["waf"] is None and record.waf is not None:
-                    group["waf"] = record.waf
+                if record.waf is not None:
+                    spec = self.specs.get(result.tool)
+                    priority = spec.waf_priority if spec is not None else 0
+                    raw = group["waf_priority"]
+                    current = raw if isinstance(raw, int) else -1
+                    if group["waf"] is None or priority > current:
+                        group["waf"] = record.waf
+                        group["waf_priority"] = priority
         for fqdn, group in groups.items():
             # Same target rule as every other stage: a record naming a host the
             # run did not ask about is dropped, not stored (docs/03 section 9).
@@ -1718,11 +1730,15 @@ class Engine:
                 continue
             tech = group["tech"]
             waf = group["waf"]
+            win_priority = group["waf_priority"]
             sub_id = self.store.upsert_subdomain(target_id, fqdn, run_id=run_id)
             self.store.update_host_extras(
                 sub_id,
                 tech=sorted(tech) if isinstance(tech, set) else [],
                 waf=waf if isinstance(waf, str) else None,
+                waf_priority=(
+                    win_priority if isinstance(win_priority, int) and win_priority > 0 else 0
+                ),
             )
 
     def _persist_ports(
