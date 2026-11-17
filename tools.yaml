@@ -101,7 +101,7 @@ tools:
       - env: VT_API_KEY
         url: "https://www.virustotal.com/gui/join-us"
         adds: "Free VirusTotal Public API key: adds the virustotal source (4 requests/minute, 500/day)."
-  amass:        {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: amass, version_cmd: [amass, -version], install: {method: apt, package: amass}, notes: "Always run in passive mode (-passive). Slow."}
+  amass:        {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: amass, version_cmd: [amass, -version], install: {method: apt, package: amass}, notes: "v5.1.3: passive is the default; enum -passive still parses but is deprecated. Slow - keep it last. Check `amass enum -h` before writing an adapter (v5 CLI: assoc|engine|enum|subs|track|viz)."}
   findomain:    {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: findomain, version_cmd: [findomain, --version], install: {method: github_release, repo: Findomain/Findomain, asset_pattern: "findomain-linux.zip", verify_checksums: false}, notes: "No checksums asset is published (verified 2026-11-13); download only over HTTPS from the registry repo."}
   chaos:
     stage: subs

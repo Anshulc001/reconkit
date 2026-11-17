@@ -833,10 +833,13 @@ FQDN:
 The progress meter rewrites one line with `\r`, so captured stderr is one very
 long line (that is why the raw capture is summarised here rather than pasted).
 
-**Mismatch to flag:** `tools.yaml` records `notes: "Always run in passive mode
-(-passive). Slow."` against **v5.1.3**, whose CLI surface changed a lot from v4
-(`assoc|engine|enum|subs|track|viz` subcommands). `-passive` still exists under
-`amass enum`, so the note is not wrong, but any adapter written from this note
-alone should be checked against `amass enum -h` first. `version_cmd: [amass,
+**Mismatch (closed 2026-11-17):** `tools.yaml` used to record `notes: "Always
+run in passive mode (-passive). Slow."` against **v5.1.3**, whose CLI surface
+changed a lot from v4 (`assoc|engine|enum|subs|track|viz` subcommands). The note
+now says passive is the default in v5 and that `enum -passive` is deprecated.
+Measured: `amass enum -h` lists `-passive` / `Deprecated since passive is the
+default setting`, and `amass -h` prints `Usage:
+amass [assoc|engine|enum|subs|track|viz] [options]`. Any adapter built from this
+note must still be checked against `amass enum -h` first. `version_cmd: [amass,
 -version]` works and prints `v5.1.3`.
 

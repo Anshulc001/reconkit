@@ -333,6 +333,17 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   adapter and its test already expected exit 0
   (`tests/test_binary_adapters.py::test_assetfinder_usage_identity`,
   `returncode=0`), so no code or test changed.
+- **2026-11-17 (install backlog T5), the amass note matches v5.1.3.**
+  `amass -version` -> `v5.1.3`; `amass -h` -> `Usage: amass
+  [assoc|engine|enum|subs|track|viz] [options]`; `amass enum -h` lists
+  `-passive` with `Deprecated since passive is the default setting`. The
+  registry note said "Always run in passive mode (-passive)", which is stale for
+  v5: passive needs no flag. `tools.yaml`, docs/09's per-stage notes and the
+  subs manual now say passive is the default, `-passive` is deprecated (still
+  parsed), and an adapter must be checked against `amass enum -h` first. No
+  test added or changed: the change is a note string and prose, and a test
+  pinning that prose would lock wording rather than behaviour (the registry
+  still loads, which the gate exercises).
 - **2026-11-17 (verification follow-up F8), the D3 test-count wording uses the
   measured figures.** The D3 entry above now says 32 test functions deleted and
   4 renamed (44 collected node ids removed, 12 added, 745 -> 713), then one

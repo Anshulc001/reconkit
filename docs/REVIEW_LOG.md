@@ -3047,6 +3047,41 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
   `mypy src/reconkit` -> `Success: no issues found in 35 source files`.
 - **Sudo:** none. **Not verified:** nothing new.
 
+## Install backlog T5 (2026-11-17): amass note against v5.1.3  (commit subject `docs: update the amass note for v5 passive default`; hash filled by the next commit)
+
+- **Docs read / goal:** `tools.yaml` amass note, docs/09 per-stage notes,
+  `docs/tool_manuals/subs.md` amass section. Goal: stop the registry telling a
+  future adapter to pass a deprecated flag.
+- **Raw measurement:** `amass -version` -> `v5.1.3` (exit 0). `amass -h` ->
+  ASCII logo, `v5.1.3`, then `Usage: amass
+  [assoc|engine|enum|subs|track|viz] [options]`. `amass enum -h` contains
+  `  -passive` / `    \tDeprecated since passive is the default setting`.
+- **Decision:** keep the recommendation (passive only, run last - it is the
+  slowest passive source) and drop the flag: in v5 passive is the default, so
+  the note now says so, names `-passive` as deprecated-but-parsed, and tells the
+  adapter author to read `amass enum -h` first because the CLI moved from v4 to
+  the six subcommands.
+- **Docs first:** docs/09's per-stage note rewritten; then `tools.yaml`'s
+  `notes:`; then subs.md's "Mismatch to flag" paragraph marked closed with the
+  measured flag help.
+- **Registry still loads:** `load_plans()['amass']` -> `binary amass`,
+  `version_args ('-version',)`; YAML `notes:` re-read from the file and printed
+  back verbatim. (Two throwaway inspection one-liners of mine hit
+  `ToolSpec`-not-subscriptable / `.notes` attribute errors; those were my
+  script's bugs, not the project's - corrected by reading the YAML directly.)
+- **Requirement -> proof:** `-passive` present + deprecated -> quoted above;
+  note text -> `notes: v5.1.3: passive is the default; enum -passive still
+  parses but is deprecated. Slow - keep it last. Check `amass enum -h` before
+  writing an adapter (v5 CLI: assoc|engine|enum|subs|track|viz).`
+- **Tests:** none added or changed - a test asserting this prose would pin
+  wording, not behaviour; nothing executable changed. Gate below covers that the
+  registry still parses.
+- **S1 checks:** `730 passed in 16.43s`; `ruff check .` -> `All checks passed!`;
+  `ruff format --check .` -> `67 files already formatted`; `mypy src/reconkit`
+  -> `Success: no issues found in 35 source files`.
+- **Sudo:** none. **Not verified:** an actual `amass enum -d` run (network
+  traffic, out of scope for a doc task).
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of
