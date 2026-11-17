@@ -613,6 +613,24 @@ D4. 2026-11-17 - The installer is removed; reconkit does not install tools.
     scope and the install half of docs/10; the tool registry, the scope gate and
     the scan path are untouched.
 
+D5. 2026-11-17 - `httpx_tech` must not accept the Python `httpx` CLI.
+    Reason: "V-UNEXPECTED item 1: httpx_tech reported Python httpx as installed;
+    fixed with a version_cmd + version_regex and a regex-miss-means-not-installed
+    rule" (owner ruling, option B, targeted fix). The D4 fallback treated a tool
+    with no `version_cmd` as installed on presence alone, so with only
+    `/usr/bin/httpx` (the Python CLI) visible, `doctor` said
+    `yes | /usr/bin/httpx | identity ok` while the `httpx` adapter row said
+    `wrong program` for the same file. `tools.yaml` `httpx_tech` gains
+    `version_cmd: [httpx, -version]` and a ProjectDiscovery banner pattern, and
+    `core.toolcheck.installed_version()` now returns `None` when a *declared*
+    `version_regex` does not match, instead of falling back to the first line.
+    A pattern is therefore a requirement, not a formatting hint; the first-line
+    fallback survives only for tools that declare no pattern. No new `ToolSpec`
+    field (identity markers stay an adapter-class concept), no change to
+    `BinaryAdapter.check_installed()`, and no probes are added to the other 12
+    presence-only tools - they stay a documented limitation (docs/10 section 3).
+    Supersedes the "absent or nothing matches" wording of decision 12j.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

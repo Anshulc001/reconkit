@@ -3116,6 +3116,61 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Sudo:** none. **Not verified:** an actual `webanalyze` scan against a host
   (network; and the tech stage has no adapter yet).
 
+## httpx_tech false positive D5 (2026-11-17, commit `fix: httpx_tech rejects Python httpx via version_regex miss rule`)
+
+- **Trigger:** the batch-db96df8 spot-checks (V-UNEXPECTED item 1). The owner
+  ruled option B, targeted fix: `tools.yaml` probe + regex, regex miss means
+  not installed, three regression tests, docs; explicitly **no** identity-marker
+  field and **no** probes on the other 12 presence-only tools.
+- **Before this fix (raw, from db96df8):** with `HOME=/tmp/fakehome` and
+  `PATH=/usr/local/bin:/usr/bin:/bin` (only the Python `/usr/bin/httpx`):
+  ```
+  httpx      -> installed="wrong program", path=/usr/bin/httpx, identity=failed
+  httpx_tech -> installed="yes", version=/usr/bin/httpx, path=/usr/bin/httpx, identity=ok
+  ```
+  Cause: `httpx_tech` had `version_cmd=None`, so `installed_version()` returned
+  `argv0` without running anything (presence-only), and `default_status()`
+  treats any non-`None` return as installed.
+- **Docs changed first:** docs/10 section 3 - the `version_regex` paragraph now
+  says an absent pattern keeps the first-line fallback while a **present**
+  pattern that does not match means not installed; new **Presence-only tools**
+  paragraph names the remaining 12 and states the limitation and that
+  `httpx_tech` is not one of them. MASTER_PLAN gains D5; PROGRESS gains a dated
+  deviation entry and its 12j line is marked superseded.
+- **Code:** `tools.yaml` `httpx_tech` gains
+  `version_cmd: [httpx, -version]` and
+  `version_regex: 'Current Version:\s*v?([0-9]+\.[0-9]+\.[0-9]+)'`;
+  `core/toolcheck.py` `installed_version()` returns `None` when the declared
+  pattern finds no match (three-line change; every other branch untouched).
+- **Proof, normal PATH:** `{"tool":"httpx_tech","installed":"yes",
+  "version":"1.12.0","path":"/home/kali/.reconkit/bin/httpx",
+  "identity":"ok"}` - the version column no longer shows a path.
+- **Proof, Python-only PATH** (same env as before): `{"tool":"httpx_tech",
+  "installed":"wrong program","version":"-","path":"/usr/bin/httpx",
+  "identity":"failed"}` plus the new warning
+  `httpx_tech: /usr/bin/httpx is not the expected program; doctor ignores it.`
+  `missing` went 27 (before, with the false positive) -> 28; `httpx` is
+  unchanged at `wrong program`.
+- **Tests:** three new in `tests/test_tools_registry.py` -
+  `test_the_python_httpx_cli_is_not_httpx_tech` (real Python console-script
+  stderr, exit 1 -> `None`), `test_projectdiscovery_httpx_is_httpx_tech`
+  (ANSI-wrapped `[INF] Current Version: v1.12.0` on stderr -> `"1.12.0"`),
+  `test_a_regex_miss_means_not_installed_for_any_tool` (`chaos` with
+  non-matching output -> `None`, proving the rule is not httpx-specific). One
+  existing test changed: `test_a_shared_binary_tool_still_has_a_source`
+  asserted `httpx_tech.version_cmd is None`, which the fix intentionally
+  falsifies; it now asserts `== ["httpx", "-version"]` and
+  `version_regex is not None` (name, purpose and source assertions unchanged).
+- **S1-S7:** `638 passed in 10.10s` (was 635); `ruff check .` -> `All checks
+  passed!`; `ruff format --check .` -> `57 files already formatted`; `mypy
+  src/reconkit` -> `Success: no issues found in 29 source files`. Focused run
+  `pytest -v -k 'httpx_tech or version_regex or regex_miss or python_httpx or
+  projectdiscovery or shared_binary'` -> 13 passed.
+- **Not done, by ruling:** no identity-marker field, no probes on the 12
+  presence-only tools, adapter path untouched. **Not verified:** a real Python
+  httpx that exits 0 on `-version` (none exists; the simulated runner covers the
+  contract).
+
 ## Installer removal D4 (2026-11-17): install/update deleted, doctor no longer needs installer/  (commit subject `refactor: remove install/update commands; doctor no longer depends on installer`; hash filled by the next commit)
 
 - **Docs read / goal:** docs/01 §6, docs/02 §2/§3/§6, docs/03 §4/§5/§9/§13,

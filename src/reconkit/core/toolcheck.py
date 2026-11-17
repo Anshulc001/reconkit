@@ -47,6 +47,11 @@ def installed_version(
     `version_cmd`'s head names the program that reports the version and defaults
     to the resolved copy; a distro package with no version flag points it at its
     package manager (docs/10 section 3).
+
+    A declared `version_regex` is a requirement, not a formatting hint: when the
+    probe output does not match it, the copy is a namesake and counts as not
+    installed. That is what keeps the Python `httpx` CLI from being reported as
+    `httpx_tech` (2026-11-17, V-UNEXPECTED item 1).
     """
     copy = installed_copy(spec, directory)
     if copy is None:
@@ -75,6 +80,7 @@ def installed_version(
         return None
     if spec.version_regex is not None:
         match = re.search(spec.version_regex, text)
-        if match is not None:
-            return match.group(1) if match.groups() else match.group(0)
+        if match is None:
+            return None
+        return match.group(1) if match.groups() else match.group(0)
     return text.splitlines()[0] if text else str(copy)

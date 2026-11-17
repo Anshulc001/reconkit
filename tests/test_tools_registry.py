@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 
 from reconkit.adapters.registry import get_spec, load_tools
+from reconkit.core.runner import ExecResult
+from reconkit.core.toolcheck import installed_version
 from reconkit.errors import ConfigError
 
 REPO = Path(__file__).resolve().parents[1]
@@ -177,7 +179,12 @@ def test_a_shared_binary_tool_still_has_a_source() -> None:
     assert spec.binary == "httpx"
     assert spec.source is not None
     assert "same binary as httpx" in spec.source
-    assert spec.version_cmd is None
+    # Changed 2026-11-17 (V-UNEXPECTED item 1): this row used to be
+    # presence-only (`version_cmd is None`), which counted Python's httpx as
+    # installed. It now carries its own probe; the regex requirement is pinned
+    # by test_projectdiscovery_httpx_is_httpx_tech and by its Python twin.
+    assert spec.version_cmd == ["httpx", "-version"]
+    assert spec.version_regex is not None
 
 
 def test_go_sources_are_pinned_to_nothing() -> None:
@@ -310,3 +317,45 @@ def test_version_regex_survives_registry_loading(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert load_tools(tools)["beta"].version_regex == r"v\d+"
+
+
+def _probe(tmp_path: Path, tool: str, binary: str, outcome: ExecResult) -> str | None:
+    """Run `installed_version` against a temp copy, with a fake probe result."""
+    (tmp_path / binary).write_text("", encoding="utf-8")
+    spec = load_tools()[tool]
+    return installed_version(spec, tmp_path, runner=lambda argv, **kwargs: outcome)
+
+
+def test_the_python_httpx_cli_is_not_httpx_tech(tmp_path: Path) -> None:
+    """V-UNEXPECTED item 1: the namesake must not count as installed.
+
+    Real output of the Python `httpx` console script (2026-11-17): no
+    `-version` flag, no ProjectDiscovery banner, exit 1. Before the regex-miss
+    rule this text fell through to the first line and doctor said `yes`.
+    """
+    python_httpx = ExecResult(
+        returncode=1,
+        stdout="",
+        stderr=(
+            "The httpx command line client could not run because the required "
+            "dependencies were not installed.\n"
+            "Make sure you've installed everything with: pip install 'httpx[cli]'\n"
+        ),
+    )
+    assert _probe(tmp_path, "httpx_tech", "httpx", python_httpx) is None
+
+
+def test_projectdiscovery_httpx_is_httpx_tech(tmp_path: Path) -> None:
+    """The real banner (stderr, ANSI around [INF]) yields the captured group."""
+    pd_httpx = ExecResult(
+        returncode=0,
+        stdout="",
+        stderr="\n[\x1b[34mINF\x1b[0m] Current Version: v1.12.0\n",
+    )
+    assert _probe(tmp_path, "httpx_tech", "httpx", pd_httpx) == "1.12.0"
+
+
+def test_a_regex_miss_means_not_installed_for_any_tool(tmp_path: Path) -> None:
+    """The rule is general, not special-cased to httpx_tech (chaos here)."""
+    namesake = ExecResult(returncode=0, stdout="chaos 0.5.2\n", stderr="")
+    assert _probe(tmp_path, "chaos", "chaos", namesake) is None

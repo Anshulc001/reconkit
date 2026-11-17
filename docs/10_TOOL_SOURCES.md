@@ -128,12 +128,15 @@ resolved path in the Version column by design (see below).
 
 **`version_regex` is how a banner-first tool reports its version.**
 `installed_version()` searches the whole `version_cmd` output with the tool's
-`version_regex` and returns the first capture group (or the whole match when the
-pattern has no group), so `katana`'s ASCII logo and `nuclei`'s ANSI-coloured
-`[INF]` line no longer become the version column. When the field is absent - or
-present and nothing matches - the fallback is unchanged: the first non-empty
-line of the output. A pattern that does not compile is a `ConfigError` when the
-registry loads, before any command runs. The pattern describes a property of the
+`version_regex` and returns the first capture group (or the whole match when the  pattern has no group), so `katana`'s ASCII logo and `nuclei`'s ANSI-coloured
+`[INF]` line no longer become the version column. When the field is absent, the
+fallback is unchanged: the first non-empty line of the output. When the field is
+present and **nothing matches, the copy is treated as not installed** (`wrong
+program` when it exists, `missing` when it does not) - since 2026-11-17 a
+declared pattern is a requirement, not a formatting hint, because a probe that
+runs but does not print the expected banner is a namesake (V-UNEXPECTED item 1:
+`httpx_tech` must not accept the Python `httpx` CLI). A pattern that does not
+compile is a `ConfigError` when the registry loads, before any command runs. The pattern describes a property of the
 tool, which is why it lives in `tools.yaml` next to `version_cmd`; the `katana`
 and `nuclei` patterns were taken from their real banners on Kali (12j).
 
@@ -147,6 +150,19 @@ tlsx/cdncheck). `wafw00f --version` writes to stdout and wraps the value in ANSI
 (`... you have is \x1b[1;94mv2.4.2\x1b[0m`), so its pattern is `WAFW00F you have
 is[^\n]*?(v?\d+\.\d+\.\d+)`. All seven were derived from the real binaries on
 this box, not from documentation.
+
+**Presence-only tools.** A binary tool with no `version_cmd` is considered
+installed when its binary name resolves, because there is nothing to run the
+name through. This is a known limitation: a **same-named program that is not the
+expected product is counted as installed** for those tools. Twelve are in this
+group: `crlfuzz`, `dalfox`, `dnsreaper`, `github_subdomains`, `gowitness`,
+`hakrawler`, `httprobe`, `sqlmap`, `subzy`, `unfurl`, `waybackurls`,
+`webanalyze` (their real `-version` only prints Go flag usage, see below).
+`httpx_tech` **is not one of them**: since 2026-11-17 it carries its own
+`version_cmd` (`httpx -version`) and a `version_regex`, so a probe that does not
+print ProjectDiscovery's `Current Version:` banner - the Python `httpx` CLI, for
+example - is treated as not installed instead of taking the file's existence as
+proof.
 
 **Tools with no version output at all (2026-11-17).** `github_subdomains`,
 `webanalyze`, `waybackurls`, `unfurl` and `httprobe` print only Go `flag` usage:

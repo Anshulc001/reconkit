@@ -9,10 +9,11 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 - All four owner tasks (2026-11-17) are implemented, tested and committed: D1 `c99eaee`, D2 `6642ee4`, D3 `6a2db4d`, the interactive-mode fix `10b3a48`, Task 4 docs with this entry. Nothing else is queued; Part 13's uncertainties stay under "Open risks".
 - The verification follow-up (2026-11-17) closes the eight findings from the accepted 4-task batch (`F1`-`F8`, report section V-UNEXPECTED) in one commit: `--active` help text, the owner verification commands, five historical pacing markers, the core package docstring, two dead `pyproject` ignores, the AGENTS `config.yaml` row, two tool manuals and the D3 test counts. Documentation and help text only - no behaviour, flag, schema or test change.
 - **Owner-requested behavior changes (2026-11-17):** D1 (no scope file = unrestricted active scanning) is committed (`c99eaee`), D2 (naabu is scope-mode dependent) is committed (`6642ee4`), D3 (all speed/throttle control removed) is committed with this entry, and Task 4 (the end-to-end interactive-flow section in docs/02) is the next action.
+- **httpx_tech false positive FIXED (2026-11-17, MASTER_PLAN D5, V-UNEXPECTED item 1; commit `fix: httpx_tech rejects Python httpx via version_regex miss rule`).** `httpx_tech` was presence-only, so with only Python's `/usr/bin/httpx` visible doctor said `yes` / `identity: ok` where the `httpx` adapter row correctly said `wrong program`. It now carries `version_cmd: [httpx, -version]` + `version_regex: 'Current Version:\s*v?([0-9]+\.[0-9]+\.[0-9]+)'`, and `installed_version()` treats a declared regex that does not match as `None` (not installed). Re-tested both ways: normal PATH -> `version: "1.12.0"`; Python-only PATH -> `wrong program` / `identity: failed`. 638 passed. The other 12 presence-only tools stay as they are and are now documented as a known limitation (docs/10 section 3).
 - **Installer removal COMPLETE (2026-11-17, MASTER_PLAN D4, owner request "user-requested removal of install/update commands").** `install`, `update`, `doctor --fix` and `src/reconkit/installer/` are deleted; `tools.yaml` `install:` blocks became inert `source:` strings; `doctor` uses `ToolSpec` through `core/toolcheck.py` and no longer imports the installer. Full evidence, every changed test and the 730 -> 635 count reconciliation are in REVIEW_LOG "Installer removal D4". Nothing else queued; next action: none.
 - **Install/doc backlog batch (2026-11-17, T1-T6 + one correction; the commands named here were removed later the same day by D4).** `reconkit install rustscan` works from its real 2.3.0 release (`f638c05`); the seven banner-first tools show a real version (`e0ef81d`); smap/gospider/subjs/urlfinder show one and the five Go-flag tools are documented path rows (`cb1fcd2`); `assetfinder -h` exit code corrected (`74c9102`, `-version` exit 2 corrected in `a037014`); amass v5 note (`24f64a3`); webanalyze `-update` recorded (`583e530`). Every one confirmed against the real binaries on this box.
 - **Next action:** none. The nested-archive item under "Open risks" is moot for reconkit (it installs nothing since D4) and stays only as a note about rustscan 2.4.1.
-- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 5) after D4: `635 passed`, `ruff check .` clean, `ruff format --check .` 57 files, `mypy src/reconkit` clean (29 source files). The pre-D4 baseline was `730 passed`, 67 files, 35 source files.
+- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 5) after D5: `638 passed`, `ruff check .` clean, `ruff format --check .` 57 files, `mypy src/reconkit` clean (29 source files). Pre-D5 was `635 passed`; pre-D4 `730 passed`, 67 files, 35 source files.
 - Nothing is pushed: local `main` is ahead of `reconkit/main`, which is still `5fd1d9a`. Push only if the owner asks (`git push reconkit main`).
 - Already decided, do not reopen: no scope-bypass flag; consensus lives in `engine.py`; adapters never import `store`/`scope`/`ui`/`cli`; `subjack` replaced by `subzy` + nuclei takeover templates; reconkit installs nothing, so there is no installer platform rule (D4, 2026-11-17); free mode is default, keys only from `.env`; the ports ceiling is permanent (12i).
 - Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in `src/`; new lint/type suppressions; `shell=True`; the whole environment to a child; adapters importing store/scope/ui/cli; consensus outside `engine.py`; pushing.
@@ -73,7 +74,7 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
 - 12g: `STALE_AFTER_S = 900` and 12d's `DETAIL_MAX_CHARS = 200` are module constants, not config keys, because the rulings allowed no new config.
 - 12k: `scan_runs.status` for an empty stage still reads `completed`; only the warning and the exit code changed.
 - 12h: the SQLite persistence block stays on the event loop by ruling; docs/03 section 11 states the reason (single writer, `check_same_thread` on the main-thread connection) and the bound (one transaction per stage). Both `scope.yaml` reads - the active gate and the `ip_allowed` predicate - moved to `to_thread`, not just the gate.
-- 12j: `version_regex` is a `tools.yaml` field next to `version_cmd` (not a config key); it is compiled and rejected at registry load, the first capture group is the version, and the old first-line behaviour is the fallback.
+- 12j: `version_regex` is a `tools.yaml` field next to `version_cmd` (not a config key); it is compiled and rejected at registry load, and the first capture group is the version. **Changed 2026-11-17 (D5):** the first-line fallback now applies only when the field is *absent*; a declared pattern that does not match means "not installed" (V-UNEXPECTED item 1).
 - **2026-11-16 (Phase 1, docs only):** a new documentation tree
   `docs/tool_manuals/` (8 files: `README.md` plus one per stage) was created
   outside `docs/02`/`docs/03`. This is the documentation-only exception the
@@ -398,6 +399,29 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   4 renamed (44 collected node ids removed, 12 added, 745 -> 713), then one
   parametrized case removed and two tests added by the interactive-mode fix
   (713 -> 714). The disclosed name list is unchanged.
+
+- **2026-11-17 (D5, V-UNEXPECTED item 1): `httpx_tech` reported Python
+  `httpx` as installed; fixed with a `version_cmd` + `version_regex` and a
+  regex-miss-means-not-installed rule.** The D4 fallback probed nothing for a
+  tool with no `version_cmd`, so `httpx_tech` accepted whatever file named
+  `httpx` was first found: with PD httpx hidden, doctor printed
+  `yes | /usr/bin/httpx | ok` while the `httpx` adapter row printed
+  `wrong program` for the same file. Fix: `tools.yaml` `httpx_tech` gains
+  `version_cmd: [httpx, -version]` and
+  `version_regex: 'Current Version:\s*v?([0-9]+\.[0-9]+\.[0-9]+)'`, and
+  `core/toolcheck.installed_version()` returns `None` when a declared pattern
+  does not match instead of falling through to the first output line. No new
+  field, no change to `BinaryAdapter.check_installed()`, and the other 12
+  presence-only tools are untouched (documented as a known limitation in
+  docs/10 section 3). Tests, three new in `tests/test_tools_registry.py`:
+  `test_the_python_httpx_cli_is_not_httpx_tech`,
+  `test_projectdiscovery_httpx_is_httpx_tech`,
+  `test_a_regex_miss_means_not_installed_for_any_tool`. One changed:
+  `test_a_shared_binary_tool_still_has_a_source`, which asserted
+  `httpx_tech.version_cmd is None` (old: the row was presence-only; new:
+  `== ["httpx", "-version"]` and `version_regex is not None`; reason: the row
+  now carries a probe, which is the whole point of the fix). 635 -> 638
+  collected.
 
 ## Open risks
 
