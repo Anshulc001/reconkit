@@ -550,6 +550,24 @@ regression test; PROGRESS "Deviations" records the new `results_dir` key and the
 new `docs/tool_manuals/` tree from Phase 1; nothing pushed.
 
 =====================================================
+DATED DEVIATIONS (owner-requested, 2026-11-17)
+=====================================================
+These are explicit owner requests made after the plan above was saved. They
+take precedence over the rules they touch; each is recorded here with its date
+and reason, and mirrored in docs/PROGRESS.md "Deviations".
+
+D1. 2026-11-17 - No scope file means unrestricted active scanning.
+    Reason: "user-requested: no scope file should mean unrestricted scanning of
+    operator-specified targets, not auto-derived restricted scope."
+    A run with no scope file at the resolved path (default `./scope.yaml`,
+    `--scope` overrides) runs active/full stages unrestricted against the
+    target(s) given with `-d`/`-l` and every host discovered under them: no
+    auto-derived scope object, no implicit restriction, no refusal. A scope
+    file that **is** present is enforced exactly as before and is only ever
+    read. This changes plan rule 2 of docs/05 for the no-file case only; there
+    is still no flag that weakens a real scope file.
+
+=====================================================
 LATER BUG FIXES (any session)
 =====================================================
 Reproduce with a failing test first, fix, run the SELF-REVIEW LOOP on the fix, log it in REVIEW_LOG "Bugs found", update RESUME. Never change behavior without a test.

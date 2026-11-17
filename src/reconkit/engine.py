@@ -29,7 +29,7 @@ from reconkit.adapters.registry import ToolSpec, load_tools
 from reconkit.config import AppConfig, SpeedName, resolve_speed
 from reconkit.core.pacing import Clock, Pacer, RateLimiter
 from reconkit.core.runner import validate_host, validate_target
-from reconkit.core.scope import load_scope, passive_warning, require_active
+from reconkit.core.scope import load_scope, passive_warning, require_active, scope_present
 from reconkit.core.store import Store, redact, utc_now
 from reconkit.core.wildcard import WildcardDetector, WildcardResult, WildcardStatus
 from reconkit.core.workspace import Workspace
@@ -86,6 +86,18 @@ IP_GATE_BLOCKED: dict[str, str] = {
 }
 Sleep = Callable[[float], Awaitable[None]]
 InstalledCheck = Callable[[type[BaseToolAdapter]], bool]
+
+
+def allow_all_ip(_ip: str) -> bool:
+    """The docs/05 rule 6 predicate when there is no scope file (2026-11-17).
+
+    No scope file means no CIDR list, so there is nothing to restrict: active
+    scanning of the operator's targets is unrestricted. With a scope file the
+    predicate is the loaded scope's `ip_allowed` instead.
+    """
+    return True
+
+
 Now = Callable[[], str]
 # One short progress line for the CLI to render on stderr (docs/03 section 5).
 Progress = Callable[[str], None]
@@ -803,6 +815,11 @@ class Engine:
     def _active_hosts(
         self, target: str, hosts: list[str], speed: str
     ) -> tuple[list[str], list[str], str | None]:
+        if not scope_present(self.scope_path):
+            # docs/05 rule 2 (2026-11-17): no scope file means unrestricted
+            # active scanning of the operator's targets and everything
+            # discovered under them. No scope object is loaded or derived.
+            return hosts, [], None
         try:
             gate = load_scope(self.scope_path)
             allowed = [host for host in hosts if gate.allows(host)]
@@ -844,6 +861,8 @@ class Engine:
         address must treat it as a block, so an unreadable scope can only narrow
         what may be contacted, never widen it.
         """
+        if not scope_present(self.scope_path):
+            return allow_all_ip
         try:
             return load_scope(self.scope_path).ip_allowed
         except (ConfigError, ScopeError):

@@ -141,7 +141,7 @@ workspaces/<domain>/
 - `now` is an injected timestamp source (default `store.utc_now`) used for `targets.created_at`, `scan_runs.started_at/finished_at` and `host_status_history.checked_at`; tests pass a fixed clock. The engine never calls `datetime.now()` or `time.time()` directly.
 - `ScanSummary.exit_code` is a typed `ExitCode` (`0` success, `1` unexpected, `2` usage, `3` scope, `4` no usable tool, `5` partial, `130` interrupted). The engine never calls `sys.exit()`; the CLI maps the value. `_exit_code()` is the single decision site and treats a requested stage that executed zero tools as one more source of `5`, adding one `ScanSummary.warnings` entry naming the stage (docs/02 section 6 has the precedence order).
 - Tools are selected from `tools.yaml` once per run. A `--tools` name must exist; `intrusive` tools are refused, `opt_in` tools need `--include-noisy` or an explicit `--tools`, and `--exclude` always wins. Every selected or skipped tool gets a `tool_runs` row with its redacted error.
-- Active tools run only when `--active` is set **and** `require_active()` passes. Discovered hosts are revalidated and re-checked against scope before they reach an active `RunContext`; dropped hosts are reported, never probed. A missing/unsafe scope skips the active tools instead of raising out of the stage.
+- Active tools run only when `--active` is set. **A scope file is optional:** when the resolved path (default `./scope.yaml`, `--scope` overrides) does not exist, active and full scanning run unrestricted against the operator's targets and the hosts discovered under them - no scope object is constructed and nothing is derived from the target to restrict it (docs/05 rule 2). When a scope file **is** present, `require_active()` runs unchanged: discovered hosts are revalidated and re-checked against scope before they reach an active `RunContext`; dropped hosts are reported, never probed; and a denial skips the active tools (exit 3) instead of raising out of the stage. The file is only read.
 - Each tool's `RunContext.env` contains only the env names in that tool's `keys` (none with `--no-keys`). One fresh `RateLimiter` is built per stage; `Pacer.reset()` runs at stage start; `slow` runs tools one at a time, other speeds use `pacer.parallel_limit()`.
 - `--mock` reads only the fixtures, never calls `check_installed()`, the network or a subprocess. Stage asset writes are batched with `store.transaction()`; tool runs are recorded individually.
 
@@ -157,7 +157,7 @@ workspaces/<domain>/
 ## 6. Data Flow (example: `reconkit live -d example.com --active`)
 
 1. CLI parses flags (`--speed slow` default) and loads `config.yaml`.
-2. Scope gate: `scope.yaml` must exist, not be expired, allow active, and match `example.com`; exit code 3 otherwise.
+2. Scope gate: if `scope.yaml` exists it must not be expired, must allow active and must match `example.com` (exit code 3 otherwise). With no scope file at the resolved path the active stages run unrestricted against the named target (docs/05 rule 2).
 3. Engine reads known subdomains for the target from SQLite; each host is checked against scope again (out-of-scope removed).
 4. Engine selects adapters for stage `live` that are installed and allowed by tier/flags.
 5. Pacer orders hosts (shuffled in slow/normal) and schedules tools: one at a time with random delays in slow mode.
@@ -253,7 +253,8 @@ Single machine, thousands of hosts per target. Beyond that is out of scope (see 
 | Tool timeout | Kill process group, keep partial output if parseable, record `timeout` |
 | HTTP source returns 429/5xx | `failed` result carrying the status; no retry (only a connection error retries once) |
 | No adapter available for a stage | Exit code 4 with install hint |
-| `scope.yaml` missing/expired/mismatch | Refuse active stage, exit code 3 |
+| `scope.yaml` expired/mismatch (file present) | Refuse active stage, exit code 3 |
+| `scope.yaml` absent | Active/full scanning runs unrestricted against the operator's targets and discovered hosts (docs/05 rule 2); no scope object is built |
 | DB locked or corrupt | Clear error; never silently continue; suggest `--db` path |
 | Ctrl+C | Stop launching new tools, mark the stage run `interrupted`, exit 130 (resumable); a child already running is not explicitly killed in this build |
 | Network down | Passive HTTP sources fail fast with one summary line |

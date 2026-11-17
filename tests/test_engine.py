@@ -182,7 +182,7 @@ def make_engine(
     *,
     env: dict[str, str] | None = None,
     store: Store | None = None,
-    scope_text: str = SCOPE,
+    scope_text: str | None = SCOPE,
     now: Callable[[], str] | None = None,
     installed: Callable[[type[BaseToolAdapter]], bool] | None = None,
 ) -> Engine:
@@ -190,7 +190,10 @@ def make_engine(
     tmp_path.mkdir(parents=True, exist_ok=True)
     store = store if store is not None else Store(tmp_path / "recon.db")
     scope = tmp_path / "scope.yaml"
-    scope.write_text(scope_text, encoding="utf-8")
+    # scope_text=None is the documented no-scope-file mode (docs/05 rule 2):
+    # the path is still handed to the engine and simply does not exist.
+    if scope_text is not None:
+        scope.write_text(scope_text, encoding="utf-8")
     return Engine(
         config,
         store,
@@ -2229,3 +2232,119 @@ async def test_raw_output_keeps_nul_and_ansi_bytes_verbatim(tmp_path: Path) -> N
 
     written = Path(raw_result(summary, "ansi").raw_path or "")
     assert written.read_bytes() == payload.encode("utf-8")
+
+
+# ---------------------------------------- no scope file (docs/05 rule 2, 2026-11-17)
+
+
+async def test_no_scope_file_runs_active_stages_unrestricted(tmp_path: Path) -> None:
+    """Regression: 2026-11-17 - no scope file means unrestricted active scanning.
+
+    The operator named the target explicitly; a missing scope file is not a
+    restriction and not a refusal. Active stages run against the target and the
+    hosts discovered under it, with no exit 3.
+    """
+    rec = Recorder()
+    specs = {
+        "subs": tool("subs", Stage.SUBS),
+        "live": tool("live", Stage.LIVE, mode=Mode.ACTIVE),
+        "ports": tool("ports", Stage.PORTS, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "subs": adapter(
+            "subs", Stage.SUBS, rec, records=[sub("www.example.com"), sub("api.example.com")]
+        ),
+        "live": adapter(
+            "live",
+            Stage.LIVE,
+            rec,
+            records=[alive("www.example.com"), alive("api.example.com")],
+        ),
+        "ports": adapter("ports", Stage.PORTS, rec, records=[]),
+    }
+    summary = await make_engine(
+        tmp_path, specs, adapters, scope_text=None, installed=lambda _adapter: True
+    ).run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, mock=True),
+    )
+
+    assert rec.names == ["subs", "live", "ports"]
+    live_hosts = rec.hosts[rec.names.index("live")]
+    assert "www.example.com" in live_hosts
+    assert "api.example.com" in live_hosts
+    assert summary.scope_denied is False
+    assert summary.exit_code is not ExitCode.SCOPE
+    stage = next(item for item in summary.stages if item.stage is Stage.LIVE)
+    assert stage.dropped_hosts == []
+
+
+async def test_a_present_scope_file_is_enforced_exactly_as_before(tmp_path: Path) -> None:
+    """The scope file that *is* present keeps the unchanged gate (docs/05 rule 2)."""
+    rec = Recorder()
+    specs = {"live": tool("live", Stage.LIVE, mode=Mode.ACTIVE)}
+    adapters = {"live": adapter("live", Stage.LIVE, rec, records=[alive("example.com")])}
+    scope = SCOPE.replace("allow_active: true", "allow_active: false")
+    summary = await make_engine(tmp_path, specs, adapters, scope_text=scope).run(
+        "example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True)
+    )
+    assert "live" not in rec.names
+    assert summary.scope_denied is True
+    assert summary.exit_code is ExitCode.SCOPE
+
+
+async def test_no_scope_file_never_loads_or_derives_a_scope_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No scope file must not construct a scope from the target.
+
+    `load_scope` is made fatal for the duration of the run: if the no-file path
+    loaded a scope (or derived one from `example.com`) the run would raise here.
+    The same run must also hand the active stage an allow-all `ip_allowed`,
+    because there is no CIDR list to restrict against.
+    """
+    rec = Recorder()
+    predicates: list[Callable[[str], bool] | None] = []
+
+    class FakePorts(BaseToolAdapter):
+        name = "ports-fake"
+        stage = Stage.PORTS
+
+        async def run(self, ctx: RunContext) -> ToolResult:
+            predicates.append(ctx.ip_allowed)
+            return ToolResult(tool=self.name, status=ToolStatus.OK, records=[])
+
+        def build_command(self, ctx: RunContext) -> list[str]:
+            raise AssertionError("build_command must not be called")
+
+        def parse_output(self, raw: str) -> list[object]:
+            return []
+
+    def fatal_load_scope(path: object = None) -> object:
+        raise AssertionError(f"no scope file may be loaded (path={path!r})")
+
+    monkeypatch.setattr(engine_module, "load_scope", fatal_load_scope)
+    specs = {
+        "subs": tool("subs", Stage.SUBS),
+        "live": tool("live", Stage.LIVE, mode=Mode.ACTIVE),
+        "ports": tool("ports", Stage.PORTS, mode=Mode.ACTIVE),
+    }
+    adapters: dict[str, type[BaseToolAdapter]] = {
+        "subs": adapter("subs", Stage.SUBS, rec, records=[sub("www.example.com")]),
+        "live": adapter("live", Stage.LIVE, rec, records=[alive("www.example.com")]),
+        "ports": FakePorts,
+    }
+    summary = await make_engine(
+        tmp_path, specs, adapters, scope_text=None, installed=lambda _adapter: True
+    ).run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, mock=True),
+    )
+
+    assert summary.exit_code is not ExitCode.SCOPE
+    assert rec.names == ["subs", "live"]
+    assert len(predicates) == 1
+    assert predicates[0] is not None
+    assert predicates[0]("203.0.113.9") is True
+    assert predicates[0]("10.0.0.1") is True
+    assert not (tmp_path / "scope.yaml").exists()

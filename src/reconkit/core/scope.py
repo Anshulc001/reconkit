@@ -120,6 +120,21 @@ def _path(path: Path | str | None) -> Path:
     return Path(path) if path is not None else DEFAULT_SCOPE_PATH
 
 
+def scope_path(path: Path | str | None = None) -> Path:
+    """The resolved scope location: `--scope` when given, else `./scope.yaml`."""
+    return _path(path)
+
+
+def scope_present(path: Path | str | None = None) -> bool:
+    """True when a scope file exists at the resolved location.
+
+    This is the one decision the active path makes about scope mode: no file
+    means unrestricted active scanning of the operator's targets (docs/05 rule
+    2, 2026-11-17); a file present means the unchanged gate runs.
+    """
+    return _path(path).exists()
+
+
 def load_scope(path: Path | str | None = None) -> ScopeGate:
     """Load and validate scope.yaml.
 

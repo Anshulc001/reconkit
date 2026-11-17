@@ -329,7 +329,7 @@ def _run_scan(
         config: AppConfig = load_config(config_path, speed=speed, delay=delay)
         is_active = active if plan is None else (plan.active or active)
         if command in _ACTIVE_ONLY and not is_active:
-            raise ConfigError(f"{command} requires --active and a matching scope.yaml")
+            raise ConfigError(f"{command} requires --active")
         # docs/02 section 2: the passive-only commands run no active stage, so
         # accepting --active would promise work the command cannot do.
         stages = plan.stages if plan is not None else _stages(command, is_active)

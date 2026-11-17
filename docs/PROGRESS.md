@@ -109,6 +109,19 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   `Store.host_rows()` now LEFT JOINs the latest `host_status_history` row once
   instead of running two correlated subqueries. The host table and the `--json`
   host shape are unchanged; the new values are only used by the report.
+- **2026-11-17 (owner-requested deviation D1), no scope file means
+  unrestricted active scanning.** With no scope file at the resolved path
+  (default `./scope.yaml`, `--scope` overrides), `--active` active/full runs scan
+  the operator's `-d`/`-l` targets and everything discovered under them with no
+  auto-derived scope object, no implicit restriction and no exit 3. A scope file
+  that IS present keeps the unchanged gate and is only ever read. Docs 02/03/05
+  and `MASTER_PLAN.md` "Dated deviations" record it. Changed test:
+  `test_mock_scope_denial_returns_three` became
+  `test_mock_run_without_a_scope_file_is_unrestricted` (it asserted the removed
+  exit 3), and `test_mock_scope_file_denial_returns_three` keeps the exit-3
+  coverage against a real file. New: `test_no_scope_file_runs_active_stages_unrestricted`,
+  `test_a_present_scope_file_is_enforced_exactly_as_before`,
+  `test_no_scope_file_never_loads_or_derives_a_scope_object`.
 - **2026-11-16 (Part 13), a multi-domain file does not use a tool's own list
   flag:** the interactive file path reuses `-l` (one full scan per domain), even
   though `subfinder -dL`, `dnsx -l`, `httpx -l`, `tlsx -l`, `naabu -list`,

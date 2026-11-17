@@ -2693,6 +2693,24 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Deviations (also in PROGRESS):** new `results_dir` config key (defaulted, so old config files still load); the report writer lives in `ui.py` and the prompts in `cli.py` instead of a new module; `--json` now emits progress on stderr (docs/02 changed first); `.gitignore` gained `results/`; `HostSnapshot` and `Store.host_rows()` gained stored fields with defaults so the table and `--json` shape are unchanged.
 - **Not verified / known:** the pty demo used the real network at `--speed fast` against two in-scope domains only; Windows untested; the pre-existing all-`UNKNOWN` result of `run --active --mock` is unchanged by this part (documented in PROGRESS Open risks, not fixed here).
 
+## Task 1 (2026-11-17): no scope file means unrestricted active scanning
+
+- **Docs read / goal:** `AGENTS.md`, RESUME, the pitfalls table, `docs/02` (full), `docs/03` (sections 5-7, 13), `docs/05` (rules 1-2, 6, 9), `docs/09` (RunContext), `docs/MASTER_PLAN.md`. Goal: a missing scope file must stop being a refusal; the operator's explicit `-d`/`-l` target is the authorization, and no scope object is derived from it. A scope file that is present keeps the unchanged gate and is only read.
+- **Decisions and assumptions:** "no scope file" is decided in exactly one place, `scope.scope_present()` (resolved path missing). `Engine._active_hosts` returns the host list untouched when it is false; `Engine._ip_allowed` returns the module-level `allow_all_ip` predicate, because with no CIDR list there is nothing to filter - returning `None` (the docs/05 "no permission" value) would silently block every address. `scope.require_active()` and `load_scope()` are untouched. `scope check` is unchanged: it is an inspection of a scope file, and still reports "BLOCKED (scope file not found)".
+- **Docs changed first:** `docs/05` rule 2 (two branches), rule 6 (naabu is Task 2; IP rule and the allow-all predicate), rule 9 (no bypass applies to a present file); `docs/02` section 2 ("What `--active` needs"), stage table header, `--active` flag row, exit code 3, `stages[].skipped` wording, section 2b question 2; `docs/03` engine API bullet, data-flow step 2, failure table row; `docs/MASTER_PLAN.md` new "DATED DEVIATIONS" section, entry D1.
+- **Files touched:** `src/reconkit/core/scope.py` (+15: `scope_path`, `scope_present`), `src/reconkit/engine.py` (`allow_all_ip`, two early returns), `src/reconkit/cli.py` (one error message drops "and a matching scope.yaml"), `tests/test_engine.py`, `tests/test_cli.py`, docs above.
+- **Requirement -> test table:**
+  | Requirement | Test |
+  |---|---|
+  | (a) no file + single domain, active stages run unrestricted, no exit 3 | `test_no_scope_file_runs_active_stages_unrestricted`, `test_mock_run_without_a_scope_file_is_unrestricted` |
+  | (b) a real scope file is enforced exactly as today | `test_a_present_scope_file_is_enforced_exactly_as_before`, `test_mock_scope_file_denial_returns_three` |
+  | (c) no auto-derived scope object is constructed or required | `test_no_scope_file_never_loads_or_derives_a_scope_object` (monkeypatched `load_scope` is fatal; also asserts the allow-all predicate) |
+- **Changed test (disclosure):** `tests/test_cli.py::test_mock_scope_denial_returns_three` was renamed `test_mock_run_without_a_scope_file_is_unrestricted` and now asserts `exit_code != 3`, `scope_denied is False`; it previously asserted the removed exit 3 for a missing file. Reason: the behavior it asserted is the one this task replaced. `test_mock_scope_file_denial_returns_three` was added so the exit-3 path stays covered against a real file.
+- **Mutation proof:** forcing `scope_present()` to `return True` made `test_no_scope_file_runs_active_stages_unrestricted` and `test_no_scope_file_never_loads_or_derives_a_scope_object` fail (raw tail: `FAILED ... test_no_scope_file_runs_active_stages_unrestricted`, `FAILED ... test_no_scope_file_never_loads_or_derives_a_scope_object`, `2 failed, 1 passed`); restored with a clean `git diff` against the backup.
+- **Raw check output:** `738 passed in 16.56s`; `ruff check .` -> `All checks passed!`; `ruff format --check .` -> `69 files already formatted` (after `ruff format` on the two files it flagged); `mypy src/reconkit` -> `Success: no issues found in 36 source files`.
+- **Not verified:** a real-network active run without a scope file; Windows.
+- **Next part must know:** `allow_all_ip` is the no-scope IP predicate; do not reintroduce a `None` there.
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

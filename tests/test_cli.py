@@ -213,7 +213,15 @@ def test_mock_human_output_uses_rich_tables_on_stderr(tmp_path: Path) -> None:
     assert "UNKNOWN" in result.stderr or "ALIVE" in result.stderr
 
 
-def test_mock_scope_denial_returns_three(tmp_path: Path) -> None:
+def test_mock_run_without_a_scope_file_is_unrestricted(tmp_path: Path) -> None:
+    """Regression: 2026-11-17 - a missing scope file is not a refusal.
+
+    Changed from `test_mock_scope_denial_returns_three`, which asserted exit 3 for
+    an absent scope file. That behaviour was replaced by the owner request: no
+    scope file means unrestricted active scanning of the operator's target. The
+    exit-3 path is still covered, against a real scope file, by
+    `test_mock_scope_file_denial_returns_three` below.
+    """
     config = make_config(tmp_path)
     missing_scope = tmp_path / "missing.yaml"
     result = CliRunner().invoke(
@@ -227,8 +235,26 @@ def test_mock_scope_denial_returns_three(tmp_path: Path) -> None:
             "--json",
         ),
     )
+    assert result.exit_code != 3
+    assert "subs: running" in result.stderr
+    document = json.loads(result.stdout)
+    assert document["scope_denied"] is False
+    assert document["exit_code"] != 3
+
+
+def test_mock_scope_file_denial_returns_three(tmp_path: Path) -> None:
+    """A scope file that *is* present keeps the unchanged gate (docs/05 rule 2)."""
+    config = make_config(tmp_path)
+    scope = tmp_path / "scope.yaml"
+    scope.write_text(
+        "authorization: engagement\nin_scope:\n  - example.com\nallow_active: false\n",
+        encoding="utf-8",
+    )
+    result = CliRunner().invoke(
+        app,
+        scan_args(config, "run", "--active", "--scope", str(scope), "--json"),
+    )
     assert result.exit_code == 3
-    # Part 13: progress is on stderr now; stdout still holds only the document.
     assert "subs: running" in result.stderr
     document = json.loads(result.stdout)
     assert document["scope_denied"] is True

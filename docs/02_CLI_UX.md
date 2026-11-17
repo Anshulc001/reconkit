@@ -24,7 +24,7 @@
 | `scope import` | Build `scope.yaml` from a bug bounty program | 3 |
 
 ### Stages (single stage per command)
-| Command | Mode | Needs `--active` + scope | Phase |
+| Command | Mode | Needs `--active` | Phase |
 |---|---|---|---|
 | `passive` | subs + dns (+ passive ports/CDN info) | no | 2 |
 | `subs` / `dns` | single passive stage | no | 2 |
@@ -43,6 +43,13 @@
 `passive` is the stage command: it runs the subs and dns stages (plus passive port/CDN info) for one target. `lite` is the workflow shortcut for exactly that passive pipeline and nothing active; adapters, flags, pacing and exit codes are the same. Only `run` includes active stages.
 
 `--active` is a usage error (exit `2`) on every passive-only command - the bare form, `lite`, `passive`, `subs` and `dns` - because none of them runs an active stage and accepting the flag would promise work the command cannot do. The message names `run` as the active workflow. Use `run -d X --active`, or an active stage command (`live`, `ports`, `tech`, `urls`, `vulns`), for active stages.
+
+**What `--active` needs depends on whether a scope file exists.** With `--scope PATH` (default `./scope.yaml`):
+
+- **No scope file at that path** - active and full scanning run **unrestricted** against the target(s) given with `-d`/`-l` and every host discovered under them. Nothing is derived from the target, no implicit scope is built, and the run is not refused (docs/05 rule 2). "No scope file" means "scan freely, I know what I typed"; exit code 3 is not produced for a missing file.
+- **A scope file is present** - it is enforced exactly as before (`authorization`, `expires`, `allow_active`, `in_scope`, `out_of_scope`); a violation exits 3 and the file is only ever read, never rewritten or deleted.
+
+The interactive mode's scope question and the `--help` text both say this in the same words (section 2b).
 
 **The ports ceiling is permanent, not a pending decision.** `pyscan` is the only selectable ports adapter in this build, `naabu` is skipped at selection time (its resolver runs inside the child, so docs/05 rule 6 cannot filter the address it connects to), and every other ports tool is phase 3 with no adapter. Ports confidence therefore cannot exceed `LOW`, and the open/closed disagreement rule cannot fire. The owner accepted this as the permanent shape of the ports stage on 2026-11-14 (12i, option c): no pre-resolve redesign and no second IP-connecting adapter is planned. The stage still does its job; what it cannot do is cross-tool confirmation.
 
@@ -79,11 +86,14 @@ The five questions:
    `validate_target()`. Anything else is treated as one domain. Both paths end in
    the same `_targets()` handling `-d`/`-l` use, so there is no second target path.
 2. **Scope file.** `yes` asks for a path and uses it exactly as `--scope` does.
-   `no` leaves the scope location at its default (`./scope.yaml`, or nothing if
-   that file is absent). **`no` is not a bypass**: with no usable scope file the
-   passive stages still run exactly as today, and every active stage is refused
-   by the unchanged gate (exit `3`, or `skipped` per host). There is no code path
-   in which answering `no` lets an active tool reach a target.
+   `no` leaves the scope location at its default (`./scope.yaml` if present,
+   otherwise no scope file). A scope file that **is present** is enforced exactly
+   as today: active stages need `allow_active`, a live `authorization`, an
+   unexpired `expires`, and the target in `in_scope`/not in `out_of_scope` (exit
+   `3` otherwise). With **no scope file**, active and full scanning proceed
+   unrestricted against the target(s) you named and everything discovered under
+   them (docs/05 rule 2) - answering `no` is not a bypass of a real file, it is
+   the documented meaning of having none.
 3. **Scan mode.** `passive` = `subs` + `dns`; `active` = `subs` + `dns` + `live`
    (passive plus alive/status-code); `full` = `subs` + `dns` + `live` + `ports` +
    `tech` + `urls`. `active` and `full` set `--active`, so the scope gate applies
@@ -119,7 +129,7 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | Flag | Meaning |
 |---|---|
 | `-d, --domain` / `-l, --list` | Target or file of targets. Omitting both on a scan command starts the interactive mode (section 2b); that is the only trigger and it adds no flag |
-| `--active` | Allow active stages (also requires matching `scope.yaml`) |
+| `--active` | Allow active stages. A `scope.yaml`, when present, is enforced; with no scope file, active scanning of the given targets is unrestricted (section 2) |
 | `--speed slow\|normal\|fast` | Pacing preset. **Default: `slow`** |
 | `--delay MIN-MAX` | Random pause in seconds between tools (example `--delay 5-20`) |
 | `--tools a,b` / `--exclude x,y` | Pick or skip adapters |
@@ -182,7 +192,7 @@ The `hosts` objects always carry `state`, `confidence` and `sources`; the top-le
 
 `hosts[].detail` is the bounded, redacted reason recorded with that host's latest status row (docs/04 section 5): `null` unless the latest pass could not decide a better state, in which case it is a one-line string of at most 200 characters with the run's known secrets redacted. It is the machine-readable half of a diagnostic the human table does not show - a script can tell a TLS failure apart from another cause without probing the host again.
 
-`stages[].skipped` lists every tool the engine selected out before it ran, as `{"tool":"<name>","reason":"<why>"}` objects - `no adapter yet (phase N)`, `requires --active`, `not installed`, or the docs/05 rule 6 block. A stage that has no adapter for any tool in its pool therefore shows its skips instead of an empty `results` array, so `results: []` means "ran, found nothing" only when `skipped` is empty too. `summary.tools_skipped` counts these rows along with any executed tool whose status is `skipped`; it is the total, not a per-tool count of executed results.
+`stages[].skipped` lists every tool the engine selected out before it ran, as `{"tool":"<name>","reason":"<why>"}` objects - `no adapter yet (phase N)`, `requires --active`, `not installed`, or the naabu scope-mode skip from docs/05 rule 6 (resolution failed or resolved outside `in_scope_cidrs`). A stage that has no adapter for any tool in its pool therefore shows its skips instead of an empty `results` array, so `results: []` means "ran, found nothing" only when `skipped` is empty too. `summary.tools_skipped` counts these rows along with any executed tool whose status is `skipped`; it is the total, not a per-tool count of executed results.
 
 `diff --json` writes one document with `type: diff`, the run ids it compared (`baseline_run_id`, `previous_run_id`, `latest_run_id`; `baseline_run_id` is `null` until a third completed discovery run exists), and arrays `new`, `gone`, `pending_gone`, `state_changes`, `ports_opened` and `ports_closed`. `pending_gone` holds the hosts that are missing from the latest run only: the same list the human output prints under "not reported as GONE yet", so a script can apply its own tolerance without re-querying. `gone` follows the two-consecutive-miss rule above. `status --json` writes one document with `type: status` and a `runs` array; each run carries `id`, `target`, `stage`, `speed`, `status`, `started_at` and `finished_at`. `install`/`update`/`scope check`/the `db` and `export` stubs do not accept `--json` in this build.
 
@@ -247,7 +257,7 @@ One folder per domain per run, never reused:
 | 0 | Success |
 | 1 | Unexpected error |
 | 2 | Usage error (bad flags) |
-| 3 | Scope violation (target not allowed, scope missing or expired) |
+| 3 | Scope violation when a scope file is present (target not allowed, unauthorized, or expired). A **missing** scope file is not a violation: it means unrestricted active scanning of the operator's targets (section 2) |
 | 4 | No usable tool for the stage |
 | 5 | Partial success (some tools failed or timed out, or a requested stage executed no tools) |
 | 6 | Every requested tool failed to install or update |
