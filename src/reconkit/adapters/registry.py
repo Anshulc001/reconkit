@@ -55,6 +55,9 @@ class ToolSpec:
     # automatically in any mode, `full` included; only an explicit `--tools`
     # naming runs one (docs/09, AGENTS "recon only").
     exploitation: bool = False
+    # Tools that cannot run without root (masscan's raw sockets). Selected only
+    # when the process is root; otherwise skipped with `requires root / sudo`.
+    needs_root: bool = False
     # Deterministic WAF merge (docs/MASTER_PLAN.md D12): the stored `waf` keeps
     # the detection of the highest priority, so completion order and rerun order
     # cannot change it. 0 = the tool makes no claim (every tool but the four
@@ -155,8 +158,17 @@ def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
         version_regex=_version_regex(name, entry),
         source=_optional_text(name, entry, "source"),
         exploitation=_exploitation(name, entry),
+        needs_root=_flag(name, entry, "needs_root"),
         waf_priority=_waf_priority(name, entry),
     )
+
+
+def _flag(name: str, entry: dict[str, Any], field: str) -> bool:
+    """An optional boolean registry flag; anything but a bool is a ConfigError."""
+    value = entry.get(field, False)
+    if not isinstance(value, bool):
+        raise ConfigError(f"tool {name!r} in tools.yaml has an invalid {field!r}")
+    return value
 
 
 def _optional_text(name: str, entry: dict[str, Any], field: str) -> str | None:

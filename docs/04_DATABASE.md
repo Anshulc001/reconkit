@@ -102,8 +102,8 @@ CREATE TABLE ports (
   port          INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
   protocol      TEXT NOT NULL DEFAULT 'tcp' CHECK (protocol IN ('tcp','udp')),
   state         TEXT NOT NULL CHECK (state IN ('open','unconfirmed','closed')),
-  service       TEXT,
-  version       TEXT,
+  service       TEXT,                     -- nmap -sV / banner; empty when tools disagree
+  version       TEXT,                     -- same source as service (docs/09 section 5)
   confidence    TEXT NOT NULL DEFAULT 'LOW'
                 CHECK (confidence IN ('HIGH','MEDIUM','LOW','UNCONFIRMED')),
   first_seen_run INTEGER NOT NULL REFERENCES scan_runs(id),

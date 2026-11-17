@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 from dotenv import dotenv_values
 
 from reconkit.adapters import ADAPTERS
-from reconkit.adapters.base import BaseToolAdapter
+from reconkit.adapters.base import BaseToolAdapter, running_as_root
 from reconkit.adapters.pyscan import default_resolve
 from reconkit.adapters.registry import ToolSpec, load_tools
 from reconkit.config import AppConfig
@@ -218,6 +218,10 @@ def confidence_for(
     if count >= medium_min:
         return Confidence.MEDIUM
     return Confidence.LOW
+
+
+# One level up, for a port an active tool fingerprinted (docs/09 section 5).
+FINGERPRINT_BUMP = {Confidence.LOW: Confidence.MEDIUM, Confidence.MEDIUM: Confidence.HIGH}
 
 
 # Transition table (previous state x evidence). Only NXDOMAIN can yield DEAD.
@@ -1145,6 +1149,12 @@ class Engine:
             if adapter is None:
                 skipped.append((spec, f"no adapter yet (phase {spec.phase})"))
                 continue
+            # `needs_root` (masscan): raw sockets are a process privilege, not a
+            # tool property, so a non-root run skips it with a reason instead of
+            # spawning it to fail (docs/09 section 4a6).
+            if spec.needs_root and not running_as_root():
+                skipped.append((spec, "requires root / sudo"))
+                continue
             if not opts.mock and not await asyncio.to_thread(self._is_installed, adapter):
                 skipped.append((spec, "not installed"))
                 continue
@@ -1747,7 +1757,7 @@ class Engine:
     def _persist_ports(
         self, target_id: int, run_id: int, results: list[ToolResult], opts: ScanOptions
     ) -> None:
-        groups: dict[tuple[str, str, int], dict[str, list[str]]] = {}
+        groups: dict[tuple[str, str, int], dict[str, list[PortRecord]]] = {}
         for result in results:
             if result.status is not ToolStatus.OK:
                 continue
@@ -1755,12 +1765,12 @@ class Engine:
                 if not isinstance(record, PortRecord):
                     continue
                 key = (record.fqdn, record.ip, record.port)
-                groups.setdefault(key, {}).setdefault(result.tool, []).append(record.state)
+                groups.setdefault(key, {}).setdefault(result.tool, []).append(record)
         for (fqdn, ip, port), by_tool in groups.items():
             tools = set(by_tool)
             if len(tools) < opts.min_sources:
                 continue
-            seen = {state for states in by_tool.values() for state in states}
+            seen = {record.state for records in by_tool.values() for record in records}
             state = "unconfirmed" if {"open", "closed"} <= seen else next(iter(seen))
             confidence = confidence_for(
                 tools,
@@ -1768,6 +1778,12 @@ class Engine:
                 medium_min=self.config.confidence.medium_min_sources,
                 disagree=state == "unconfirmed",
             )
+            service, version = _fingerprint(by_tool)
+            # docs/09 section 5: an active tool's `-sV`/banner fingerprint raises
+            # confidence by one level. Two tools that disagree on the service say
+            # nothing, so the fields stay empty instead of picking a winner.
+            if (service or version) and confidence in FINGERPRINT_BUMP:
+                confidence = FINGERPRINT_BUMP[confidence]
             sub_id = self.store.upsert_subdomain(target_id, fqdn, run_id=run_id)
             port_id = self.store.upsert_port(
                 sub_id,
@@ -1775,7 +1791,27 @@ class Engine:
                 port,
                 run_id=run_id,
                 state=state,
+                service=service,
+                version=version,
                 confidence=confidence.value,
             )
-            for tool, states in by_tool.items():
-                self.store.add_port_source(port_id, run_id, tool, states[0])
+            for tool, records in by_tool.items():
+                self.store.add_port_source(port_id, run_id, tool, records[0].state)
+
+
+def _fingerprint(by_tool: dict[str, list[PortRecord]]) -> tuple[str | None, str | None]:
+    """The service/version an active tool reported, or nothing when tools disagree.
+
+    `tcp/80` is `http` to nmap and `http?` to smap in the same collision, so only
+    a single agreed value is stored; anything else is left empty rather than
+    invented (docs/09 section 5).
+    """
+    services = {
+        record.service for records in by_tool.values() for record in records if record.service
+    }
+    versions = {
+        record.version for records in by_tool.values() for record in records if record.version
+    }
+    service = services.pop() if len(services) == 1 else None
+    version = versions.pop() if len(versions) == 1 else None
+    return service, version

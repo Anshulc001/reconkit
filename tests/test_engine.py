@@ -3084,3 +3084,83 @@ def test_waf_priority_deterministic_merge(tmp_path: Path) -> None:
 
     # Every one of the six orders ends with wafw00f's detection and its priority.
     assert stored == {("Cloudflare", 100)}
+
+
+async def test_a_service_fingerprint_is_stored_and_raises_port_confidence(
+    tmp_path: Path,
+) -> None:
+    """docs/09 section 5: the `-sV`/banner fingerprint is stored and bumps one level.
+
+    Real `nmap -sV` on testfire.net reports `service=http version=Apache
+    Tomcat/Coyote JSP engine 1.1`; before this test that record reached the parse
+    and was dropped by `_persist_ports`, so the documented rule never fired.
+    """
+    rec = Recorder()
+    specs = {
+        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
+        "nmap": tool("nmap", Stage.PORTS, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("example.com")]),
+        "nmap": adapter(
+            "nmap",
+            Stage.PORTS,
+            rec,
+            records=[
+                PortRecord(
+                    fqdn="example.com",
+                    ip="203.0.113.10",
+                    port=443,
+                    state="open",
+                    service="http",
+                    version="Apache Tomcat/Coyote JSP engine 1.1",
+                    source="nmap",
+                )
+            ],
+        ),
+    }
+    engine = make_engine(tmp_path, specs, adapters, installed=lambda _adapter: True)
+    await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.LIVE, Stage.PORTS), active=True),
+    )
+    stored = [
+        tuple(row)
+        for row in rows(engine.store, "SELECT state, service, version, confidence FROM ports")
+    ]
+    assert stored == [("open", "http", "Apache Tomcat/Coyote JSP engine 1.1", "MEDIUM")]
+
+
+async def test_two_tools_disagreeing_on_the_service_store_no_fingerprint(
+    tmp_path: Path,
+) -> None:
+    """smap says `http?` and nmap says `http`: an invented winner is worse than none."""
+    rec = Recorder()
+    specs = {
+        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
+        "nmap": tool("nmap", Stage.PORTS, mode=Mode.ACTIVE),
+        "smap": tool("smap", Stage.PORTS, mode=Mode.ACTIVE),
+    }
+    mine = PortRecord(fqdn="example.com", ip="203.0.113.10", port=80, state="open", source="nmap")
+    theirs = PortRecord(
+        fqdn="example.com", ip="203.0.113.10", port=80, state="open", service="http?", source="smap"
+    )
+    adapters = {
+        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("example.com")]),
+        "nmap": adapter(
+            "nmap",
+            Stage.PORTS,
+            rec,
+            records=[mine.model_copy(update={"service": "http"})],
+        ),
+        "smap": adapter("smap", Stage.PORTS, rec, records=[theirs]),
+    }
+    engine = make_engine(tmp_path, specs, adapters, installed=lambda _adapter: True)
+    await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.LIVE, Stage.PORTS), active=True),
+    )
+    # Two tools is MEDIUM (high_min_sources is 3); a fingerprint would bump it to
+    # HIGH, so staying MEDIUM is the proof that nothing was invented.
+    stored = [tuple(row) for row in rows(engine.store, "SELECT service, confidence FROM ports")]
+    assert stored == [(None, "MEDIUM")]

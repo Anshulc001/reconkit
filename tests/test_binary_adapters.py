@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import os
 import subprocess
 import sys
@@ -203,6 +204,22 @@ NO_HOME_NEEDED: dict[str, str] = {
     "whatweb": (
         "real `whatweb --help` lists only scan/log/plugin flags: no config path "
         "is read and no key is used"
+    ),
+    "nmap": (
+        "real `nmap --help` reads no HOME config in the invocation we build "
+        "(-sV -Pn -oX --open, no --datadir/-sC): no config path and no key"
+    ),
+    "rustscan": (
+        "the adapter always passes -n/--no-config, so rustscan's config file is "
+        "never read; no key is used"
+    ),
+    "smap": (
+        "real `smap -h` lists only -iL/--nmap/--concurrency/output flags: it "
+        "queries Shodan's public data, reads no HOME config and uses no key"
+    ),
+    "masscan": (
+        "real `masscan --help` reads config only via -c (never passed); the "
+        "adapter writes an -oL file and uses no key"
     ),
 }
 
@@ -1889,3 +1906,288 @@ def test_ffuf_hosts_wordlist_has_no_trailing_slash() -> None:
     adapter = FfufAdapter(finder=lambda _name: "/usr/bin/ffuf")
     ctx = make_ctx(hosts=["testfire.net"])
     assert adapter._roots(ctx) == ["https://testfire.net", "http://testfire.net"]
+
+
+# -------------------------------------------------------- ports (wave 6)
+
+
+def test_nmap_adapter_parses_xml_ports() -> None:
+    """Two hosts, open ports only, service/version kept as the -sV fingerprint."""
+    from reconkit.adapters.nmap import NmapAdapter
+
+    records = NmapAdapter().parse_output(fixture("adapters", "nmap.synthetic.xml"))
+    assert [(r.fqdn, r.ip, r.port, r.state, r.service, r.version) for r in records] == [
+        (
+            "testfire.net",
+            "65.61.137.117",
+            80,
+            "open",
+            "http",
+            "Apache Tomcat/Coyote JSP engine 1.1",
+        ),
+        (
+            "testfire.net",
+            "65.61.137.117",
+            443,
+            "open",
+            "http",
+            "Apache Tomcat/Coyote JSP engine 1.1",
+        ),
+        (
+            "shop.testfire.net",
+            "65.61.137.118",
+            22,
+            "open",
+            "ssh",
+            "OpenSSH 8.9p1 Ubuntu 3ubuntu0.4",
+        ),
+    ]
+    assert all(isinstance(record, PortRecord) and record.source == "nmap" for record in records)
+
+
+def test_nmap_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    from reconkit.adapters.nmap import NmapAdapter
+
+    fake_exec(monkeypatch, outcome(stdout="Nmap version 7.991 ( https://nmap.org )\n"))
+    accepted = NmapAdapter(finder=lambda _name: "/usr/bin/nmap").check_installed()
+    assert accepted.installed is True
+    assert accepted.version == "7.991"
+    fake_exec(monkeypatch, outcome(stdout="ncat 7.94\n"))
+    rejected = NmapAdapter(finder=lambda _name: "/usr/bin/nmap").check_installed()
+    assert rejected.installed is False
+
+
+def test_nmap_respects_ports_flag() -> None:
+    from reconkit.adapters.nmap import TOP_PORTS, NmapAdapter
+
+    adapter = NmapAdapter(finder=lambda _name: "/usr/bin/nmap")
+    plain = adapter.build_command(make_ctx(hosts=["testfire.net"]))
+    assert plain[1:3] == ["-sV", "-Pn"]
+    assert "-sS" not in plain and "-O" not in plain
+    top = plain.index("--top-ports")
+    assert plain[top : top + 2] == ["--top-ports", TOP_PORTS]
+    assert plain[-1] == "testfire.net"
+    chosen = adapter.build_command(make_ctx(hosts=["testfire.net"], ports=[80, 443, 8000]))
+    assert ["-p", "80,443,8000"] == chosen[chosen.index("-p") : chosen.index("-p") + 2]
+    assert "--top-ports" not in chosen
+
+
+def test_nmap_parses_the_xml_file_it_wrote(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`-oX` output is read through read_output, not from stdout."""
+    from reconkit.adapters.nmap import NmapAdapter
+
+    adapter = NmapAdapter(finder=lambda _name: "/usr/bin/nmap")
+    ctx = make_ctx(hosts=["testfire.net"])
+    ctx.workspace = tmp_path
+    fake_exec(
+        monkeypatch,
+        outcome(stdout="Starting Nmap 7.991\n"),
+        on_call=lambda argv, _kwargs: Path(argv[argv.index("-oX") + 1]).write_text(
+            fixture("adapters", "nmap.synthetic.xml"), encoding="utf-8"
+        ),
+    )
+    import asyncio
+
+    result = asyncio.run(adapter.run(ctx))
+    assert result.status is ToolStatus.OK
+    assert len(result.records) == 3
+    assert result.raw_text is not None and result.raw_text.startswith("<?xml")
+
+
+def test_nmap_malformed_xml_is_a_parse_error() -> None:
+    from reconkit.adapters.nmap import NmapAdapter
+
+    with pytest.raises(ParseError, match="invalid XML"):
+        NmapAdapter().parse_output("<nmaprun><host></nmaprun>")
+
+
+def test_rustscan_adapter_parses_plain_ports() -> None:
+    from reconkit.adapters.rustscan import RustscanAdapter
+
+    records = RustscanAdapter().parse_output(fixture("adapters", "rustscan.synthetic.txt"))
+    assert [(r.fqdn, r.ip, r.port) for r in records] == [
+        ("65.61.137.117", "65.61.137.117", 443),
+        ("65.61.137.117", "65.61.137.117", 80),
+        ("65.61.137.118", "65.61.137.118", 22),
+    ]
+    assert all(record.state == "open" and record.source == "rustscan" for record in records)
+
+
+def test_rustscan_single_host_keeps_the_name_it_scanned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Greppable output prints the resolved address; one host means one owner."""
+    from reconkit.adapters.rustscan import RustscanAdapter
+
+    adapter = RustscanAdapter(finder=lambda _name: "/usr/bin/rustscan")
+    ctx = make_ctx(hosts=["testfire.net"])
+    fake_exec(monkeypatch, outcome(stdout="65.61.137.117 -> [443,80]\n"))
+    result = asyncio.run(adapter.run(ctx))
+    assert [(r.fqdn, r.ip, r.port) for r in result.records if isinstance(r, PortRecord)] == [
+        ("testfire.net", "65.61.137.117", 443),
+        ("testfire.net", "65.61.137.117", 80),
+    ]
+
+
+def test_rustscan_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    from reconkit.adapters.rustscan import RustscanAdapter
+
+    fake_exec(monkeypatch, outcome(stdout="rustscan 2.3.0\n"))
+    assert RustscanAdapter(finder=lambda _name: "/x").check_installed().installed is True
+    fake_exec(monkeypatch, outcome(stdout="some other scanner 1.0\n"))
+    assert RustscanAdapter(finder=lambda _name: "/x").check_installed().installed is False
+
+
+def test_rustscan_does_not_need_nmap_in_greppable_mode() -> None:
+    """Verified with nmap off PATH: `-g` prints ports itself (`No Nmap`)."""
+    from reconkit.adapters.rustscan import RustscanAdapter
+
+    adapter = RustscanAdapter(finder=lambda _name: "/usr/bin/rustscan")
+    command = adapter.build_command(make_ctx(hosts=["testfire.net"]))
+    assert "-g" in command
+    assert "--" not in command and "-oX" not in command
+    assert "nmap" not in " ".join(command)
+
+
+def test_rustscan_respects_ports_flag() -> None:
+    from reconkit.adapters.rustscan import RustscanAdapter
+
+    adapter = RustscanAdapter(finder=lambda _name: "/usr/bin/rustscan")
+    plain = adapter.build_command(make_ctx(hosts=["testfire.net"]))
+    assert plain[-1] == "--top"
+    chosen = adapter.build_command(make_ctx(hosts=["testfire.net"], ports=[22, 2222]))
+    assert chosen[-2:] == ["-p", "22,2222"]
+    assert "--top" not in chosen
+
+
+def test_smap_adapter_parses_json_ports() -> None:
+    from reconkit.adapters.smap import SmapAdapter
+
+    records = SmapAdapter().parse_output(fixture("adapters", "smap.synthetic.json"))
+    assert [(r.fqdn, r.ip, r.port, r.service) for r in records] == [
+        ("testfire.net", "65.61.137.117", 80, "http?"),
+        ("testfire.net", "65.61.137.117", 443, "https?"),
+        ("testfire.net", "65.61.137.117", 8080, "http-proxy?"),
+    ]
+    assert all(record.source == "smap" and record.state == "open" for record in records)
+
+
+def test_smap_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    from reconkit.adapters.smap import SmapAdapter
+
+    fake_exec(monkeypatch, outcome(stdout="Smap 1.0.0-beta\nUsage: smap <targets here>\n"))
+    accepted = SmapAdapter(finder=lambda _name: "/x").check_installed()
+    assert accepted.installed is True and accepted.version == "1.0.0"
+    fake_exec(monkeypatch, outcome(stdout="Smap-ish 2.0\n"))
+    assert SmapAdapter(finder=lambda _name: "/x").check_installed().installed is False
+
+
+def test_smap_ports_flag_filters_passive_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """smap cannot choose ports, so `--ports` filters what Shodan reported."""
+    from reconkit.adapters.smap import SmapAdapter
+
+    adapter = SmapAdapter(finder=lambda _name: "/usr/bin/smap")
+    ctx = make_ctx(hosts=["testfire.net"], ports=[443])
+    ctx.workspace = tmp_path
+    fake_exec(
+        monkeypatch,
+        outcome(stdout="smap: querying shodan\n"),
+        on_call=lambda argv, _kwargs: Path(argv[argv.index("-oJ") + 1]).write_text(
+            fixture("adapters", "smap.synthetic.json"), encoding="utf-8"
+        ),
+    )
+    import asyncio
+
+    result = asyncio.run(adapter.run(ctx))
+    assert [record.port for record in result.records if isinstance(record, PortRecord)] == [443]
+
+
+def test_masscan_skips_when_not_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-root: skipped with the reason, and masscan is never spawned."""
+    from reconkit.adapters import masscan as masscan_module
+    from reconkit.adapters.masscan import MasscanAdapter
+
+    monkeypatch.setattr(masscan_module, "is_root", lambda: False)
+    calls = fake_exec(monkeypatch, outcome(stdout="open tcp 80 1.2.3.4 1\n"))
+    import asyncio
+
+    result = asyncio.run(MasscanAdapter(finder=lambda _name: "/usr/bin/masscan").run(make_ctx()))
+    assert result.status is ToolStatus.SKIPPED
+    assert result.error == "requires root / sudo"
+    assert calls == []
+
+
+def test_masscan_adapter_parses_json_ports() -> None:
+    from reconkit.adapters.masscan import MasscanAdapter
+
+    records = MasscanAdapter().parse_output(fixture("adapters", "masscan.synthetic.list"))
+    assert [(r.fqdn, r.ip, r.port, r.state) for r in records] == [
+        ("65.61.137.117", "65.61.137.117", 80, "open"),
+        ("65.61.137.117", "65.61.137.117", 443, "open"),
+        ("65.61.137.118", "65.61.137.118", 22, "open"),
+    ]
+    assert all(record.source == "masscan" and record.protocol == "tcp" for record in records)
+
+
+def test_masscan_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    from reconkit.adapters.masscan import MasscanAdapter
+
+    # `masscan --version` exits 1 while printing a valid banner (PIT-35).
+    fake_exec(
+        monkeypatch,
+        outcome(
+            stdout="Masscan version 1.3.2 (https://github.com/robertdavidgraham/masscan)\n",
+            returncode=1,
+        ),
+    )
+    accepted = MasscanAdapter(finder=lambda _name: "/x").check_installed()
+    assert accepted.installed is True and accepted.version == "1.3.2"
+    fake_exec(monkeypatch, outcome(stdout="nmap version 7.99\n"))
+    assert MasscanAdapter(finder=lambda _name: "/x").check_installed().installed is False
+
+
+def test_masscan_builds_ip_targets_and_respects_ports(monkeypatch: pytest.MonkeyPatch) -> None:
+    """masscan takes IPs only, so a name is resolved locally and checked."""
+    from reconkit.adapters import masscan as masscan_module
+    from reconkit.adapters.masscan import MasscanAdapter
+
+    monkeypatch.setattr(masscan_module, "_resolve", lambda host: ["93.184.216.34"])
+    adapter = MasscanAdapter(finder=lambda _name: "/usr/bin/masscan")
+    ctx = make_ctx(hosts=["example.com"], ports=[80, 443])
+    ctx.ip_allowed = lambda ip: True
+    command = adapter.build_command(ctx)
+    assert command[1] == "93.184.216.34"
+    assert command[2] == "-p80,443"
+    assert command[command.index("--rate") + 1] == "1000"
+    assert "-oL" in command and "--open-only" not in command
+
+
+def test_masscan_refuses_targets_outside_the_allowed_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from reconkit.adapters import masscan as masscan_module
+    from reconkit.adapters.masscan import MasscanAdapter
+
+    monkeypatch.setattr(masscan_module, "_resolve", lambda host: ["203.0.113.9"])
+    adapter = MasscanAdapter(finder=lambda _name: "/usr/bin/masscan")
+    ctx = make_ctx(hosts=["example.com"])
+    ctx.ip_allowed = lambda ip: False
+    with pytest.raises(ToolFailed, match="no permitted IP addresses"):
+        adapter.build_command(ctx)
+
+
+def test_ports_adapters_are_registered_with_the_right_stage() -> None:
+    from reconkit.adapters.masscan import MasscanAdapter
+    from reconkit.adapters.nmap import NmapAdapter
+    from reconkit.adapters.rustscan import RustscanAdapter
+    from reconkit.adapters.smap import SmapAdapter
+    from reconkit.models import Stage
+
+    assert ADAPTERS["nmap"] is NmapAdapter
+    assert ADAPTERS["rustscan"] is RustscanAdapter
+    assert ADAPTERS["smap"] is SmapAdapter
+    assert ADAPTERS["masscan"] is MasscanAdapter
+    for name in ("nmap", "rustscan", "smap", "masscan"):
+        assert ADAPTERS[name].stage is Stage.PORTS

@@ -1,0 +1,9 @@
+# Shape of masscan's list format (`-oL`), documented in
+# /usr/share/doc/masscan/README.md.gz as `open tcp 80 XXX.XXX.XXX.XXX 1390380064`.
+# A real masscan run needs root, which this build never has, so the values are
+# synthetic and the shape is the documented one.
+#masscan
+#rate = 1000
+open tcp 80 65.61.137.117 1794944133
+open tcp 443 65.61.137.117 1794944133
+open tcp 22 65.61.137.118 1794944133

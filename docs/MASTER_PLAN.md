@@ -747,6 +747,30 @@ D13. 2026-11-17 - Inline default wordlist for ffuf (owner ruling). Wave 5 left
     PyPI, has no `setup.py`/`pyproject.toml`, and is a script run by hand, so it
     needs an adapter kind that does not exist.
 
+D14. 2026-11-17 - Ports wave: four mechanics the brief and the tools disagreed
+    on. (1) **masscan root is a selection-time skip, not a runtime status.** The
+    brief asked the adapter to check `os.geteuid()` and return `SKIPPED`; done,
+    but a run-time `SKIPPED` made `_exit_code` count the tool as failed, so every
+    `--full` run by a normal user exited 5. The skip moved to `_select`, driven
+    by the `needs_root: true` that `tools.yaml` already carried and that
+    `ToolSpec` now parses; the adapter keeps the same guard for a direct call.
+    (2) **rustscan needs no nmap.** Verified with `PATH` emptied: `-g` prints
+    `IP -> [ports]` and its help says `No Nmap`; 2.3.0 has no `--` passthrough,
+    so service detection stays nmap's job and no "requires nmap" skip exists.
+    (3) **masscan writes the list format (`-oL`), not JSON.** `-oJ` needs a root
+    scan to observe and `sudo -n` asks for a password on this box, so the
+    adapter uses the format whose example ships in
+    `/usr/share/doc/masscan/README.md.gz` instead of an unverified schema.
+    (4) **`_persist_ports` now stores `service`/`version` and applies the
+    documented `-sV` confidence bump.** The real ports run exposed that the
+    fingerprint was parsed and then thrown away, so docs/09 section 5's "raises
+    confidence by one level" had never fired. Two tools that disagree (`http`
+    vs `http?`) store neither value. Also: `smap` cannot be told which ports to
+    scan, so `--ports` filters its passive records; `_VERSION` accepts a
+    two-part version (`Nmap version 7.991`); `adapters/nmap.py` carries a
+    per-file `S314` ignore because it parses only the `-oX` file nmap itself
+    wrote.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

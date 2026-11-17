@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/share/nmap/nmap.xsl" type="text/xsl"?>
+<!-- Sanitized shape of a real nmap 7.991 service scan on this box (2026-11-17, -sV -Pn -p 80,443,8080, open ports only, -oX out.xml): one host element per target, an ipv4 address, hostnames, and open ports. A closed port is kept on each host so the parser is tested to drop it. The second host is synthetic so the parser sees more than one target. -->
+<nmaprun scanner="nmap" args="nmap -sV -Pn -p 80,443,8080 --open -oX out.xml testfire.net shop.testfire.net" start="1794944133" startstr="Tue Nov 17 14:35:33 2026" version="7.991" xmloutputversion="1.05">
+<scaninfo type="syn" protocol="tcp" numservices="3" services="80,443,8080"/>
+<verbose level="0"/>
+<debugging level="0"/>
+<host starttime="1794944134" endtime="1794944157"><status state="up" reason="user-set" reason_ttl="0"/>
+<address addr="65.61.137.117" addrtype="ipv4"/>
+<hostnames>
+<hostname name="testfire.net" type="user"/>
+<hostname name="demo.testfire.net" type="PTR"/>
+</hostnames>
+<ports><port protocol="tcp" portid="80"><state state="open" reason="syn-ack" reason_ttl="104"/><service name="http" product="Apache Tomcat/Coyote JSP engine" version="1.1" method="probed" conf="10"><cpe>cpe:/a:apache:coyote_http_connector:1.1</cpe></service></port>
+<port protocol="tcp" portid="443"><state state="open" reason="syn-ack" reason_ttl="104"/><service name="http" product="Apache Tomcat/Coyote JSP engine" version="1.1" tunnel="ssl" method="probed" conf="10"><cpe>cpe:/a:apache:coyote_http_connector:1.1</cpe></service></port>
+<port protocol="tcp" portid="8080"><state state="closed" reason="reset" reason_ttl="104"/><service name="http-proxy" method="table" conf="3"/></port>
+</ports>
+<times srtt="331" rttvar="128" to="100000"/>
+</host>
+<host starttime="1794944134" endtime="1794944157"><status state="up" reason="user-set" reason_ttl="0"/>
+<address addr="65.61.137.118" addrtype="ipv4"/>
+<hostnames>
+<hostname name="shop.testfire.net" type="user"/>
+</hostnames>
+<ports><port protocol="tcp" portid="22"><state state="open" reason="syn-ack" reason_ttl="104"/><service name="ssh" product="OpenSSH" version="8.9p1 Ubuntu 3ubuntu0.4" method="probed" conf="10"><cpe>cpe:/a:openbsd:openssh:8.9p1</cpe></service></port>
+<port protocol="tcp" portid="443"><state state="closed" reason="reset" reason_ttl="104"/><service name="https" method="table" conf="3"/></port>
+</ports>
+<times srtt="331" rttvar="128" to="100000"/>
+</host>
+<runstats><finished time="1794944157" timestr="Tue Nov 17 14:35:57 2026" summary="Nmap done at Tue Nov 17 14:35:57 2026; 2 IP addresses (2 hosts up) scanned in 24.16 seconds" elapsed="24.16" exit="success"/><hosts up="2" down="0" total="2"/></runstats>
+</nmaprun>

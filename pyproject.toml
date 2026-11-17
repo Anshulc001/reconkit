@@ -57,6 +57,7 @@ select = ["E", "F", "I", "B", "UP", "S"]
 "tests/test_runner.py" = ["S603"]   # the kill-tree test must hold a live Popen to call _kill_tree
 "tests/test_binary_adapters.py" = ["S603"]   # the SIGKILL test spawns a python child that kills itself
 "src/reconkit/core/runner.py" = ["S603"]   # argv is validated; sole subprocess entry
+"src/reconkit/adapters/nmap.py" = ["S314"]   # parses only the -oX file nmap itself wrote in this run
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

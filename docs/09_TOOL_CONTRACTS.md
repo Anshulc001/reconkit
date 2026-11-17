@@ -112,14 +112,18 @@ class RunContext(BaseModel):
 
 ```python
 class BaseToolAdapter(ABC):
-    name: ClassVar[str]             # must match the key in tools.yaml
+    name: ClassVar[str]  # must match the key in tools.yaml
     stage: ClassVar[Stage]
     # tier, mode, kind come from tools.yaml (single source of truth)
 
-    def check_installed(self) -> InstallStatus: ...     # found? version? path
-    def build_command(self, ctx: RunContext) -> list[str]: ...   # binary adapters only; argv list, no shell
-    async def run(self, ctx: RunContext) -> ToolResult: ...      # default: runner.run_exec(build_command) + parse
-    def parse_output(self, raw: str) -> list[Record]: ...        # pure function, fully unit-testable
+    def check_installed(self) -> InstallStatus: ...  # found? version? path
+    def build_command(
+        self, ctx: RunContext
+    ) -> list[str]: ...  # binary adapters only; argv list, no shell
+    async def run(
+        self, ctx: RunContext
+    ) -> ToolResult: ...  # default: runner.run_exec(build_command) + parse
+    def parse_output(self, raw: str) -> list[Record]: ...  # pure function, fully unit-testable
 ```
 
 - `RunContext` (above) carries: `target`, `hosts` (already scope-checked), `ports`, `timeout`, `workspace`, `mock` flag, `env` (allowed keys only), `ip_allowed` (the loaded scope's `in_scope_cidrs` predicate, or `None`), `headers` (from repeatable `--header "Name: Value"`) and `user_agent` (from `--user-agent`). `headers`/`user_agent` are optional: an adapter that cannot send one ignores them and the engine warns `--header not applied to <tool> (no -H support)` once per executed tool. `ports` is the `--ports` override when given, else empty (each adapter then uses its own default). `ip_allowed` exists so an adapter can apply docs/05 rule 6 without importing `core.scope`; `None` means no permission, never allow-all. **naabu input is scope-mode dependent (2026-11-17):** with no scope file the engine leaves `hosts` as the ordinary names; with a scope file present it resolves each target itself and replaces `hosts` for naabu only with the verified IP addresses. The replacement happens in the engine's per-tool context copy; no other adapter's `hosts` changes. `env` is the entire child environment: the runner passes only these keys, so adapters must add `HOME` explicitly for tools that read config or provider keys from it (confirm per tool from its own `--help`, do not guess).
@@ -153,7 +157,7 @@ Phase 2 = working adapter in the first build. Phase 3 = listed in `tools.yaml`, 
 | vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) | nuclei, subzy |
 | shots | active | gowitness (opt_in) | - |
 
-Selection rules (2026-11-17: the mode tables in docs/02 section 2 and `MODE_STAGES`/`MODE_TOOLS` in `engine.py` are the source): use adapters that are installed (or http/python kind), allowed by tier for the mode (`allowed_tiers`: `opt_in` only with `--include-noisy` or a `full` run; `intrusive` only with `full` or an explicit `--tools` name), allowed by tool mode (an active tool in `passive` mode is skipped with `tool mode not included in passive mode` even when named), never `exploitation: true` unless named with `--tools`, and filtered by `--tools` / `--exclude`. `tools.yaml` may carry `exploitation: true` on an intrusive entry (`sqlmap`, `dalfox`, `crlfuzz`); the registry parses it into `ToolSpec.exploitation` (a non-bool is a `ConfigError`) and the engine skips such a tool automatically in every mode with `exploitation tool requires explicit --tools`. Missing tools are reported as `skipped`, never fatal unless no adapter remains (exit 4). Every selection-time skip is recorded in `tool_runs` **and** reported to the caller: `stages[].skipped` in the `--json` document and the Tools table list each tool with its reason, and `summary.tools_skipped` counts them (docs/02 section 5), so a stage whose whole pool has no adapter cannot look like a stage that ran and found nothing. This is the selection-time rule: a binary that was present at selection but cannot be spawned at run time is a `failed` result instead (see the adapter contract in section 3), not a skip. **`naabu` is scope-mode dependent (owner decision 2026-11-17; supersedes the permanent block of 11c-G-7/12i):**
+Selection rules (2026-11-17: the mode tables in docs/02 section 2 and `MODE_STAGES`/`MODE_TOOLS` in `engine.py` are the source): use adapters that are installed (or http/python kind), allowed by tier for the mode (`allowed_tiers`: `opt_in` only with `--include-noisy` or a `full` run; `intrusive` only with `full` or an explicit `--tools` name), allowed by tool mode (an active tool in `passive` mode is skipped with `tool mode not included in passive mode` even when named), never `exploitation: true` unless named with `--tools`, and filtered by `--tools` / `--exclude`. `tools.yaml` may carry `exploitation: true` on an intrusive entry (`sqlmap`, `dalfox`, `crlfuzz`); the registry parses it into `ToolSpec.exploitation` (a non-bool is a `ConfigError`) and the engine skips such a tool automatically in every mode with `exploitation tool requires explicit --tools`. Missing tools are reported as `skipped`, never fatal unless no adapter remains (exit 4). A `needs_root` tool in a non-root process is skipped the same way with `requires root / sudo` (section 4a6). Every selection-time skip is recorded in `tool_runs` **and** reported to the caller: `stages[].skipped` in the `--json` document and the Tools table list each tool with its reason, and `summary.tools_skipped` counts them (docs/02 section 5), so a stage whose whole pool has no adapter cannot look like a stage that ran and found nothing. This is the selection-time rule: a binary that was present at selection but cannot be spawned at run time is a `failed` result instead (see the adapter contract in section 3), not a skip. **`naabu` is scope-mode dependent (owner decision 2026-11-17; supersedes the permanent block of 11c-G-7/12i):**
 
 - **No scope file** - `naabu` is an ordinary active tool. It is selected, installed-checked and run exactly like `pyscan`, receiving the discovered hostnames. No pre-resolution gate, no IP-only restriction, no special-case skip.
 - **Scope file present** - before invoking `naabu`, the engine resolves each already-in-scope target with its own resolver (`adapters.pyscan.default_resolve`, injected in tests), checks every returned address with the same `ip_allowed` predicate `pyscan` uses, and hands `naabu` only the verified IP addresses through `-host` - never a bare domain. A target whose resolution fails or yields no in-scope address is omitted from the list; if no target yields a verified address, `naabu` is removed from the selection with `blocked: no in-scope IP for any target (resolution failed or the address is outside in_scope_cidrs)` and the reason is recorded in `tool_runs`/`stages[].skipped`. When some targets do verify, the run continues and one warning counts the omitted targets.
@@ -438,11 +442,125 @@ Verified on this box (`nuclei` v3.11.1 in `~/go/bin`, `subzy` v1.2.0 in
   `~/<subzy>/fingerprints.json` beside the user's config and writes it on first
   run.
 
+### 4a6. Adapter wave 6 (2026-11-17): ports stage - nmap, rustscan, smap, masscan
+
+The ports stage was the last one with a partial pool (`pyscan`, `naabu`). These
+four close it. `ports` is not part of `--active` (`MODE_STAGES`, locked at
+`756af8e`), so the stage runs under `--full` or the explicit
+`reconkit ports` / `--tools` name, exactly like `vulns`.
+
+| Tool | Invocation | Records |
+|---|---|---|
+| `nmap` | `-sV -Pn -oX <xml file> --open` + `--top-ports 1000`, or `-p <list>` when `--ports` is given, then the hosts | `PortRecord(fqdn=<first hostname for the host>, ip=<address>, port=<portid>, state="open", service=<service@name>, version=<product + version>, source="nmap")` |
+| `rustscan` | `-g -n --ulimit 5000 -a <comma-separated hosts>` + `-p <list>` or `--top`, one process for the whole stage | `PortRecord(fqdn=<the only input host, else the printed address>, ip=<printed address>, port=<port>, state="open", source="rustscan")` |
+| `smap` | `-iL <hosts file> -oJ <json file>` (passive: Shodan data, no packets) | `PortRecord(fqdn=<user_hostname>, ip=<ip>, port=<port>, state="open", service=<ports[].service>, source="smap")`, filtered to `ctx.ports` when `--ports` is given |
+| `masscan` | `<ip targets...> -p<list> --rate 1000 -oL <list file>`, **root only** | `PortRecord(fqdn=<ip>, ip=<ip>, port=<port>, state="open", source="masscan")` |
+
+**No `-sS`, no `sudo`, no pacing.** `nmap` is invoked without a scan type: run
+unprivileged it does a `-sT` connect scan, which is the default this build
+documents (docs/01 Feature 5), and the adapter never asks for `-sS`, `-O` or
+scripts. `nmap -sV` is what makes it a verifier: its service/version string arrives on the
+`PortRecord` (`service`, `version`), `_persist_ports` writes it to
+`ports.service` / `ports.version`, and it is the fingerprint section 5 raises
+confidence for. A real run on testfire.net stored
+`Apache Tomcat/Coyote JSP engine 1.1` against 80, 443 and 8080. `--rate 1000` is masscan's own packet
+rate, not reconkit pacing (D3): masscan does nothing without a rate and 1000
+packets/s is its documented default. The other three get no rate flag.
+
+**`--ports` maps to all four, but not identically.** `nmap` swaps
+`--top-ports 1000` for `-p`; `rustscan` swaps `--top` for `-p` (both verified in
+`-h`/`--help`); `masscan` has no top-ports list at all, so it gets `-p<list>`
+when the operator supplies one and the `pyscan` `DEFAULT_PORTS` set otherwise
+(12 ports, stated on the record rather than silently scanning 65535). `smap`
+cannot be told which ports to scan - it reports what Shodan already observed -
+so `--ports` filters its records after parsing. That filter is the one place the
+flag is applied to output instead of input, and it is deliberate: dropping the
+filter would let a passive answer store ports the operator excluded. A port a
+passive tool reports but no active tool confirmed stays `LOW` (section 5).
+
+**`masscan` needs root, and reconkit never asks for the password.** masscan uses
+raw sockets: on this box, as `kali`, it exits 2 with `[-] FAIL: permission
+denied` and `[hint] need to sudo or run as root or something`. Nothing in the
+build shells out to `sudo` (AGENTS rule 1, and a scan must not stop mid-run for
+a password) and nothing calls `setcap` on the operator's binary. Running
+`sudo reconkit run ...` (or a one-time `sudo setcap cap_net_raw+ep
+/usr/bin/masscan`, the operator's choice on their own box) is what enables it;
+both are operator actions documented here, not adapter behaviour.
+
+The skip itself happens at **selection**, from the `needs_root: true` the
+registry already carried: `ToolSpec.needs_root` is parsed (a non-bool is a
+`ConfigError`) and a non-root process skips the tool with `requires root /
+sudo`, recorded in `tool_runs` and listed in `stages[].skipped` like any other
+skip. That placement is deliberate - the alternative, letting the adapter return
+`ToolStatus.SKIPPED` at run time, made every full run of a normal user exit 5
+(`partial`), because `_exit_code` counts any non-OK executed tool as a failure
+while this is an environment fact, not a broken tool. `requires root / sudo` is
+not one of the two absence-only gap reasons, so the ports stage keeps running
+its other tools and the run stays `complete`. The adapter keeps the same
+effective-uid guard as a second line of defence (`running_as_root()` from
+`adapters/base.py`, shared with the selection rule): invoked directly it returns
+`SKIPPED` with the same reason instead of spawning a masscan that can only fail.
+
+**`rustscan` does not need `nmap`, verified rather than assumed.** rustscan's
+`-g/--greppable` mode prints `Cartesian ...`-free machine output
+(`65.61.137.117 -> [443,80,8080]`) and its own `--help` says `Greppable mode.
+Only output the ports. No Nmap.` Running it with `PATH` emptied of `nmap`
+returned the same line (2026-11-17), so the adapter uses `-g` and there is no
+"requires nmap" skip to implement: the service detection lives in the `nmap`
+adapter (`-sV`), which is where a version fingerprint belongs. rustscan 2.3.0
+has no `-- <nmap args>` passthrough, so the alternative (drive `nmap -oX`
+through rustscan) is not available in this version and is not pretended. Because
+`-g` prints the **resolved address**, the adapter uses the single input host as
+the `fqdn` when the stage ran one host, and the printed address otherwise (the
+same IP-keyed fallback `naabu` documents in scope mode). `-n/--no-config` keeps
+a user's `rustscan.toml` from changing the scan, and `--ulimit 5000` is the
+value its own docs recommend for the open-file limit.
+
+**Output files, not stdout, for three of the four.** `nmap -oX`, `smap -oJ` and
+`masscan -oL` all write a document; the adapters implement `read_output(ctx)`
+(the `subzy`/`ffuf` hook) and parse the file, so log lines on stdout cannot
+corrupt a parse. `rustscan -g` is the exception: its machine output is stdout.
+
+Verified on this box (`nmap` 7.991 in `/usr/bin`, `rustscan` 2.3.0 in
+`~/.reconkit/bin`, `smap` 1.0.0-beta in `~/.reconkit/bin`, `masscan` 1.3.2 in
+`/usr/bin`):
+
+- `nmap -sV -Pn -p 80,443,8080 --open -oX out.xml testfire.net` produced
+  `<port protocol="tcp" portid="80"><state state="open" .../><service
+  name="http" product="Apache Tomcat/Coyote JSP engine" version="1.1"/>` for
+  all three ports; the fixture keeps that shape. The parser reads
+  `.//host` elements, takes `address[@addrtype="ipv4"]` (or `ipv6`), the first
+  `<hostname name=...>`, and only `state[@state="open"]` ports. Missing address
+  or portid is a `ParseError`, never a guessed record.
+- `masscan --help` states `'-p80' is the same as '--ports 80'`, and
+  `/usr/share/doc/masscan/README.md.gz` documents the list format as
+  `open tcp 80 XXX.XXX.XXX.XXX 1390380064`; the adapter parses exactly that
+  (state, protocol, port, address, timestamp) and ignores the timestamp. The
+  manpage accepts **IP addresses and ranges only** as targets ("anything on the
+  command-line not prefixed with a '-' is assumed to be an IP address or
+  range"), so the adapter resolves each `ctx.hosts` name locally and keeps only
+  addresses `ctx.ip_allowed` permits (docs/05 rule 6, the `pyscan` rule) - a
+  hostname is never handed to masscan to resolve a second time. With no
+  resolvable, permitted address the adapter skips instead of scanning nothing.
+  **`masscan`'s own JSON output (`-oJ`) is unverified on this box**: producing
+  it needs root, `sudo -n` asks for a password here, and this session does not
+  run interactive sudo, so the adapter writes the list format whose example is
+  installed in `/usr/share/doc` rather than a JSON schema nobody has seen.
+- `smap`'s JSON is an array of hosts (`ip`, `hostnames[]`, `user_hostname`,
+  `ports[{port, service, protocol, ...}]`); the fixture is the real response for
+  `testfire.net` (ports 80, 443, 8080), trimmed. `user_hostname` is the name
+  the operator asked for and is what the record stores, so a passive answer
+  joins the same host rows the active tools write.
+- `nmap` was launched as `kali` and nmap still chose `-sS` on this box (its
+  binary carries `cap_net_raw`), which is the OS packaging's choice, not ours:
+  the adapter passes no scan type, so a host where nmap is unprivileged gets a
+  connect scan and no root is ever required from the operator.
+
 ### 4b. Per-tool support for the injected parameters
 
 | Parameter | `httpx` | `pyprobe` | `pyscan` | `naabu` | Every other adapter |
 |---|---|---|---|---|---|
-| `--ports` | - (live stage) | - | yes, `ctx.ports` replaces `DEFAULT_PORTS` | yes, `-p` (verified: `naabu -h` `-port, -p string`) | ignored |
+| `--ports` | - (live stage) | - | yes, `ctx.ports` replaces `DEFAULT_PORTS` | yes, `-p` (verified: `naabu -h` `-port, -p string`) | `nmap`/`rustscan`/`masscan`: `-p <list>` instead of their top-ports default; `smap`: filters its passive records |
 | `--header` | yes, `-H "Name: Value"` (verified: `httpx -h` `-H, -header string[]`) | yes, request headers | ignored + one warning | ignored + one warning | ignored + one warning |
 | `--user-agent` | yes, `-H "User-Agent: ..."` | yes, client header | ignored + one warning | ignored + one warning | ignored + one warning |
 
@@ -508,7 +626,7 @@ truth). Two consequences for this table:
   - Responses that look like WAF/CDN blocks (for example 403/429 with CDN markers) still count as `ALIVE`.
 - **Port-scan pre-check (Phase 2):** port scans require a stored `live` result for the host. If none is stored, skip the host and print a warning (`run live first`). If the stored `HostStatusRecord.waf` is set (from the `httpx` CDN/WAF JSON fields), skip it as CDN/WAF-fronted. `cdncheck` and `wafw00f` both write that field
   (wave 2 and wave 4), so either tool's match can trigger the skip.
-- **Ports:** `open` if at least one tool saw it open. If one tool saw open and another (that scanned the same port) saw closed, store `unconfirmed` with both in `port_sources`. Verified by a service fingerprint (nmap -sV, banner) raises confidence by one level.
+- **Ports:** `open` if at least one tool saw it open. If one tool saw open and another (that scanned the same port) saw closed, store `unconfirmed` with both in `port_sources`. A service fingerprint (`nmap -sV`, a banner) raises confidence by one level and is stored in `ports.service` / `ports.version`; when two tools disagree (`nmap` says `http`, `smap` says `http?`) both fields stay empty rather than picking a winner, and a fingerprint never lifts an `unconfirmed` state. Before wave 6 `_persist_ports` discarded `service`/`version`, so the bump never fired; it now does.
 
 ### Passive ports (smap)
 Stored with source `smap` and confidence LOW until an active scan confirms; never counted as active proof.

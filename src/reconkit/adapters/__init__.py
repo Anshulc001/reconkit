@@ -18,11 +18,15 @@ from reconkit.adapters.httprobe import HttprobeAdapter
 from reconkit.adapters.httpx_tech import HttpxTechAdapter
 from reconkit.adapters.httpx_tool import HttpxAdapter
 from reconkit.adapters.katana import KatanaAdapter
+from reconkit.adapters.masscan import MasscanAdapter
 from reconkit.adapters.naabu import NaabuAdapter
+from reconkit.adapters.nmap import NmapAdapter
 from reconkit.adapters.nuclei import NucleiAdapter
 from reconkit.adapters.otx import OtxAdapter
 from reconkit.adapters.pyprobe import PyprobeAdapter
 from reconkit.adapters.pyscan import PyscanAdapter
+from reconkit.adapters.rustscan import RustscanAdapter
+from reconkit.adapters.smap import SmapAdapter
 from reconkit.adapters.subfinder import SubfinderAdapter
 from reconkit.adapters.subjs import SubjsAdapter
 from reconkit.adapters.subzy import SubzyAdapter
@@ -65,6 +69,10 @@ ADAPTERS: dict[str, type[BaseToolAdapter]] = {
     "nuclei": NucleiAdapter,
     "subzy": SubzyAdapter,
     "ffuf": FfufAdapter,
+    "nmap": NmapAdapter,
+    "rustscan": RustscanAdapter,
+    "smap": SmapAdapter,
+    "masscan": MasscanAdapter,
 }
 
 __all__ = ["ADAPTERS", "BaseToolAdapter", "BinaryAdapter", "HttpAdapter"]

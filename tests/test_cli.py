@@ -731,6 +731,30 @@ def test_full_json_skips_exploitation_tools_and_does_not_tier_skip_opt_in(
     ]
 
 
+def test_a_full_run_skips_masscan_with_the_root_reason_when_not_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`needs_root` in tools.yaml is a selection skip, so the run still exits 0."""
+    from reconkit import engine as engine_module
+
+    monkeypatch.setattr(engine_module, "running_as_root", lambda: False)
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, mode_args(config, "--full", "--json"))
+    assert result.exit_code == 0, result.stderr
+    document = json.loads(result.stdout)
+    ports = next(stage for stage in document["stages"] if stage["stage"] == "ports")
+    assert {"tool": "masscan", "reason": "requires root / sudo"} in ports["skipped"]
+    assert [item["tool"] for item in ports["results"]] == [
+        "smap",
+        "pyscan",
+        "naabu",
+        "nmap",
+        "rustscan",
+    ]
+    assert document["completion"] == {"status": "complete", "gaps": []}
+
+
 def test_a_full_run_has_no_gaps_when_every_mode_stage_has_a_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

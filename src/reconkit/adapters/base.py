@@ -41,7 +41,9 @@ IDENTITY_TIMEOUT = 10.0
 FIXTURES = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-_VERSION = re.compile(r"v?\d+\.\d+\.\d+")
+# Two-part versions are real (`nmap --version` prints `Nmap version 7.991`), so the
+# patch part is optional rather than required.
+_VERSION = re.compile(r"v?\d+\.\d+(?:\.\d+)?")
 
 Sleep = Callable[[float], Awaitable[None]]
 Finder = Callable[[str], str | None]
@@ -282,6 +284,16 @@ class BaseToolAdapter(ABC):
         if len(flat) == 1:
             return flat[0].read_text(encoding="utf-8")
         raise FetchFailed(f"{self.name}: no fixture for {ctx.target}")
+
+
+def running_as_root() -> bool:
+    """True only on a POSIX host whose effective uid is 0 (Windows is never root).
+
+    Used by the registry's `needs_root` selection rule (docs/09 section 4a6) and
+    by the masscan adapter's own guard, so both ask the same question once.
+    """
+    geteuid = getattr(os, "geteuid", None)
+    return bool(geteuid is not None and geteuid() == 0)
 
 
 def managed_bin_dir() -> Path:

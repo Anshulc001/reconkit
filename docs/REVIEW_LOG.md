@@ -68,6 +68,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-50 | Two tools could not be driven at all: `httprobe` and `waybackurls` read their host list on **stdin**, and `run_exec` opened stdin as `DEVNULL` with no way to feed it - the only alternatives were a shell pipe or a temporary file, and AGENTS rule 1 forbids the first | `run_exec` was written for flag-driven ProjectDiscovery tools, so "input" meant argv | `run_exec(..., stdin_text=...)` feeds the child from its own daemon thread (a lazily-reading child cannot block the timeout clock, an early exit is only a broken pipe) and `None` keeps the documented EOF. The adapter hook is `stdin_text(ctx)`; nothing else changed | `test_stdin_text_reaches_the_child_and_none_keeps_stdin_closed` (`Regression: PIT-50`), `test_stdin_text_survives_a_child_that_never_reads_it`, `test_httprobe_feeds_hosts_on_stdin_and_never_uses_a_shell`, `test_waybackurls_feeds_domains_on_stdin` |
 | PIT-51 | The `tech` stage had no persistence branch at all: `_persist_stage` covered subs/dns/live/ports/urls, so every `HostStatusRecord` a tech adapter returned was dropped - webanalyze and cdncheck would have run, printed `ok N item(s)` and stored nothing | the tech stage never had an adapter, so the missing branch was invisible; `host_status_history.tech_json`/`waf` existed but only a live pass could fill them | `_persist_tech` merges `tech`/`waf` into the host's newest status row through the new `Store.update_host_extras`: no state row is appended and `state` is never touched, so `diff`/`previous_state()` are unchanged; an off-target record is dropped and a host with no status row is not annotated (D11) | `test_tech_stage_annotates_the_latest_host_row` (`Regression: PIT-51`), `test_tech_stage_drops_a_host_outside_the_target` |
 | PIT-48 | `doctor` showed junk for two installed tools (`katana` -> `__`, `nuclei` -> `[I…` plus ANSI escapes), and `update` could not call `katana` up to date, so an already-current binary would be downloaded again on every run (12j) | `installed_version()` returned `text.splitlines()[0]` for every tool, but `katana -version` prints four lines of ASCII art (the real version is on line 8, on stderr) and `nuclei -version` prints a coloured `[INF]` line first, so `_same_version()` compared a release tag against a logo | A tool may carry a top-level `version_regex` in `tools.yaml`; `installed_version()` searches the whole `version_cmd` output, returns the first capture group (or the whole match when the pattern has no group), and falls back to `splitlines()[0]` when the field is absent or nothing matches. A pattern that does not compile is a `ConfigError` at registry load, before any command runs | `test_katana_version_ignores_the_ascii_banner` (`Regression: PIT-48`), `test_nuclei_version_drops_the_ansi_log_prefix` (`Regression: PIT-48`), `test_a_regex_with_no_match_falls_back_to_the_first_line`, `test_a_version_regex_without_a_group_returns_the_match`, `test_version_regex_is_parsed_from_the_registry`, `test_a_broken_version_regex_is_a_config_error`, `test_version_regex_survives_the_plan_copy` |
+| PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
 ## Commit map
 
@@ -3607,6 +3608,71 @@ install residue. No new feature, no behaviour change, no code-logic change.
   `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` (unchanged
   from the previous batch; no scope edit was made).
 
+## Adapter wave 6: ports stage - nmap, rustscan, smap, masscan (2026-11-17, D14)
+
+- Docs read / goal: `AGENTS.md` (rules 1, 5, 7; section 7 recipe), RESUME, `docs/09` sections 3/4/4a6/5,
+  `docs/02` (ports paragraph + `--ports` row), `docs/04` (ports table), `docs/05` rule 6,
+  `docs/tool_manuals/ports.md` (the real captured `--help` for all four), `tools.yaml`.
+  Goal: close the `ports` stage so every adapter wave has a full pool there.
+- Flags/fields were taken from the installed binaries, not from memory:
+  `nmap --version` -> `Nmap version 7.991`; `rustscan --version` -> `rustscan 2.3.0` plus its
+  full `--help`; `smap -h` -> `Smap 1.0.0-beta`; `masscan --help` + the packaged manpage
+  (`/usr/share/man/man8/masscan.8.gz`) + `/usr/share/doc/masscan/README.md.gz`. Commands:
+  `nmap -sV -Pn -p 80,443,8080 --open -oX out.xml testfire.net` (real, XML shape captured),
+  `rustscan -a testfire.net -p 80,443 -g -n --ulimit 5000` -> `65.61.137.117 -> [443,80]`,
+  `smap testfire.net -oJ -` -> the JSON array in the fixture, and masscan only got as far as
+  `[-] FAIL: permission denied` as `kali`.
+- **Three findings that changed the plan, each verified rather than assumed:**
+  1. `rustscan` does **not** need `nmap` in greppable mode. `-g` says `Only output the ports.
+     No Nmap.` and the same command with `PATH=/tmp/emptybin` printed the same
+     `IP -> [ports]` line, so the brief's "skip when nmap is missing" has nothing to guard.
+     2.3.0 also has no `-- <nmap args>` passthrough (`--help` ends at `--udp`), so the service
+     fingerprint stays `nmap`'s job instead of being smuggled through rustscan.
+  2. `masscan` JSON (`-oJ`) could not be observed: it needs a root scan, `sudo -n true` answers
+     `sudo: a password is required`, and this session does not run interactive sudo. The list
+     format `-oL` is documented in the installed README (`open tcp 80 XXX.XXX.XXX.XXX
+     1390380064`), so the adapter parses that and the fixture is `.synthetic.list`, not `.json`.
+  3. The same re-check found the adapter's `run()`-time `SKIPPED` cannot live in this engine: a
+     full mock run went from exit 0 to exit 5 (`failed_total` counts every non-OK executed
+     tool). The skip moved to `_select` via the `needs_root: true` the registry already carried
+     (`ToolSpec.needs_root`, non-bool -> `ConfigError`); the adapter keeps the identical guard
+     through `base.running_as_root()` for a direct call.
+- Behaviour, per tool: `nmap` `-sV -Pn -oX <ws>/nmap-output-<pid>.xml --open` + `--top-ports 1000`
+  (or `-p <list>`), XML read through `read_output`; `rustscan` one `-g -n --ulimit 5000 -a a,b`
+  process with `-p` or `--top`, stdout parsed, the single input host kept as `fqdn` because `-g`
+  prints the resolved address; `smap` `-iL <ws>/smap-targets-<pid>.txt -oJ <ws>/smap-output-<pid>.json`
+  (passive, no packets), `--ports` filters its records; `masscan` `<ips> -p<list> --rate 1000 -oL
+  <ws>/masscan-output-<pid>.list`, resolving names locally and keeping only addresses
+  `ctx.ip_allowed` permits (docs/05 rule 6), `DEFAULT_PORTS` when `--ports` is absent because
+  masscan has no top-ports option. No `-sS`, no `-O`, no scripts, no rate flag on the other three.
+- **`--ports` mapping, stated plainly, with the one gap:** `nmap`/`rustscan`/`masscan` take it as
+  input, `smap` cannot (it reports what Shodan already saw) so it filters output. Nothing is
+  silently dropped; docs/02 and docs/09 section 4b say so.
+- Real end-to-end proof (not a mock): `reconkit run -d testfire.net --full --no-scope --tools
+  pyprobe,nmap,rustscan,smap,masscan --ports 80,443,8080` -> `live: pyprobe ok 1`, `ports: nmap ok
+  3`, `rustscan ok 3`, `smap ok 3`, `masscan skipped` / `requires root / sudo`, exit 0, and the DB
+  holds `80/443/8080 open HIGH` with `nmap`+`rustscan`+`smap` in `port_sources` and
+  `version = Apache Tomcat/Coyote JSP engine 1.1`.
+- That real run produced the second finding (PIT-54): `_persist_ports` grouped `tool -> [state]`,
+  so the `-sV` fingerprint was parsed and then thrown away and the documented confidence bump had
+  never fired. Fixed in the same part (`_fingerprint()`, `FINGERPRINT_BUMP`), two engine tests.
+- Tests: 22 new - 19 adapter tests in `tests/test_binary_adapters.py` (`nmap` parse/identity/
+  `--ports`/file-output/malformed XML, `rustscan` parse/identity/single-host/`-g`-needs-no-nmap/
+  `--ports`, `smap` parse/identity/`--ports` filter, `masscan` non-root skip/parse/identity/IP
+  targets/scope refusal, registration+stage), 1 CLI test (`--full` reports
+  `{"tool": "masscan", "reason": "requires root / sudo"}` and stays `complete`), 2 engine tests
+  (PIT-54 and the disagreement case). Existing guard extended, not weakened:
+  `NO_HOME_NEEDED` gained the four tools with reasons taken from their real help output. Suite `758 -> 780`, `ruff check .` clean,
+  `ruff format --check .` 80 files, `mypy src/reconkit` clean (52 source files).
+- Deviations recorded in MASTER_PLAN **D14** and PROGRESS: masscan root skip at selection (not a
+  runtime status), rustscan needs no nmap, masscan list output instead of JSON, `smap --ports`
+  filters passive records, `_VERSION` now accepts a two-part version (`Nmap version 7.991`),
+  `adapters/nmap.py` carries a per-file `S314` ignore with its reason in `pyproject.toml`
+  (it parses only the `-oX` file nmap wrote in the same run).
+- Next action: none. Still unadapted: subs `urlscan, amass, findomain, chaos, github_subdomains`;
+  dns `dig, massdns, puredns`; vulns `dnsreaper, nikto`; shots `gowitness`. Every `ports` stage
+  tool now has an adapter (6 of 6).
+
 ## Adapter wave 5 completed: ffuf (inline wordlist); dnsreaper still unadapted (2026-11-17)
 
 - Docs read / goal: `AGENTS.md` (0/0b/0c, hard rule 7, no new deps without
@@ -3787,8 +3853,7 @@ install residue. No new feature, no behaviour change, no code-logic change.
       stored_waf = waf
       stored_priority = waf_priority
   self._conn.execute(
-      "UPDATE host_status_history SET tech_json = ?, waf = ?, waf_priority = ?"
-      " WHERE id = ?",
+      "UPDATE host_status_history SET tech_json = ?, waf = ?, waf_priority = ? WHERE id = ?",
       (json.dumps(merged), stored_waf, stored_priority, int(row["id"])),
   )
   ```
