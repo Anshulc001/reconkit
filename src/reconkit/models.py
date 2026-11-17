@@ -95,7 +95,8 @@ class UrlRecord(BaseModel):
 class FindingRecord(BaseModel):
     fqdn: str
     kind: str
-    severity: Literal["info", "low", "medium", "high", "critical"]
+    # `unknown` is a real nuclei severity (42 installed templates declare it).
+    severity: Literal["info", "low", "medium", "high", "critical", "unknown"]
     title: str
     evidence: str | None = None
     template_id: str | None = None

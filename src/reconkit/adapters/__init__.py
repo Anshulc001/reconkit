@@ -18,11 +18,13 @@ from reconkit.adapters.httpx_tech import HttpxTechAdapter
 from reconkit.adapters.httpx_tool import HttpxAdapter
 from reconkit.adapters.katana import KatanaAdapter
 from reconkit.adapters.naabu import NaabuAdapter
+from reconkit.adapters.nuclei import NucleiAdapter
 from reconkit.adapters.otx import OtxAdapter
 from reconkit.adapters.pyprobe import PyprobeAdapter
 from reconkit.adapters.pyscan import PyscanAdapter
 from reconkit.adapters.subfinder import SubfinderAdapter
 from reconkit.adapters.subjs import SubjsAdapter
+from reconkit.adapters.subzy import SubzyAdapter
 from reconkit.adapters.tlsx import TlsxAdapter
 from reconkit.adapters.unfurl import UnfurlAdapter
 from reconkit.adapters.urlfinder import UrlfinderAdapter
@@ -59,6 +61,8 @@ ADAPTERS: dict[str, type[BaseToolAdapter]] = {
     "wafw00f": Wafw00fAdapter,
     "whatweb": WhatwebAdapter,
     "httpx_tech": HttpxTechAdapter,
+    "nuclei": NucleiAdapter,
+    "subzy": SubzyAdapter,
 }
 
 __all__ = ["ADAPTERS", "BaseToolAdapter", "BinaryAdapter", "HttpAdapter"]

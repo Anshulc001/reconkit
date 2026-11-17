@@ -68,7 +68,9 @@ class UrlRecord(BaseModel):         # Phase 3
 class FindingRecord(BaseModel):     # Phase 3
     fqdn: str
     kind: str
-    severity: Literal["info","low","medium","high","critical"]
+    # `unknown` is real: 42 of the installed nuclei templates declare it and
+    # nuclei can select it with `-severity unknown` (2026-11-17, adapter wave 5).
+    severity: Literal["info","low","medium","high","critical","unknown"]
     title: str
     evidence: str | None = None
     template_id: str | None = None
@@ -148,7 +150,7 @@ Phase 2 = working adapter in the first build. Phase 3 = listed in `tools.yaml`, 
 | ports | active (smap passive) | pyscan, naabu, nmap, rustscan, smap; masscan (opt_in) | pyscan, naabu |
 | tech | active | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze |
 | urls | passive/active | gau, waybackurls, katana, hakrawler, gospider, subjs, unfurl, urlfinder | gau, katana, waybackurls, hakrawler, gospider, subjs, unfurl, urlfinder |
-| vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) | - |
+| vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) | nuclei, subzy |
 | shots | active | gowitness (opt_in) | - |
 
 Selection rules (2026-11-17: the mode tables in docs/02 section 2 and `MODE_STAGES`/`MODE_TOOLS` in `engine.py` are the source): use adapters that are installed (or http/python kind), allowed by tier for the mode (`allowed_tiers`: `opt_in` only with `--include-noisy` or a `full` run; `intrusive` only with `full` or an explicit `--tools` name), allowed by tool mode (an active tool in `passive` mode is skipped with `tool mode not included in passive mode` even when named), never `exploitation: true` unless named with `--tools`, and filtered by `--tools` / `--exclude`. `tools.yaml` may carry `exploitation: true` on an intrusive entry (`sqlmap`, `dalfox`, `crlfuzz`); the registry parses it into `ToolSpec.exploitation` (a non-bool is a `ConfigError`) and the engine skips such a tool automatically in every mode with `exploitation tool requires explicit --tools`. Missing tools are reported as `skipped`, never fatal unless no adapter remains (exit 4). Every selection-time skip is recorded in `tool_runs` **and** reported to the caller: `stages[].skipped` in the `--json` document and the Tools table list each tool with its reason, and `summary.tools_skipped` counts them (docs/02 section 5), so a stage whose whole pool has no adapter cannot look like a stage that ran and found nothing. This is the selection-time rule: a binary that was present at selection but cannot be spawned at run time is a `failed` result instead (see the adapter contract in section 3), not a skip. **`naabu` is scope-mode dependent (owner decision 2026-11-17; supersedes the permanent block of 11c-G-7/12i):**
@@ -359,6 +361,67 @@ Two rules apply, and they are not symmetric:
   `_persist_tech` picks the pass's highest-priority detection before calling it.
   The three names are still not merged into a list: a list column was rejected
   as a wider schema change than the ruling asked for.
+
+### 4a5. Adapter wave 5 (2026-11-17): nuclei, subzy
+
+Both are `vulns` / `active` / `core`. The stage is not part of `--active`
+(`MODE_STAGES`, locked at `756af8e`), so these adapters run under `--full`, the
+explicit `reconkit vulns` stage command, or an explicit `--tools` name.
+
+| Tool | Invocation | Records |
+|---|---|---|
+| `nuclei` | `-l <hosts file> -jsonl -silent -nc -duc -tags takeover,exposure,misconfig` | `FindingRecord(kind=<template type>, severity=<info.severity>, template_id=<template-id>, evidence=<matched-at>)` |
+| `subzy` | `run --targets <hosts file> --hide_fails --output <json file>` | `FindingRecord(kind="takeover", severity="high", title=<service/documentation>)` for `vulnerable: true` entries only |
+
+**Findings are not persisted yet.** `FindingRecord` and the `vulns` stage
+existed as a contract since Phase 2, but `_persist_stage` has no `VULNS`
+branch and `docs/04` still defers the `findings` table, so a vulns adapter's
+records reach the `--json` document and the run's raw output file and stop
+there. That is the documented state of the stage, not new behaviour: making
+them durable is the deferred findings table (schema + report work), and no
+adapter invented a second persistence path for it.
+
+Verified on this box (`nuclei` v3.11.1 in `~/go/bin`, `subzy` v1.2.0 in
+`~/.reconkit/bin`):
+
+- `nuclei -version` prints `[INF] Nuclei Engine Version: v3.11.1`; `-h` lists
+  `-l, -list`, `-j, -jsonl`, `-silent`, `-nc, -no-color`, `-duc,
+  -disable-update-check`, `-tags`, `-severity`, `-o, -output`, `-rl`.
+- `nuclei` reads its target list from a file (`-l`), so the adapter writes
+  `nuclei-hosts-<pid>.txt` into the run workspace and removes it in `finally`
+  (gospider/webanalyze precedent). `-duc` is always passed: without it nuclei
+  checks for template updates before scanning and can block on the network.
+- **Tags, not severity, bound the blast radius.** `tools.yaml` already says
+  `Run safe tags only (takeover, exposure, misconfig)`, so the adapter passes
+  exactly those three and no `-severity` filter: severity is stored on the
+  record, and dropping findings by severity in the adapter would silently
+  discard evidence the operator asked for. `-rl` is never passed (no pacing,
+  D3); nuclei's own default rate applies.
+- `nuclei`'s severity vocabulary includes `unknown` (42 installed templates),
+  which the `FindingRecord` literal now accepts; anything else is a
+  `ParseError`, so a changed vocabulary fails loudly rather than being guessed.
+- `subzy run --help` lists `--targets` (file), `--target` (comma list),
+  `--output` (JSON file), `--hide_fails`, `--concurrency`, `--timeout`,
+  `--vuln`, `--https`, `--verify_ssl`. `subzy version` prints
+  `subzy version: v1.2.0`.
+- **Two real-output traps, both found by running the tools, not by reading
+  `-h`:** (1) nuclei's `host` field is `host:port` when it probed a non-default
+  port (`demo.testfire.net:443`), not a URL - the first real run failed with
+  `nuclei: invalid host 'demo.testfire.net:443'` and the fix is `finding_host()`
+  (PIT-53); (2) subzy writes the literal `null`, not `[]`, when nothing
+  matched, which the first real subzy run rejected as "not a JSON array".
+  Fixtures written from a doc or a happy-path sample show neither.
+- **`subzy` writes its findings only to the `--output` file** - stdout carries
+  log lines (`[ * ] Loaded 2 targets`, `[ * ] Saved output to "..."`), and the
+  JSON array is in the file. The adapter therefore implements the new
+  `read_output(ctx)` hook: after a successful run the base flow asks the
+  adapter for the document to parse (and to store as the raw output) instead of
+  `stdout`, so timeout/failed/parse handling stays in one place. A
+  `--output`-only tool is a real class (`subzy` now, `ffuf`/`dnsreaper` later),
+  which is why the hook is generic rather than a `subzy`-only `run()` override.
+- subzy needs `HOME` (`needs_home = True`): it stores
+  `~/<subzy>/fingerprints.json` beside the user's config and writes it on first
+  run.
 
 ### 4b. Per-tool support for the injected parameters
 

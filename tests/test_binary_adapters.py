@@ -29,6 +29,7 @@ from reconkit.adapters.httpx_tech import HttpxTechAdapter
 from reconkit.adapters.httpx_tool import HttpxAdapter
 from reconkit.adapters.katana import KatanaAdapter
 from reconkit.adapters.naabu import NaabuAdapter
+from reconkit.adapters.nuclei import NucleiAdapter
 from reconkit.adapters.registry import get_spec, load_tools
 from reconkit.adapters.subfinder import (
     PROVIDERS,
@@ -37,6 +38,7 @@ from reconkit.adapters.subfinder import (
     cleanup_stale_provider_dirs,
 )
 from reconkit.adapters.subjs import SubjsAdapter
+from reconkit.adapters.subzy import SubzyAdapter
 from reconkit.adapters.tlsx import TlsxAdapter
 from reconkit.adapters.unfurl import UnfurlAdapter
 from reconkit.adapters.urlfinder import UrlfinderAdapter
@@ -48,8 +50,9 @@ from reconkit.config import load_config
 from reconkit.core.runner import ExecResult
 from reconkit.core.store import Store
 from reconkit.engine import Engine
-from reconkit.errors import ToolFailed
+from reconkit.errors import ParseError, ToolFailed
 from reconkit.models import (
+    FindingRecord,
     HostState,
     HostStatusRecord,
     PortRecord,
@@ -157,6 +160,8 @@ def test_binary_adapters_are_registered() -> None:
     assert ADAPTERS["wafw00f"] is Wafw00fAdapter
     assert ADAPTERS["whatweb"] is WhatwebAdapter
     assert ADAPTERS["httpx_tech"] is HttpxTechAdapter
+    assert ADAPTERS["nuclei"] is NucleiAdapter
+    assert ADAPTERS["subzy"] is SubzyAdapter
 
 
 # Binary tools whose invocation never touches $HOME, so neither the identity
@@ -1693,3 +1698,126 @@ def test_a_javascript_href_is_skipped_not_a_parse_error() -> None:
         assert urls == ["http://testfire.net/index.jsp", "http://testfire.net/login.jsp"], (
             adapter.name
         )
+
+
+# --------------------------------------------- wave 5 (nuclei, subzy)
+
+
+def test_nuclei_adapter_parses_jsonl_findings() -> None:
+    """Each JSONL match becomes a FindingRecord with the tool's own severity."""
+    records = NucleiAdapter().parse_output(fixture("adapters", "nuclei.synthetic.jsonl"))
+    assert [(r.fqdn, r.severity, r.template_id) for r in records] == [
+        ("testfire.net", "high", "takeover-detect"),
+        ("www.testfire.net", "medium", "exposed-panels"),
+        ("testfire.net", "unknown", "tech-detect-generic"),
+    ]
+    assert all(isinstance(record, FindingRecord) for record in records)
+    assert all(record.source == "nuclei" for record in records)
+    assert records[0].title == "Subdomain Takeover - Unclaimed S3 Bucket"
+    assert records[0].evidence == "https://testfire.net/"
+    assert records[1].kind == "http"
+    # `severity: unknown` is a real nuclei value (42 installed templates).
+    assert records[2].severity == "unknown"
+
+
+def test_nuclei_adapter_scans_the_given_hosts_with_safe_tags(tmp_path: Path) -> None:
+    adapter = NucleiAdapter(finder=lambda _name: "/usr/bin/nuclei")
+    ctx = make_ctx(hosts=["testfire.net", "www.testfire.net", "testfire.net"])
+    ctx.workspace = tmp_path
+    command = adapter.build_command(ctx)
+    assert command[1:4] == ["-l", str(tmp_path / f"nuclei-hosts-{os.getpid()}.txt"), "-jsonl"]
+    assert "-duc" in command and "-silent" in command and "-nc" in command
+    assert command[command.index("-tags") + 1] == "takeover,exposure,misconfig"
+    assert "-severity" not in command  # severity is stored, never used to hide findings
+    assert "-rl" not in command  # no pacing (D3)
+
+
+def test_nuclei_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome(stdout="[INF] Nuclei Engine Version: v3.11.1\n"))
+    accepted = NucleiAdapter(finder=lambda _name: "/usr/bin/nuclei").check_installed()
+    assert accepted.installed is True
+    fake_exec(monkeypatch, outcome(stdout="nuclei 1.0 — not the scanner\n"))
+    rejected = NucleiAdapter(finder=lambda _name: "/usr/bin/nuclei").check_installed()
+    assert rejected.installed is False
+
+
+def test_subzy_adapter_parses_takeover_findings() -> None:
+    """Only `vulnerable: true` becomes a finding; a clean name is silence."""
+    records = SubzyAdapter().parse_output(fixture("adapters", "subzy.synthetic.json"))
+    assert len(records) == 1
+    (finding,) = records
+    assert isinstance(finding, FindingRecord)
+    assert (finding.fqdn, finding.kind, finding.severity) == (
+        "old.testfire.net",
+        "takeover",
+        "high",
+    )
+    assert finding.title == "subdomain takeover: Amazon S3"
+    assert finding.evidence is not None and "can-i-take-over-xyz" in finding.evidence
+    assert finding.source == "subzy"
+
+
+def test_subzy_reads_its_findings_from_the_output_file(tmp_path: Path) -> None:
+    """stdout is only the tool's log; the JSON array is in the `--output` file."""
+    adapter = SubzyAdapter(finder=lambda _name: "/usr/bin/subzy")
+    ctx = make_ctx(hosts=["testfire.net"])
+    ctx.workspace = tmp_path
+
+    with pytest.raises(ParseError, match="no --output file"):
+        adapter.read_output(ctx)
+
+    output = tmp_path / f"subzy-output-{os.getpid()}.json"
+    output.write_text(fixture("adapters", "subzy.synthetic.json"), encoding="utf-8")
+    assert "old.testfire.net" in (adapter.read_output(ctx) or "")
+
+
+async def test_the_base_flow_parses_the_document_a_tool_wrote_to_a_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`read_output` is what makes a --output-only tool usable (wave 5)."""
+    adapter = SubzyAdapter(finder=lambda _name: "/usr/bin/subzy")
+    ctx = make_ctx(hosts=["testfire.net"])
+    ctx.workspace = tmp_path
+    document = fixture("adapters", "subzy.synthetic.json")
+
+    def fake(argv: list[str], **_kwargs: object) -> ExecResult:
+        output = Path(argv[argv.index("--output") + 1])
+        output.write_text(document, encoding="utf-8")
+        return outcome(stdout="[ * ] Saved output to the file\n")
+
+    monkeypatch.setattr(base_module, "run_exec", fake)
+    result = await adapter.run(ctx)
+
+    assert result.status is ToolStatus.OK
+    assert all(isinstance(record, FindingRecord) for record in result.records)
+    findings = [record for record in result.records if isinstance(record, FindingRecord)]
+    assert [record.fqdn for record in findings] == ["old.testfire.net"]
+    assert result.raw_text is not None and "old.testfire.net" in result.raw_text
+
+
+def test_subzy_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome(stdout="subzy version: v1.2.0\n"))
+    accepted = SubzyAdapter(finder=lambda _name: "/usr/bin/subzy").check_installed()
+    assert accepted.installed is True
+    fake_exec(monkeypatch, outcome(stdout="subzy 9.9 (not a takeover tool)\n"))
+    rejected = SubzyAdapter(finder=lambda _name: "/usr/bin/subzy").check_installed()
+    assert rejected.installed is False
+
+
+def test_regression_a_nuclei_host_with_a_port_keeps_its_name() -> None:
+    """Regression: PIT-53 - the real tool prints `host` as `host:port`."""
+    raw = (
+        '{"template-id":"t","info":{"name":"N","severity":"info"},'
+        '"type":"http","host":"demo.testfire.net:443"}'
+    )
+    (record,) = NucleiAdapter().parse_output(raw)
+    assert isinstance(record, FindingRecord)
+    assert record.fqdn == "demo.testfire.net"
+    assert record.evidence is None
+
+
+def test_subzy_treats_a_null_document_as_no_findings() -> None:
+    """Regression: the real tool writes `null`, not `[]`, when nothing matched."""
+    assert SubzyAdapter().parse_output("null\n") == []
+    assert SubzyAdapter().parse_output("[]") == []
+    assert SubzyAdapter().parse_output("") == []

@@ -64,6 +64,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-47 | A first `live` pass that contacted a host but could not decide wrote no `host_status_history` row, so "probed and inconclusive" was indistinguishable from "never touched the host", and the reason 12d stores was dropped in exactly the first-run case (11d-findings-g) | `decide_host_state` tied `persist` to `previous is not None`, so the write only started at the second pass; the pass's own evidence (a returned record) was never consulted, although docs/04 section 5 promises one row per host per status pass with a `dns`-stage exemption only | `persist` in the two inconclusive branches is `previous is not None or attempted`, where `attempted = bool(evidence.web)` - a live tool returned a record for that host, ambiguous or not, per the owner ruling and docs/04 section 5. A pass with no record (failed or timed-out tool, or no tool) still writes nothing, and the `dns` stage's SERVFAIL/timeout/no-answer skip is untouched because its evidence never carries web records | `test_regression_an_attempted_probe_persists_with_no_previous_state` (`Regression: PIT-47`), `test_a_first_inconclusive_live_pass_writes_an_unknown_row`, `test_only_the_host_a_tool_reported_gets_the_unknown_row`, `test_a_host_without_a_record_gets_no_row_even_when_another_did`, `test_a_failed_live_tool_attempted_nothing_and_writes_no_row` |
 | PIT-49 | A host a live-stage adapter discovered while probing (a `tlsx` certificate SAN) entered the in-memory `discovered` set - later stages probed it - but had **no row in `subdomains`**: it vanished from `status`, `diff` and the report, and `--new-only` could never show it | `_persist_live` iterated only its input `hosts` list and only collected `HostStatusRecord`s; `_update_discovered` had already unioned the `SubdomainRecord`s into memory, so the loss was invisible inside the run | A status pass persists the discoveries it made as well as the hosts it was given: `_persist_live_discoveries` writes one `subdomains` row (`provenance='subs'`, its tool in `subdomain_sources`, `source_count` per run, `min_sources` respected) for every live `SubdomainRecord` not already in `hosts` or `subdomains`; existing rows keep their own count (PIT-03), and the host-state path is unchanged | `test_regression_live_discovered_subdomain_reaches_the_subdomains_table` (`Regression: PIT-49`), `test_tlsx_sans_enter_discovered_and_reach_subdomains_table` |
 | PIT-52 | The first **real** hakrawler crawl failed the whole tool: `hakrawler: line is not a URL "javascript:checkSiteStatus('AltoroMutual')"`. The strict parser treated a page's own non-HTTP link as malformed tool output, so a perfectly good crawl was thrown away | every urls parser raised `ParseError` on any line `normalize_url()` could not turn into an http(s) URL, and the mock fixtures only contained real URLs - the fake data hid the class of line a real page produces | `base.is_non_web_reference()` recognises `javascript:`, `mailto:`, `tel:`, `data:`, `about:`, `ftp:` and `file:` and all four wave-3 parsers (plus nothing else) skip those lines before parsing. A line that is neither a known non-web link nor an HTTP(S) URL is still a `ParseError`, so genuinely broken output still fails loudly | `test_a_javascript_href_is_skipped_not_a_parse_error` (`Regression: PIT-52`) |
+| PIT-53 | The first **real** nuclei run failed the whole tool: `nuclei: invalid host 'demo.testfire.net:443'` - 14 real findings were thrown away | nuclei prints `host` as `host:port` when it probed a non-default port, not as a URL; the parser's `urlsplit(...).hostname if "://" in value else value` turned that into an invalid host. The mock fixture only had `matched-at` URLs, so the fake data hid the shape | `finding_host()` in `adapters/nuclei.py` returns `urlsplit().hostname` for URLs, the bracketed address for an IPv6 literal, and the part before the first `:` otherwise; `validate_host()` still decides what is a host | `test_regression_a_nuclei_host_with_a_port_keeps_its_name` (`Regression: PIT-53`) |
 | PIT-50 | Two tools could not be driven at all: `httprobe` and `waybackurls` read their host list on **stdin**, and `run_exec` opened stdin as `DEVNULL` with no way to feed it - the only alternatives were a shell pipe or a temporary file, and AGENTS rule 1 forbids the first | `run_exec` was written for flag-driven ProjectDiscovery tools, so "input" meant argv | `run_exec(..., stdin_text=...)` feeds the child from its own daemon thread (a lazily-reading child cannot block the timeout clock, an early exit is only a broken pipe) and `None` keeps the documented EOF. The adapter hook is `stdin_text(ctx)`; nothing else changed | `test_stdin_text_reaches_the_child_and_none_keeps_stdin_closed` (`Regression: PIT-50`), `test_stdin_text_survives_a_child_that_never_reads_it`, `test_httprobe_feeds_hosts_on_stdin_and_never_uses_a_shell`, `test_waybackurls_feeds_domains_on_stdin` |
 | PIT-51 | The `tech` stage had no persistence branch at all: `_persist_stage` covered subs/dns/live/ports/urls, so every `HostStatusRecord` a tech adapter returned was dropped - webanalyze and cdncheck would have run, printed `ok N item(s)` and stored nothing | the tech stage never had an adapter, so the missing branch was invisible; `host_status_history.tech_json`/`waf` existed but only a live pass could fill them | `_persist_tech` merges `tech`/`waf` into the host's newest status row through the new `Store.update_host_extras`: no state row is appended and `state` is never touched, so `diff`/`previous_state()` are unchanged; an off-target record is dropped and a host with no status row is not annotated (D11) | `test_tech_stage_annotates_the_latest_host_row` (`Regression: PIT-51`), `test_tech_stage_drops_a_host_outside_the_target` |
 | PIT-48 | `doctor` showed junk for two installed tools (`katana` -> `__`, `nuclei` -> `[I…` plus ANSI escapes), and `update` could not call `katana` up to date, so an already-current binary would be downloaded again on every run (12j) | `installed_version()` returned `text.splitlines()[0]` for every tool, but `katana -version` prints four lines of ASCII art (the real version is on line 8, on stderr) and `nuclei -version` prints a coloured `[INF]` line first, so `_same_version()` compared a release tag against a logo | A tool may carry a top-level `version_regex` in `tools.yaml`; `installed_version()` searches the whole `version_cmd` output, returns the first capture group (or the whole match when the pattern has no group), and falls back to `splitlines()[0]` when the field is absent or nothing matches. A pattern that does not compile is a `ConfigError` at registry load, before any command runs | `test_katana_version_ignores_the_ascii_banner` (`Regression: PIT-48`), `test_nuclei_version_drops_the_ansi_log_prefix` (`Regression: PIT-48`), `test_a_regex_with_no_match_falls_back_to_the_first_line`, `test_a_version_regex_without_a_group_returns_the_match`, `test_version_regex_is_parsed_from_the_registry`, `test_a_broken_version_regex_is_a_config_error`, `test_version_regex_survives_the_plan_copy` |
@@ -3605,6 +3606,88 @@ install residue. No new feature, no behaviour change, no code-logic change.
   before the commit:
   `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` (unchanged
   from the previous batch; no scope edit was made).
+
+## Adapter wave 5 (partial): nuclei, subzy; dnsreaper and ffuf blocked (2026-11-17)
+
+- Docs read / goal: `AGENTS.md` (0/0b/0c, hard rules 1, 6, 7), RESUME, PIT-14,
+  PIT-30, PIT-50-52, docs/09 adapter contract + §4a5 slot + `FindingRecord`,
+  docs/04 (findings table status), docs/10 version contract, `tools.yaml`,
+  `reconkit run --help`. Goal: four vulns adapters, stop-and-report if one
+  balloons.
+- Baseline: `742 passed` (D12, `501c6d7`), ruff/format/mypy clean, tree clean,
+  `scope.yaml` sha256 `d45a3c9...eeee8b`.
+- **`vulns` is not in `--active`** (mode table locked at `756af8e`): `run
+  --help` lists `--active` as "subs, dns, live, tech, urls", so the vulns
+  adapters run under `--full`, the explicit `reconkit vulns` command, or an
+  explicit `--tools` name. Nothing in the mode table changed.
+- **Record type: no new model needed.** `FindingRecord` already exists
+  (`models.py:95`) with `fqdn`, `kind`, `severity`, `title`, `evidence`,
+  `template_id`, `source`. Its severity literal gained `unknown`, which is a
+  real nuclei value (42 of the installed templates declare it), so a real
+  finding is representable instead of being dropped or coerced. **Findings are
+  still not persisted:** `_persist_stage` has no `VULNS` branch and docs/04
+  still defers the `findings` table, so records reach `--json` and the run's
+  raw output file only. That gap predates this wave and no adapter invented a
+  second persistence path for it; making findings durable is the deferred
+  findings table (schema + report work).
+- Real flags verified on this box: `nuclei` v3.11.1 (`~/go/bin`, on PATH) -
+  `-l/-list` (file), `-j/-jsonl`, `-silent`, `-nc`, `-duc`, `-tags`, `-severity`,
+  `-o`, `-rl`; `subzy` v1.2.0 (`~/.reconkit/bin`) - `version` subcommand and
+  `run --targets/--target/--output/--hide_fails/--concurrency/--timeout`.
+- Command choices: nuclei gets `-l <file> -jsonl -silent -nc -duc -tags
+  takeover,exposure,misconfig` - tags (not a severity filter) are what
+  `tools.yaml` asks for ("Run safe tags only"), and no `-rl` because reconkit
+  has no pacing (D3). subzy gets `run --targets <file> --hide_fails --output
+  <file>` with the tool's own concurrency/timeout defaults.
+- **New shared hook: `read_output(ctx)`.** subzy writes findings only to the
+  `--output` file, so the base flow now asks the adapter for the document after
+  a successful run and parses that instead of stdout (and stores it as the raw
+  output). One method plus two lines in `BaseToolAdapter.run`, so
+  timeout/failed/parse mapping stays in one place; `ffuf`/`dnsreaper` are the
+  next tools of this class.
+- **Two real-output traps found by running, not by reading `-h`:**
+  - **PIT-53:** the first real nuclei run failed the whole tool with
+    `nuclei: invalid host 'demo.testfire.net:443'` - the `host` field is
+    `host:port` when a non-default port is probed, and 14 real findings were
+    thrown away. `finding_host()` now handles URL, `host:port` and bracketed
+    IPv6. Guard: `test_regression_a_nuclei_host_with_a_port_keeps_its_name`.
+  - subzy writes the literal `null` when nothing matched, not `[]`; the first
+    real subzy run failed with "output is not a JSON array". Both are in
+    docs/09 §4a5 and the parsers.
+- Evidence (raw in the report): `doctor` -> `nuclei yes / ok`
+  (`/home/kali/go/bin/nuclei`), `subzy yes / ok` (`~/.reconkit/bin/subzy`); mock
+  run `--full --include-noisy --tools pyprobe,nuclei,subzy` -> `nuclei ok 3`,
+  `subzy ok 1`, `completion complete`, exit 0; real run on testfire.net
+  (`--tools dnspython,pyprobe,nuclei,subzy`) -> `nuclei ok 14`, `subzy ok 0`,
+  exit 0 (14 findings: swagger-api info, weak-cipher-suites low,
+  http-missing-security-headers info, ...). A real `crtsh` run in the same
+  session returned HTTP 404 (external), unrelated to this wave.
+- **Blocked, not written (stop rule):**
+  - **`dnsreaper`** is not installed anywhere on this box (`doctor`: `missing`,
+    no binary under `~/.reconkit/bin`, `~/go/bin`, `/usr/bin`, no pipx
+    package), and docs/09 §8 has no captured flag list for it, so there is no
+    way to verify `--filename/--out json` or its output shape without guessing
+    (AGENTS hard rule 7). Its tools.yaml entry also says it must be installed
+    by hand.
+  - **`ffuf`** is installed (2.3.0) but has no wordlist: nothing under
+    `~/.reconkit/wordlists`, no wordlist in the repo, and docs/PROGRESS.md:548
+    records that no adapter uses one. An ffuf adapter needs a default wordlist
+    - a new dependency/asset the owner has to approve - so per the stop rule it
+    was not added.
+- Tests: 9 new, `742 -> 751` (nuclei parse/command/identity/PIT-53, subzy
+  parse/file-io/`null`/identity, the base `read_output` flow, plus two
+  registration assertions), two CLI tests updated because `vulns` is no longer
+  adapter-less: `test_a_stage_with_no_adapter_reports_its_skips` now names
+  `dnsreaper`, and
+  `test_a_full_run_reports_the_gaps_of_stages_with_no_adapter` became
+  `test_a_full_run_has_no_gaps_when_every_mode_stage_has_a_tool` (the gap rule
+  itself is still guarded by `test_engine` and the block rendering by
+  `test_ui`).
+- Gate: `751 passed`, ruff clean, 75 files formatted, mypy clean (47 source
+  files).
+- Next action: owner ruling on dnsreaper (install it so its flags can be
+  verified, or drop it from the wave) and on the ffuf wordlist question; the
+  findings-table work is separate and still deferred.
 
 ## D12: deterministic WAF merge via tool priority (2026-11-17)
 

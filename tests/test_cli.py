@@ -325,11 +325,12 @@ def test_a_stage_with_no_adapter_reports_its_skips(tmp_path: Path) -> None:
     """Regression: 11d-findings-f, `tools_skipped: 0` for a stage that built nothing.
 
     Changed 2026-11-17 (wave 4): every `tech` tool has an adapter now, so the tool
-    is named from a phase-3 stage instead - `--tools nuclei`, no adapter yet.
+    is named from a phase-3 stage instead - `dnsreaper` (wave 5 added nuclei and
+    subzy, so it is the vulns tool that still has no adapter).
     """
     config = make_config(tmp_path)
     result = CliRunner().invoke(
-        app, scan_args(config, "vulns", "--active", "--json", "--tools", "nuclei")
+        app, scan_args(config, "vulns", "--active", "--json", "--tools", "dnsreaper")
     )
     assert result.exit_code == 4  # no usable tool for the stage, unchanged
     document = json.loads(result.stdout)
@@ -729,28 +730,28 @@ def test_full_json_skips_exploitation_tools_and_does_not_tier_skip_opt_in(
     ]
 
 
-def test_a_full_run_reports_the_gaps_of_stages_with_no_adapter(
+def test_a_full_run_has_no_gaps_when_every_mode_stage_has_a_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Added 2026-11-17: full exits 0 and names the stages that had no tool."""
+    """Changed 2026-11-17 (wave 5): every mode stage can now run something.
+
+    The gap rule itself (exit 0 plus a `completion.gaps` entry) is still guarded
+    by `test_engine.py::test_a_stage_that_executed_no_tools_is_a_gap` and the
+    block rendering by `test_ui.py`; what this test pins is the consequence of
+    the vulns adapters - a `--full` run is no longer `complete_with_gaps`.
+    """
     config = make_config(tmp_path)
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(app, mode_args(config, "--full", "--json"))
 
     assert result.exit_code == 0, result.stderr
     document = json.loads(result.stdout)
-    # Wave 2 (2026-11-17): `tech` has adapters now, so `vulns` is the only gap.
-    assert document["completion"] == {
-        "status": "complete_with_gaps",
-        "gaps": [
-            {"stage": "vulns", "reason": "no adapter yet (phase 3)"},
-        ],
-    }
-    # The human block is stderr-only: stdout stays one clean document.
+    assert document["completion"] == {"status": "complete", "gaps": []}
+    # The human block is stderr-only and prints nothing without gaps.
     assert result.stdout.count("\n") == 1
-    assert "⚠ full scan completed with gaps — 1 stage(s)" in result.stderr
-    assert "vulns: 5 tool(s) skipped (no adapter yet (phase 3))" in result.stderr
-    assert "this is not a failure" in result.stderr
+    assert "completed with gaps" not in result.stderr
+    vulns = next(stage for stage in document["stages"] if stage["stage"] == "vulns")
+    assert [item["tool"] for item in vulns["results"]] == ["nuclei", "subzy"]
 
 
 def test_a_partial_stage_still_exits_five(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

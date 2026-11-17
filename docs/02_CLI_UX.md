@@ -456,6 +456,10 @@ Code `6` is retired (2026-11-17, docs/MASTER_PLAN.md D4): it belonged to `instal
 
 The gaps block is printed by `ui.render_completion_gaps()` and is **stderr-only**, so `--json` stdout stays one clean document. It prints nothing at all when there are no gaps, which keeps every ordinary run's output byte-identical. `--silent` suppresses it like every other message; the exit code and `completion` in `--json` are unaffected.
 
+The block below is the **format**; the counts change with every adapter wave
+(2026-11-17, wave 5: `vulns` gained `nuclei` and `subzy`, so on a box with the
+usual tools installed a `--full` run has no gaps at all and prints nothing).
+
 ```text
 ⚠ full scan completed with gaps — 4 stage(s) had no runnable tools
   subs: 5 tool(s) skipped (no adapter yet (phase 3))

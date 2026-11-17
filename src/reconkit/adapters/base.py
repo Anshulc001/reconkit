@@ -166,6 +166,16 @@ class BaseToolAdapter(ABC):
         """
         return None
 
+    def read_output(self, ctx: RunContext) -> str | None:
+        """Document a tool wrote to a file instead of stdout (docs/09 section 3).
+
+        `None` means "parse stdout", which is every adapter but `subzy`: it only
+        writes its findings to the `--output` file and puts log lines on stdout.
+        Called after a successful run, before `parse_output`, so a file-output
+        tool keeps the base flow's timeout/failed/parse handling.
+        """
+        return None
+
     def prepare(self, ctx: RunContext) -> AbstractContextManager[None]:
         """Optional per-run setup (for example a temporary config file)."""
         return nullcontext()
@@ -217,7 +227,10 @@ class BaseToolAdapter(ABC):
                             raw_text=raw_text,
                         )
                     truncated = outcome.truncated
-                    records = self.parse_output(outcome.stdout)
+                    produced = self.read_output(ctx)
+                    if produced is not None:
+                        raw_text = capture_output(produced, outcome.stderr)
+                    records = self.parse_output(outcome.stdout if produced is None else produced)
         except (ParseError, FetchFailed, ToolFailed) as exc:
             return ToolResult(
                 tool=self.name,

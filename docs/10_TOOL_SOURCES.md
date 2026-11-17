@@ -120,23 +120,24 @@ fails the check is `wrong program` (identity `failed`) and the engine skips the
 tool as `not installed`. Tools without an adapter go through the same
 `ToolSpec` path in `doctor`.
 
-**Presence-only tools (known limitation).** Eleven binary tools carry no
+**Presence-only tools (known limitation).** Ten binary tools carry no
 `version_cmd`, because their real `-version` only prints Go `flag` usage, so
 there is nothing to run the name through: `crlfuzz`, `dalfox`, `dnsreaper`,
-`github_subdomains`, `gowitness`, `hakrawler`, `httprobe`, `sqlmap`, `subzy`,
+`github_subdomains`, `gowitness`, `hakrawler`, `httprobe`, `sqlmap`,
 `waybackurls`, `webanalyze`. For these, a **same-named program that is
 not the expected product is counted as installed**, and doctor's `path` column
 shows the resolved copy by design - not a missing version and not a defect.
 `httpx_tech` is not in this group: it carries `httpx -version` and a pattern, so
-the Python `httpx` CLI is `wrong program` there too. Eight of them
+the Python `httpx` CLI is `wrong program` there too. Nine of them
 (`httprobe`, `webanalyze`, `waybackurls` in wave 2; `hakrawler`, `gospider`,
-`subjs`, `urlfinder` in wave 3; `unfurl` in wave 4) gained adapters on
-2026-11-17 and prove their identity through their own `-h`/`-version` markers
-instead - `unfurl` uses its stderr `Usage:` block, since it has no version flag
-at all. `doctor` asks the adapter when one exists (`doctor.default_status`), so
-the identity column is a real check for those eight; `crlfuzz`, `dalfox`,
-`dnsreaper`, `github_subdomains`, `gowitness`, `sqlmap` and `subzy` still have
-no adapter and stay presence-only. `smap`, `gospider`, `subjs`
+`subjs`, `urlfinder` in wave 3; `unfurl` in wave 4; `subzy` in wave 5) gained
+adapters on 2026-11-17 and prove their identity through their own
+`-h`/`-version` markers instead - `unfurl` uses its stderr `Usage:` block,
+`subzy` its `version` subcommand, since neither has a version flag at all.
+`doctor` asks the adapter when one exists (`doctor.default_status`), so the
+identity column is a real check for those nine; `crlfuzz`, `dalfox`,
+`dnsreaper`, `github_subdomains`, `gowitness` and `sqlmap` still have no
+adapter and stay presence-only. `smap`, `gospider`, `subjs`
 and `urlfinder` have real probes; the ProjectDiscovery tools, `wafw00f`,
 `findomain`, `puredns`, `dig`, `massdns`, `whatweb`, `nmap`, `masscan`, `gau`,
 `ffuf` and `nikto` report a version from their own banner. `gau` gained a

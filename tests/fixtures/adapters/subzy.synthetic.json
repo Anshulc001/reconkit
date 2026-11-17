@@ -1,0 +1,44 @@
+[
+  {
+    "subdomain": "old.testfire.net",
+    "status": "vulnerable",
+    "engine": "Amazon S3",
+    "documentation": "https://github.com/EdOverflow/can-i-take-over-xyz/issues/29",
+    "discussion": "",
+    "cicd_pass": false,
+    "cname": "old-testfire.s3.amazonaws.com",
+    "fingerprint": "NoSuchBucket",
+    "http_status": 404,
+    "nxdomain": false,
+    "service": "Amazon S3",
+    "vulnerable": true
+  },
+  {
+    "subdomain": "www.testfire.net",
+    "status": "not vulnerable",
+    "engine": "",
+    "documentation": "",
+    "discussion": "",
+    "cicd_pass": false,
+    "cname": null,
+    "fingerprint": "",
+    "http_status": null,
+    "nxdomain": false,
+    "service": "",
+    "vulnerable": false
+  },
+  {
+    "subdomain": "demo.testfire.net",
+    "status": "not vulnerable",
+    "engine": "GitHub Pages",
+    "documentation": "",
+    "discussion": "",
+    "cicd_pass": false,
+    "cname": "testfire.github.io",
+    "fingerprint": "There isn't a GitHub Pages site here.",
+    "http_status": null,
+    "nxdomain": false,
+    "service": "",
+    "vulnerable": false
+  }
+]
