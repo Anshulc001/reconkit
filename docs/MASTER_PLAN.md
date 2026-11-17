@@ -736,6 +736,17 @@ D12. 2026-11-17 - Deterministic WAF merge via tool priority (owner ruling,
     `host_status_history.waf_priority INTEGER NOT NULL DEFAULT 0`, schema 6 -> 7 -
     and `Store.update_host_extras` compares priorities instead of overwriting.
 
+D13. 2026-11-17 - Inline default wordlist for ffuf (owner ruling). Wave 5 left
+    ffuf unadapted because no wordlist existed anywhere in the repo or under
+    `~/.reconkit`, and an adapter without one cannot fuzz anything. Owner
+    ruling: ship `src/reconkit/data/wordlists/common.txt` - about 110 common
+    paths, committed, packaged as package data, no runtime download - and add
+    `--ffuf-wordlist PATH` on the scan commands so an operator can replace it.
+    `ffuf` is `opt_in`, and its findings are `severity="info"`: a discovered path
+    is not a confirmed vulnerability. dnsreaper stays unadapted: it is not on
+    PyPI, has no `setup.py`/`pyproject.toml`, and is a script run by hand, so it
+    needs an adapter kind that does not exist.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

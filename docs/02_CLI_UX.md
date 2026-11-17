@@ -271,6 +271,7 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | `--status-codes LIST` | Only keep hosts that responded with one of these HTTP status codes (`200,301,302`) |
 | `--header "Name: Value"` | Add an HTTP header for `httpx` and `pyprobe`; repeatable. A tool without `-H` logs `--header not applied to <tool> (no -H support)` and does not fail |
 | `--user-agent STR` | Override the default User-Agent for `httpx` and `pyprobe` |
+| `--ffuf-wordlist PATH` | Wordlist for `ffuf` content discovery, replacing the packaged `common.txt` (about 110 paths, D13). The file must exist and be readable; a missing file is a failed `ffuf` result, never a silent fallback |
 | `--redact-headers` / `--show-headers` | Hide (default) or reveal header values in JSON and UI output |
 | `--min-sources N` | Hide results confirmed by fewer than N tools |
 | `--phase-timeout SEC` | Stage time limit. `--timeout-<stage>` is deferred; `--phase-timeout` is the only stage-timeout control in this build. |
@@ -368,9 +369,10 @@ With a filter flag (`--only-alive`, `--only-states`, `--status-codes`) the
 when `--status-codes` was used). The database write is unchanged: filters only
 change what is printed.
 
-With an injectable flag (`--ports`, `--status-codes`, `--header`, `--user-agent`)
-a top-level `injections` object is added:
-`{"ports":[80,443],"status_codes":[200,301],"headers":{"X-Test":"***"},"user_agent":"reconkit-test"}`.
+With an injectable flag (`--ports`, `--status-codes`, `--header`, `--user-agent`,
+`--ffuf-wordlist`) a top-level `injections` object is added:
+`{"ports":[80,443],"status_codes":[200,301],"headers":{"X-Test":"***"},"user_agent":"reconkit-test","ffuf_wordlist":"/path/common.txt"}`
+(`ffuf_wordlist` is `null` unless the flag was given).
 Header values are redacted as `***` unless `--show-headers` was given. `ToolResult` objects under `stages[].results` use the schemas in docs/09.
 
 `hosts[].detail` is the bounded, redacted reason recorded with that host's latest status row (docs/04 section 5): `null` unless the latest pass could not decide a better state, in which case it is a one-line string of at most 200 characters with the run's known secrets redacted. It is the machine-readable half of a diagnostic the human table does not show - a script can tell a TLS failure apart from another cause without probing the host again.

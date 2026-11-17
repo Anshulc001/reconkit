@@ -117,6 +117,10 @@ _HEADER_HELP = (
     'Format: "Name: Value".'
 )
 _USER_AGENT_HELP = "Override the default User-Agent for httpx and pyprobe."
+_FFUF_WORDLIST_HELP = (
+    "Wordlist for ffuf content discovery. Default: the packaged common.txt "
+    "(about 110 paths). The file must exist and be readable."
+)
 _REDACT_HELP = "Hide header values in JSON and UI output (default on)."
 _SHOW_HEADERS_HELP = "Reveal header values in JSON output (overrides --redact-headers)."
 _HEADER_NAME = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
@@ -682,6 +686,7 @@ def _run_scan(
     headers: tuple[tuple[str, str], ...] = (),
     user_agent: str | None = None,
     redact_headers: bool = True,
+    ffuf_wordlist: Path | None = None,
 ) -> int:
     engine: Engine | None = None
     try:
@@ -788,6 +793,7 @@ def _run_scan(
                         headers=headers,
                         user_agent=user_agent,
                         redact_headers=redact_headers,
+                        ffuf_wordlist=ffuf_wordlist,
                     ),
                 )
             )
@@ -822,7 +828,7 @@ def _run_scan(
                 if status_codes:
                     filter_info["status_codes"] = list(status_codes)
             injections: dict[str, object] | None = None
-            if ports or status_codes or headers or user_agent:
+            if ports or status_codes or headers or user_agent or ffuf_wordlist:
                 injections = {
                     "ports": list(ports),
                     "status_codes": list(status_codes),
@@ -830,6 +836,7 @@ def _run_scan(
                         name: ("***" if redact_headers else value) for name, value in headers
                     },
                     "user_agent": user_agent,
+                    "ffuf_wordlist": None if ffuf_wordlist is None else str(ffuf_wordlist),
                 }
             for name in sorted({result.tool for result in summary.results}):
                 if headers and name not in _HEADER_TOOLS:
@@ -929,6 +936,9 @@ def _scan_command(
         bool,
         typer.Option("--redact-headers/--show-headers", help=_REDACT_HELP),
     ] = True,
+    ffuf_wordlist: Annotated[
+        Path | None, typer.Option("--ffuf-wordlist", help=_FFUF_WORDLIST_HELP)
+    ] = None,
     no_keys: Annotated[bool, typer.Option("--no-keys", help="Force free mode.")] = False,
     resume: Annotated[
         bool, typer.Option("--resume", help="Continue the latest unfinished run.")
@@ -965,6 +975,7 @@ def _scan_command(
             headers=_headers(header),
             user_agent=user_agent,
             redact_headers=redact_headers,
+            ffuf_wordlist=ffuf_wordlist,
             no_keys=no_keys,
             resume=resume,
             no_color=no_color,

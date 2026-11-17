@@ -141,6 +141,9 @@ class RunContext(BaseModel):
     # header apply these; the rest ignore them and the engine warns once.
     headers: dict[str, str] = {}
     user_agent: str | None = None
+    # `--ffuf-wordlist` (docs/02 section 3): a user-supplied list replaces the
+    # packaged default for content discovery. `None` means "use the packaged one".
+    ffuf_wordlist: Path | None = None
     # docs/05 rule 6: the loaded scope's `in_scope_cidrs` check, handed down by the
     # engine so an adapter can refuse a resolved address without importing `scope`.
     # `None` means "no permission": an adapter that connects to a resolved address

@@ -364,6 +364,8 @@ class ScanOptions:
     headers: tuple[tuple[str, str], ...] = ()
     user_agent: str | None = None
     redact_headers: bool = True
+    # `--ffuf-wordlist` (D13): a user list replaces the packaged default.
+    ffuf_wordlist: Path | None = None
 
     @property
     def mode(self) -> str:
@@ -1195,6 +1197,7 @@ class Engine:
             ip_allowed=ip_allowed,
             headers=dict(opts.headers),
             user_agent=opts.user_agent,
+            ffuf_wordlist=opts.ffuf_wordlist,
         )
 
         async def one(spec: ToolSpec, adapter: type[BaseToolAdapter]) -> None:

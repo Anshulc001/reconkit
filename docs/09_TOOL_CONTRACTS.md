@@ -372,6 +372,21 @@ explicit `reconkit vulns` stage command, or an explicit `--tools` name.
 |---|---|---|
 | `nuclei` | `-l <hosts file> -jsonl -silent -nc -duc -tags takeover,exposure,misconfig` | `FindingRecord(kind=<template type>, severity=<info.severity>, template_id=<template-id>, evidence=<matched-at>)` |
 | `subzy` | `run --targets <hosts file> --hide_fails --output <json file>` | `FindingRecord(kind="takeover", severity="high", title=<service/documentation>)` for `vulnerable: true` entries only |
+| `ffuf` | `-u FHOST/FUZZ -w <hosts file>:FHOST -w <wordlist>:FFUF -mode clusterbomb -of json -o <json file> -mc 200,204,301,302,307,401,403 -t 50 -s -noninteractive` | `FindingRecord(kind="path", severity="info", title=`<status> <path>`, evidence=<url>)` for every match |
+
+**`ffuf` is content discovery, not exploitation.** It replaces `FUZZ` with each
+line of `src/reconkit/data/wordlists/common.txt` (~110 paths, packaged as
+package data - D13) and reports the responses that match `-mc`. Every record is
+`severity="info"` with `kind="path"`: a path that exists is not a confirmed
+vulnerability, and the operator decides what matters. `--ffuf-wordlist PATH`
+replaces the packaged list; a missing file is a failed result, never a silent
+fallback. Hosts travel as the `FHOST` wordlist (one ffuf process for every
+host, both schemes via `crawl_urls`), no `-k` is passed, and `-t 50` is
+concurrency, not pacing (D3). Two details came from real runs: the URL must use
+the keyword the wordlist declares (`-u FHOST/FFUF` with `-w ...:FFUF`; `FUZZ`
+there makes ffuf exit 0 with `Keyword FFUF defined, but not found ...` and zero
+results - a silent empty answer), and the `FHOST` values must not end in `/`
+because the template joins literally (`https://host//admin` otherwise).
 
 **Findings are not persisted yet.** `FindingRecord` and the `vulns` stage
 existed as a contract since Phase 2, but `_persist_stage` has no `VULNS`

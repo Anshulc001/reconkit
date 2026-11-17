@@ -9,6 +9,7 @@ from reconkit.adapters.certspotter import CertspotterAdapter
 from reconkit.adapters.crtsh import CrtshAdapter
 from reconkit.adapters.dnspython import DnsPythonAdapter
 from reconkit.adapters.dnsx import DnsxAdapter
+from reconkit.adapters.ffuf import FfufAdapter
 from reconkit.adapters.gau import GauAdapter
 from reconkit.adapters.gospider import GospiderAdapter
 from reconkit.adapters.hackertarget import HackertargetAdapter
@@ -63,6 +64,7 @@ ADAPTERS: dict[str, type[BaseToolAdapter]] = {
     "httpx_tech": HttpxTechAdapter,
     "nuclei": NucleiAdapter,
     "subzy": SubzyAdapter,
+    "ffuf": FfufAdapter,
 }
 
 __all__ = ["ADAPTERS", "BaseToolAdapter", "BinaryAdapter", "HttpAdapter"]

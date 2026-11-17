@@ -1821,3 +1821,71 @@ def test_subzy_treats_a_null_document_as_no_findings() -> None:
     assert SubzyAdapter().parse_output("null\n") == []
     assert SubzyAdapter().parse_output("[]") == []
     assert SubzyAdapter().parse_output("") == []
+
+
+# ------------------------------------------------- ffuf (wave 5 completion)
+
+from reconkit.adapters.ffuf import DEFAULT_WORDLIST, FfufAdapter  # noqa: E402
+
+
+def test_ffuf_adapter_parses_json_matches() -> None:
+    """Each match is an info finding: a path that exists, not a vulnerability."""
+    records = FfufAdapter().parse_output(fixture("adapters", "ffuf.synthetic.json"))
+    assert [(r.fqdn, r.title, r.evidence) for r in records] == [
+        ("testfire.net", "200 /admin", "https://testfire.net/admin"),
+        ("testfire.net", "403 /.env", "https://testfire.net/.env"),
+    ]
+    assert all(isinstance(record, FindingRecord) for record in records)
+    assert all(record.severity == "info" and record.kind == "path" for record in records)
+    assert records[0].source == "ffuf"
+
+
+def test_ffuf_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_exec(monkeypatch, outcome(stdout="ffuf version: 2.3.0\n"))
+    accepted = FfufAdapter(finder=lambda _name: "/usr/bin/ffuf").check_installed()
+    assert accepted.installed is True
+    fake_exec(monkeypatch, outcome(stdout="ffuf 1.0 - a different tool\n"))
+    rejected = FfufAdapter(finder=lambda _name: "/usr/bin/ffuf").check_installed()
+    assert rejected.installed is False
+
+
+def test_ffuf_uses_default_wordlist_when_no_flag_given() -> None:
+    adapter = FfufAdapter(finder=lambda _name: "/usr/bin/ffuf")
+    ctx = make_ctx(hosts=["testfire.net"])
+    assert ctx.ffuf_wordlist is None
+    assert adapter.wordlist(ctx) == DEFAULT_WORDLIST
+    assert ctx.ffuf_wordlist is None  # the adapter never mutates its context
+
+
+def test_ffuf_wordlist_flag_overrides_default(tmp_path: Path) -> None:
+    adapter = FfufAdapter(finder=lambda _name: "/usr/bin/ffuf")
+    custom = tmp_path / "paths.txt"
+    custom.write_text("admin\napi\n", encoding="utf-8")
+    ctx = make_ctx(hosts=["testfire.net"])
+    ctx.ffuf_wordlist = custom
+    assert adapter.wordlist(ctx) == custom
+    command = adapter.build_command(ctx)
+    assert f"{custom}:FFUF" in command
+    assert str(DEFAULT_WORDLIST) not in command
+
+
+def test_ffuf_default_wordlist_exists_and_is_nonempty() -> None:
+    assert DEFAULT_WORDLIST.is_file()
+    lines = [line for line in DEFAULT_WORDLIST.read_text(encoding="utf-8").splitlines() if line]
+    assert 50 <= len(lines) <= 150
+    assert "admin" in lines and ".git/HEAD" in lines and ".env" in lines
+
+
+def test_ffuf_missing_wordlist_is_a_failed_tool() -> None:
+    adapter = FfufAdapter(finder=lambda _name: "/usr/bin/ffuf")
+    ctx = make_ctx(hosts=["testfire.net"])
+    ctx.ffuf_wordlist = Path("/nonexistent/wordlist.txt")
+    with pytest.raises(ToolFailed, match="wordlist not found"):
+        adapter.wordlist(ctx)
+
+
+def test_ffuf_hosts_wordlist_has_no_trailing_slash() -> None:
+    """Regression: `FHOST/FFUF` joins literally, so a slash gave `//admin`."""
+    adapter = FfufAdapter(finder=lambda _name: "/usr/bin/ffuf")
+    ctx = make_ctx(hosts=["testfire.net"])
+    assert adapter._roots(ctx) == ["https://testfire.net", "http://testfire.net"]

@@ -3607,6 +3607,61 @@ install residue. No new feature, no behaviour change, no code-logic change.
   `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` (unchanged
   from the previous batch; no scope edit was made).
 
+## Adapter wave 5 completed: ffuf (inline wordlist); dnsreaper still unadapted (2026-11-17)
+
+- Docs read / goal: `AGENTS.md` (0/0b/0c, hard rule 7, no new deps without
+  asking), RESUME, PIT-14/30, docs/09 §4a5, docs/02 section 3, `tools.yaml`.
+  Close the two wave-5 blockers the owner named.
+- Baseline: `751 passed`, ruff/format/mypy clean, tree clean at `825a552`,
+  `scope.yaml` sha256 `d45a3c9...eeee8b`.
+- **dnsreaper: reported, not installed.** `pip install dnsreaper` fails -
+  `ERROR: Could not find a version that satisfies the requirement dnsreaper
+  (from versions: none) / No matching distribution found`. The repository
+  (`api.github.com/repos/punk-security/dnsReaper/contents/`) has no
+  `setup.py`/`pyproject.toml`/console script: it is `main.py` plus
+  `requirements.txt`, i.e. "clone it, `pip install -r requirements.txt`, run
+  `python main.py`" (its README). That is not an install but (a) a checkout
+  with its own dependency tree (boto3 and others) and (b) a **new adapter kind**
+  - a script launched through `sys.executable`, which the documented contract
+  (http/python/binary, docs/09 section 3) does not have and `tools.yaml`'s
+  `binary: dnsreaper` cannot express. Per the part's stop rule this is reported
+  rather than improvised; no install was attempted beyond the `pip` probe.
+- **ffuf: shipped with an inline wordlist (D13).** `src/reconkit/data/wordlists/
+  common.txt` holds 118 paths (admin/.git/.env/swagger/actuator/...), committed
+  and declared as package data, so a built wheel contains
+  `reconkit/data/wordlists/common.txt` (verified with `pip wheel .`).
+  `--ffuf-wordlist PATH` replaces it on the scan commands; a missing file is a
+  failed result (`ffuf: wordlist not found: ...`), never a silent fallback.
+- Invocation, from the real `ffuf -h` (v2.3.0): `-u FHOST/FFUF`, two wordlists
+  (`-w hosts:FHOST -w <wordlist>:FFUF`), `-mode clusterbomb`, `-of json -o
+  <file>`, `-mc 200,204,301,302,307,401,403`, `-t 50`, `-s`, `-noninteractive`.
+  One process covers every host and both schemes; no `-k`, no `-p` (no pacing,
+  D3). Records are `FindingRecord(kind="path", severity="info")` - a path that
+  exists is not a confirmed vulnerability - read from the output file through
+  the `read_output` hook added in wave 5.
+- **Two defects found by the first real run, both fixed before commit:**
+  (1) `-u FHOST/FUZZ` with `-w ...:FFUF` makes ffuf print `Keyword FFUF
+  defined, but not found in headers, method, URL or POST data.`, exit **0**,
+  and write zero results - a silent empty answer that looked like `ok 0 item(s)`;
+  the URL must use `FFUF`. (2) `crawl_urls()` returns roots with a trailing
+  slash, and the template joins literally, so the first working run stored
+  `https://testfire.net//admin`; the hosts file now holds slash-free roots.
+  Guarded by `test_ffuf_hosts_wordlist_has_no_trailing_slash`.
+- Evidence (raw in the report): `doctor` -> `ffuf yes / ok (/usr/bin/ffuf)`,
+  `dnsreaper missing`; mock run `--full --include-noisy --tools
+  pyprobe,dnsreaper,ffuf` -> `ffuf ok 2`, `dnsreaper` skipped `no adapter yet
+  (phase 3)`, exit 0; real run on testfire.net (`--tools dnspython,pyprobe,ffuf`)
+  -> `ffuf ok 12` real matches (`302 /admin`, `/admin/index.php`,
+  `/admin/login`, ...), exit 0.
+- Tests: 7 new, `751 -> 758` (parse, identity, default wordlist, override,
+  packaged wordlist exists/non-empty, missing wordlist, slash-free roots), plus
+  `--ffuf-wordlist` in `DOCUMENTED_OPTIONS` and the vulns expectation in the
+  full-run test now includes `ffuf`. Docs updated first: docs/02 section 3 +
+  `injections`, docs/09 §4a5, MASTER_PLAN D13, PROGRESS.
+- Gate: `758 passed`, ruff clean, 76 files formatted, mypy clean (48 files).
+- Next action: Part 2 (ports adapters). dnsreaper needs an owner ruling on
+  whether a script-kind adapter is acceptable or the tool is dropped.
+
 ## Adapter wave 5 (partial): nuclei, subzy; dnsreaper and ffuf blocked (2026-11-17)
 
 - Docs read / goal: `AGENTS.md` (0/0b/0c, hard rules 1, 6, 7), RESUME, PIT-14,
