@@ -290,6 +290,20 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   test silently stopped injecting anything and passed nothing through the
   schema check - the append form tests the same thing without coupling to one
   line's spelling.
+- **2026-11-17 (install backlog T2), seven tools report a real version.**
+  `chaos`, `dnsx`, `httpx`, `tlsx`, `naabu`, `cdncheck` share
+  `version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)'`; `wafw00f` uses
+  `'WAFW00F you have is[^\n]*?(v?\d+\.\d+\.\d+)'` because its value is
+  ANSI-wrapped. **Pre-check result:** no doctor or `installed_version()` change
+  was needed - it reads `stdout or stderr`, and the real probes showed the PD
+  six write the banner to stderr (stdout empty) while `wafw00f` writes to
+  stdout, so the capture was already receiving the text; only extraction from
+  the first line was wrong. Values now shown: `0.5.2`, `1.3.1`, `v1.12.0`,
+  `v1.4.0`, `2.7.0`, `v1.4.0`, `v2.4.2`. No existing test asserted the old
+  first-line behaviour for these tools; new test
+  `tests/test_installer_registry.py::test_the_seven_version_patterns_extract_their_real_banner`
+  (7 parametrized cases) pins each real banner -> expected version, and a
+  mutation (dropping the ANSI tolerance from the wafw00f pattern) makes it fail.
 - **2026-11-17 (verification follow-up F8), the D3 test-count wording uses the
   measured figures.** The D3 entry above now says 32 test functions deleted and
   4 renamed (44 collected node ids removed, 12 added, 745 -> 713), then one

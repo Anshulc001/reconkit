@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -94,6 +95,36 @@ def test_version_regex_is_parsed_from_the_registry() -> None:
     assert plans["katana"].version_regex == r"Current version: (v?\d+\.\d+\.\d+)"
     assert plans["nuclei"].version_regex == r"Nuclei Engine Version: (v?\d+\.\d+\.\d+)"
     assert plans["assetfinder"].version_regex is None
+
+
+@pytest.mark.parametrize(
+    ("tool", "banner", "expected"),
+    [
+        # Real banners captured on this box on 2026-11-17. The PD six print to
+        # stderr, with ANSI around the [INF] tag; wafw00f uses stdout and wraps
+        # the value itself.
+        ("chaos", "[\x1b[34mINF\x1b[0m] Current Version: 0.5.2", "0.5.2"),
+        ("dnsx", "[\x1b[34mINF\x1b[0m] Current Version: 1.3.1", "1.3.1"),
+        ("httpx", "[\x1b[34mINF\x1b[0m] Current Version: v1.12.0", "v1.12.0"),
+        ("tlsx", "[\x1b[34mINF\x1b[0m] Current version: v1.4.0", "v1.4.0"),
+        ("naabu", "[\x1b[34mINF\x1b[0m] Current Version: 2.7.0", "2.7.0"),
+        ("cdncheck", "[\x1b[34mINF\x1b[0m] Current version: v1.4.0", "v1.4.0"),
+        (
+            "wafw00f",
+            "[+] The version of WAFW00F you have is \x1b[1;94mv2.4.2\x1b[0m",
+            "v2.4.2",
+        ),
+    ],
+)
+def test_the_seven_version_patterns_extract_their_real_banner(
+    tool: str, banner: str, expected: str
+) -> None:
+    """2026-11-17: the regex must yield the version, not the ASCII art."""
+    pattern = plan_for(tool).version_regex
+    assert pattern is not None
+    match = re.search(pattern, banner)
+    assert match is not None, f"{tool}: {pattern!r} did not match {banner!r}"
+    assert match.group(1) == expected
 
 
 def test_a_broken_version_regex_is_a_config_error(tmp_path: Path) -> None:

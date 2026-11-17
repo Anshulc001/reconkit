@@ -2938,6 +2938,47 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Not verified:** an actual `rustscan` scan (no adapter yet, phase 3); arm64
   (the pin's asset is amd64-only).
 
+## Install backlog T2 (2026-11-17): version_regex for seven tools  (commit subject `fix: give the seven banner-first tools a version_regex`; hash filled by the next commit)
+
+- **Docs read / goal:** docs/10 "version_regex is how a banner-first tool reports
+  its version", docs/09 tool-flags table, `tools.yaml`. Goal: doctor must show a
+  clean version instead of ASCII art for chaos, dnsx, httpx, tlsx, naabu,
+  wafw00f, cdncheck.
+- **Pre-check (owner asked for it before any regex):** does the probe read
+  stderr? `installed_version` does `text = (outcome.stdout or outcome.stderr).strip()`.
+  Raw evidence: stdout of all six PD tools is empty (`chaos -version
+  2>/dev/null` -> 0 lines) and stderr carries the banner and
+  `[\x1b[34mINF\x1b[0m] Current Version: ...`; `wafw00f --version` is the
+  reverse (stdout 12 lines, stderr 0). A direct call showed what doctor gets:
+  `chaos -> '__                    '`, `naabu -> '__'`,
+  `wafw00f -> '\x1b[1;97m______'`. So the capture is fine and only the
+  extraction is wrong - **no doctor code change**, not a bigger-than-looks item.
+- **Real banners (raw, as captured on this box):** `chaos`
+  `Current Version: 0.5.2`; `dnsx` `Current Version: 1.3.1`; `httpx`
+  `Current Version: v1.12.0`; `tlsx` `Current version: v1.4.0`; `naabu`
+  `Current Version: 2.7.0`; `cdncheck` `Current version: v1.4.0`; `wafw00f`
+  `[+] The version of WAFW00F you have is \x1b[1;94mv2.4.2\x1b[0m`.
+- **Docs first:** docs/10 gained the 2026-11-17 paragraph (shared PD pattern,
+  lowercase `version` for tlsx/cdncheck, the ANSI-tolerant wafw00f pattern, and
+  the stderr/stdout fact); docs/09's httpx and naabu rows name their pattern;
+  `docs/tool_manuals/README.md` flagged item 2 is marked closed.
+- **Requirement -> proof (doctor rows, raw):** `chaos 0.5.2`, `dnsx 1.3.1`,
+  `httpx v1.12.0`, `tlsx v1.4.0`, `naabu 2.7.0`, `cdncheck v1.4.0`,
+  `wafw00f v2.4.2`, every row `yes ... ok`.
+- **Test added:**
+  `tests/test_installer_registry.py::test_the_seven_version_patterns_extract_their_real_banner`,
+  parametrized over the seven real strings (ANSI included), asserting the first
+  capture group equals the version. No existing test changed.
+- **S5 mutation:** replaced the wafw00f pattern with
+  `WAFW00F you have is (v?\d+\.\d+\.\d+)` (no ANSI tolerance) -> the
+  parametrized case failed with `assert None is not None`; restored from a copy,
+  `sha256sum` identical (`7ee1c9ae...`), test green again.
+- **S1 checks:** `721 passed in 15.71s` (714 + 7 new cases); `ruff check .` ->
+  `All checks passed!`; `ruff format --check .` -> `67 files already formatted`;
+  `mypy src/reconkit` -> `Success: no issues found in 35 source files`.
+- **Sudo:** none. **Not verified:** nothing new (no adapter consumes these
+  values yet).
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

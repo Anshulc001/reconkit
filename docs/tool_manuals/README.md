@@ -137,14 +137,12 @@ each one is recorded and left alone.
    it. The latest release (2.4.1) ships a nested `.tar.gz.zip`, so 2.4.1 stays
    uninstallable until nested-archive extraction exists; see the rustscan entry
    in `docs/tool_manuals/ports.md` and `docs/10` section 3.
-2. **Seven tools' version column shows ASCII art.** `installed_version()` returns
-   the first output line, and only `katana`/`nuclei` carry a `version_regex`
-   (12j/PIT-48). Real `reconkit doctor` output today: `chaos` -> `__`,
-   `dnsx` -> `_ __ __`, `tlsx` -> `_____ _ _____ __`, `cdncheck` -> `__ __ __`,
-   and `wafw00f`/`httpx`/`naabu` print art first on the raw probe too (those two
-   with adapters are fine in `doctor`). Same defect class as PIT-48: needs
-   `version_regex` rows for the phase-3 tools, or a ruling that it waits until
-   their adapters land.
+2. **Seven tools' version column shows ASCII art (closed 2026-11-17).**
+   `chaos`, `dnsx`, `httpx`, `tlsx`, `naabu`, `cdncheck` and `wafw00f` now carry
+   a `version_regex` derived from their real banners, so `doctor` prints `0.5.2`,
+   `1.3.1`, `v1.12.0`, `v1.4.0`, `2.7.0`, `v1.4.0` and `v2.4.2`. The PD six print
+   the version to stderr, which `installed_version()` already reads; `wafw00f`
+   writes to stdout with an ANSI-wrapped value. See `docs/10` "version_regex".
 3. **Tools with no version flag report their *path* as the version.**
    `installed_version()` returns `argv0` when `version_args` is empty, so
    `doctor` shows a path in the Version column for `github_subdomains`, `smap`,

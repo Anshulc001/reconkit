@@ -111,6 +111,7 @@ tools:
     phase: 3
     binary: chaos
     version_cmd: [chaos, -version]
+    version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)'
     install: {<<: *pd_release, name: chaos-client, repo: projectdiscovery/chaos-client, member: chaos-client}
     keys:
       - env: PDCP_API_KEY
@@ -131,21 +132,21 @@ tools:
 
   # ---------------- dns ----------------
   dnspython:    {stage: dns, kind: python, tier: core, mode: passive, phase: 2, install: {method: none}, notes: "A/AAAA/CNAME/NS/MX/TXT, wildcard probe, dangling CNAME check."}
-  dnsx:         {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dnsx, version_cmd: [dnsx, -version], install: {<<: *pd_release, name: dnsx, repo: projectdiscovery/dnsx}}
+  dnsx:         {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dnsx, version_cmd: [dnsx, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', install: {<<: *pd_release, name: dnsx, repo: projectdiscovery/dnsx}}
   puredns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: puredns, version_cmd: [puredns, --version], requires: [massdns], install: {method: go_install, package: "github.com/d3mondev/puredns/v2@latest"}}
   massdns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: massdns, version_cmd: [dpkg-query, -W, '-f=${Version}', massdns], install: {method: apt, package: massdns}}
   dig:          {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dig, version_cmd: [dig, -v], install: {method: apt, package: dnsutils}}
 
   # ---------------- live (active) ----------------
   pyprobe:      {stage: live, kind: python, tier: core, mode: active, phase: 2, install: {method: none}, notes: "Async HTTP/HTTPS probe, status, title, redirects. Fallback when no binary is installed."}
-  httpx:        {stage: live, kind: binary, tier: core, mode: active, phase: 2, binary: httpx, version_cmd: [httpx, -version], install: {<<: *pd_release, name: httpx, repo: projectdiscovery/httpx}, notes: "ProjectDiscovery httpx. Kali's apt package is httpx-toolkit; the python 'httpx' CLI is a different program. Always use ~/.reconkit/bin first."}
+  httpx:        {stage: live, kind: binary, tier: core, mode: active, phase: 2, binary: httpx, version_cmd: [httpx, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', install: {<<: *pd_release, name: httpx, repo: projectdiscovery/httpx}, notes: "ProjectDiscovery httpx. Kali's apt package is httpx-toolkit; the python 'httpx' CLI is a different program. Always use ~/.reconkit/bin first."}
   httprobe:     {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: httprobe, version_cmd: [httprobe, -h], install: {method: go_install, package: "github.com/tomnomnom/httprobe@latest"}}
-  tlsx:         {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: tlsx, version_cmd: [tlsx, -version], install: {<<: *pd_release, name: tlsx, repo: projectdiscovery/tlsx}, notes: "Certificate SANs can reveal more subdomains."}
+  tlsx:         {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: tlsx, version_cmd: [tlsx, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', install: {<<: *pd_release, name: tlsx, repo: projectdiscovery/tlsx}, notes: "Certificate SANs can reveal more subdomains."}
 
   # ---------------- ports ----------------
   smap:         {stage: ports, kind: binary, tier: core, mode: passive, phase: 3, binary: smap, install: {method: go_install, package: "github.com/s0md3v/smap/cmd/smap@latest"}, notes: "Passive ports from Shodan data. No packets to the target."}
   pyscan:       {stage: ports, kind: python, tier: core, mode: active, phase: 2, install: {method: none}, notes: "Async TCP connect scan (no root). Fallback and verifier."}
-  naabu:        {stage: ports, kind: binary, tier: core, mode: active, phase: 2, binary: naabu, version_cmd: [naabu, -version], requires_apt: [libpcap-dev], install: {<<: *pd_release, name: naabu, repo: projectdiscovery/naabu, checksums_pattern: "naabu-checksums.txt"}, notes: "Needs libpcap. Use connect scan (-scan-type c) when not root."}
+  naabu:        {stage: ports, kind: binary, tier: core, mode: active, phase: 2, binary: naabu, version_cmd: [naabu, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', requires_apt: [libpcap-dev], install: {<<: *pd_release, name: naabu, repo: projectdiscovery/naabu, checksums_pattern: "naabu-checksums.txt"}, notes: "Needs libpcap. Use connect scan (-scan-type c) when not root."}
   nmap:         {stage: ports, kind: binary, tier: core, mode: active, phase: 3, binary: nmap, version_cmd: [nmap, --version], install: {method: apt, package: nmap}, notes: "Service/version verification (-sV)."}
   rustscan:     {stage: ports, kind: binary, tier: core, mode: active, phase: 3, binary: rustscan, version_cmd: [rustscan, --version], version_regex: '^rustscan (\d+\.\d+\.\d+)$', install: {method: github_release, repo: bee-san/RustScan, asset_pattern: "rustscan-{version}-x86_64-linux.zip", verify_checksums: false}, notes: "Pinned 2.3.0 (2026-11-17): 2.4.1 ships a nested .tar.gz.zip and reconkit's extractor unwraps one layer only; latest is amd64-only anyway and 2.3.0 publishes no checksums, so verify_checksums: false. Nested-archive extraction is a future follow-up, not a current capability."}
   masscan:      {stage: ports, kind: binary, tier: opt_in, mode: active, phase: 3, binary: masscan, version_cmd: [masscan, --version], needs_root: true, install: {method: apt, package: masscan}, notes: "Opt-in only."}
@@ -153,8 +154,8 @@ tools:
   # ---------------- tech ----------------
   httpx_tech:   {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: httpx, notes: "httpx -td technology detection (reuses httpx)."}
   whatweb:      {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: whatweb, version_cmd: [whatweb, --version], install: {method: apt, package: whatweb}}
-  wafw00f:      {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: wafw00f, version_cmd: [wafw00f, --version], install: {method: pipx, package: wafw00f}}
-  cdncheck:     {stage: tech, kind: binary, tier: core, mode: passive, phase: 3, binary: cdncheck, version_cmd: [cdncheck, -version], install: {<<: *pd_release, name: cdncheck, repo: projectdiscovery/cdncheck}, notes: "Detects CDN/WAF by IP range so a CDN block is not mistaken for a dead host."}
+  wafw00f:      {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: wafw00f, version_cmd: [wafw00f, --version], version_regex: 'WAFW00F you have is[^\n]*?(v?\d+\.\d+\.\d+)', install: {method: pipx, package: wafw00f}}
+  cdncheck:     {stage: tech, kind: binary, tier: core, mode: passive, phase: 3, binary: cdncheck, version_cmd: [cdncheck, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', install: {<<: *pd_release, name: cdncheck, repo: projectdiscovery/cdncheck}, notes: "Detects CDN/WAF by IP range so a CDN block is not mistaken for a dead host."}
   webanalyze:   {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: webanalyze, install: {method: go_install, package: "github.com/rverton/webanalyze/cmd/webanalyze@latest"}}
 
   # ---------------- urls ----------------
