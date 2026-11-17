@@ -525,7 +525,10 @@ http://testfire.net (0.6s):
 
 #### Notes and errors hit
 
-**First run fails; one documented preparation step fixes it.**
+**First run fails; one documented preparation step fixes it.** (Recorded in
+`tools.yaml` `notes:` and docs/09 since 2026-11-17. Measured again: the file
+written by `-update` is 2,122,079 bytes and lands in the CWD, so it is one
+update per working directory unless `-apps` is given.)
 
 ```
 $ webanalyze -host testfire.net

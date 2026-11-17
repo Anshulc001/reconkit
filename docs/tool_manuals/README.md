@@ -161,8 +161,9 @@ each one is recorded and left alone.
    under `amass enum`, and `amass -version` works, but an adapter written from
    the note alone must be checked against `amass enum -h` first.
 6. **`webanalyze` fails on a fresh box** until `webanalyze -update` writes
-   `technologies.json`; the first run exits 1. Nothing in `tools.yaml` records
-   that preparation step.
+   `technologies.json`; the first run exits 1 (closed 2026-11-17: `tools.yaml`
+   and docs/09 now record the step, the file is ~2.1 MB, and it lands in the
+   current working directory, so it is once per directory or `-apps`).
 
 Two smaller observations, recorded but not flagged as defects: `run_exec`
 redacts the child's own environment values from its output, so a `-h` probe that

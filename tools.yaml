@@ -156,7 +156,7 @@ tools:
   whatweb:      {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: whatweb, version_cmd: [whatweb, --version], install: {method: apt, package: whatweb}}
   wafw00f:      {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: wafw00f, version_cmd: [wafw00f, --version], version_regex: 'WAFW00F you have is[^\n]*?(v?\d+\.\d+\.\d+)', install: {method: pipx, package: wafw00f}}
   cdncheck:     {stage: tech, kind: binary, tier: core, mode: passive, phase: 3, binary: cdncheck, version_cmd: [cdncheck, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', install: {<<: *pd_release, name: cdncheck, repo: projectdiscovery/cdncheck}, notes: "Detects CDN/WAF by IP range so a CDN block is not mistaken for a dead host."}
-  webanalyze:   {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: webanalyze, install: {method: go_install, package: "github.com/rverton/webanalyze/cmd/webanalyze@latest"}}
+  webanalyze:   {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: webanalyze, install: {method: go_install, package: "github.com/rverton/webanalyze/cmd/webanalyze@latest"}, notes: "Needs `webanalyze -update` once per working directory first: it writes technologies.json (~2.1 MB) into the CWD, and a scan without it exits 1 (can not open apps file). Point -apps elsewhere to reuse one file."}
 
   # ---------------- urls ----------------
   gau:          {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: gau, version_cmd: [gau, --version], install: {method: go_install, package: "github.com/lc/gau/v2/cmd/gau@latest"}}

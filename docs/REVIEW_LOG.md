@@ -3082,6 +3082,41 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Sudo:** none. **Not verified:** an actual `amass enum -d` run (network
   traffic, out of scope for a doc task).
 
+## Install backlog T6 (2026-11-17): webanalyze needs -update, recorded  (commit subject `docs: record the webanalyze -update preparation step`; hash filled by the next commit)
+
+- **Docs read / goal:** docs/09 tech-stage rows and per-stage notes,
+  `tools.yaml`, `docs/tool_manuals/{README,tech}.md`'s flagged item 6. Goal: the
+  registry must name the preparation step, since nothing recorded it.
+- **Raw measurement (local, no scan):** in `/tmp` with no `technologies.json`,
+  `webanalyze -host 127.0.0.1` -> stderr
+  `2026/11/17 05:20:42 error: can not open apps file : could not find the
+  technologies file: technologies.json`, stdout empty, exit **1**. In an empty
+  dir, `webanalyze -update` -> stderr `app definition file updated`, exit 0, and
+  `ls` shows `technologies.json` **2,122,079 bytes in that directory**. `-h`
+  confirms `-update  update technologies file to current dir`, `-apps string
+  technologies definition file (default "technologies.json")`; `-h` itself goes
+  to stderr (751 bytes, exit 0).
+- **Docs first:** docs/09 per-stage note; then `tools.yaml` `notes:` (says once
+  per working directory, ~2.1 MB, exit 1 without it, `-apps` to reuse a file);
+  then `docs/tool_manuals/README.md` item 6 and the tech manual's notes section.
+- **Requirement -> proof:** the step is named where a future adapter author will
+  read it -> registry note printed back from the YAML, quoted above; the quoted
+  failure text and exit 1 -> reproduced above. Registry still loads:
+  `load_plans()['webanalyze']` -> binary `webanalyze`, empty `version_args`
+  (documented path row, T3).
+- **Decision, not a fix:** the step stays manual. `doctor`/installer writing
+  `technologies.json` into the user's CWD would be a side effect no doc allows,
+  and no adapter exists yet to own it; the note is the correct place per the
+  batch scope.
+- **Tests:** none - prose/registry-note only, nothing executable changed.
+- **S1 checks:** `730 passed in 16.28s`; `ruff check .` -> `All checks passed!`;
+  `ruff format --check .` -> `67 files already formatted`; `mypy src/reconkit`
+  -> `Success: no issues found in 35 source files`. (One proof command first ran
+  with a shell PATH that lacked `~/.reconkit/bin` and reported `command not
+  found`; re-run with the PATH set, output above.)
+- **Sudo:** none. **Not verified:** an actual `webanalyze` scan against a host
+  (network; and the tech stage has no adapter yet).
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

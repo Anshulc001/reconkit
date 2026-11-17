@@ -202,6 +202,7 @@ Stored with source `smap` and confidence LOW until an active scan confirms; neve
 - `httpx`: the ProjectDiscovery binary, not the Python `httpx` CLI or Kali's differently named package; installer places the right one in `~/.reconkit/bin`.
 - `naabu`: needs libpcap; use connect scan when not root.
 - `amass` (v5.1.3, verified 2026-11-17): passive is the **default** in v5, so nothing needs to be turned on; `amass enum -passive` still parses but v5 prints `-passive` / `Deprecated since passive is the default setting`. Keep it last (it is the slowest passive source), and check `amass enum -h` before writing an adapter - v5's CLI is `assoc|engine|enum|subs|track|viz`, not the v4 surface.
+- `webanalyze` (verified 2026-11-17): it needs a technologies file **in the current working directory** before it will scan. `webanalyze -update` downloads it (`technologies.json`, ~2.1 MB) and prints `app definition file updated`; without it a scan exits **1** with `error: can not open apps file : could not find the technologies file: technologies.json`. Run the update once per working directory, or point `-apps` at an existing file.
 - HTTP sources: free tiers rate-limit; 429 and 5xx are `failed` results carrying the status, with no retry. Only a connection error retries once.
 
 ## 9. Verified Tool Contracts (2026-11-14)

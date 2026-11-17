@@ -344,6 +344,17 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   test added or changed: the change is a note string and prose, and a test
   pinning that prose would lock wording rather than behaviour (the registry
   still loads, which the gate exercises).
+- **2026-11-17 (install backlog T6), the webanalyze preparation step is in the
+  registry.** Measured: a scan in a directory without `technologies.json` exits
+  **1** with `error: can not open apps file : could not find the technologies
+  file: technologies.json`; `webanalyze -update` downloads 2,122,079 bytes of
+  `technologies.json` **into the current working directory** and prints
+  `app definition file updated` (exit 0). `tools.yaml` now carries that in
+  `notes:` (with the `-apps` escape hatch), docs/09 has the same note in the
+  per-stage list, and the manuals README flagged item 6 and the tech manual
+  section are marked closed. No code or test changed (no `webanalyze` adapter
+  exists; the step cannot be automated by doctor without writing into the
+  user's CWD, which the installer does not do).
 - **2026-11-17 (verification follow-up F8), the D3 test-count wording uses the
   measured figures.** The D3 entry above now says 32 test functions deleted and
   4 renamed (44 collected node ids removed, 12 added, 745 -> 713), then one
