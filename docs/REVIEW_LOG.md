@@ -3030,8 +3030,7 @@ too, and a verbose or crashing tool is exactly the case where a key can end up i
 - **Raw measurement:** `assetfinder -h 1>/dev/null 2>/tmp/af.err; echo $?` ->
   `exit=0`; `/tmp/af.err` -> `Usage of assetfinder:` / `  -subs-only` /
   `    \tOnly include subdomains of search domain`; `assetfinder -h
-  2>/dev/null | wc -c` -> `0` (stderr only). `assetfinder -version` ->
-  `flag provided but not defined: -version` then the same usage, exit 0.
+  2>/dev/null | wc -c` -> `0` (stderr only).`assetfinder -version` -> `flag provided but not defined: -version` then the same usage, exit **2** (corrected 2026-11-17: the first reading said exit 0 because the command was piped into `head`, so `$?` was head's status - the exact trap AGENTS.md 0c names; re-measured unpiped, `assetfinder -version >/dev/null 2>&1; echo $?` -> 2. `-h` stays 0, measured unpiped twice).
 - **Conflict found and resolved:** docs/09 said "exits 2" (inferred from Go
   `flag` source, and it said the binary was not installed); subs.md said exit 0.
   The measurement sides with subs.md; docs/09 was corrected, not the manual.

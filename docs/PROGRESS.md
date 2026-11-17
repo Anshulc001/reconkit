@@ -329,7 +329,12 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
   stdout is 0 bytes, exit **0** (the subs manual already said exit 0, so the two
   docs disagreed and the manual was right). The row now states the measured
   behaviour and that the identity probe has been exercised on the real binary
-  (`reconkit doctor --json` -> `'identity': 'ok'`). Docs-only change: the
+  (`reconkit doctor --json` -> `'identity': 'ok'`). Note `-h` exits 0 but
+  `-version` exits **2**: my first reading said 0 and was a pipe artifact
+  (`... | head; echo $?` reports `head`), corrected before the batch report.
+  The five Go-flag tools in T3 (`github_subdomains`, `webanalyze`,
+  `waybackurls`, `unfurl`, `httprobe`) measured `-version` -> exit **2**, which
+  is what docs/10 says. Docs-only change: the
   adapter and its test already expected exit 0
   (`tests/test_binary_adapters.py::test_assetfinder_usage_identity`,
   `returncode=0`), so no code or test changed.
