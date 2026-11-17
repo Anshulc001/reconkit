@@ -27,15 +27,17 @@ same two dicts.
 |---|---|---|---|---|---|
 | `passive` | `subs`, `dns`, `urls` | passive only | `core`, `opt_in`* | (default) | `passive` |
 | `active` | `subs`, `dns`, `live`, `tech`, `urls` | passive + active | `core`, `opt_in`* | `--active` | `active` |
-| `full` | all: `subs`, `dns`, `live`, `ports`, `tech`, `urls`, `vulns` | passive + active | `core`, `opt_in`, `intrusive` | `--full` | `full` |
+| `full` | all: `subs`, `dns`, `live`, `ports`, `tech`, `urls`, `shots`, `vulns` | passive + active | `core`, `opt_in`, `intrusive` | `--full` | `full` |
 
 \*`opt_in` requires `--include-noisy`, unless the mode is `full` (which implies
 it). `--full` also implies `--active`.
 
 Stages still run in the fixed `STAGE_ORDER` (`subs`, `dns`, `live`, `ports`,
-`tech`, `urls`, `vulns`); a mode only decides which of them are in scope. So in
-`passive` the order is `subs`, `dns`, `urls`, and in `active` it is `subs`,
-`dns`, `live`, `tech`, `urls` - `urls` always runs after `live` when `live` runs.
+`tech`, `urls`, `shots`, `vulns`); a mode only decides which of them are in
+scope. So in `passive` the order is `subs`, `dns`, `urls`, and in `active` it is
+`subs`, `dns`, `live`, `tech`, `urls` - `urls` always runs after `live` when
+`live` runs. `shots` exists in `full` only (D19) and sits between `urls` and
+`vulns`, so a browser never delays the findings stage.
 
 **What a urls tool receives depends on its `mode:`** (2026-11-17, D10):
 
@@ -69,8 +71,8 @@ What "full = all" means today, honestly: every stage is requested and every
 three tools are `exploitation: true` and therefore still skip unless named;
 and the `vulns` pool still carries one tool with no adapter (`dnsreaper`, D15).
 `subs`, `dns`, `live`, `ports`, `tech` and `urls` are fully adapted since
-adapter waves 6-8 (2026-11-17); `shots` has an adapter (`gowitness`) but the
-stage is in no mode table yet, so no mode runs it. An adapter-less tool reports
+adapter waves 6-8 (2026-11-17); `shots` has an adapter (`gowitness`) and is in
+the `full` mode table only (D19). An adapter-less tool reports
 `no adapter yet (phase 3)`, and a stage left with only those is a completion gap
 (exit `0`), not a partial run. The per-tool mode/tier table is in docs/09
 section 4.
