@@ -6820,3 +6820,45 @@ existed (hence 908, unchanged), and commit `7cf1b20` had to add `db_path.parent.
 No `src/` change is made in this commit.
 
 Suite 908 -> 908. Gate: `908 passed`, `All checks passed!`, `92 files already formatted`, mypy clean.
+
+## 2026-11-18 (batch 2026-11-18b) Part J - the seven rulings index + R6's fixture remainder
+
+### J.1 raw: the table now in `docs/PROGRESS.md` (Deviations, top)
+
+```
+| Ruling | Decision | Recorded as |
+| R1 - 6488aad stop-rule breach      | Accepted, no revert; process lesson                  | D28.1 |
+| R2 - probe-only timeout            | Exit 4 by design; normal scan exits 0 with gaps       | D28.2 |
+| R3 - -2 sentinel                   | Defined in docs/04_DATABASE.md:193/:245               | D28.3 |
+| R4 - commit order / split commit   | Accepted as shipped                                   | D28.4 |
+| R5 - mock isolation                | Separate mock DB + results/mock/ namespace            | D30   |
+| R6 - mock live ALIVE               | "All UNKNOWN" disproved; fixture remainder fixed      | D31 (withdrawn) + D33 |
+| R7 - redact() routing              | Five surviving render_error sites routed              | D32   |
+```
+
+Nothing was re-decided: each row points at the D-number that already holds the ruling.
+
+### J.2 raw: why pyprobe is the right place for the status
+
+`tests/fixtures/adapters/httprobe.synthetic.txt` and `tlsx.synthetic.jsonl` name `testfire.net`, `www.testfire.net`
+and carry no HTTP status - `httprobe` prints `http://host`, `tlsx` prints TLS JSON. Neither tool ever emits a status
+code, so a parser change would be fabrication. `pyprobe` is the mock stand-in for a real HTTP probe and already has
+per-target fixtures (`example.com`, `www-pair.test`), so the status belongs there.
+
+New file `tests/fixtures/pyprobe/testfire.net.synthetic.json`:
+
+```json
+{
+  "testfire.net": {"status_code": 200, "title": "Altoro Mutual", "location": null},
+  "www.testfire.net": {"status_code": 200, "title": "Altoro Mutual", "location": null}
+}
+```
+
+New test `test_mock_active_reports_status_200_from_the_live_fixture` asserts `www.testfire.net` is `ALIVE` with
+`status_code == 200` and `testfire.net` carries 200 in a mock `--active` run. No adapter, verdict, confidence or count
+code touched.
+
+Side effect worth noting: before this fixture, pyprobe had **no** fixture for `testfire.net` and failed with
+`pyprobe: no fixture for testfire.net` in every mock `--active` run on that target. The new file fixes that too.
+
+Suite 908 -> 909.

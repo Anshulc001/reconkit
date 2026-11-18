@@ -4,7 +4,7 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status: **BATCH 2026-11-18b (Parts I, J, L, M) in progress.** Part I done: the four prior-batch acceptance tests reconciled to this batch's names/setups (`test_urlfinder_cap_3600_when_only_the_stage_budget_is_raised`, the testfire.net sentinel, byte-identical mock DB) and the probe-only exit-4 line mirrored into the `--phase-timeout` row of COMMANDS.md. Suite stays 908 - the tests landed one commit earlier in `7cf1b20`, which also had to create `~/.reconkit`. Next action: Part J.
+- Status: **BATCH 2026-11-18b (Parts I, J, L, M) in progress.** Part J done: R1-R7 index table + `pyprobe/testfire.net` fixture (D33), suite 909. Part I done: the four prior-batch acceptance tests reconciled to this batch's names/setups (`test_urlfinder_cap_3600_when_only_the_stage_budget_is_raised`, the testfire.net sentinel, byte-identical mock DB) and the probe-only exit-4 line mirrored into the `--phase-timeout` row of COMMANDS.md. Suite stays 908 - the tests landed one commit earlier in `7cf1b20`, which also had to create `~/.reconkit`. Next action: Part J.
 - Previous status: **BATCH 2026-11-18 COMPLETE (Parts D-H) + acceptance follow-up.** Suite 908. The follow-up added the three D30 tests and the missing D29 stage-budget test, the missing `COMMANDS.md` probe-only note, and fixed a real bug the missing tests hid: the mock DB default did not create `~/.reconkit`, so a fresh machine failed with `unable to open database file`. Evidence in REVIEW_LOG "follow-up".
 - Previous status: **BATCH 2026-11-18 COMPLETE (Parts D-H).** D28 rulings recorded, D29 double-ceiling cleanup, D30 mock isolation, D31 withdrawn (premise disproved), D32 redaction routing. Suite 898 -> 903. Next action: none; report.
 - Previous status: **BATCH 2026-11-18 (Part F) DONE: D30 mock isolation.** Suite 899. Next action: Part G (mock ALIVE).
@@ -93,10 +93,27 @@ There is no `core/consensus.py`: consensus lives in `engine.py`. Order and modul
 
 Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session, the `diff` two-miss rule) is in the `REVIEW_LOG` archive.
 
+### The seven owner rulings, mapped (2026-11-18)
+
+Nothing from the reviewer's R1-R7 table is unrecorded; they were just scattered across D28-D32. This table is the
+index, not a new decision. Every ruling is already applied; none is re-decided here.
+
+| Ruling | Decision | Recorded as |
+|---|---|---|
+| R1 - `6488aad` stop-rule breach | Accepted, no revert; process lesson (stop when a stop rule fires) | D28.1 |
+| R2 - probe-only timeout | Exit 4 by design; a normal scan exits 0 with gaps | D28.2 |
+| R3 - `-2` sentinel | Defined in `docs/04_DATABASE.md:193`/`:245`; no undefined user-facing surface | D28.3 |
+| R4 - commit order / split commit | Accepted as shipped | D28.4 |
+| R5 - mock isolation | Separate mock DB + `results/mock/` namespace | D30 |
+| R6 - mock live ALIVE | "All hosts UNKNOWN" claim disproved; fixture remainder fixed | D31 (withdrawn) + D33 |
+| R7 - `redact()` routing | Five surviving `render_error` sites routed; `install` is gone (D4) | D32 |
+
 - **D22 (2026-11-18): www/non-www deduplication is metadata only.** Schema 8 -> 9 adds `host_status_history.duplicate_of` and `.www_note` (both nullable, no default) and `Store.set_host_duplicate()` updates the host's **newest** status row - it never appends a row and never writes `state`, `status_code`, `confidence` or `checked_at`, so host-state definitions, the confidence formula, `diff`, `status` and every count query are unchanged (the frozen boundary). **Disclosed deviation:** the batch said 7 -> 8, but 8 was already spent on Part 1's `tool_runs` rebuild, so the dedup columns are schema 9. **Disclosed narrowing:** the batch's "if IPs differ -> different server" is applied only when both IP sets are known and disjoint; with no DNS evidence for a name the pass says nothing. The Notes column is added only when a row has a note (an ordinary table keeps six columns) and the unique count appears in the summary line only when a duplicate exists, so no existing output changed shape.
 - **D23 (2026-11-18): the url probe stores an answer, never a guess.** Schema 9 -> 10 adds `urls.status_code` (nullable, no default) and `--skip-url-probe` removes the stage. Values: the HTTP status, `-1` for "no answer" (refused, timeout, DNS failure), `-2` for "answered with a certificate that does not verify". **Disclosed deviation:** the batch assumed schema 8; 8 and 9 were already spent by Parts 1 and 3. **Disclosed addition:** `-2` is not in the brief - the first real testfire.net run stored `-1` for every URL of a live site whose certificate is issued for `www.testfire.net`, and reporting that as "dead" would be false; verification stays on, so the fact gets its own value. `NULL` keeps its single meaning ("not probed yet"), a stored answer is never retried, `--mock` sends nothing, and host state, confidence, `diff` and every count query are untouched.
 - **D25 (2026-11-18): www dedup needs a known, equal status.** `_dedupe_www_variants` now requires both `status_code` values to be present and equal before the shared-IP branch can mark `www.X` as `duplicate_of X`. `NULL` is "no status observed", not a shared status, so a pair with no code on either side is left alone (no `duplicate_of`, no note). No schema change, no state, confidence or count change. Found by verification (PIT-61), not by a scan.
 - **D32 (2026-11-18): the five `render_error` sites route through `redact()`.** `scope check` (two excepts), `diff`, `status` and `doctor` no longer print a raw exception message; `install` is gone (D4), so the old "six sites" note was one too many. `redact()`'s semantics are untouched (header values only, paths and domains pass through). Four tests, one per command site. Suite 899 -> 903.
+- **D33 (2026-11-18): mock live gets per-target pyprobe fixtures, no verdict change.** R6's dead claim ("a mock `--active` run stores every host UNKNOWN") stays withdrawn; its narrow remainder was real - hosts named only by the flat `httprobe`/`tlsx` fixtures reached ALIVE with `status_code` NULL. `tests/fixtures/pyprobe/testfire.net.synthetic.json` gives those two hosts an explicit 200, so a mock `--active` demo carries a status. **No parser, adapter, state, confidence or count change**: the httprobe/tlsx parsers still record no status, because those tools never print one, and inventing it in the parser would be a fabricated record. The fixture is the honest place (docs/07: a fixture is a stand-in for real tool output).
+
 
 - **D31 withdrawn (2026-11-18): the mock live path already stores ALIVE.** The batch's "`--active --mock` stores every host as `UNKNOWN`" does not reproduce: `www.example.com` 200 HIGH and `api.example.com` 401 MEDIUM come straight from the pyprobe/httpx fixtures. Hosts with no live record stay `UNKNOWN` by the state rule. No fixture or adapter was changed (that would invent statuses); only the two stale claims were corrected. Evidence in REVIEW_LOG "Part G".
 

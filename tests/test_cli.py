@@ -1311,3 +1311,27 @@ def test_active_mock_run_stores_hosts_alive(
     assert states["www.example.com"]["status_code"] == 200
     assert states["api.example.com"]["state"] == "ALIVE"
     assert states["api.example.com"]["status_code"] == 401
+
+
+def test_mock_active_reports_status_200_from_the_live_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D33: a host reached only via httprobe/tlsx gets its status from pyprobe.
+
+    Regression: the generic httprobe/tlsx fixtures name testfire.net hosts but
+    carry no HTTP status, so those hosts were ALIVE with `status_code` NULL
+    (R6's remainder). The per-target pyprobe fixture supplies the status; no
+    parser or verdict rule changed.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    config = make_config(tmp_path)
+
+    args = ["run", "-d", "testfire.net", "--active", "--mock", "--config", str(config), "--json"]
+    result = CliRunner().invoke(app, args)
+    summary = json.loads(result.stdout.strip().splitlines()[-1])
+    hosts = {host["fqdn"]: host for host in summary["hosts"]}
+
+    assert hosts["www.testfire.net"]["state"] == "ALIVE"
+    assert hosts["www.testfire.net"]["status_code"] == 200
+    assert hosts["testfire.net"]["status_code"] == 200
