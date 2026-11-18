@@ -835,6 +835,8 @@ def _run_scan(
                     status_code=item.status_code,
                     ports=item.ports,
                     detail=item.detail,
+                    duplicate_of=item.duplicate_of,
+                    www_note=item.www_note,
                 )
                 for item in snapshots
             ]

@@ -1,0 +1,4 @@
+{
+  "www-pair.test": {"ips": ["203.0.113.7"], "cnames": []},
+  "www.www-pair.test": {"ips": ["203.0.113.7"], "cnames": []}
+}

@@ -354,6 +354,24 @@ A tool that cannot run without its key is a **selection skip** with the reason
 `confidence` is `HIGH`/`MEDIUM`/`LOW`/`UNCONFIRMED` from how many independent
 tools agree plus the stage's evidence rules.
 
+## Reading the results table
+
+```
+Subdomain          State    Status  Ports   Sources                Trust       Notes
+sakec.ac.in        ALIVE    301     -       crtsh, subfinder       MEDIUM (2)  -> redirects to www.sakec.ac.in
+www.sakec.ac.in    ALIVE    200     -       crtsh, subfinder       MEDIUM (2)  canonical
+admission.sakec.in ALIVE    403     -       crtsh                  LOW (1)     canonical
+www.admission...   ALIVE    403     -       crtsh                  LOW (1)     -> duplicate of admission.sakec.in
+```
+
+`Notes` explains a www/non-www pair (D22) without hiding the row: `-> redirects
+to <host>`, `-> duplicate of <host>`, `canonical`, or the informational
+`has www sibling at <host>` / `www variant on a different server`. The column
+only appears when some row has a note. When any duplicate exists the summary
+line reads `N hosts (M unique after www-dedup):
+...`. State and confidence are unchanged by it, and `--json` carries
+`duplicate_of` per host plus a top-level `www_dedup` object.
+
 ---
 
 ## Confirming it works

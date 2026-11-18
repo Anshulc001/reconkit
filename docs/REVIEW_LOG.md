@@ -68,6 +68,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-51 | The `tech` stage had no persistence branch at all: `_persist_stage` covered subs/dns/live/ports/urls, so every `HostStatusRecord` a tech adapter returned was dropped - webanalyze and cdncheck would have run, printed `ok N item(s)` and stored nothing | the tech stage never had an adapter, so the missing branch was invisible; `host_status_history.tech_json`/`waf` existed but only a live pass could fill them | `_persist_tech` merges `tech`/`waf` into the host's newest status row through the new `Store.update_host_extras`: no state row is appended and `state` is never touched, so `diff`/`previous_state()` are unchanged; an off-target record is dropped and a host with no status row is not annotated (D11) | `test_tech_stage_annotates_the_latest_host_row` (`Regression: PIT-51`), `test_tech_stage_drops_a_host_outside_the_target` |
 | PIT-48 | `doctor` showed junk for two installed tools (`katana` -> `__`, `nuclei` -> `[I…` plus ANSI escapes), and `update` could not call `katana` up to date, so an already-current binary would be downloaded again on every run (12j) | `installed_version()` returned `text.splitlines()[0]` for every tool, but `katana -version` prints four lines of ASCII art (the real version is on line 8, on stderr) and `nuclei -version` prints a coloured `[INF]` line first, so `_same_version()` compared a release tag against a logo | A tool may carry a top-level `version_regex` in `tools.yaml`; `installed_version()` searches the whole `version_cmd` output, returns the first capture group (or the whole match when the pattern has no group), and falls back to `splitlines()[0]` when the field is absent or nothing matches. A pattern that does not compile is a `ConfigError` at registry load, before any command runs | `test_katana_version_ignores_the_ascii_banner` (`Regression: PIT-48`), `test_nuclei_version_drops_the_ansi_log_prefix` (`Regression: PIT-48`), `test_a_regex_with_no_match_falls_back_to_the_first_line`, `test_a_version_regex_without_a_group_returns_the_match`, `test_version_regex_is_parsed_from_the_registry`, `test_a_broken_version_regex_is_a_config_error`, `test_version_regex_survives_the_plan_copy` |
 | PIT-58 | A real scan reported `katana: invalid JSON line` and threw away the whole crawl (0 items) although katana had found URLs; `hakrawler`/`gospider`/`subjs` had the same shape (any line their parser could not turn into an http(s) URL raised `ParseError`) | The parsers treated "this line is not output I understand" as "this tool failed", and the tools that print a warning on stdout (katana) or a log line (gospider) produced exactly such lines. PIT-52 fixed only the known non-web schemes, so any other noise was still fatal | A urls parser skips an unusable line, counts it, and keeps parsing: `ToolResult.error` carries one message per skipped line up to 10, then a single `skipped N unusable line(s); last: ...` summary, and the status stays `ok` because the parsed records are the tool's real output. `urlfinder` keeps its stricter archive rule (see docs/09 4a3) | `test_katana_skips_invalid_json_lines` (`Regression: PIT-58`), `test_katana_warning_lines_reach_the_detail_and_stay_ok`, `test_katana_many_junk_lines_are_summarised_once`, `test_crawler_parsers_skip_unusable_lines` |
+| PIT-59 | The results table counted one website twice: `sakec.ac.in` (301) and `www.sakec.ac.in` (200) were two ALIVE hosts, and the same for `admission`, `iprc`, `research`, `portal`, so 39 "ALIVE" rows suggested 39 sites | Nothing in the pipeline related a `www.` name to its bare name: DNS resolves both, the live pass probes both, and neither `subdomains` nor `host_status_history` had anywhere to say they are the same site | A post-`live` pass (`Engine._dedupe_www_variants`) writes **metadata only** (`duplicate_of`, `www_note`, schema 9) on the newest status row: 3xx+2xx marks the 3xx name, two 2xx marks neither, same non-2xx plus a shared IP marks `www.X`, a dead variant and an unknown IP set mark nothing. Host state, confidence and every count query are untouched. The table gains a Notes column (only when a row has a note) and the summary line a unique count (only when a duplicate exists) | `test_www_redirect_to_bare_is_marked_duplicate` (`Regression: PIT-59`), `test_bare_redirect_to_www_is_marked_duplicate`, `test_both_200_independent_servers_not_marked_duplicate`, `test_same_status_on_one_server_marks_the_www_variant`, `test_same_status_on_different_servers_is_only_a_note`, `test_www_dead_is_not_marked_duplicate`, `test_single_variant_not_touched`, `test_www_dedup_never_changes_host_state_or_confidence`, `test_set_host_duplicate_updates_in_place_and_keeps_state`, `test_www_duplicate_rows_get_notes_and_the_summary_counts_unique` |
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
@@ -5582,4 +5583,89 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
   `-max-time` ceiling is 30 minutes now, not 3) and `run_script` in
   `tests/test_runner.py` gained the two clock arguments. New fixture:
   `tests/fakebin/silent_after_output.py`.
+
+## 2026-11-18 (batch) Part 3 - www/non-www deduplication with `duplicate_of` metadata
+
+- **Owner request:** "www.anywebsite.com and anywebsite.com are the same - fix that
+  yourself", after a real `sakec.ac.in` scan listed both names as ALIVE.
+- **Docs first:** docs/04 section 5 (`duplicate_of`/`www_note` semantics) and
+  section 11 (schema 9), docs/09 section 5 (the five rules), docs/02 section 5
+  (Notes column, summary line, `--json`), MASTER_PLAN D22, COMMANDS.md.
+- **Schema: 8 -> 9**, not 7 -> 8. The batch prompt was written before Part 1
+  spent 8 on the `tool_runs` CHECK rebuild (`_SCHEMA_V8`). Disclosed here and in
+  D22. `_SCHEMA_V9` is two `ALTER TABLE ... ADD COLUMN` statements, both nullable
+  with no default, so every existing row reads `NULL` = "no duplicate
+  information"; nothing is rewritten and no data migration is needed.
+- **Why a second column (`www_note`) instead of `host_status_history.detail`:**
+  `detail` is the documented UNKNOWN reason, redacted and bounded to 200 chars
+  and exposed as `hosts[].detail` (PIT-46). Overloading it would have made an
+  informational sibling note look like a probe failure.
+- **Detection.** `Engine._dedupe_www_variants(target_id, hosts)` runs right after
+  the live persistence block, once per run, over `Store.host_rows()` filtered to
+  the current run's host set. Rules and their tests are in the PIT-59 row. Two
+  details worth naming: (a) the three-way 2xx/3xx/same-status decision reads the
+  `status_code` the live stage stored, never a fresh request - the pass sends no
+  traffic; (b) "different servers" is claimed only when **both** IP sets are
+  known and disjoint, because an empty `ips_json` (a scan that ran no DNS stage)
+  is not evidence of anything. That is a narrowing of the batch text, which said
+  "if IPs differ"; it is recorded in docs/09 and D22.
+- **Metadata only (frozen boundary).** `Store.set_host_duplicate()` updates the
+  host's newest status row; it never appends a row and never writes `state`,
+  `status_code`, `confidence`, `checked_at` or `source_count`. Host-state
+  definitions, the confidence formula, `diff` and `status` are untouched, and
+  `test_www_dedup_never_changes_host_state_or_confidence` pins it.
+- **Display.** `ui.host_note()` produces `-> redirects to <host>`,
+  `-> duplicate of <host>`, `canonical` or the sibling note. The Notes column is
+  added only when some row has a note, so an ordinary run's table keeps its six
+  columns (`test_no_notes_column_when_no_pair_was_found`); it wraps instead of
+  ellipsizing, because a clipped note reads as no note. The summary line gains
+  `N hosts (M unique after www-dedup)` only when a duplicate exists. `--json`
+  always carries `www_dedup` (`applied`, `pairs`) and every host object carries
+  `duplicate_of` and `www_note`.
+- **Mock proof (new synthetic fixtures, offline):**
+  `tests/fixtures/dnspython/www-pair.test.synthetic.json` and
+  `tests/fixtures/pyprobe/www-pair.test.synthetic.json` describe one bare name
+  that 301s to `www.www-pair.test` (200), same IP. Fixtures are per-target, so
+  no other mock run changed.
+
+  ```
+  $ reconkit run -d www-pair.test --active --no-scope --mock
+  │ www-pai… │ ALIVE │ 301 │ - │ - │ LOW (0) │ -> redirects to www.www-pair.test │
+  │ www.www… │ ALIVE │ 200 │ - │ - │ LOW (0) │ canonical                        │
+  17 hosts (16 unique after www-dedup): 2 ALIVE, 0 DNS_ONLY, 0 SHUT_DOWN, 0 DEAD, 15 UNKNOWN
+  EXIT=0
+
+  $ reconkit run -d www-pair.test --active --no-scope --mock --json | jq '.www_dedup'
+  {"applied": true, "pairs": [{"host": "www-pair.test", "duplicate_of": "www.www-pair.test"}]}
+  $ sqlite3 recon.db "SELECT s.fqdn, h.duplicate_of, h.www_note FROM host_status_history h
+                      JOIN subdomains s ON s.id = h.subdomain_id
+                      WHERE h.duplicate_of IS NOT NULL OR h.www_note IS NOT NULL"
+  testfire.net||has www sibling at www.testfire.net
+  www.testfire.net||has www sibling at testfire.net
+  www-pair.test|www.www-pair.test|
+  ```
+
+- **Real proof (testfire.net, small):** `reconkit run -d testfire.net --active
+  --no-scope --tools assetfinder,dnspython,pyprobe` -> both names answer 200,
+  which is the "two 2xx" branch: **nothing** was marked and both rows got
+  `has www sibling at ...`, exit 0. The DB rows above are from that run and the
+  mock run in the same workspace. No scan of `sakec.ac.in` was made.
+- **Tests:** 855 -> 869. New: `test_www_redirect_to_bare_is_marked_duplicate`,
+  `test_bare_redirect_to_www_is_marked_duplicate`,
+  `test_both_200_independent_servers_not_marked_duplicate`,
+  `test_same_status_on_one_server_marks_the_www_variant`,
+  `test_same_status_on_different_servers_is_only_a_note`,
+  `test_www_dead_is_not_marked_duplicate`, `test_single_variant_not_touched`,
+  `test_www_dedup_never_changes_host_state_or_confidence`,
+  `test_v8_database_migrates_the_www_dedup_columns`,
+  `test_set_host_duplicate_updates_in_place_and_keeps_state`,
+  `test_set_host_duplicate_is_false_for_unknown_host_or_status`,
+  `test_www_duplicate_rows_get_notes_and_the_summary_counts_unique`,
+  `test_www_notes_without_any_duplicate_leave_the_summary_line_alone`,
+  `test_no_notes_column_when_no_pair_was_found`. Changed: the six
+  `SCHEMA_VERSION == 8` assertions in `tests/test_store.py` became `== 9`,
+  `test_v7_database_rebuilds_tool_runs_for_the_gap_status` now also creates a
+  `host_status_history` (a real v7 database has one; v9 alters it), and
+  `test_json_output_is_one_valid_document_with_documented_schema` gained
+  `www_dedup` plus the two host keys.
 

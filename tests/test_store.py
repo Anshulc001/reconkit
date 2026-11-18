@@ -162,7 +162,7 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 8
+        assert migrated.schema_version == SCHEMA_VERSION == 9
         assert "cnames_json" in columns
         assert "dangling_cname" in columns
         assert "detail" in columns
@@ -174,6 +174,73 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
         assert row["detail"] is None
     finally:
         migrated.close()
+
+
+def test_v8_database_migrates_the_www_dedup_columns(tmp_path: Path) -> None:
+    """D22: schema 9 adds duplicate_of/www_note, and old rows read as not duplicates."""
+    db_path = tmp_path / "recon.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version (version) VALUES (8);
+            CREATE TABLE host_status_history (
+              id           INTEGER PRIMARY KEY,
+              subdomain_id INTEGER NOT NULL,
+              run_id       INTEGER NOT NULL,
+              state        TEXT NOT NULL,
+              checked_at   TEXT NOT NULL
+            );
+            INSERT INTO host_status_history (subdomain_id, run_id, state, checked_at)
+              VALUES (1, 1, 'ALIVE', '2026-11-17T10:00:00Z');
+            """
+        )
+    finally:
+        conn.close()
+
+    migrated = Store(db_path)
+    try:
+        assert migrated.schema_version == SCHEMA_VERSION == 9
+        columns = {
+            str(row["name"]): row
+            for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
+        }
+        assert {"duplicate_of", "www_note"} <= set(columns)
+        row = migrated._conn.execute(
+            "SELECT duplicate_of, www_note FROM host_status_history"
+        ).fetchone()
+        assert (row["duplicate_of"], row["www_note"]) == (None, None)
+    finally:
+        migrated.close()
+
+
+def test_set_host_duplicate_updates_in_place_and_keeps_state(store: Store) -> None:
+    """Metadata only: no new row, and state/status_code/checked_at are untouched."""
+    target_id, run_id = make_run(store)
+    sub_id = store.upsert_subdomain(target_id, "www.example.com", run_id=run_id)
+    store.append_host_status(
+        sub_id, run_id, "ALIVE", status_code=301, checked_at="2026-11-18T09:00:00Z"
+    )
+    before = store.count("host_status_history")
+    assert store.set_host_duplicate(target_id, "www.example.com", duplicate_of="example.com")
+    assert store.count("host_status_history") == before
+    row = store._conn.execute(
+        "SELECT state, status_code, checked_at, duplicate_of, www_note FROM host_status_history"
+    ).fetchone()
+    assert (row["state"], row["status_code"], row["checked_at"]) == (
+        "ALIVE",
+        301,
+        "2026-11-18T09:00:00Z",
+    )
+    assert (row["duplicate_of"], row["www_note"]) == ("example.com", None)
+
+
+def test_set_host_duplicate_is_false_for_unknown_host_or_status(store: Store) -> None:
+    target_id, run_id = make_run(store)
+    assert not store.set_host_duplicate(target_id, "nope.example.com", duplicate_of="x")
+    store.upsert_subdomain(target_id, "bare.example.com", run_id=run_id)
+    assert not store.set_host_duplicate(target_id, "bare.example.com", duplicate_of="x")
 
 
 def test_host_status_persists_cnames_and_latest_cnames(store: Store) -> None:
@@ -279,7 +346,7 @@ def test_v3_database_migrates_the_additive_detail_column(tmp_path: Path) -> None
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 8
+        assert migrated.schema_version == SCHEMA_VERSION == 9
         columns = {
             str(row["name"])
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
@@ -717,7 +784,7 @@ def test_v2_database_migrates_provenance_with_backfill(tmp_path: Path) -> None:
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(subdomains)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 8
+        assert migrated.schema_version == SCHEMA_VERSION == 9
         assert "provenance" in columns
         rows = {
             str(row["fqdn"]): str(row["provenance"])
@@ -1001,7 +1068,7 @@ def test_v4_database_migrates_by_removing_the_speed_column(tmp_path: Path) -> No
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 8
+        assert migrated.schema_version == SCHEMA_VERSION == 9
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(scan_runs)")
         }
@@ -1050,13 +1117,22 @@ def test_v7_database_rebuilds_tool_runs_for_the_gap_status(tmp_path: Path) -> No
         );
         INSERT INTO tool_runs (id, run_id, tool, status, item_count, duration_s, error)
           VALUES (3, 1, 'crtsh', 'failed', 0, 1.5, 'crtsh: server error (HTTP 502)');
+        -- A real v7 database has it; schema 9 alters it.
+        CREATE TABLE host_status_history (
+          id           INTEGER PRIMARY KEY,
+          subdomain_id INTEGER NOT NULL,
+          run_id       INTEGER NOT NULL,
+          state        TEXT NOT NULL,
+          waf          TEXT,
+          checked_at   TEXT NOT NULL
+        );
         """
     )
     conn.close()
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 8
+        assert migrated.schema_version == SCHEMA_VERSION == 9
         row = migrated._conn.execute(
             "SELECT id, run_id, tool, status, item_count, duration_s, error FROM tool_runs"
         ).fetchone()
@@ -1131,7 +1207,7 @@ def test_v6_database_migrates_the_waf_priority_column(tmp_path: Path) -> None:
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 8
+        assert migrated.schema_version == SCHEMA_VERSION == 9
         columns = {
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")

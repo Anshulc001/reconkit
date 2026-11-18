@@ -907,6 +907,38 @@ D21. 2026-11-18 - `scripts/install-tools.sh`: the owner reinstates installation,
     program counts as a failure.
     (5) **Linux only** - bash script, Kali/Debian, by owner decision (2026-11-18).
 
+D22. 2026-11-18 - www/non-www deduplication (owner request: "www.anywebsite.com
+    and anywebsite.com are the same - fix that yourself").
+    Reason: a real `sakec.ac.in` scan listed `sakec.ac.in` (301) and
+    `www.sakec.ac.in` (200) as two ALIVE hosts, and the same again for
+    `admission`, `iprc`, `research`, `portal`, so 39 "ALIVE" hosts looked like
+    39 websites. New metadata, not a new state rule: schema 9 adds
+    `host_status_history.duplicate_of` and `.www_note`;
+    `Engine._dedupe_www_variants()` runs after `live` and before `tech`/`urls`
+    and writes them on the newest status row of each host; the results table
+    gains a Notes column and the summary line a unique count; `--json` gains
+    `hosts[].duplicate_of`/`.www_note` and a top-level `www_dedup` block.
+
+    **Frozen rules untouched:** no change to host-state definitions
+    (ALIVE/DNS_ONLY/SHUT_DOWN/DEAD/UNKNOWN), to the confidence formula, to
+    `decide_host_state`, to any count query, or to `diff`. The pass only reads
+    stored rows and writes two nullable columns.
+
+    Rules (docs/09 section 5): a 3xx name is the duplicate of the 2xx name; two
+    2xx names are never marked (both serve content) and get the
+    `has www sibling at ...` note; two alive names with the same non-2xx status
+    that share an IP mark `www.X` as a duplicate of `X`; two names on different
+    servers get the `www variant on a different server` note; a dead/DNS-only
+    variant is never a duplicate of an alive name (that means "this name does
+    not resolve"); a single variant is untouched.
+
+    Disclosed: the brief said "schema 7 -> 8", but Part 1 of the same batch had
+    already taken 8 (the `tool_runs` CHECK rebuild for the `gap` status), so the
+    dedup columns are **schema 9**. The brief also asked for the sibling note on
+    the existing `detail` column; that column is documented as the UNKNOWN
+    reason and is exposed as `hosts[].detail`, so a second column (`www_note`)
+    keeps the two meanings apart.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

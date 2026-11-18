@@ -342,12 +342,23 @@ The `slow`/`normal`/`fast` presets, `--speed`, `--delay`, the pacer (delays, hos
 ### Result table (example `passive` / `diff`)
 
 ```
-Subdomain          State      Status  Ports    Sources                    Trust
-api.example.com    ALIVE      200     80,443   crtsh, subfinder, otx      HIGH (3)
-vpn.example.com    DNS_ONLY   -       443      assetfinder, naabu         MEDIUM (2)
-old.example.com    SHUT_DOWN  -       -        crtsh                      LOW (1)
-new.example.com    UNKNOWN    -       -        certspotter, hackertarget  MEDIUM (2)
+Subdomain          State      Status  Ports    Sources                    Trust       Notes
+api.example.com    ALIVE      200     80,443   crtsh, subfinder, otx      HIGH (3)    canonical
+vpn.example.com    DNS_ONLY   -       443      assetfinder, naabu         MEDIUM (2)  -
+old.example.com    SHUT_DOWN  -       -        crtsh                      LOW (1)     -
+new.example.com    UNKNOWN    -       -        certspotter, hackertarget  MEDIUM (2)  -
 ```
+
+The **Notes** column (D22, 2026-11-18) explains a www/non-www pair instead of
+hiding a row: `-> redirects to <host>` for a 3xx duplicate, `-> duplicate of
+<host>` for a same-server duplicate, `canonical` for the host a duplicate points
+at, and the informational `has www sibling at <host>` / `www variant on a
+different server` when both names serve independently. `-` means no sibling was
+found, and when no row has anything to say the column is left out entirely so an
+ordinary table keeps its six columns. The state, status and confidence of every row are unchanged; the
+`--only-alive` filter still prints both names, now self-explanatory. The summary
+line gains the unique count when any duplicate exists:
+`20 hosts (18 unique after www-dedup): 12 ALIVE, ...`.
 
 - A final summary line: counts per state and tool statuses. New items are shown by `diff`, not in the stage summary.
 - A "Tools" table lists each adapter with stage, status (`ok`, `gap`, `skipped`, `failed`, `timeout`), item count and a short detail.
@@ -363,7 +374,7 @@ new.example.com    UNKNOWN    -       -        certspotter, hackertarget  MEDIUM
 One JSON document is written to stdout; tables and progress stay on stderr. The fixed shape is:
 
 ```json
-{"type":"summary","target":"example.com","exit_code":0,"resumed":false,"scope_denied":false,"scope_mode":"enforced","completion":{"status":"complete","gaps":[]},"warnings":[],"hosts":[{"fqdn":"api.example.com","state":"ALIVE","confidence":"HIGH","sources":["crtsh","subfinder","otx"],"status_code":200,"ports":[80,443],"detail":null}],"stages":[{"stage":"subs","run_id":1,"resumed":false,"dropped_hosts":[],"results":[],"skipped":[]}],"summary":{"hosts":1,"alive":1,"dns_only":0,"shut_down":0,"dead":0,"unknown":0,"tools_ok":1,"tools_failed":0,"tools_skipped":0,"tools_timeout":0}}
+{"type":"summary","target":"example.com","exit_code":0,"resumed":false,"scope_denied":false,"scope_mode":"enforced","completion":{"status":"complete","gaps":[]},"warnings":[],"hosts":[{"fqdn":"api.example.com","state":"ALIVE","confidence":"HIGH","sources":["crtsh","subfinder","otx"],"status_code":200,"ports":[80,443],"detail":null,"duplicate_of":null,"www_note":null}],"www_dedup":{"applied":false,"pairs":[]},"stages":[{"stage":"subs","run_id":1,"resumed":false,"dropped_hosts":[],"results":[],"skipped":[]}],"summary":{"hosts":1,"alive":1,"dns_only":0,"shut_down":0,"dead":0,"unknown":0,"tools_ok":1,"tools_failed":0,"tools_skipped":0,"tools_timeout":0}}
 ```
 
 The `hosts` objects always carry `state`, `confidence` and `sources`; the top-level `summary` object carries the counts. `scope_mode` is the same value written to `scan_runs` (section 3.1).
@@ -383,6 +394,8 @@ With an injectable flag (`--ports`, `--status-codes`, `--header`, `--user-agent`
 `{"ports":[80,443],"status_codes":[200,301],"headers":{"X-Test":"***"},"user_agent":"reconkit-test","ffuf_wordlist":"/path/common.txt","resolvers":"/path/resolvers.txt"}`
 (`ffuf_wordlist` and `resolvers` are `null` unless the flag was given).
 Header values are redacted as `***` unless `--show-headers` was given. `ToolResult` objects under `stages[].results` use the schemas in docs/09.
+
+`hosts[].duplicate_of` is the canonical hostname when the row is a www/non-www duplicate, `null` otherwise (docs/04 section 5, D22), and `hosts[].www_note` carries the informational sibling text when there is one. The top-level `www_dedup` object is always present: `applied` is `true` when at least one duplicate pair was detected, and `pairs` lists `{"host": "www.example.com", "duplicate_of": "example.com"}` for each one.
 
 `hosts[].detail` is the bounded, redacted reason recorded with that host's latest status row (docs/04 section 5): `null` unless the latest pass could not decide a better state, in which case it is a one-line string of at most 200 characters with the run's known secrets redacted. It is the machine-readable half of a diagnostic the human table does not show - a script can tell a TLS failure apart from another cause without probing the host again.
 

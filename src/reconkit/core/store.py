@@ -16,7 +16,7 @@ from pathlib import Path
 
 from reconkit.errors import ConfigError
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 REDACTED = "***"
 # docs/04 section 5: the stored reason is one line of at most this many characters.
 DETAIL_MAX_CHARS = 200
@@ -184,6 +184,14 @@ DROP TABLE tool_runs;
 ALTER TABLE tool_runs_new RENAME TO tool_runs;
 """
 
+# docs/04 section 11 (2026-11-18, MASTER_PLAN D22): www/non-www deduplication
+# metadata. Additive: every existing row reads NULL for both, which means "no
+# duplicate information". No state, confidence or count query reads them.
+_SCHEMA_V9 = """
+ALTER TABLE host_status_history ADD COLUMN duplicate_of TEXT;
+ALTER TABLE host_status_history ADD COLUMN www_note TEXT;
+"""
+
 _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, _SCHEMA_V1),
     (2, _SCHEMA_V2),
@@ -193,6 +201,7 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (6, _SCHEMA_V6),
     (7, _SCHEMA_V7),
     (8, _SCHEMA_V8),
+    (9, _SCHEMA_V9),
 )
 
 _COUNT_SQL: dict[str, str] = {
@@ -446,6 +455,7 @@ class Store:
         rows = self._conn.execute(
             "SELECT s.fqdn, s.state, s.confidence, s.source_count,"
             " h.status_code, h.detail, h.title, h.location, h.ips_json, h.tech_json,"
+            " h.duplicate_of, h.www_note,"
             " COALESCE((SELECT GROUP_CONCAT(DISTINCT x.tool) FROM subdomain_sources x"
             "  WHERE x.subdomain_id = s.id), '') AS sources,"
             " COALESCE((SELECT GROUP_CONCAT(DISTINCT p.port) FROM ports p"
@@ -469,6 +479,10 @@ class Store:
                     "source_count": int(row["source_count"] or 0),
                     "status_code": None if row["status_code"] is None else int(row["status_code"]),
                     "detail": None if row["detail"] is None else str(row["detail"]),
+                    "duplicate_of": (
+                        None if row["duplicate_of"] is None else str(row["duplicate_of"])
+                    ),
+                    "www_note": None if row["www_note"] is None else str(row["www_note"]),
                     "title": None if row["title"] is None else str(row["title"]),
                     "location": None if row["location"] is None else str(row["location"]),
                     "ips": _text_list(row["ips_json"]),
@@ -643,6 +657,39 @@ class Store:
         )
         self._commit()
         return int(cursor.lastrowid or 0)
+
+    def set_host_duplicate(
+        self,
+        target_id: int,
+        fqdn: str,
+        *,
+        duplicate_of: str | None,
+        www_note: str | None = None,
+    ) -> bool:
+        """Write the www/non-www metadata on the host's newest status row (D22).
+
+        Metadata only: it never appends a row and never touches `state`,
+        `status_code`, `confidence` or `checked_at`, so host state and every
+        count query stay exactly what the live stage decided. Returns False when
+        the host or its status row does not exist.
+        """
+        sub = self._conn.execute(
+            "SELECT id FROM subdomains WHERE target_id = ? AND fqdn = ?", (target_id, fqdn)
+        ).fetchone()
+        if sub is None:
+            return False
+        row = self._conn.execute(
+            "SELECT id FROM host_status_history WHERE subdomain_id = ? ORDER BY id DESC LIMIT 1",
+            (int(sub["id"]),),
+        ).fetchone()
+        if row is None:
+            return False
+        self._conn.execute(
+            "UPDATE host_status_history SET duplicate_of = ?, www_note = ? WHERE id = ?",
+            (duplicate_of, www_note, int(row["id"])),
+        )
+        self._commit()
+        return True
 
     def update_host_extras(
         self,

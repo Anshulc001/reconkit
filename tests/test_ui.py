@@ -124,10 +124,13 @@ def test_json_output_is_one_valid_document_with_documented_schema() -> None:
         "scope_mode",
         "completion",
         "warnings",
+        # Added 2026-11-18 (D22): the www/non-www pairs, always present.
+        "www_dedup",
         "hosts",
         "stages",
         "summary",
     }
+    assert document["www_dedup"] == {"applied": False, "pairs": []}
     # Added 2026-11-17 with the owner's completion ruling: a run with no gaps
     # still carries the key, so consumers never branch on its absence.
     assert document["completion"] == {"status": "complete", "gaps": []}
@@ -139,8 +142,11 @@ def test_json_output_is_one_valid_document_with_documented_schema() -> None:
         "status_code",
         "ports",
         "detail",
+        "duplicate_of",
+        "www_note",
     }
     assert document["hosts"][0]["detail"] is None
+    assert document["hosts"][0]["duplicate_of"] is None
     assert document["stages"][0]["stage"] == "subs"
     assert document["stages"][0]["results"][0]["tool"] == "crtsh"
     assert document["stages"][0]["results"][0]["status"] == "ok"
@@ -333,6 +339,75 @@ def test_one_and_many_warnings_are_all_rendered() -> None:
     assert many_text.count("warning:") == 3
     for warning in ("first", "second", "third"):
         assert warning in many_text
+
+
+def test_www_duplicate_rows_get_notes_and_the_summary_counts_unique() -> None:
+    """D22: the Notes column explains each pair and the summary counts unique hosts."""
+    rows = [
+        ui.HostRow("example.com", HostState.ALIVE, Confidence.HIGH, ("dnsx", "httpx"), 200),
+        ui.HostRow(
+            "www.example.com",
+            HostState.ALIVE,
+            Confidence.HIGH,
+            ("dnsx", "httpx"),
+            301,
+            duplicate_of="example.com",
+        ),
+        ui.HostRow("api.example.com", HostState.ALIVE, Confidence.HIGH, ("dnsx",), 403),
+    ]
+    canonical = {row.duplicate_of for row in rows if row.duplicate_of is not None}
+    assert ui.host_note(rows[0], canonical) == "canonical"
+    assert ui.host_note(rows[1], canonical) == "-> redirects to example.com"
+    assert ui.host_note(rows[2], canonical) == "-"
+    _, _, err = render_text(make_summary(), rows)
+    # The table wraps at the terminal width, so compare on collapsed whitespace.
+    flat = " ".join(err.split())
+    assert "Notes" in flat
+    assert "canonical" in flat
+    assert "3 hosts (2 unique after www-dedup): 3 ALIVE" in flat
+    _, raw, _ = render_text(make_summary(), rows, json_output=True)
+    document = json.loads(raw)
+    assert document["www_dedup"] == {
+        "applied": True,
+        "pairs": [{"host": "www.example.com", "duplicate_of": "example.com"}],
+    }
+    assert document["hosts"][1]["duplicate_of"] == "example.com"
+
+
+def test_www_notes_without_any_duplicate_leave_the_summary_line_alone() -> None:
+    rows = [
+        ui.HostRow(
+            "example.com",
+            HostState.ALIVE,
+            Confidence.HIGH,
+            ("dnsx",),
+            200,
+            www_note="has www sibling at www.example.com",
+        ),
+        ui.HostRow(
+            "www.example.com",
+            HostState.ALIVE,
+            Confidence.HIGH,
+            ("dnsx",),
+            200,
+            www_note="has www sibling at example.com",
+        ),
+    ]
+    canonical: set[str] = set()
+    assert ui.host_note(rows[0], canonical) == "has www sibling at www.example.com"
+    _, _, err = render_text(make_summary(), rows)
+    flat = " ".join(err.split())
+    assert "2 hosts: 2 ALIVE" in flat
+    assert "sibling" in flat
+    _, raw, _ = render_text(make_summary(), rows, json_output=True)
+    assert json.loads(raw)["www_dedup"] == {"applied": False, "pairs": []}
+
+
+def test_no_notes_column_when_no_pair_was_found() -> None:
+    """An ordinary run keeps its six columns; Notes appears only when used."""
+    _, _, err = render_text(make_summary(), host_rows())
+    assert "Notes" not in err
+    assert "Subdomain" in err
 
 
 def test_rich_markup_in_host_data_is_printed_literally() -> None:

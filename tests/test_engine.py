@@ -34,6 +34,7 @@ from reconkit.engine import (
     Engine,
     ExitCode,
     HostEvidence,
+    HostSnapshot,
     ScanOptions,
     ScanSummary,
     allowed_tiers,
@@ -1667,6 +1668,139 @@ async def test_url_tools_receive_the_configured_runtime_bounds(tmp_path: Path) -
     assert (urlfinder.max_s, urlfinder.idle_s, urlfinder.min_s) == (1800.0, 60.0, 180.0)
     assert seen["hakrawler"].max_s == 120.0
     assert seen["subjs"].max_s == 60.0
+
+
+def _dedup_run(
+    tmp_path: Path,
+    *,
+    bare: tuple[int | None, HostState],
+    www: tuple[int | None, HostState] | None,
+    bare_ips: tuple[str, ...] = ("192.0.2.10",),
+    www_ips: tuple[str, ...] = ("192.0.2.10",),
+) -> dict[str, HostSnapshot]:
+    """Run dns+live with the given answers and return the stored host rows.
+
+    `www=None` means the www name does not exist at all (not in DNS, not probed).
+    """
+    rec = Recorder()
+    specs = {
+        "dns-fake": tool("dns-fake", Stage.DNS),
+        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
+    }
+    dns_records: list[Record] = [
+        SubdomainRecord(fqdn="example.com", source="dns-fake", ips=list(bare_ips))
+    ]
+    live_records: list[Record] = [
+        HostStatusRecord(
+            fqdn="example.com",
+            source="live-fake",
+            state=bare[1],
+            status_code=bare[0],
+        )
+    ]
+    if www is not None:
+        dns_records.append(
+            SubdomainRecord(fqdn="www.example.com", source="dns-fake", ips=list(www_ips))
+        )
+        live_records.append(
+            HostStatusRecord(
+                fqdn="www.example.com",
+                source="live-fake",
+                state=www[1],
+                status_code=www[0],
+            )
+        )
+    adapters = {
+        "dns-fake": adapter("dns-fake", Stage.DNS, rec, records=dns_records),
+        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=live_records),
+    }
+    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+    summary = asyncio.run(
+        engine.run(
+            "example.com",
+            ScanOptions(stages=(Stage.DNS, Stage.LIVE), active=True, mock=True),
+        )
+    )
+    return {row.fqdn: row for row in engine.host_rows(summary.target_id)}
+
+
+def test_www_redirect_to_bare_is_marked_duplicate(tmp_path: Path) -> None:
+    """D22: www.X 301 + X 200 -> www.X is the duplicate (the bare name is canonical)."""
+    rows = _dedup_run(tmp_path, bare=(200, HostState.ALIVE), www=(301, HostState.ALIVE))
+    assert rows["www.example.com"].duplicate_of == "example.com"
+    assert rows["example.com"].duplicate_of is None
+
+
+def test_bare_redirect_to_www_is_marked_duplicate(tmp_path: Path) -> None:
+    """The other direction: X 301 + www.X 200 -> X is the duplicate."""
+    rows = _dedup_run(tmp_path, bare=(301, HostState.ALIVE), www=(200, HostState.ALIVE))
+    assert rows["example.com"].duplicate_of == "www.example.com"
+    assert rows["www.example.com"].duplicate_of is None
+
+
+def test_both_200_independent_servers_not_marked_duplicate(tmp_path: Path) -> None:
+    """Both serve content: two sites, so neither is a duplicate (D22 rule 2)."""
+    rows = _dedup_run(
+        tmp_path,
+        bare=(200, HostState.ALIVE),
+        www=(200, HostState.ALIVE),
+        bare_ips=("192.0.2.10",),
+        www_ips=("192.0.2.11",),
+    )
+    assert rows["example.com"].duplicate_of is None
+    assert rows["www.example.com"].duplicate_of is None
+    assert rows["example.com"].www_note == "has www sibling at www.example.com"
+    assert rows["www.example.com"].www_note == "has www sibling at example.com"
+
+
+def test_same_status_on_one_server_marks_the_www_variant(tmp_path: Path) -> None:
+    """The sakec.ac.in 403 pair: same code, shared IP -> www is the duplicate."""
+    rows = _dedup_run(
+        tmp_path,
+        bare=(403, HostState.ALIVE),
+        www=(403, HostState.ALIVE),
+        bare_ips=("192.0.2.10",),
+        www_ips=("192.0.2.10",),
+    )
+    assert rows["www.example.com"].duplicate_of == "example.com"
+    assert rows["example.com"].duplicate_of is None
+
+
+def test_same_status_on_different_servers_is_only_a_note(tmp_path: Path) -> None:
+    rows = _dedup_run(
+        tmp_path,
+        bare=(403, HostState.ALIVE),
+        www=(403, HostState.ALIVE),
+        bare_ips=("192.0.2.10",),
+        www_ips=("192.0.2.11",),
+    )
+    assert rows["example.com"].duplicate_of is None
+    assert rows["www.example.com"].duplicate_of is None
+    assert rows["example.com"].www_note == "www variant on a different server"
+    assert rows["www.example.com"].www_note == "www variant on a different server"
+
+
+def test_www_dead_is_not_marked_duplicate(tmp_path: Path) -> None:
+    """A dead variant is a name that does not resolve, not a duplicate website."""
+    rows = _dedup_run(tmp_path, bare=(200, HostState.ALIVE), www=(None, HostState.DEAD))
+    assert rows["example.com"].duplicate_of is None
+    assert rows["www.example.com"].duplicate_of is None
+    assert rows["www.example.com"].www_note is None
+
+
+def test_single_variant_not_touched(tmp_path: Path) -> None:
+    rows = _dedup_run(tmp_path, bare=(200, HostState.ALIVE), www=None)
+    assert set(rows) == {"example.com"}
+    assert rows["example.com"].duplicate_of is None
+    assert rows["example.com"].www_note is None
+
+
+def test_www_dedup_never_changes_host_state_or_confidence(tmp_path: Path) -> None:
+    """Frozen boundary (D22): metadata only - state, confidence and counts stay."""
+    rows = _dedup_run(tmp_path, bare=(200, HostState.ALIVE), www=(301, HostState.ALIVE))
+    assert rows["www.example.com"].state is HostState.ALIVE
+    assert rows["www.example.com"].status_code == 301
+    assert rows["example.com"].state is HostState.ALIVE
 
 
 async def test_exit_code_scope_violation(tmp_path: Path) -> None:

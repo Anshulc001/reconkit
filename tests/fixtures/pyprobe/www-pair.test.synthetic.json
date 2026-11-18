@@ -1,0 +1,4 @@
+{
+  "www-pair.test": {"status_code": 301, "title": null, "location": "https://www.www-pair.test/"},
+  "www.www-pair.test": {"status_code": 200, "title": "www-pair", "location": null}
+}

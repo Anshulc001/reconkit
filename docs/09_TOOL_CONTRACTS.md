@@ -886,6 +886,31 @@ truth). Two consequences for this table:
 ### Passive ports (smap)
 Stored with source `smap` and confidence LOW until an active scan confirms; never counted as active proof.
 
+### www / non-www deduplication (D22, 2026-11-18)
+
+`www.example.com` and `example.com` are usually the same website, and a scan
+that lists both inflates the "ALIVE" count. A post-`live` pass,
+`Engine._dedupe_www_variants()`, reads the stored host rows of the current run
+and only writes **metadata** on the newest status row of each host:
+
+| Situation | Result |
+|---|---|
+| both ALIVE, one 3xx (301/302/303/307/308) and the other 2xx | the 3xx name is `duplicate_of` the 2xx name |
+| both ALIVE, both 2xx | neither is marked; both get `www_note = "has www sibling at <other>"` (both serve content) |
+| both ALIVE, same non-2xx status, sharing an IP | `www.X` is `duplicate_of X` (the bare name is preferred) |
+| both ALIVE, same status, different known IPs | neither is marked; both get `www_note = "www variant on a different server"` |
+| both ALIVE, same status, an IP set unknown for either name | nothing (no DNS evidence, so no claim about the server) |
+| one ALIVE, the other DEAD/DNS_ONLY/SHUT_DOWN/UNKNOWN | nothing: a dead variant is a name that does not resolve, not a duplicate |
+| only one of the pair present | nothing |
+
+**It never changes host state, confidence or any count query.** `state`,
+`status_code`, `confidence` and `source_count` are exactly what the live and dns
+stages decided; `diff`, `status` and the confidence formula are untouched. The
+only visible effects are the new "Notes" column in the results table (added
+only when some row has a note, so an ordinary table keeps its six columns), the
+`N hosts (M unique after www-dedup)` summary and the `duplicate_of` field plus
+`www_dedup` block in `--json` (docs/02 section 5).
+
 ## 6. JSON Output
 
 `--json` writes ONE JSON document to stdout (shape in docs/02 section 5), not JSONL. Each host object carries `confidence`, `sources` and `state`; the top-level `summary` object carries counts and tool statuses. Human tables and progress stay on stderr.

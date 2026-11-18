@@ -145,6 +145,16 @@ Resolve = Callable[[str], Awaitable[list[str]]]
 InstalledCheck = Callable[[type[BaseToolAdapter]], bool]
 
 
+def _is_2xx(status: object) -> bool:
+    """A content answer: the name served the site itself."""
+    return isinstance(status, int) and 200 <= status < 300
+
+
+def _is_redirect(status: object) -> bool:
+    """A redirect answer: the name points somewhere else (D22)."""
+    return isinstance(status, int) and status in (301, 302, 303, 307, 308)
+
+
 def _completed(status: ToolStatus) -> bool:
     """True for a tool that did all it could: `ok`, or a `gap` from its upstream."""
     return status in (ToolStatus.OK, ToolStatus.GAP)
@@ -480,6 +490,10 @@ class HostSnapshot:
     title: str | None = None
     location: str | None = None
     tech: tuple[str, ...] = ()
+    # www/non-www metadata (D22): the canonical host when this row is a
+    # duplicate, and the informational sibling note otherwise.
+    duplicate_of: str | None = None
+    www_note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -615,6 +629,10 @@ class Engine:
                     title=raw_title if isinstance(raw_title, str) else None,
                     location=raw_location if isinstance(raw_location, str) else None,
                     tech=tuple(str(value) for value in cast(tuple[str, ...], row["tech"])),
+                    duplicate_of=(
+                        str(row["duplicate_of"]) if isinstance(row["duplicate_of"], str) else None
+                    ),
+                    www_note=(str(row["www_note"]) if isinstance(row["www_note"], str) else None),
                 )
             )
         return rows
@@ -819,6 +837,11 @@ class Engine:
             except Exception:
                 self.store.finish_scan_run(run_id, "failed", finished_at=self._now())
                 raise
+
+            # www/non-www deduplication (D22): a post-live metadata pass, before
+            # tech/urls see the hosts. It never changes a state or a confidence.
+            if stage is Stage.LIVE and results:
+                self._dedupe_www_variants(target_id, hosts)
 
             selected_total += len(selected)
             # A gap is an external service refusing the tool, not a failure of the
@@ -1628,6 +1651,71 @@ class Engine:
             for warning in transition.warnings:
                 if warning not in self._warnings:
                     self._warnings.append(warning)
+
+    def _dedupe_www_variants(self, target_id: int, hosts: list[str]) -> None:
+        """Mark a www/non-www pair as one website (D22, 2026-11-18).
+
+        Metadata only: it reads the rows the `live` pass just stored and writes
+        `duplicate_of`/`www_note` on the newest status row. Host state,
+        confidence, `status_code` and every count query are untouched, and a
+        pair that cannot be explained (different non-2xx codes) is left alone.
+
+        Rules (docs/09 section 5):
+
+        - one 3xx and one 2xx -> the 3xx name is the duplicate of the 2xx name;
+        - both 2xx -> both serve content, neither is a duplicate (sibling note);
+        - same non-2xx status and a shared IP -> `www.X` is a duplicate of `X`
+          (the bare name is the web convention for the canonical one);
+        - same status, different IPs -> different servers, sibling note only;
+        - one alive, one not -> nothing (a dead variant is not a duplicate of a
+          live site, it is a name that does not resolve).
+        """
+        rows: dict[str, dict[str, object]] = {
+            str(row["fqdn"]): row for row in self.store.host_rows(target_id)
+        }
+        current = set(hosts)
+        for fqdn in sorted(rows):
+            if not fqdn.startswith("www."):
+                continue
+            bare = fqdn[len("www.") :]
+            other = rows.get(bare)
+            if other is None or fqdn not in current or bare not in current:
+                continue
+            if rows[fqdn]["state"] != HostState.ALIVE.value:
+                continue
+            if other["state"] != HostState.ALIVE.value:
+                continue
+            www_status = rows[fqdn]["status_code"]
+            bare_status = other["status_code"]
+            www_ip = set(cast(tuple[str, ...], rows[fqdn]["ips"]))
+            bare_ip = set(cast(tuple[str, ...], other["ips"]))
+            duplicate: str | None = None
+            canonical: str | None = None
+            note: str | None = None
+            if _is_redirect(bare_status) and _is_2xx(www_status):
+                duplicate, canonical = bare, fqdn
+            elif _is_redirect(www_status) and _is_2xx(bare_status):
+                duplicate, canonical = fqdn, bare
+            elif _is_2xx(bare_status) and _is_2xx(www_status):
+                # Both names serve content: two sites, not a duplicate (rule 2).
+                self.store.set_host_duplicate(
+                    target_id, bare, duplicate_of=None, www_note=f"has www sibling at {fqdn}"
+                )
+                self.store.set_host_duplicate(
+                    target_id, fqdn, duplicate_of=None, www_note=f"has www sibling at {bare}"
+                )
+                continue
+            elif www_status == bare_status and www_ip & bare_ip:
+                duplicate, canonical = fqdn, bare
+            elif www_status == bare_status and www_ip and bare_ip and not (www_ip & bare_ip):
+                # Known and disjoint: two servers. With no DNS evidence for
+                # either name we say nothing rather than guess.
+                note = "www variant on a different server"
+            if duplicate is not None and canonical is not None:
+                self.store.set_host_duplicate(target_id, duplicate, duplicate_of=canonical)
+            elif note is not None:
+                self.store.set_host_duplicate(target_id, bare, duplicate_of=None, www_note=note)
+                self.store.set_host_duplicate(target_id, fqdn, duplicate_of=None, www_note=note)
 
     def _persist_live(
         self,

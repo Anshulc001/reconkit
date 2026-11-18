@@ -56,6 +56,9 @@ class HostRow:
     status_code: int | None = None
     ports: tuple[int, ...] = ()
     detail: str | None = None
+    # www/non-www metadata (D22): canonical host when this row is a duplicate.
+    duplicate_of: str | None = None
+    www_note: str | None = None
 
 
 ReportGate = Literal["always", "alive", "unknown"]
@@ -185,6 +188,8 @@ def _host_document(row: HostRow) -> dict[str, object]:
         "status_code": row.status_code,
         "ports": sorted(set(row.ports)),
         "detail": row.detail,
+        "duplicate_of": row.duplicate_of,
+        "www_note": row.www_note,
     }
 
 
@@ -204,6 +209,11 @@ def summary_document(
     rows = list(hosts)
     state_counts: Counter[HostState] = Counter(row.state for row in rows)
     tool_counts: Counter[ToolStatus] = Counter(result.status for result in summary.results)
+    pairs = [
+        {"host": row.fqdn, "duplicate_of": row.duplicate_of}
+        for row in rows
+        if row.duplicate_of is not None
+    ]
     document: dict[str, object] = {
         "type": "summary",
         "target": summary.target,
@@ -218,6 +228,9 @@ def summary_document(
             "gaps": [{"stage": gap.stage.value, "reason": gap.reason} for gap in summary.gaps],
         },
         "warnings": list(summary.warnings),
+        # docs/02 section 5 (D22): every detected www/non-www duplicate pair, so
+        # a consumer never has to re-derive it from the hosts array.
+        "www_dedup": {"applied": bool(pairs), "pairs": pairs},
         "hosts": [_host_document(row) for row in rows],
         "stages": [
             {
@@ -288,6 +301,21 @@ def make_console(stream: TextIO | None = None, *, no_color: bool = False) -> Con
     )
 
 
+def host_note(row: HostRow, canonical: set[str]) -> str:
+    """The Notes cell: how a www/non-www row relates to its sibling (D22)."""
+
+    if row.duplicate_of is not None:
+        if row.status_code in _REDIRECT_CODES:
+            return f"-> redirects to {row.duplicate_of}"
+        return f"-> duplicate of {row.duplicate_of}"
+    if row.fqdn in canonical:
+        return "canonical"
+    return row.www_note or "-"
+
+
+_REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
+
+
 def _host_table(rows: list[HostRow]) -> Table:
     table = Table(title="Results", header_style="bold")
     table.add_column("Subdomain")
@@ -296,8 +324,15 @@ def _host_table(rows: list[HostRow]) -> Table:
     table.add_column("Ports")
     table.add_column("Sources")
     table.add_column("Trust", no_wrap=True, min_width=15)
+    canonical = {row.duplicate_of for row in rows if row.duplicate_of is not None}
+    # Only when there is something to say, so an ordinary run's table keeps its
+    # six columns (D22). Wraps rather than ellipsizing: a clipped note reads as
+    # no note at all.
+    notes = any(host_note(row, canonical) != "-" for row in rows)
+    if notes:
+        table.add_column("Notes", overflow="fold")
     for row in rows:
-        table.add_row(
+        cells = [
             Text(row.fqdn),
             Text(format_state(row.state), style=_STATE_STYLES[row.state]),
             Text(str(row.status_code) if row.status_code is not None else "-"),
@@ -307,7 +342,10 @@ def _host_table(rows: list[HostRow]) -> Table:
                 format_confidence(row.confidence, row.sources),
                 style=_CONFIDENCE_STYLES[row.confidence],
             ),
-        )
+        ]
+        if notes:
+            cells.append(Text(host_note(row, canonical)))
+        table.add_row(*cells)
     return table
 
 
@@ -825,8 +863,15 @@ def render(
             target.print(_tool_table(summary))
         counts: Counter[HostState] = Counter(row.state for row in rows)
         tools: Counter[ToolStatus] = Counter(result.status for result in summary.results)
+        duplicates = sum(1 for row in rows if row.duplicate_of is not None)
+        # Only shown when a pair was found, so an ordinary run's line is unchanged.
+        head = (
+            f"{len(rows)} hosts ({len(rows) - duplicates} unique after www-dedup): "
+            if duplicates
+            else f"{len(rows)} hosts: "
+        )
         summary_line = (
-            f"{len(rows)} hosts: "
+            head
             + ", ".join(f"{counts[state]} {state.value}" for state in HostState)
             + " | tools: "
             + f"{tools[ToolStatus.OK]} ok, {tools[ToolStatus.GAP]} gap, "
