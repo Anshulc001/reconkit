@@ -37,6 +37,8 @@ USER_AGENT = "reconkit/0.1"
 RETRY_DELAY = 1.0
 MAX_BODY_BYTES = 10 * 1024 * 1024
 MAX_ERROR_CHARS = 200
+# How many unusable parser lines are named one by one in the detail column.
+SKIP_WARNINGS = 10
 IDENTITY_TIMEOUT = 10.0
 FIXTURES = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 
@@ -198,8 +200,31 @@ class BaseToolAdapter(ABC):
 
     runtime_cap_s: ClassVar[float | None] = None
 
+    # A tool killed by its own cap keeps its partial output; these are the
+    # activity clock's defaults when config.yaml supplies none (docs/09 4a2b).
+    idle_timeout_s: ClassVar[float | None] = None
+    min_runtime_s: ClassVar[float] = 0.0
+
     def __init__(self, *, fixtures_dir: Path | None = None) -> None:
         self._fixtures_dir = fixtures_dir if fixtures_dir is not None else FIXTURES
+        # Unusable lines a parser skipped instead of failing the tool (PIT-58).
+        # Per run; `_skip_note()` turns the list into the detail line.
+        self.skipped_lines: list[str] = []
+
+    def _skip_note(self) -> str | None:
+        """One detail line for the lines a parser could not use, or None.
+
+        Up to ten skipped lines are listed one by one; beyond that a single
+        summary keeps a 11 000-line log from becoming 11 000 warnings.
+        """
+        if not self.skipped_lines:
+            return None
+        if len(self.skipped_lines) <= SKIP_WARNINGS:
+            return "; ".join(f"skipped unusable line {line!r}" for line in self.skipped_lines)[
+                :MAX_ERROR_CHARS
+            ]
+        count = len(self.skipped_lines)
+        return f"skipped {count} unusable line(s); last: {self.skipped_lines[-1]!r}"
 
     def check_installed(self) -> InstallStatus:
         """HTTP and python adapters need nothing installed; binaries override this."""
@@ -269,34 +294,60 @@ class BaseToolAdapter(ABC):
         duration = 0.0
         truncated = False
         raw_text = ""
+        self.skipped_lines = []
+        limits = ctx.limits.get(self.name)
+        # An explicit ceiling in config.yaml wins over the per-tool budget (a
+        # productive urlfinder may use the whole stage budget); otherwise the
+        # class cap is intersected with the budget (docs/09 sections 4a2b/4a3).
+        cap = self.runtime_cap_s
+        if limits is not None and limits.max_s:
+            cap = float(limits.max_s)
+            budget = cap
+        elif cap is not None:
+            budget = min(ctx.timeout, cap)
+        else:
+            budget = ctx.timeout
+        idle = limits.idle_s if limits is not None and limits.idle_s else self.idle_timeout_s
+        minimum = float(
+            limits.min_s if limits is not None and limits.min_s is not None else self.min_runtime_s
+        )
         try:
             if ctx.mock:
                 raw_text = self._read_fixture(ctx)
                 records = self.parse_output(raw_text)
             else:
                 with self.prepare(ctx):
-                    cap = self.runtime_cap_s
                     outcome = await asyncio.to_thread(
                         run_exec,
                         self.build_command(ctx),
-                        timeout=ctx.timeout if cap is None else min(ctx.timeout, cap),
+                        timeout=budget,
                         env=self.child_env(ctx),
                         stdin_text=self.stdin_text(ctx),
+                        idle_timeout=idle,
+                        min_runtime=minimum,
                     )
                     duration = outcome.duration_s
                     raw_text = capture_output(outcome.stdout, outcome.stderr)
                     if outcome.timed_out:
-                        if cap is not None:
+                        if cap is not None or idle is not None:
+                            # A capped run keeps what arrived; a kille tool that
+                            # found nothing is still `ok 0 (capped)`, because the
+                            # tool worked and we stopped it (2026-11-18).
                             partial = self.parse_output(outcome.stdout)
-                            if partial:
-                                return ToolResult(
-                                    tool=self.name,
-                                    status=ToolStatus.OK,
-                                    records=partial,
-                                    duration_s=duration,
-                                    error=f"capped at {cap:g}s; kept partial output",
-                                    raw_text=raw_text,
-                                )
+                            note = (
+                                f"idle for {idle:g}s; kept partial output"
+                                if outcome.idle_killed and idle is not None
+                                else f"capped at {budget:g}s; kept partial output"
+                            )
+                            detail = "; ".join(part for part in (note, self._skip_note()) if part)
+                            return ToolResult(
+                                tool=self.name,
+                                status=ToolStatus.OK,
+                                records=partial,
+                                duration_s=duration,
+                                error=detail,
+                                raw_text=raw_text,
+                            )
                         return ToolResult(
                             tool=self.name,
                             status=ToolStatus.TIMEOUT,
@@ -360,7 +411,12 @@ class BaseToolAdapter(ABC):
             status=ToolStatus.OK,
             records=records,
             duration_s=elapsed,
-            error="output truncated" if truncated else None,
+            error="; ".join(
+                part
+                for part in ("output truncated" if truncated else None, self._skip_note())
+                if part
+            )
+            or None,
             raw_text=raw_text,
         )
 

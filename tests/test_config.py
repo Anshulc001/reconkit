@@ -20,6 +20,25 @@ def test_load_real_config() -> None:
     assert config.user_agent
 
 
+def test_the_urls_runtime_bounds_load_and_default(tmp_path: Path) -> None:
+    """2026-11-18 (2.2/2.3): the per-tool caps live in config.yaml `urls:`."""
+    config = load_config(CONFIG)
+    assert config.urls.urlfinder_min_s == 180
+    assert config.urls.urlfinder_max_s == 1800
+    assert config.urls.urlfinder_idle_s == 60
+    assert config.urls.hakrawler_max_s == 120
+    assert config.urls.subjs_max_s == 60
+
+    # A config file written before the block still loads, with the defaults.
+    import yaml
+
+    legacy = tmp_path / "legacy.yaml"
+    raw = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    raw.pop("urls")
+    legacy.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    assert load_config(legacy).urls.urlfinder_idle_s == 60
+
+
 def test_managed_bin_dir_has_one_source_of_truth(tmp_path: Path) -> None:
     """Moved from tests/test_install_cli.py:373 when `installer/` was deleted.
 

@@ -25,7 +25,7 @@ from pathlib import Path
 from reconkit.adapters.base import BinaryAdapter, is_non_web_reference, normalize_url, strip_ansi
 from reconkit.adapters.hakrawler import CRAWL_DEPTH, crawl_urls
 from reconkit.core.runner import validate_host
-from reconkit.errors import ParseError, ToolFailed
+from reconkit.errors import ToolFailed
 from reconkit.models import Record, RunContext, Stage, UrlRecord
 
 THREADS = 10
@@ -90,6 +90,7 @@ class GospiderAdapter(BinaryAdapter):
     def parse_output(self, raw: str) -> list[Record]:
         records: list[Record] = []
         seen: set[str] = set()
+        self.skipped_lines = []
         for line in strip_ansi(raw).splitlines():
             line = line.strip()
             if not line or is_non_web_reference(line):
@@ -100,11 +101,11 @@ class GospiderAdapter(BinaryAdapter):
                 (index for index in (line.find("http://"), line.find("https://")) if index >= 0),
                 default=-1,
             )
-            if start < 0:
-                raise ParseError(f"gospider: line carries no URL {line!r}")
-            url = normalize_url(line[start:])
+            url = None if start < 0 else normalize_url(line[start:])
             if url is None:
-                raise ParseError(f"gospider: line is not a URL {line!r}")
+                # A log line with no URL is counted, not fatal (PIT-58).
+                self.skipped_lines.append(line)
+                continue
             if url in seen:
                 continue
             seen.add(url)

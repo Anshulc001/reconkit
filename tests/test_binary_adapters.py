@@ -62,6 +62,7 @@ from reconkit.models import (
     PortRecord,
     RunContext,
     SubdomainRecord,
+    ToolLimits,
     ToolResult,
     ToolStatus,
     UrlRecord,
@@ -1149,6 +1150,114 @@ def test_katana_skips_a_crawl_error_line() -> None:
     assert KatanaAdapter().parse_output(raw) == []
 
 
+def test_katana_skips_invalid_json_lines() -> None:
+    """Regression: PIT-58 katana sometimes prints warnings on stdout.
+
+    A real scan failed the whole tool with `katana: invalid JSON line` although
+    it had found URLs; the three valid lines must survive and the two junk lines
+    must be counted, with the tool still `ok`.
+    """
+    raw = (
+        '{"request":{"endpoint":"https://testfire.net/"}}\n'
+        "WARN: crawl started\n"
+        '{"request":{"endpoint":"https://testfire.net/login.jsp"}}\n'
+        "this is not json at all\n"
+        '{"request":{"endpoint":"https://testfire.net/admin"}}\n'
+    )
+    adapter = KatanaAdapter()
+    records = adapter.parse_output(raw)
+    assert [record.url for record in records] == [
+        "https://testfire.net/",
+        "https://testfire.net/login.jsp",
+        "https://testfire.net/admin",
+    ]
+    assert len(adapter.skipped_lines) == 2
+
+
+def test_katana_warning_lines_reach_the_detail_and_stay_ok(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The skipped lines are two warnings in the Tools detail, status `ok`."""
+    raw = (
+        '{"request":{"endpoint":"https://testfire.net/"}}\n'
+        "WARN: something happened\n"
+        '{"request":{"endpoint":"https://testfire.net/a"}}\n'
+        "another non-json line\n"
+        '{"request":{"endpoint":"https://testfire.net/b"}}\n'
+    )
+    calls = fake_exec(monkeypatch, outcome(stdout=raw))
+    result = asyncio.run(
+        KatanaAdapter(finder=lambda _name: "/usr/bin/katana").run(make_ctx(hosts=["testfire.net"]))
+    )
+    assert calls  # the binary really ran (through the fake runner)
+    assert result.status is ToolStatus.OK
+    assert len(result.records) == 3
+    assert (result.error or "").count("skipped unusable line") == 2
+
+
+def test_katana_many_junk_lines_are_summarised_once() -> None:
+    """Rate limit: more than ten bad lines cost one summary, not a wall of text."""
+    raw = "".join(f"junk line {index}\n" for index in range(25))
+    adapter = KatanaAdapter()
+    assert adapter.parse_output(raw) == []
+    assert len(adapter.skipped_lines) == 25
+    note = adapter._skip_note()
+    assert note is not None
+    assert "25 unusable line(s)" in note
+    assert note.count("skipped") == 1
+
+
+@pytest.mark.parametrize(
+    ("adapter", "junk", "good"),
+    [
+        (HakrawlerAdapter(), "not a url at all", "http://testfire.net/a"),
+        (GospiderAdapter(), "[info] - crawl started", "https://testfire.net/a"),
+        (SubjsAdapter(), "Fetching https://testfire.net/ failed", "https://testfire.net/app.js"),
+    ],
+)
+def test_crawler_parsers_skip_unusable_lines(adapter: BinaryAdapter, junk: str, good: str) -> None:
+    """Regression: PIT-58 one bad line must not throw away a whole crawl."""
+    raw = f"{junk}\n{good}\n"
+    records = adapter.parse_output(raw)
+    assert [record.url for record in records] == [good]
+    assert adapter.skipped_lines == [junk]
+
+
+def test_hakrawler_runtime_cap_parses_partial(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2.2: a capped hakrawler keeps what it crawled instead of `timeout 0`."""
+    adapter = HakrawlerAdapter(finder=lambda _name: "/usr/bin/hakrawler")
+    calls = fake_exec(
+        monkeypatch,
+        outcome(stdout="http://testfire.net/a\nhttp://testfire.net/b\n", timed_out=True),
+    )
+    ctx = make_ctx(hosts=["testfire.net"])
+    ctx.timeout = 600.0  # the real per-tool budget
+    result = asyncio.run(adapter.run(ctx))
+    assert calls[0][1]["timeout"] == float(HakrawlerAdapter.runtime_cap_s)
+    assert result.status is ToolStatus.OK
+    assert [record.url for record in result.records] == [
+        "http://testfire.net/a",
+        "http://testfire.net/b",
+    ]
+    assert "capped at 120s" in (result.error or "")
+
+
+def test_subjs_runtime_cap_parses_partial(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2.2: same for subjs, with its own one-minute cap."""
+    adapter = SubjsAdapter(finder=lambda _name: "/usr/bin/subjs")
+    calls = fake_exec(
+        monkeypatch,
+        outcome(stdout="https://testfire.net/app.js\n", timed_out=True),
+    )
+    ctx = make_ctx(hosts=["testfire.net"])
+    ctx.timeout = 600.0
+    result = asyncio.run(adapter.run(ctx))
+    assert calls[0][1]["timeout"] == float(SubjsAdapter.runtime_cap_s)
+    assert result.status is ToolStatus.OK
+    assert [record.url for record in result.records] == ["https://testfire.net/app.js"]
+    assert "capped at 60s" in (result.error or "")
+
+
 def test_gau_adapter_parses_plain_urls() -> None:
     plain = (
         "http://testfire.net/\n"
@@ -1575,12 +1684,13 @@ def test_urlfinder_skips_archived_junk_and_feeds_domains(monkeypatch: pytest.Mon
         "-max-time",
         "1",
     ]
-    # `-max-time` never exceeds 3 minutes, whatever the stage budget is: one
-    # slow source otherwise held the enumeration for 500 s (2026-11-18).
+    # `-max-time` never exceeds the 30-minute ceiling, whatever the stage budget
+    # is: the flat 180 s cap became an inactivity kill with a floor and a
+    # ceiling in the 2026-11-18 batch (docs/09 section 4a2b).
     big = make_ctx(hosts=["testfire.net"])
-    big.timeout = 1800.0
+    big.timeout = 7200.0
     capped = adapter.build_command(big)
-    assert capped[capped.index("-max-time") + 1] == "3"
+    assert capped[capped.index("-max-time") + 1] == "30"
     assert adapter.stdin_text(ctx) == "testfire.net\nwww.testfire.net\n"
     assert calls == []
 
@@ -1608,6 +1718,59 @@ def test_urlfinder_keeps_partial_urls_when_the_runtime_cap_fires(
         "https://testfire.net/admin",
     ]
     assert result.error is not None and "capped at" in result.error
+
+
+def test_urlfinder_idle_timeout_kills_stuck_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2.3: a source that stopped answering is killed 60 s after its last URL.
+
+    The flat 180 s cap became an inactivity kill with a 180 s floor and a 1800 s
+    ceiling (docs/09 section 4a2b).
+    """
+    adapter = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder")
+    ctx = make_ctx(hosts=["testfire.net"])
+    ctx.timeout = 600.0
+    ctx.limits = {
+        "urlfinder": ToolLimits(max_s=1800.0, idle_s=60.0, min_s=180.0),
+    }
+    calls = fake_exec(
+        monkeypatch,
+        outcome(
+            stdout="https://testfire.net/login.jsp\nhttps://testfire.net/admin\n",
+            timed_out=True,
+        ),
+    )
+    result = asyncio.run(adapter.run(ctx))
+
+    kwargs = calls[0][1]
+    assert kwargs["timeout"] == 1800.0  # the ceiling wins over the 600 s budget
+    assert kwargs["idle_timeout"] == 60.0
+    assert kwargs["min_runtime"] == 180.0
+    assert result.status is ToolStatus.OK
+    assert [record.url for record in result.records] == [
+        "https://testfire.net/login.jsp",
+        "https://testfire.net/admin",
+    ]
+
+
+def test_urlfinder_runs_to_stage_budget_if_productive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2.3: a tool that keeps answering uses the ceiling, not the idle clock."""
+    adapter = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder")
+    ctx = make_ctx(hosts=["testfire.net"])
+    ctx.timeout = 600.0
+    ctx.limits = {"urlfinder": ToolLimits(max_s=1800.0, idle_s=60.0, min_s=180.0)}
+    urls = "".join(f"https://testfire.net/p{index}\n" for index in range(50))
+    calls = fake_exec(monkeypatch, outcome(stdout=urls))
+    result = asyncio.run(adapter.run(ctx))
+
+    assert calls[0][1]["timeout"] == 1800.0
+    assert calls[0][1]["idle_timeout"] == 60.0
+    # Not capped, not killed: everything the tool printed is kept.
+    assert result.status is ToolStatus.OK
+    assert len(result.records) == 50
+    assert "capped at" not in (result.error or "")
+    assert "idle for" not in (result.error or "")
 
 
 def test_urlfinder_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:

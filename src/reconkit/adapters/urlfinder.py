@@ -33,16 +33,23 @@ from reconkit.models import Record, RunContext, Stage, UrlRecord
 # old command - faster and no worse. `-max-time` still comes from the run budget.
 REQUEST_TIMEOUT_S = 30
 # One slow source can hold the whole enumeration: measured 506 s and 525 s on
-# testfire.net where the same command finished in 15 s once. 3 minutes keeps the
-# stage predictable and still returns what the sources found (2026-11-18).
-MAX_ENUMERATION_S = 180
+# testfire.net where the same command finished in 15 s once. The bounds are an
+# inactivity kill with a floor and a ceiling, not a flat cap: a target with
+# hundreds of hosts can still be productive at three minutes, while a stuck
+# source is killed 60 s after its last URL (2026-11-18, docs/09 section 4a2b).
+MIN_ENUMERATION_S = 180
+IDLE_ENUMERATION_S = 60
+MAX_ENUMERATION_S = 1800
 
 
 class UrlfinderAdapter(BinaryAdapter):
     # `-max-time` is not enforced by the real binary (measured: still running at
-    # 5m52s with `-max-time 3`), so the adapter caps the process itself and keeps
-    # whatever arrived.
+    # 5m52s with `-max-time 3`), so the adapter bounds the process itself and
+    # keeps whatever arrived. These defaults apply when `config.yaml` supplies no
+    # `urls:` block; the engine's values normally win (docs/09 4a2b/4a3).
     runtime_cap_s = MAX_ENUMERATION_S
+    idle_timeout_s = IDLE_ENUMERATION_S
+    min_runtime_s = MIN_ENUMERATION_S
     name = "urlfinder"
     stage = Stage.URLS
     binary = "urlfinder"
@@ -70,6 +77,8 @@ class UrlfinderAdapter(BinaryAdapter):
         # Both timeouts are capped by the run budget so `--phase-timeout` still
         # wins; `-max-time` never exceeds MAX_ENUMERATION_S.
         budget = max(1, int(ctx.timeout))
+        limits = ctx.limits.get(self.name)
+        ceiling = int(limits.max_s) if limits is not None and limits.max_s else budget
         return [
             self.binary_path() or self.binary,
             "-all",
@@ -78,7 +87,7 @@ class UrlfinderAdapter(BinaryAdapter):
             "-timeout",
             str(min(REQUEST_TIMEOUT_S, budget)),
             "-max-time",
-            str(max(1, (min(budget, MAX_ENUMERATION_S) + 59) // 60)),
+            str(max(1, min(ceiling, MAX_ENUMERATION_S) // 60)),
         ]
 
     def stdin_text(self, ctx: RunContext) -> str | None:

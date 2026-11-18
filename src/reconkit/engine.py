@@ -47,6 +47,7 @@ from reconkit.models import (
     Stage,
     SubdomainRecord,
     Tier,
+    ToolLimits,
     ToolResult,
     ToolStatus,
     UrlRecord,
@@ -1260,6 +1261,7 @@ class Engine:
     ) -> RunContext:
         # Every tool in the stage starts at once and runs at its own natural
         # pace (2026-11-17, MASTER_PLAN D3).
+        urls_config = self.config.urls
         ctx = RunContext(
             target=target,
             hosts=hosts,
@@ -1273,6 +1275,16 @@ class Engine:
             ffuf_wordlist=opts.ffuf_wordlist,
             resolvers=opts.resolvers,
             results_dir=Path(self.config.results_dir),
+            # Per-tool runtime bounds from `config.yaml` `urls:` (docs/09 4a2b).
+            limits={
+                "urlfinder": ToolLimits(
+                    max_s=float(urls_config.urlfinder_max_s),
+                    idle_s=float(urls_config.urlfinder_idle_s),
+                    min_s=float(urls_config.urlfinder_min_s),
+                ),
+                "hakrawler": ToolLimits(max_s=float(urls_config.hakrawler_max_s)),
+                "subjs": ToolLimits(max_s=float(urls_config.subjs_max_s)),
+            },
         )
 
         total = len(selected)

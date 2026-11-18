@@ -128,6 +128,20 @@ class InstallStatus(BaseModel):
     path: Path | None = None
 
 
+class ToolLimits(BaseModel):
+    """Per-tool runtime bounds the engine reads from `config.yaml` (`urls:`).
+
+    `max_s` is a hard cap, `idle_s` kills a tool whose stdout has been silent
+    that long and `min_s` is the floor below which idleness cannot kill. They
+    reach an adapter through `RunContext.limits`, so an adapter never reads the
+    config file itself (docs/09 sections 4a2b and 4a3).
+    """
+
+    max_s: float | None = None
+    idle_s: float | None = None
+    min_s: float | None = None
+
+
 class RunContext(BaseModel):
     """Everything an adapter may read for one run. Built by the engine."""
 
@@ -153,6 +167,8 @@ class RunContext(BaseModel):
     # The configured results root, so a per-run artifact adapter (gowitness,
     # D17) writes under the same `results/` the reports use.
     results_dir: Path | None = None
+    # Runtime bounds per tool name, from `config.yaml` `urls:` (docs/09 4a2b).
+    limits: dict[str, ToolLimits] = {}
     # docs/05 rule 6: the loaded scope's `in_scope_cidrs` check, handed down by the
     # engine so an adapter can refuse a resolved address without importing `scope`.
     # `None` means "no permission": an adapter that connects to a resolved address

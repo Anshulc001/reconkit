@@ -51,6 +51,21 @@ class ConfidenceConfig(_StrictModel):
     medium_min_sources: int = Field(ge=1)
 
 
+class UrlsConfig(_StrictModel):
+    """Per-tool runtime bounds for the urls stage (docs/09 sections 4a2b/4a3).
+
+    `urlfinder` gets a floor, an inactivity kill and a ceiling; `hakrawler` and
+    `subjs` get a hard cap. The engine passes them down as
+    `RunContext.limits`, so an adapter never reads this file itself.
+    """
+
+    urlfinder_min_s: int = Field(default=180, gt=0)
+    urlfinder_max_s: int = Field(default=1800, gt=0)
+    urlfinder_idle_s: int = Field(default=60, gt=0)
+    hakrawler_max_s: int = Field(default=120, gt=0)
+    subjs_max_s: int = Field(default=60, gt=0)
+
+
 class WildcardCheck(_StrictModel):
     enabled: bool
     probes: int = Field(ge=1)
@@ -76,6 +91,8 @@ class AppConfig(_StrictModel):
     results_dir: str = "results"
     user_agent: str
     timeouts: Timeouts
+    # Defaulted so a config file written before this key existed still loads.
+    urls: UrlsConfig = Field(default_factory=UrlsConfig)
     confidence: ConfidenceConfig
     wildcard_check: WildcardCheck
     install: InstallConfig

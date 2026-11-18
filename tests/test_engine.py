@@ -1640,6 +1640,35 @@ async def test_exit_code_clean_is_success(tmp_path: Path) -> None:
     assert summary.exit_code is ExitCode.SUCCESS
 
 
+async def test_url_tools_receive_the_configured_runtime_bounds(tmp_path: Path) -> None:
+    """2.2/2.3: the engine hands `config.yaml` `urls:` down as RunContext.limits.
+
+    An adapter never reads config.yaml itself (docs/09 section 4a2b).
+    """
+    seen: dict[str, object] = {}
+
+    class Urls(BaseToolAdapter):
+        name = "urls-fake"
+        stage = Stage.URLS
+
+        async def run(self, ctx: RunContext) -> ToolResult:
+            seen.update(ctx.limits)
+            return ToolResult(tool=self.name, status=ToolStatus.OK)
+
+        def parse_output(self, raw: str) -> list[Record]:
+            return []
+
+    specs = {"urls-fake": tool("urls-fake", Stage.URLS)}
+    summary = await make_engine(tmp_path, specs, {"urls-fake": Urls}).run(
+        "example.com", ScanOptions(stages=(Stage.URLS,), mock=True)
+    )
+    assert summary.exit_code is ExitCode.SUCCESS
+    urlfinder = seen["urlfinder"]
+    assert (urlfinder.max_s, urlfinder.idle_s, urlfinder.min_s) == (1800.0, 60.0, 180.0)
+    assert seen["hakrawler"].max_s == 120.0
+    assert seen["subjs"].max_s == 60.0
+
+
 async def test_exit_code_scope_violation(tmp_path: Path) -> None:
     rec = Recorder()
     specs = {"live": tool("live", Stage.LIVE, mode=Mode.ACTIVE)}

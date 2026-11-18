@@ -20,6 +20,16 @@ timeouts:
   urls: 1800
   vulns: 7200
 
+# Per-tool runtime bounds for the urls stage (docs/09 sections 4a2b and 4a3).
+# urlfinder: never killed before min, killed after `idle` seconds of silent
+# stdout, and never held past max. A capped run keeps the URLs it already found.
+urls:
+  urlfinder_min_s: 180
+  urlfinder_max_s: 1800    # the stage-budget default
+  urlfinder_idle_s: 60
+  hakrawler_max_s: 120
+  subjs_max_s: 60
+
 confidence:
   high_min_sources: 3
   medium_min_sources: 2

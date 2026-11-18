@@ -21,6 +21,9 @@ REDACTED = "***"
 # limit or a config key.
 MAX_OUTPUT_BYTES = 1_000_000
 _READ_CHUNK = 8192
+# How often the wait loop re-checks the inactivity clock; the total timeout is
+# still exact, this only bounds the idle check's resolution.
+_POLL_INTERVAL = 0.25
 _LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 # Discovered hosts may contain underscores (real subdomains like dev_api do).
 _HOST_LABEL_RE = re.compile(r"^[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?$")
@@ -36,6 +39,9 @@ class ExecResult(BaseModel):
     timed_out: bool = False
     truncated: bool = False
     duration_s: float = 0.0
+    # True when the kill came from the inactivity clock, not the total timeout;
+    # an adapter reports the two differently in its detail line (docs/09 4a2b).
+    idle_killed: bool = False
 
 
 def validate_target(target: str) -> str:
@@ -90,6 +96,8 @@ def run_exec(
     max_output_bytes: int = MAX_OUTPUT_BYTES,
     cwd: Path | str | None = None,
     stdin_text: str | None = None,
+    idle_timeout: float | None = None,
+    min_runtime: float = 0.0,
 ) -> ExecResult:
     """Run one program without a shell and return its captured output.
 
@@ -100,12 +108,19 @@ def run_exec(
     `stdin_text` feeds a tool that takes its input list on stdin (httprobe,
     waybackurls); `None` (the default) keeps stdin closed, so a program that
     reads it sees EOF instead of hanging forever.
+
+    `idle_timeout` adds a second clock: the process is killed once its **stdout**
+    has been silent that long, but never before `min_runtime` seconds have
+    elapsed. That is how a source that has stopped answering is told apart from
+    one that is still working (docs/09 section 4a2b).
     """
     _validate_argv(argv)
     if timeout <= 0:
         raise ValueError("timeout must be > 0")
     if max_output_bytes <= 0:
         raise ValueError("max_output_bytes must be > 0")
+    if idle_timeout is not None and idle_timeout <= 0:
+        raise ValueError("idle_timeout must be > 0")
 
     child_env = dict(env or {})
     started = time.monotonic()
@@ -155,14 +170,20 @@ def run_exec(
     err_chunks: list[bytes] = []
     truncated = False
     trunc_lock = threading.Lock()
+    # The inactivity clock reads stdout only: stderr chatter is not progress.
+    activity_lock = threading.Lock()
+    last_activity = [started]
 
-    def drain(stream: IO[bytes], chunks: list[bytes]) -> None:
+    def drain(stream: IO[bytes], chunks: list[bytes], *, watch: bool = False) -> None:
         nonlocal truncated
         kept = 0
         while True:
             chunk = stream.read(_READ_CHUNK)
             if not chunk:
                 break
+            if watch:
+                with activity_lock:
+                    last_activity[0] = time.monotonic()
             room = max_output_bytes - kept
             if room > 0:
                 chunks.append(chunk[:room])
@@ -171,18 +192,38 @@ def run_exec(
                 with trunc_lock:
                     truncated = True
 
-    out_thread = threading.Thread(target=drain, args=(stdout_pipe, out_chunks), daemon=True)
+    out_thread = threading.Thread(
+        target=drain, args=(stdout_pipe, out_chunks), kwargs={"watch": True}, daemon=True
+    )
     err_thread = threading.Thread(target=drain, args=(stderr_pipe, err_chunks), daemon=True)
     out_thread.start()
     err_thread.start()
 
     timed_out = False
-    try:
-        process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        _kill_tree(process)
-        process.wait()
+    idle_killed = False
+    deadline = started + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            _kill_tree(process)
+            process.wait()
+            break
+        try:
+            process.wait(timeout=min(remaining, _POLL_INTERVAL))
+            break
+        except subprocess.TimeoutExpired:
+            pass
+        if idle_timeout is None or time.monotonic() - started < min_runtime:
+            continue
+        with activity_lock:
+            silent_for = time.monotonic() - last_activity[0]
+        if silent_for >= idle_timeout:
+            timed_out = True
+            idle_killed = True
+            _kill_tree(process)
+            process.wait()
+            break
 
     out_thread.join()
     err_thread.join()
@@ -195,6 +236,7 @@ def run_exec(
         timed_out=timed_out,
         truncated=truncated,
         duration_s=time.monotonic() - started,
+        idle_killed=idle_killed,
     )
 
 

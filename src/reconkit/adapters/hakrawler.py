@@ -27,10 +27,13 @@ from reconkit.adapters.base import (
     strip_ansi,
 )
 from reconkit.core.runner import validate_host
-from reconkit.errors import ParseError, ToolFailed
+from reconkit.errors import ToolFailed
 from reconkit.models import Record, RunContext, Stage, UrlRecord
 
 CRAWL_DEPTH = 2
+# On the sakec.ac.in scan hakrawler hit the phase budget with 0 items and owned
+# the whole urls stage, so it gets a hard cap and keeps what it found (2.2).
+MAX_CRAWL_S = 120
 
 
 def crawl_urls(hosts: list[str]) -> list[str]:
@@ -43,6 +46,7 @@ def crawl_urls(hosts: list[str]) -> list[str]:
 
 
 class HakrawlerAdapter(BinaryAdapter):
+    runtime_cap_s = MAX_CRAWL_S
     name = "hakrawler"
     stage = Stage.URLS
     binary = "hakrawler"
@@ -86,6 +90,7 @@ class HakrawlerAdapter(BinaryAdapter):
     def parse_output(self, raw: str) -> list[Record]:
         records: list[Record] = []
         seen: set[str] = set()
+        self.skipped_lines = []
         for line in strip_ansi(raw).splitlines():
             line = line.strip()
             if not line or is_non_web_reference(line):
@@ -93,7 +98,10 @@ class HakrawlerAdapter(BinaryAdapter):
                 continue
             url = normalize_url(line)
             if url is None:
-                raise ParseError(f"hakrawler: line is not a URL {line!r}")
+                # Any other unusable line is skipped and counted, never fatal
+                # for the whole crawl (PIT-58).
+                self.skipped_lines.append(line)
+                continue
             if url in seen:
                 continue
             seen.add(url)

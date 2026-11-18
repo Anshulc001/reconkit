@@ -254,15 +254,36 @@ the whole `urls` stage in **15 s wall clock** with `gau ok 345` and
 `urlfinder ok 933`, where the 2026-11-18 morning run needed 664 s and recorded
 `gau timeout 0`.
 
-**Whole-enumeration cap (2026-11-18, owner request for consistent runtimes).**
-`urlfinder` is the one tool whose runtime could not be predicted: with the same
-command it returned 996 URLs in 15 s, then 206 in 506 s and 932 in 525 s on the
-next three runs, because a single slow source holds the whole enumeration. Its
-own `-max-time` turned out **not to be enforced** by the binary (still running
-at 5m52s with `-max-time 3`), so the adapter now sets `runtime_cap_s = 180`:
-the process is killed at three minutes and the partial stdout is parsed, so the
-URLs found before the cap are kept (a plain timeout used to discard all of
-them). `-max-time 3` is still passed to the tool for its own bookkeeping.
+**Whole-enumeration bounds (2026-11-18).** `urlfinder` is the one tool whose
+runtime could not be predicted: with the same command it returned 996 URLs in
+15 s, then 206 in 506 s and 932 in 525 s on the next three runs, because a
+single slow source holds the whole enumeration. Its own `-max-time` turned out
+**not to be enforced** by the binary (still running at 5m52s with `-max-time 3`),
+so the adapter bounds the process itself and parses the partial stdout, which
+keeps every URL found before the kill (a plain timeout used to discard all of
+them).
+
+The first version was a flat `runtime_cap_s = 180`. That is right for
+`testfire.net` (43 hosts) and wrong for a target with hundreds of hosts, where
+sources are still answering productively at three minutes. The cap is now three
+values, whichever fires first:
+
+| Key (`config.yaml`) | Default | Meaning |
+|---|---|---|
+| `urls.urlfinder_min_s` | `180` | Floor: never kill before this many seconds |
+| `urls.urlfinder_idle_s` | `60` | Kill once stdout has been silent this long (the floor applies first) |
+| `urls.urlfinder_max_s` | `1800` | Ceiling: the stage-budget default, whatever the tool is doing |
+| `urls.hakrawler_max_s` | `120` | Hard cap for `hakrawler` (2.2) |
+| `urls.subjs_max_s` | `60` | Hard cap for `subjs` (2.2) |
+
+The engine hands these to adapters as `RunContext.limits[<tool>]`
+(`ToolLimits.max_s`/`idle_s`/`min_s`), so an adapter never reads `config.yaml`
+itself. The inactivity clock is the runner's: `run_exec(..., idle_timeout=,
+min_runtime=)` kills the process group when stdout has been silent for
+`idle_timeout` seconds after `min_runtime` has elapsed, and `ExecResult.idle_killed`
+says which clock fired. A silent tool is therefore killed at about
+`min_s + idle_s` (240 s by default) and a productive one runs to `max_s`.
+`-max-time 30` is still passed for the tool's own bookkeeping.
 
 `nikto` has the same shape: one process per host, each with its share of the
 remaining stage budget, and the tool's own `-maxtime <share>s` so it stops
@@ -316,10 +337,28 @@ page that references two scripts); `urlfinder -version` prints
 - **Links that are not URLs.** A crawl prints the page's own links verbatim, and
 the first real hakrawler run on testfire.net produced
 `javascript:checkSiteStatus('AltoroMutual')` and made the strict parser fail the
-tool. `base.is_non_web_reference()` now recognises `javascript:`, `mailto:`,
-`tel:`, `data:`, `about:`, `ftp:` and `file:` and every urls parser skips them;
-a line that is neither one of those nor an HTTP(S) URL is still a `ParseError`
+tool. `base.is_non_web_reference()` recognises `javascript:`, `mailto:`,
+`tel:`, `data:`, `about:`, `ftp:` and `file:` and every urls parser skips them
 (PIT-52).
+- **An unusable line is skipped and counted, never fatal (2026-11-18, PIT-58).**
+  `katana`, `hakrawler`, `gospider` and `subjs` now keep parsing after a line
+  they cannot use (a non-JSON line from katana, a line with no URL from the
+  crawlers) instead of failing the whole tool: the real scan showed
+  `katana: invalid JSON line` with 0 items while katana was printing warning
+  text on stdout. Each parser collects the unusable lines and the adapter puts
+  the count in `ToolResult.error`, one message per line up to 10, then a single
+  `skipped N unusable line(s); last: ...` summary - so 11 000 junk lines cost
+  one line of detail, not 11 000. `status` stays `ok`: the records that did
+  parse are the tool's real output. `urlfinder` keeps its stricter rule (a line
+  with inner whitespace or a non-web scheme is skipped silently, anything else
+  is still a parse error), because its input is an archive, not a live page.
+- **Per-tool runtime caps (2026-11-18).** `hakrawler` is capped at 120 s and
+  `subjs` at 60 s (`urls.hakrawler_max_s` / `urls.subjs_max_s` in
+  `config.yaml`): on the sakec.ac.in scan both hit the phase budget with 0
+  items and owned the whole `urls` stage. A capped run keeps its partial stdout,
+  records `ok N` with `capped at <n>s; kept partial output` in the detail
+  column, and never reports `timeout` - which stays reserved for a tool that
+  produced nothing usable before the cap.
 - **subjs adds no `.js` filter.** The tool prints JavaScript files only; a second
   filter would drop a `.php`-suffixed script endpoint it deliberately reported.
 - **urlfinder is a passive aggregator in an active stage.** It queries third

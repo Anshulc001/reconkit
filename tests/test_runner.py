@@ -29,12 +29,16 @@ def run_script(
     timeout: float = 5.0,
     env: dict[str, str] | None = None,
     max_output_bytes: int = 1_000_000,
+    idle_timeout: float | None = None,
+    min_runtime: float = 0.0,
 ) -> ExecResult:
     return run_exec(
         [sys.executable, str(FAKEBIN / name), *args],
         timeout=timeout,
         env=env,
         max_output_bytes=max_output_bytes,
+        idle_timeout=idle_timeout,
+        min_runtime=min_runtime,
     )
 
 
@@ -61,6 +65,32 @@ def test_timeout_keeps_partial_output() -> None:
     assert result.returncode is not None
     assert "started" in result.stdout
     assert result.duration_s >= 0.25
+
+
+def test_idle_timeout_kills_a_child_that_went_silent() -> None:
+    """2026-11-18 (2.3): stdout silence is a kill signal, partial output is kept."""
+    result = run_script("silent_after_output.py", timeout=30.0, idle_timeout=0.4, min_runtime=0.1)
+    assert result.timed_out is True
+    assert result.idle_killed is True
+    assert "url 0" in result.stdout
+    # Killed by the clock, not by the 30 s total timeout.
+    assert result.duration_s < 10
+
+
+def test_the_floor_protects_a_slow_start_before_the_idle_clock() -> None:
+    """`min_runtime` wins: a child inside its floor is never killed for silence."""
+    result = run_script("silent_after_output.py", timeout=0.6, idle_timeout=0.1, min_runtime=10.0)
+    assert result.timed_out is True
+    # The total timeout fired while the floor still protected the child.
+    assert result.idle_killed is False
+    assert "url 0" in result.stdout
+
+
+def test_a_finished_child_is_never_flagged_idle() -> None:
+    result = run_script("success.py", idle_timeout=0.1, min_runtime=0.0)
+    assert result.returncode == 0
+    assert result.timed_out is False
+    assert result.idle_killed is False
 
 
 def test_output_limit_truncates() -> None:

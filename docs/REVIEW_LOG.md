@@ -67,6 +67,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-50 | Two tools could not be driven at all: `httprobe` and `waybackurls` read their host list on **stdin**, and `run_exec` opened stdin as `DEVNULL` with no way to feed it - the only alternatives were a shell pipe or a temporary file, and AGENTS rule 1 forbids the first | `run_exec` was written for flag-driven ProjectDiscovery tools, so "input" meant argv | `run_exec(..., stdin_text=...)` feeds the child from its own daemon thread (a lazily-reading child cannot block the timeout clock, an early exit is only a broken pipe) and `None` keeps the documented EOF. The adapter hook is `stdin_text(ctx)`; nothing else changed | `test_stdin_text_reaches_the_child_and_none_keeps_stdin_closed` (`Regression: PIT-50`), `test_stdin_text_survives_a_child_that_never_reads_it`, `test_httprobe_feeds_hosts_on_stdin_and_never_uses_a_shell`, `test_waybackurls_feeds_domains_on_stdin` |
 | PIT-51 | The `tech` stage had no persistence branch at all: `_persist_stage` covered subs/dns/live/ports/urls, so every `HostStatusRecord` a tech adapter returned was dropped - webanalyze and cdncheck would have run, printed `ok N item(s)` and stored nothing | the tech stage never had an adapter, so the missing branch was invisible; `host_status_history.tech_json`/`waf` existed but only a live pass could fill them | `_persist_tech` merges `tech`/`waf` into the host's newest status row through the new `Store.update_host_extras`: no state row is appended and `state` is never touched, so `diff`/`previous_state()` are unchanged; an off-target record is dropped and a host with no status row is not annotated (D11) | `test_tech_stage_annotates_the_latest_host_row` (`Regression: PIT-51`), `test_tech_stage_drops_a_host_outside_the_target` |
 | PIT-48 | `doctor` showed junk for two installed tools (`katana` -> `__`, `nuclei` -> `[I…` plus ANSI escapes), and `update` could not call `katana` up to date, so an already-current binary would be downloaded again on every run (12j) | `installed_version()` returned `text.splitlines()[0]` for every tool, but `katana -version` prints four lines of ASCII art (the real version is on line 8, on stderr) and `nuclei -version` prints a coloured `[INF]` line first, so `_same_version()` compared a release tag against a logo | A tool may carry a top-level `version_regex` in `tools.yaml`; `installed_version()` searches the whole `version_cmd` output, returns the first capture group (or the whole match when the pattern has no group), and falls back to `splitlines()[0]` when the field is absent or nothing matches. A pattern that does not compile is a `ConfigError` at registry load, before any command runs | `test_katana_version_ignores_the_ascii_banner` (`Regression: PIT-48`), `test_nuclei_version_drops_the_ansi_log_prefix` (`Regression: PIT-48`), `test_a_regex_with_no_match_falls_back_to_the_first_line`, `test_a_version_regex_without_a_group_returns_the_match`, `test_version_regex_is_parsed_from_the_registry`, `test_a_broken_version_regex_is_a_config_error`, `test_version_regex_survives_the_plan_copy` |
+| PIT-58 | A real scan reported `katana: invalid JSON line` and threw away the whole crawl (0 items) although katana had found URLs; `hakrawler`/`gospider`/`subjs` had the same shape (any line their parser could not turn into an http(s) URL raised `ParseError`) | The parsers treated "this line is not output I understand" as "this tool failed", and the tools that print a warning on stdout (katana) or a log line (gospider) produced exactly such lines. PIT-52 fixed only the known non-web schemes, so any other noise was still fatal | A urls parser skips an unusable line, counts it, and keeps parsing: `ToolResult.error` carries one message per skipped line up to 10, then a single `skipped N unusable line(s); last: ...` summary, and the status stays `ok` because the parsed records are the tool's real output. `urlfinder` keeps its stricter archive rule (see docs/09 4a3) | `test_katana_skips_invalid_json_lines` (`Regression: PIT-58`), `test_katana_warning_lines_reach_the_detail_and_stay_ok`, `test_katana_many_junk_lines_are_summarised_once`, `test_crawler_parsers_skip_unusable_lines` |
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
@@ -5511,4 +5512,74 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
   `scripts/install-tools.sh` has existed since D21 - it now documents what the
   script does (apt under per-command sudo, refuses root, verifies with
   `doctor --json`, no curl/pipe, no archive or checksum handling).
+
+
+## 2026-11-18 (batch) Part 2 - katana JSON skip, hakrawler/subjs caps, urlfinder inactivity kill
+
+- **Owner report:** the sakec.ac.in scan showed `katana: invalid JSON line` (tool
+  failed with 0 items), `hakrawler timeout 0 item(s)` and `subjs timeout 0
+  item(s)`, and `urlfinder`'s flat 180 s cap was too short for a target with
+  hundreds of hosts.
+- **Docs first:** docs/09 section 4a3 (the skip-and-count rule, the two caps) and
+  section 4a2b (min/idle/ceiling plus the `urls:` config table).
+- **2.1 - parsers.** `katana` skips a non-JSON line (and a JSON line that is not
+  an object) instead of raising `ParseError`; `hakrawler`, `gospider` and `subjs`
+  do the same for a line with no usable URL. `BaseToolAdapter.skipped_lines` +
+  `_skip_note()` turn the count into the detail line: one message per line up to
+  10, then one summary, so 25 junk lines read `skipped 25 unusable line(s);
+  last: 'junk line 24'`. The status stays `ok`. `urlfinder` is deliberately
+  unchanged (its input is an archive; it already skips whitespace junk).
+- **2.2 - caps.** `HakrawlerAdapter.runtime_cap_s = 120`,
+  `SubjsAdapter.runtime_cap_s = 60`, overridable by
+  `urls.hakrawler_max_s` / `urls.subjs_max_s`. A capped run now always returns
+  `ok` with its partial output and `capped at <n>s; kept partial output` in the
+  detail column - including 0 items, because the tool worked and we stopped it.
+  `timeout` is reserved for a tool with no cap that produced nothing.
+- **2.3 - urlfinder.** The flat `runtime_cap_s = 180` is gone. The engine passes
+  `RunContext.limits["urlfinder"] = ToolLimits(max_s=1800, idle_s=60,
+  min_s=180)` from the new `config.yaml` `urls:` block; `run_exec(...,
+  idle_timeout=, min_runtime=)` is the new runner capability and
+  `ExecResult.idle_killed` says which clock fired. A silent source is killed at
+  about 240 s (floor + idle), a productive one runs to 1800 s.
+- **Real proof (network, testfire.net, exit codes captured directly):**
+
+  ```
+  $ reconkit run -d testfire.net --active --no-scope --tools pyprobe,katana,hakrawler,subjs
+  urls: subjs ok 0 item(s)
+  urls: hakrawler ok 66 item(s)
+  urls: katana ok 58 item(s)
+  urls: finished 3/3 tool(s), 124 item(s)              EXIT=0
+
+  $ reconkit run -d testfire.net --active --no-scope --tools pyprobe,gau,urlfinder
+  urls: urlfinder ok 933 item(s)
+  urls: gau ok 345 item(s)                             EXIT=0
+  $ sqlite3 recon.db "SELECT tool, status, item_count, round(duration_s,1) FROM tool_runs"
+  pyprobe|ok|1|1.2
+  urlfinder|ok|933|18.1
+  gau|ok|345|38.2
+  ```
+
+  Neither cap fired here (both tools finished inside them), which is the point:
+  the bounds only bite a stuck tool. The cap and idle paths are proven by the
+  tests below, including a real child process (`tests/fakebin/silent_after_output.py`)
+  that is killed by the inactivity clock and keeps its three lines.
+- **Mock proof:** `reconkit run -d testfire.net --active --no-scope --tools
+  pyprobe,katana --mock` → `urls: katana ok 3 item(s)`, exit 0.
+- **Tests:** 840 → 855. New: `test_katana_skips_invalid_json_lines`,
+  `test_katana_warning_lines_reach_the_detail_and_stay_ok`,
+  `test_katana_many_junk_lines_are_summarised_once`,
+  `test_crawler_parsers_skip_unusable_lines` (3 cases),
+  `test_hakrawler_runtime_cap_parses_partial`,
+  `test_subjs_runtime_cap_parses_partial`,
+  `test_urlfinder_idle_timeout_kills_stuck_source`,
+  `test_urlfinder_runs_to_stage_budget_if_productive`,
+  `test_idle_timeout_kills_a_child_that_went_silent`,
+  `test_the_floor_protects_a_slow_start_before_the_idle_clock`,
+  `test_a_finished_child_is_never_flagged_idle`,
+  `test_the_urls_runtime_bounds_load_and_default`,
+  `test_url_tools_receive_the_configured_runtime_bounds`.
+  Changed: `test_urlfinder_skips_archived_junk_and_feeds_domains` (the
+  `-max-time` ceiling is 30 minutes now, not 3) and `run_script` in
+  `tests/test_runner.py` gained the two clock arguments. New fixture:
+  `tests/fakebin/silent_after_output.py`.
 

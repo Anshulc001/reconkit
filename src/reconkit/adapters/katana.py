@@ -3,6 +3,11 @@
 Katana crawls the alive hosts and prints one JSON line per request. A line that
 carries a crawl error ("max depth reached") has no endpoint and is skipped: an
 error is not a URL.
+
+Not every line is JSON. A real scan failed the whole tool with
+`katana: invalid JSON line` while katana was printing a warning on stdout, so a
+line that does not parse is skipped and counted instead of failing the tool: the
+lines that did parse are still the tool's output (PIT-58).
 """
 
 from __future__ import annotations
@@ -10,7 +15,7 @@ from __future__ import annotations
 import json
 
 from reconkit.adapters.base import BinaryAdapter, normalize_url, strip_ansi
-from reconkit.errors import ParseError, ToolFailed
+from reconkit.errors import ToolFailed
 from reconkit.models import Record, RunContext, Stage, UrlRecord
 
 
@@ -51,6 +56,7 @@ class KatanaAdapter(BinaryAdapter):
     def parse_output(self, raw: str) -> list[Record]:
         records: list[Record] = []
         seen: set[str] = set()
+        self.skipped_lines = []
         for line in strip_ansi(raw).splitlines():
             line = line.strip()
             if not line or line.startswith("["):
@@ -58,9 +64,12 @@ class KatanaAdapter(BinaryAdapter):
             try:
                 data = json.loads(line)
             except json.JSONDecodeError:
-                raise ParseError("katana: invalid JSON line") from None
+                # Warning text on stdout is not the tool failing (PIT-58).
+                self.skipped_lines.append(line)
+                continue
             if not isinstance(data, dict):
-                raise ParseError("katana: JSON line is not an object")
+                self.skipped_lines.append(line)
+                continue
             request = data.get("request")
             if not isinstance(request, dict):
                 # `{"error": "max depth reached", ...}`: no request was made.
