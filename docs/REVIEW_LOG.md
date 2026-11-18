@@ -75,6 +75,456 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
+## 2026-11-18 (audit close-out) - raw proofs for the url_probe/httpx batch
+
+The follow-up batch (6488aad, 4b97928, aad092c, 62e88db) reported five findings
+whose raw evidence had not been pasted. They are pasted here verbatim, with no
+code change. Nothing in them contradicts the report; two are stronger than the
+report's own summary (A.2 measures the whole 20-URL distribution, A.5 makes the
+database state itself differ instead of relying on the run's parameters).
+
+### A.1 - the managed PD httpx help, complete
+
+`~/.reconkit/bin/httpx -h`, 196 lines, verbatim. There is no `-insecure` (nor any
+`-verify`) flag anywhere in it: the only TLS switches are `-tls-probe`,
+`-tls-grab`, `-sni`, `-ztls` and `-tlsi`. `-rl` defaults to 150 requests/second.
+
+```
+httpx is a fast and multi-purpose HTTP toolkit that allows running multiple probes using the retryablehttp library.
+
+Usage:
+  /home/kali/.reconkit/bin/httpx [flags]
+
+Flags:
+INPUT:
+   -l, -list string         input file containing list of hosts to process
+   -rr, -request string     file containing raw request
+   -u, -target string[]     input target host(s) to probe
+   -im, -input-mode string  mode of input file (burp)
+
+PROBES:
+   -sc, -status-code                      display response status-code
+   -cl, -content-length                   display response content-length
+   -ct, -content-type                     display response content-type
+   -location                              display response redirect location
+   -favicon                               display mmh3 hash for '/favicon.ico' file
+   -hash string                           display response body hash (supported: md5,mmh3,simhash,sha1,sha256,sha512)
+   -jarm                                  display jarm fingerprint hash
+   -rt, -response-time                    display response time
+   -lc, -line-count                       display response body line count
+   -wc, -word-count                       display response body word count
+   -title                                 display page title
+   -bp, -body-preview                     display first N characters of response body (default 100)
+   -server, -web-server                   display server name
+   -td, -tech-detect                      display technology in use based on wappalyzer dataset
+   -cff, -custom-fingerprint-file string  path to a custom fingerprint file for technology detection
+   -cpe                                   display CPE (Common Platform Enumeration) with product version based on awesome-search-queries
+   -wp, -wordpress                        display WordPress plugins and themes
+   -kb, -knowledge-base                   enable knowledge base classification
+   -method                                display http request method
+   -ws, -websocket                        display server using websocket
+   -ip                                    display host ip
+   -cname                                 display host cname
+   -extract-fqdn, -efqdn                  get domain and subdomains from response body and header in jsonl/csv output
+   -asn                                   display host asn information
+   -cdn                                   display cdn/waf in use (default true)
+   -probe                                 display probe status
+
+HEADLESS:
+   -ss, -screenshot                 enable saving screenshot of the page using headless browser
+   -system-chrome                   enable using local installed chrome for screenshot
+   -ho, -headless-options string[]  start headless chrome with additional options
+   -esb, -exclude-screenshot-bytes  enable excluding screenshot bytes from json output
+   -ehb, -exclude-headless-body     enable excluding headless header from json output
+   -no-screenshot-full-page         disable saving full page screenshot
+   -st, -screenshot-timeout value   set timeout for screenshot in seconds (default 10s)
+   -sid, -screenshot-idle value     set idle time before taking screenshot in seconds (default 1s)
+   -jsc, -javascript-code string[]  execute JavaScript code after navigation
+
+MATCHERS:
+   -mc, -match-code string            match response with specified status code (-mc 200,302)
+   -ml, -match-length string          match response with specified content length (-ml 100,102)
+   -mlc, -match-line-count string     match response body with specified line count (-mlc 423,532)
+   -mwc, -match-word-count string     match response body with specified word count (-mwc 43,55)
+   -mfc, -match-favicon string[]      match response with specified favicon hash (-mfc 1494302000)
+   -ms, -match-string string[]        match response with specified string (-ms admin)
+   -mr, -match-regex string[]         match response with specified regex (-mr admin)
+   -mcdn, -match-cdn string[]         match host with specified cdn provider (arvancloud, cdnetworks, gcore, lgtelecom, skbroadband, 云盾, cafe24, cloudfront, google, gocache, qrator, 百度云加速, fastly, kinx, 加速乐, 腾讯云)
+   -mrt, -match-response-time string  match response with specified response time in seconds (-mrt '< 1')
+   -mdc, -match-condition string      match response with dsl expression condition
+
+EXTRACTOR:
+   -er, -extract-regex string[]   display response content with matched regex
+   -ep, -extract-preset string[]  display response content matched by a pre-defined regex (url,ipv4,mail)
+
+FILTERS:
+   -fc, -filter-code string               filter response with specified status code (-fc 403,401)
+   -fpt, -filter-page-type string[]       filter response with specified page type (e.g. -fpt login,captcha,parked)
+   -fep, -filter-error-page               [DEPRECATED: use -fpt] filter response with ML based error page detection
+   -fd, -filter-duplicates                filter out near-duplicate responses (only first response is retained)
+   -fl, -filter-length string             filter response with specified content length (-fl 23,33)
+   -flc, -filter-line-count string        filter response body with specified line count (-flc 423,532)
+   -fwc, -filter-word-count string        filter response body with specified word count (-fwc 423,532)
+   -ffc, -filter-favicon string[]         filter response with specified favicon hash (-ffc 1494302000)
+   -fs, -filter-string string[]           filter response with specified string (-fs admin)
+   -fe, -filter-regex string[]            filter response with specified regex (-fe admin)
+   -fcdn, -filter-cdn string[]            filter host with specified cdn provider (arvancloud, cdnetworks, gcore, lgtelecom, skbroadband, 云盾, cafe24, cloudfront, google, gocache, qrator, 百度云加速, fastly, kinx, 加速乐, 腾讯云)
+   -frt, -filter-response-time string     filter response with specified response time in seconds (-frt '> 1')
+   -fdc, -filter-condition string         filter response with dsl expression condition
+   -strip                                 strips all tags in response. supported formats: html,xml (default html)
+   -lof, -list-output-fields              list of fields to output (comma separated)
+   -eof, -exclude-output-fields string[]  exclude output fields output based on a condition
+
+RATE-LIMIT:
+   -t, -threads int              number of threads to use (default 50)
+   -rl, -rate-limit int          maximum requests to send per second (default 150)
+   -rlm, -rate-limit-minute int  maximum number of requests to send per minute
+
+MISCELLANEOUS:
+   -pa, -probe-all-ips        probe all the ips associated with same host
+   -p, -ports string[]        ports to probe (nmap syntax: eg http:1,2-10,11,https:80)
+   -path string               path or list of paths to probe (comma-separated, file)
+   -tls-probe                 send http probes on the extracted TLS domains (dns_name)
+   -csp-probe                 send http probes on the extracted CSP domains
+   -tls-grab                  perform TLS(SSL) data grabbing
+   -pipeline                  probe and display server supporting HTTP1.1 pipeline
+   -http2                     probe and display server supporting HTTP2
+   -vhost                     probe and display server supporting VHOST
+   -ldv, -list-dsl-variables  list json output field keys name that support dsl matcher/filter
+
+UPDATE:
+   -up, -update                 update httpx to latest version
+   -duc, -disable-update-check  disable automatic httpx update check
+
+OUTPUT:
+   -o, -output string                     file to write output results
+   -oa, -output-all                       filename to write output results in all formats
+   -sr, -store-response                   store http response to output directory
+   -srd, -store-response-dir string       store http response to custom directory
+   -ob, -omit-body                        omit response body in output
+   -csv                                   store output in csv format
+   -csvo, -csv-output-encoding string     define output encoding
+   -j, -json                              store output in JSONL(ines) format
+   -md, -markdown                         store output in Markdown table format
+   -irh, -include-response-header         include http response (headers) in JSON output (-json only)
+   -irr, -include-response                include http request/response (headers + body) in JSON output (-json only)
+   -irrb, -include-response-base64        include base64 encoded http request/response in JSON output (-json only)
+   -include-chain                         include redirect http chain in JSON output (-json only)
+   -store-chain                           include http redirect chain in responses (-sr only)
+   -svrc, -store-vision-recon-cluster     include visual recon clusters (-ss and -sr only)
+   -pr, -protocol string                  protocol to use (unknown, http11, http2 [experimental], http3 [experimental])
+   -fepp, -filter-error-page-path string  path to store filtered error pages (default "filtered_error_page.json")
+   -rdb, -result-db                       store results in database
+   -rdbc, -result-db-config string        path to database config file
+   -rdbt, -result-db-type string          database type (mongodb, postgres, mysql)
+   -rdbcs, -result-db-conn string         database connection string
+   -rdbn, -result-db-name string          database name (default "httpx")
+   -rdbtb, -result-db-table string        table/collection name (default "results")
+   -rdbbs, -result-db-batch-size int      batch size for database inserts (default 100)
+   -rdbor, -result-db-omit-raw            omit raw request/response data from database
+
+CONFIGURATIONS:
+   -config string                   path to the httpx configuration file (default $HOME/.config/httpx/config.yaml)
+   -r, -resolvers string[]          list of custom resolver (file or comma separated)
+   -allow string[]                  allowed list of IP/CIDR's to process (file or comma separated)
+   -deny string[]                   denied list of IP/CIDR's to process (file or comma separated)
+   -sni, -sni-name string           custom TLS SNI name
+   -random-agent                    enable Random User-Agent to use (default true)
+   -auto-referer                    set the Referer header to the current URL
+   -H, -header string[]             custom http headers to send with request
+   -http-proxy, -proxy string       proxy (http|socks) to use (eg http://127.0.0.1:8080); falls back to HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars
+   -unsafe                          send raw requests skipping golang normalization
+   -resume                          resume scan using resume.cfg
+   -fr, -follow-redirects           follow http redirects
+   -maxr, -max-redirects int        max number of redirects to follow per host (default 10)
+   -fhr, -follow-host-redirects     follow redirects on the same host
+   -rhsts, -respect-hsts            respect HSTS response headers for redirect requests
+   -vhost-input                     get a list of vhosts as input
+   -x string                        request methods to probe, use 'all' to probe all HTTP methods
+   -body string                     post body to include in http request
+   -s, -stream                      stream mode - start elaborating input targets without sorting
+   -sd, -skip-dedupe                disable dedupe input items (only used with stream mode)
+   -ldp, -leave-default-ports       leave default http/https ports in host header (eg. http://host:80 - https://host:443
+   -ztls                            use ztls library with autofallback to standard one for tls13
+   -no-decode                       avoid decoding body
+   -tlsi, -tls-impersonate string   enable experimental client hello (ja3) tls impersonation (chrome, or ja3 full string)
+   -no-stdin                        Disable Stdin processing
+   -hae, -http-api-endpoint string  experimental http api endpoint
+   -sf, -secret-file string         path to the secret file for authentication
+
+DEBUG:
+   -health-check, -hc        run diagnostic check up
+   -debug                    display request/response content in cli
+   -debug-req                display request content in cli
+   -debug-resp               display response content in cli
+   -version                  display httpx version
+   -stats                    display scan statistic
+   -profile-mem string       optional httpx memory profile dump file
+   -silent                   silent mode
+   -v, -verbose              verbose mode
+   -si, -stats-interval int  number of seconds to wait between showing a statistics update (default: 5)
+   -nc, -no-color            disable colors in cli output
+   -tr, -trace               trace
+
+OPTIMIZATIONS:
+   -nf, -no-fallback                  display both probed protocol (HTTPS and HTTP)
+   -nfs, -no-fallback-scheme          probe with protocol scheme specified in input 
+   -maxhr, -max-host-error int        max error count per host before skipping remaining path/s (default 30)
+   -e, -exclude string[]              exclude host matching specified filter ('cdn', 'private-ips', cidr, ip, regex)
+   -retries int                       number of retries
+   -timeout int                       timeout in seconds (default 10)
+   -delay value                       duration between each http request (eg: 200ms, 1s) (default -1ns)
+   -rsts, -response-size-to-save int  max response size to save in bytes (default 50000000)
+   -rstr, -response-size-to-read int  max response size to read in bytes (default 50000000)
+
+CLOUD:
+   -auth                           configure projectdiscovery cloud (pdcp) api key (default true)
+   -ac, -auth-config string        configure projectdiscovery cloud (pdcp) api key credential file
+   -pd, -dashboard                 upload / view output in projectdiscovery cloud (pdcp) UI dashboard
+   -tid, -team-id string           upload asset results to given team id (optional)
+   -aid, -asset-id string          upload new assets to existing asset id (optional)
+   -aname, -asset-name string      assets group name to set (optional)
+   -pdu, -dashboard-upload string  upload httpx output file (jsonl) in projectdiscovery cloud (pdcp) UI dashboard
+```
+
+The flag the report said does not exist, asked for directly:
+
+```
+$ ~/.reconkit/bin/httpx -l /tmp/probe200.txt -insecure -silent
+flag provided but not defined: -insecure
+```
+
+### A.2 - 10 certificate-invalid https URLs against 10 http 200s, one pass
+
+Fixture: 20 rows in a fresh DB for `testfire.net` - ten `https://testfire.net/...`
+URLs (the host's certificate is issued for `www.testfire.net`) and ten
+`http://testfire.net/...` paths that answer 200. One `url_probe` pass, real
+network, `threads: 10`, `batch_size: 10`.
+
+```
+== A.2 fixture: 10 https (certificate for www.testfire.net) + 10 http 200 ==
+  sqlite3 a2.db '.dump urls' (first 4 INSERT lines):
+    INSERT INTO "urls" VALUES(1,1,'https://testfire.net/',NULL,'[]',0,1,1,NULL);
+    INSERT INTO "urls" VALUES(2,1,'https://testfire.net/index.jsp',NULL,'[]',0,1,1,NULL);
+    INSERT INTO "urls" VALUES(3,1,'https://testfire.net/login.jsp',NULL,'[]',0,1,1,NULL);
+    INSERT INTO "urls" VALUES(4,1,'https://testfire.net/feedback.jsp',NULL,'[]',0,1,1,NULL);
+  seeded 10 https + 10 http rows
+  url_probe: probing 20 URL(s)
+  url_probe: 10/20 URL(s) probed
+  url_probe: finished 20 URL(s)
+  warnings: []
+  completion: complete
+  probe run 2 params_json: {"scan_key": "830175900ad751cd", "mode": "active", "tools": [], "mock": false, "active": true, "reprobe": false, "no_keys": false, "min_sources": 1}
+  [A.2] SELECT status_code, COUNT(*) FROM urls GROUP BY status_code:
+    -2|10
+    200|10
+```
+
+`-2|10` and `200|10`: the mixed list is fully classified in a single pass, so the
+https rows that fail at the certificate do not starve the http rows that answer.
+
+### A.3 - `_dedupe_www_variants`, before and after (4b97928)
+
+Before, at `4b97928^:src/reconkit/engine.py`:
+
+```python
+    def _dedupe_www_variants(self, target_id: int, hosts: list[str]) -> None:
+        """Mark a www/non-www pair as one website (D22, 2026-11-18).
+
+        Metadata only: it reads the rows the `live` pass just stored and writes
+        `duplicate_of`/`www_note` on the newest status row. Host state,
+        confidence, `status_code` and every count query are untouched, and a
+        pair that cannot be explained (different non-2xx codes) is left alone.
+
+        Rules (docs/09 section 5):
+
+        - one 3xx and one 2xx -> the 3xx name is the duplicate of the 2xx name;
+        - both 2xx -> both serve content, neither is a duplicate (sibling note);
+        - same non-2xx status and a shared IP -> `www.X` is a duplicate of `X`
+          (the bare name is the web convention for the canonical one);
+        - same status, different IPs -> different servers, sibling note only;
+        - one alive, one not -> nothing (a dead variant is not a duplicate of a
+          live site, it is a name that does not resolve).
+        """
+        rows: dict[str, dict[str, object]] = {
+            str(row["fqdn"]): row for row in self.store.host_rows(target_id)
+        }
+        current = set(hosts)
+        for fqdn in sorted(rows):
+            if not fqdn.startswith("www."):
+                continue
+            bare = fqdn[len("www.") :]
+            other = rows.get(bare)
+            if other is None or fqdn not in current or bare not in current:
+                continue
+            if rows[fqdn]["state"] != HostState.ALIVE.value:
+                continue
+            if other["state"] != HostState.ALIVE.value:
+                continue
+            www_status = rows[fqdn]["status_code"]
+            bare_status = other["status_code"]
+            www_ip = set(cast(tuple[str, ...], rows[fqdn]["ips"]))
+            bare_ip = set(cast(tuple[str, ...], other["ips"]))
+            duplicate: str | None = None
+            canonical: str | None = None
+            note: str | None = None
+            if _is_redirect(bare_status) and _is_2xx(www_status):
+                duplicate, canonical = bare, fqdn
+            elif _is_redirect(www_status) and _is_2xx(bare_status):
+                duplicate, canonical = fqdn, bare
+            elif _is_2xx(bare_status) and _is_2xx(www_status):
+                # Both names serve content: two sites, not a duplicate (rule 2).
+                self.store.set_host_duplicate(
+                    target_id, bare, duplicate_of=None, www_note=f"has www sibling at {fqdn}"
+                )
+                self.store.set_host_duplicate(
+                    target_id, fqdn, duplicate_of=None, www_note=f"has www sibling at {bare}"
+                )
+                continue
+            elif www_status == bare_status and www_ip & bare_ip:
+                duplicate, canonical = fqdn, bare
+            elif www_status == bare_status and www_ip and bare_ip and not (www_ip & bare_ip):
+                # Known and disjoint: two servers. With no DNS evidence for
+                # either name we say nothing rather than guess.
+                note = "www variant on a different server"
+            if duplicate is not None and canonical is not None:
+                self.store.set_host_duplicate(target_id, duplicate, duplicate_of=canonical)
+            elif note is not None:
+                self.store.set_host_duplicate(target_id, bare, duplicate_of=None, www_note=note)
+                self.store.set_host_duplicate(target_id, fqdn, duplicate_of=None, www_note=note)
+```
+
+After, at `4b97928`:
+
+```python
+    def _dedupe_www_variants(self, target_id: int, hosts: list[str]) -> None:
+        """Mark a www/non-www pair as one website (D22, 2026-11-18).
+
+        Metadata only: it reads the rows the `live` pass just stored and writes
+        `duplicate_of`/`www_note` on the newest status row. Host state,
+        confidence, `status_code` and every count query are untouched, and a
+        pair that cannot be explained (different non-2xx codes) is left alone.
+
+        Rules (docs/09 section 5):
+
+        - one 3xx and one 2xx -> the 3xx name is the duplicate of the 2xx name;
+        - both 2xx -> both serve content, neither is a duplicate (sibling note);
+        - same **known** non-2xx status and a shared IP -> `www.X` is a duplicate
+          of `X` (the bare name is the web convention for the canonical one);
+          `NULL` is "no HTTP status observed", not a status the two names share,
+          so a pair with no status on either side is never marked (D25);
+        - same status, different IPs -> different servers, sibling note only;
+        - one alive, one not -> nothing (a dead variant is not a duplicate of a
+          live site, it is a name that does not resolve).
+        """
+        rows: dict[str, dict[str, object]] = {
+            str(row["fqdn"]): row for row in self.store.host_rows(target_id)
+        }
+        current = set(hosts)
+        for fqdn in sorted(rows):
+            if not fqdn.startswith("www."):
+                continue
+            bare = fqdn[len("www.") :]
+            other = rows.get(bare)
+            if other is None or fqdn not in current or bare not in current:
+                continue
+            if rows[fqdn]["state"] != HostState.ALIVE.value:
+                continue
+            if other["state"] != HostState.ALIVE.value:
+                continue
+            www_status = rows[fqdn]["status_code"]
+            bare_status = other["status_code"]
+            www_ip = set(cast(tuple[str, ...], rows[fqdn]["ips"]))
+            bare_ip = set(cast(tuple[str, ...], other["ips"]))
+            duplicate: str | None = None
+            canonical: str | None = None
+            note: str | None = None
+            if _is_redirect(bare_status) and _is_2xx(www_status):
+                duplicate, canonical = bare, fqdn
+            elif _is_redirect(www_status) and _is_2xx(bare_status):
+                duplicate, canonical = fqdn, bare
+            elif _is_2xx(bare_status) and _is_2xx(www_status):
+                # Both names serve content: two sites, not a duplicate (rule 2).
+                self.store.set_host_duplicate(
+                    target_id, bare, duplicate_of=None, www_note=f"has www sibling at {fqdn}"
+                )
+                self.store.set_host_duplicate(
+                    target_id, fqdn, duplicate_of=None, www_note=f"has www sibling at {bare}"
+                )
+                continue
+            elif (
+                www_status is not None
+                and bare_status is not None
+                and www_status == bare_status
+                and www_ip & bare_ip
+            ):
+                # Both codes must be known: `NULL == NULL` is not evidence that
+                # the two names answer the same way (D25, verification gap 2).
+                duplicate, canonical = fqdn, bare
+            elif www_status == bare_status and www_ip and bare_ip and not (www_ip & bare_ip):
+                # Known and disjoint: two servers. With no DNS evidence for
+                # either name we say nothing rather than guess.
+                note = "www variant on a different server"
+            if duplicate is not None and canonical is not None:
+                self.store.set_host_duplicate(target_id, duplicate, duplicate_of=canonical)
+            elif note is not None:
+                self.store.set_host_duplicate(target_id, bare, duplicate_of=None, www_note=note)
+                self.store.set_host_duplicate(target_id, fqdn, duplicate_of=None, www_note=note)
+```
+
+### A.4 - the config line, raw
+
+```
+$ grep -n 'url_probe' config.yaml
+21:  url_probe: 600      # D26: the probe's own deadline; --phase-timeout overrides it
+36:url_probe:
+```
+
+Line 21 is the `timeouts:` entry the report cited; line 36 is the ordinary probe
+block (`threads`/`batch_size`/`timeout_s`/`max_urls`).
+
+### A.5 - `--reprobe-urls` changes which rows are probed
+
+Two identical fresh DBs, five URLs each, with rows 1-2 carrying a deliberately
+stale `404` and rows 3-5 `NULL`. Without the flag only the three `NULL` rows are
+sent, so the stale answers survive; with it all five are sent and the two stale
+`404`s are rewritten to the real `200`.
+
+```
+== A.5 db1: 5 URLs, 2 carry a stale 404, 3 NULL - run WITHOUT --reprobe-urls ==
+  seed: id=1 status_code=404 http://testfire.net/
+  seed: id=2 status_code=404 http://testfire.net/index.jsp
+  seed: id=3 status_code=None http://testfire.net/login.jsp
+  seed: id=4 status_code=None http://testfire.net/feedback.jsp
+  seed: id=5 status_code=None http://testfire.net/search.jsp
+  url_probe: probing 3 URL(s)
+  url_probe: finished 3 URL(s)
+  warnings: []
+  completion: complete
+  probe run 2 params_json: {"scan_key": "28bd99886c47c934", "mode": "active", "tools": [], "mock": false, "active": true, "reprobe": false, "no_keys": false, "min_sources": 1}
+  [A.5 without] SELECT status_code, COUNT(*) FROM urls GROUP BY status_code:
+    200|3
+    404|2
+
+== A.5 db2: same 5 rows - run WITH --reprobe-urls ==
+  seed: id=1 status_code=404 http://testfire.net/
+  seed: id=2 status_code=404 http://testfire.net/index.jsp
+  seed: id=3 status_code=None http://testfire.net/login.jsp
+  seed: id=4 status_code=None http://testfire.net/feedback.jsp
+  seed: id=5 status_code=None http://testfire.net/search.jsp
+  url_probe: probing 5 URL(s)
+  url_probe: finished 5 URL(s)
+  warnings: []
+  completion: complete
+  probe run 2 params_json: {"scan_key": "9530a2ae45e41b0e", "mode": "active", "tools": [], "mock": false, "active": true, "reprobe": true, "no_keys": false, "min_sources": 1}
+  [A.5 with] SELECT status_code, COUNT(*) FROM urls GROUP BY status_code:
+    200|5
+```
+
+That is the distinction the earlier report lacked: `probing 3 URL(s)` leaves
+`404|2` behind, `probing 5 URL(s)` replaces it with `200|5`, and `params_json`
+shows `"reprobe": false` against `"reprobe": true`.
+
 ## Commit map
 
 - Step 1 (`docs: add master plan, review log, check script, resume block`): `09a5bce`
