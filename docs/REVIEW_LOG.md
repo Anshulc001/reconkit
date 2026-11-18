@@ -6504,3 +6504,78 @@ acted on": the `6488aad` stop-rule breach, probe-only timeout exiting 4 instead 
 Historical status paragraphs were not rewritten: each records what was true on
 its own date, and line 16 already annotates its own stale `827`.
 
+
+## 2026-11-18 (batch 2026-11-18) Part D - record the owner's rulings (docs only)
+
+Docs only; no `src/`, no `tests/`; suite stays 898.
+
+### D.1 - raw, pasted first
+
+The four open items as they stood in `docs/PROGRESS.md` (`## Open risks`, lines 564-584), verbatim:
+
+```
+- **2026-11-18, awaiting owner ruling (four items from the url_probe/httpx batch).** Logged, not acted on.
+  1. **Part 1 stop-rule breach (`6488aad`).** That batch's own stop rules said to stop if PD httpx JSON could not
+     classify "certificate did not verify" versus "no answer", and again if the speed win was under 2x. Both fired;
+     the agent shipped the Python-transport alternative instead of waiting for a ruling. The outcome was measured
+     and disclosed (9.19 s PD httpx versus 3.44 s Python on 158 URLs, `-2` preserved), so nothing is broken, but the
+     process step was skipped. Ruling wanted: accept as-is, or revert `6488aad` and redo it after a ruling.
+  2. **A probe-only run that times out exits 4, not 0.** `test_url_probe_respects_phase_timeout`
+     (`tests/test_engine.py:3796`) pins exit 0 for a normal scan, and the D26 branch
+     (`src/reconkit/engine.py:769`) turns the timeout into a completion gap. A run whose only stage is
+     `Stage.URL_PROBE` produces no results at all under the "nothing usable" rule, so it exits 4 (measured: 3 real
+     testfire URLs, `threads: 1`, `phase_timeout=1.5` -> `complete_with_gaps`, exit 4). Ruling wanted: keep 4 for a
+     probe-only run, or make a timed-out probe alone exit 0.
+  3. **`-2` is a reconkit sentinel, not an HTTP status.** `urls.status_code` holds a real code, `-1` (no answer) or
+     `-2` (answered, certificate did not verify). Documented at `docs/04_DATABASE.md:193` and `:245`; anything that
+     reads the column must know it. Ruling wanted: is the prose enough, or does the schema need a CHECK/NOTE-level
+     marker so a future reader cannot mistake `-2` for a status?
+  4. **Commit order and commit count in that batch.** The parts landed 2 -> 1 -> 3 (`4b97928`, then `6488aad`, then
+     `aad092c`), not 1 -> 2 -> 3, because Part 2 was independent and ready while Part 1 waited on the transport
+     question; and Part 3 became two commits (`aad092c` plus `62e88db`, the config-default fix the real proof
+     exposed). Ruling wanted: accept the history as-is, or require a reorder/squash before the next push.
+```
+
+`git log --oneline a49e4b5..HEAD`:
+
+```
+a4ba0cc docs: reconcile stale claims and log four open rulings
+aadd7b5 perf: urlfinder cap scales with host count (floor 180s, stage budget ceiling)
+1e21297 docs: paste raw proofs for the url_probe/httpx batch (audit close-out)
+62e88db fix: default timeouts.url_probe so older config files still load
+aad092c fix: url_probe respects --phase-timeout and timeouts.url_probe
+6488aad perf: reuse one url_probe client and raise threads; add --reprobe-urls
+4b97928 fix: www dedup requires known equal status (NULL != NULL)
+de50a15 feat: url_probe stage checks archive URL liveness
+6a50030 feat: www/non-www deduplication with duplicate_of metadata
+ce28cf3 fix: katana JSON skip, hakrawler/subjs caps, urlfinder inactivity kill
+9fd4c6d fix: external-service errors are gaps not failures; stale docs cleanup
+```
+
+`grep -n 'urlfinder_max_s' config.yaml src/reconkit/config.py src/reconkit/engine.py` (before Part E):
+
+```
+config.yaml:29:  urlfinder_max_s: 1800    # the stage-budget default
+src/reconkit/config.py:64:    urlfinder_max_s: int = Field(default=1800, gt=0)
+src/reconkit/engine.py:1372:            ceiling=float(urls_config.urlfinder_max_s),
+```
+
+### D.2 - D28 recorded
+
+`MASTER_PLAN.md` gained a `D28` block before "LATER BUG FIXES"; `PROGRESS.md` gained a `D28` deviation entry and the
+four Open-risks items were marked closed by D28. `docs/02_CLI_UX.md` gained the probe-only-exits-4 note. No code
+change.
+
+### D.3 - post-D27 stale claims
+
+`grep -rn 'flat 180|MAX_ENUMERATION_S = 180|cap is a flat|clipped to timeouts.urls' docs/ src/ tests/` found only
+historical/dated statements (Previous-status paragraphs, REVIEW_LOG history, MASTER_PLAN D27 problem statement, tests
+describing the old behaviour). The one current-tense wording that contradicts D27 is the `enumeration_cap_s`
+docstring/comment block in `src/reconkit/adapters/urlfinder.py` ("500 -> 2000 s clipped to `timeouts.urls`"); it is
+deliberately deferred to Part E, which fixes it together with the code.
+
+### D.4 - push-state line made durable
+
+`docs/PROGRESS.md` push-state bullet is now count-free: "`reconkit/main` is at `a49e4b5` ...; local `main` is ahead
+of it; nothing has been pushed since." No fixed count to rot.
+

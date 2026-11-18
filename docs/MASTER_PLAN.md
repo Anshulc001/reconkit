@@ -1080,6 +1080,38 @@ D27. 2026-11-18 - urlfinder's runtime cap scales with the host count.
     now 180 s (the floor). `test_url_tools_receive_the_configured_runtime_bounds`
     was updated from (1800, 60, 180) to (180, 60, 180).
 
+D28. 2026-11-18 - url_probe batch close-out rulings (owner rulings, docs only).
+
+    Four decisions the url_probe/httpx batch (6488aad, 4b97928, aad092c, 62e88db)
+    left open. All are accepted as shipped; none of them changes code.
+
+    1. 6488aad accepted, no revert. PD httpx (v1.12.0) is rejected on evidence:
+       there is no -insecure/-verify/-k flag, TLS verification is off by default so
+       a cert-invalid URL reads as 200, a failed URL emits no JSON line at all, a
+       random browser User-Agent is the default, and measured on 158 URLs it took
+       9.19 s against Python httpx's 3.44 s. The shipped fix is the Python transport
+       with one client per pass and 100 threads; the -2 distinction is preserved.
+       Process lesson recorded: when a stop rule fires, stop - do not substitute an
+       adjacent fix and proceed. The two fired stop rules (classification and
+       speed win under 2x) are on the record as a process breach, not a code defect.
+
+    2. A probe-only run that times out exits 4 by design. A run whose only stage is
+       Stage.URL_PROBE and which produced zero results is the existing
+       "nothing usable -> 4" case; a normal scan still exits 0
+       (test_url_probe_respects_phase_timeout). Documented under --phase-timeout in
+       docs/02_CLI_UX.md and as a note in COMMANDS.md.
+
+    3. -2 is a reconkit sentinel, not an HTTP status. urls.status_code holds a real
+       code, -1 (no answer) or -2 (answered, certificate did not verify). Defined at
+       docs/04_DATABASE.md:193 and :245. No user-facing surface was found that uses
+       -2 without definition, so no code change. No CHECK/NOTE-level marker is added;
+       the prose is the contract.
+
+    4. Commit order and commit count accepted. History is monotonic, every commit
+       passed the gate, and the 62e88db split was a genuine compat fix for older
+       config files missing timeouts.url_probe.
+
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

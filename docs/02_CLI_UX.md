@@ -129,6 +129,12 @@ prints `url_probe: timed out after Ns (M/N URL(s) probed)`, the run reports a
 completion gap (so `--json` says `complete_with_gaps`) and the exit code stays
 **0** - a probe that ran out of time is a gap, not a failed scan.
 
+**Probe-only runs are the one exception (D28).** A scan whose only stage is
+`url_probe` (no other stage produced any result) and which times out produced
+nothing usable, so it exits **4** under the existing "nothing usable" rule rather
+than 0. A normal scan that includes `url_probe` alongside other stages is
+unaffected and still exits 0 (see `test_url_probe_respects_phase_timeout`).
+
 ### Workflows
 | Command | Pipeline |
 |---|---|
