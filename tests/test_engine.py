@@ -1786,6 +1786,23 @@ def test_same_status_on_different_servers_is_only_a_note(tmp_path: Path) -> None
     assert rows["www.example.com"].www_note == "www variant on a different server"
 
 
+def test_www_both_null_status_not_marked_duplicate(tmp_path: Path) -> None:
+    """NULL is "no HTTP status observed", not a status both names share (D25)."""
+    rows = _dedup_run(
+        tmp_path,
+        bare=(None, HostState.ALIVE),
+        www=(None, HostState.ALIVE),
+        bare_ips=("192.0.2.10",),
+        www_ips=("192.0.2.10",),
+    )
+    # The pair is ALIVE on both names and shares an IP, but neither name has a
+    # status code, so nothing licenses the claim "same website" (PIT-61).
+    assert rows["example.com"].duplicate_of is None
+    assert rows["www.example.com"].duplicate_of is None
+    assert rows["example.com"].www_note is None
+    assert rows["www.example.com"].www_note is None
+
+
 def test_www_dead_is_not_marked_duplicate(tmp_path: Path) -> None:
     """A dead variant is a name that does not resolve, not a duplicate website."""
     rows = _dedup_run(tmp_path, bare=(200, HostState.ALIVE), www=(None, HostState.DEAD))

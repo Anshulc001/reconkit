@@ -975,6 +975,23 @@ D23. 2026-11-18 - URL liveness probe (`url_probe` stage, owner-requested after
     confidence formula, to `decide_host_state`, or to `diff`. The probe writes
     one integer on the `urls` row and nothing else.
 
+D25. 2026-11-18 - www dedup requires a known, equal status (verification gap 2).
+
+    Problem: `_dedupe_www_variants` compared the two `status_code` values with
+    `==`, so `NULL == NULL` counted as "same status" and a pair of ALIVE names
+    with no HTTP status on either side but a shared IP was marked
+    `duplicate_of` from DNS evidence alone. The documented rule (D22,
+    docs/09 section 5) is "same **non-2xx** status"; `NULL` means "no status
+    observed", which is not a status. Found in verification: a mock run marked
+    `www.testfire.net` as a duplicate of `testfire.net` while both rows carried
+    `status_code = NULL`.
+
+    Fix: the shared-IP branch requires both codes to be present and equal. A
+    pair with no status on either side is now left alone (no `duplicate_of`, no
+    note), because nothing about the two answers is known. The 3xx/2xx and
+    both-2xx branches already required real codes and are unchanged, as is the
+    "different known IPs" note. No schema change, no state or confidence change.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

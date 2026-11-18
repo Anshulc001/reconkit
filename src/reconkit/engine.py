@@ -1837,8 +1837,10 @@ class Engine:
 
         - one 3xx and one 2xx -> the 3xx name is the duplicate of the 2xx name;
         - both 2xx -> both serve content, neither is a duplicate (sibling note);
-        - same non-2xx status and a shared IP -> `www.X` is a duplicate of `X`
-          (the bare name is the web convention for the canonical one);
+        - same **known** non-2xx status and a shared IP -> `www.X` is a duplicate
+          of `X` (the bare name is the web convention for the canonical one);
+          `NULL` is "no HTTP status observed", not a status the two names share,
+          so a pair with no status on either side is never marked (D25);
         - same status, different IPs -> different servers, sibling note only;
         - one alive, one not -> nothing (a dead variant is not a duplicate of a
           live site, it is a name that does not resolve).
@@ -1878,7 +1880,14 @@ class Engine:
                     target_id, fqdn, duplicate_of=None, www_note=f"has www sibling at {bare}"
                 )
                 continue
-            elif www_status == bare_status and www_ip & bare_ip:
+            elif (
+                www_status is not None
+                and bare_status is not None
+                and www_status == bare_status
+                and www_ip & bare_ip
+            ):
+                # Both codes must be known: `NULL == NULL` is not evidence that
+                # the two names answer the same way (D25, verification gap 2).
                 duplicate, canonical = fqdn, bare
             elif www_status == bare_status and www_ip and bare_ip and not (www_ip & bare_ip):
                 # Known and disjoint: two servers. With no DNS evidence for

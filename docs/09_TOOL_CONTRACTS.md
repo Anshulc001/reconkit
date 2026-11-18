@@ -897,7 +897,7 @@ and only writes **metadata** on the newest status row of each host:
 |---|---|
 | both ALIVE, one 3xx (301/302/303/307/308) and the other 2xx | the 3xx name is `duplicate_of` the 2xx name |
 | both ALIVE, both 2xx | neither is marked; both get `www_note = "has www sibling at <other>"` (both serve content) |
-| both ALIVE, same non-2xx status, sharing an IP | `www.X` is `duplicate_of X` (the bare name is preferred) |
+| both ALIVE, the **same known** non-2xx status, sharing an IP | `www.X` is `duplicate_of X` (the bare name is preferred). `NULL` is "no status observed", not a shared status, so a pair with no code on either side is never marked |
 | both ALIVE, same status, different known IPs | neither is marked; both get `www_note = "www variant on a different server"` |
 | both ALIVE, same status, an IP set unknown for either name | nothing (no DNS evidence, so no claim about the server) |
 | one ALIVE, the other DEAD/DNS_ONLY/SHUT_DOWN/UNKNOWN | nothing: a dead variant is a name that does not resolve, not a duplicate |
