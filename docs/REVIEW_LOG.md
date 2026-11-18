@@ -6779,5 +6779,6 @@ stderr: unexpected error: OperationalError: unable to open database file
 Fixed by `db_path.parent.mkdir(parents=True, exist_ok=True)` next to the D30 branch. The three new tests run with
 `HOME` pointed at `tmp_path`, so they exercise this on every run.
 
-Suite 903 -> 907.
+Suite 903 -> 907, then -> 908 with `test_active_mock_run_stores_hosts_alive`, the Part G test name kept as a
+regression pin for the behaviour the part assumed was broken (`www.example.com` 200, `api.example.com` 401).
 

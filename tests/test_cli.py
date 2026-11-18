@@ -1280,3 +1280,27 @@ def test_doctor_error_is_redacted(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     result = CliRunner().invoke(app, ["doctor", "--config", str(config)])
     assert result.exit_code == 1
     _assert_redacted(result)
+
+
+def test_active_mock_run_stores_hosts_alive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D31 (withdrawn) pinned as a regression: mock `--active` reaches ALIVE.
+
+    The batch that named this test assumed a mock active run stored every host
+    `UNKNOWN`; it does not (see REVIEW_LOG "Part G"). This test keeps it that
+    way, using the statuses the pyprobe/httpx fixtures already carry.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    config = make_config(tmp_path)
+
+    result = CliRunner().invoke(app, scan_args(config, "run", "--active", "--json"))
+    assert result.exit_code == 0, result.stderr
+    summary = json.loads(result.stdout.strip().splitlines()[-1])
+    states = {host["fqdn"]: host for host in summary["hosts"]}
+
+    assert states["www.example.com"]["state"] == "ALIVE"
+    assert states["www.example.com"]["status_code"] == 200
+    assert states["api.example.com"]["state"] == "ALIVE"
+    assert states["api.example.com"]["status_code"] == 401
