@@ -576,10 +576,11 @@ def test_a_real_mock_run_reports_alive_fields_only_for_alive_hosts(
 
     A `passive` mock run is enough for this: `gone.example.com` is `DEAD` from
     the DNS fixture, so every alive-gated column must be empty for it while the
-    ungated ones still carry values. (A mock `--active` run never produces an
-    `ALIVE` host in this build - the flag-based `run --active --mock` behaves the
-    same - so the ALIVE side is pinned by the unit test above instead of relying
-    on a state the mock pipeline does not reach.)
+    ungated ones still carry values. The ALIVE side is pinned by the unit test
+    above; a mock `--active` run does reach ALIVE too (`www.example.com` 200,
+    `api.example.com` 401 from the pyprobe/httpx fixtures), verified 2026-11-18,
+    so this docstring's old "never produces an ALIVE host" claim was stale and
+    is gone.
     """
     config = make_config(tmp_path)
     as_tty(monkeypatch)

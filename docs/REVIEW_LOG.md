@@ -6652,3 +6652,32 @@ Historical polluted rows are not deleted (no rewrite of history), as required.
 
 No ripple beyond the report-path edits; D20 report-on-every-scan behaviour preserved (mock still writes both files, now under the mock namespace). No stop triggered.
 
+
+## 2026-11-18 (batch 2026-11-18) Part G - mock live ALIVE: premise disproved, nothing changed
+
+**The defect named for this part no longer exists.** `reconkit run -d example.com --active --no-scope --mock`
+stores ALIVE hosts with real statuses today, straight from the pyprobe/httpx mock fixtures:
+
+```
+ALIVE: api.example.com 401 ['assetfinder', 'otx', 'subfinder']
+ALIVE: www.example.com 200 ['assetfinder', 'certspotter', 'crtsh', 'hackertarget', 'otx', 'subfinder']
+alive count: 2 of 21
+```
+
+The hosts that stay `UNKNOWN` are the ones with **no live record at all**: the flat `httprobe`/`tlsx` fixtures carry
+only three `testfire.net` names, and `pyprobe`/`httpx` have an `example.com` fixture only, so `dev.example.com`,
+`blog.example.com`, `products.example.com` and friends never appear in any live record. That is the state rule
+working, not an inconclusive record.
+
+**What was changed: the two stale claims, and nothing else.** No adapter, fixture, verdict rule or state definition
+was touched - making every discovered host ALIVE would mean inventing HTTP statuses the fixtures do not contain,
+which the mock contract forbids (a fixture is a stand-in for real tool output).
+
+- `tests/test_interactive_scan.py`: `test_a_real_mock_run_reports_alive_fields_only_for_alive_hosts`'s docstring
+  claimed "a mock `--active` run never produces an `ALIVE` host in this build". False; corrected, assertion unchanged.
+- `docs/PROGRESS.md` `## Open risks`: the "stores every host as UNKNOWN" entry is now a dated "Disproved" note with
+  the numbers above and the reason nothing was changed.
+
+**D31 is withdrawn**, not deferred: there is no code defect to fix. Suite 899 -> 903 (the four D32 tests from
+Part H, which is in the same working tree).
+
