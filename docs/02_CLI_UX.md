@@ -322,7 +322,7 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | `--redact-headers` / `--show-headers` | Hide (default) or reveal header values in JSON and UI output |
 | `--min-sources N` | Hide results confirmed by fewer than N tools |
 | `--phase-timeout SEC` | Stage time limit, applied to **every** stage including the engine-owned `url_probe` (D26). `--timeout-<stage>` is deferred; `--phase-timeout` is the only stage-timeout control in this build. Without it, each stage uses its `timeouts:` entry (`timeouts.url_probe` is 600 s). |
-| `--mock` | Use fixtures instead of real tools/network |
+| `--mock` | Use fixtures instead of real tools/network. A mock run is isolated: it stores under the `mock:<target>` target namespace, writes its DB to `~/.reconkit/mock.db` unless `--db` is given, and writes its report under `results/mock/<target>/`, so it can never pollute or overwrite a real run (D30). |
 | `--resume` | Continue the latest unfinished run for the target; completed stages are not repeated |
 | `--no-keys` | Force free mode on the scan commands: ignore API keys from `.env` (policy in docs/05 §6.1) |
 | `--json` | One JSON document on stdout, no colors or progress |

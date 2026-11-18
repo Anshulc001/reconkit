@@ -144,7 +144,7 @@ def test_interactive_passive_writes_one_folder_per_domain(
         "stages subs, dns, urls; tools passive only" in " ".join(result.stderr.split())
     )
 
-    (domain_dir,) = (tmp_path / "results").iterdir()
+    (domain_dir,) = (tmp_path / "results" / "mock").iterdir()
     assert domain_dir.name == "example.com"
     (run_dir,) = domain_dir.iterdir()
     assert (run_dir / "report.txt").is_file()
@@ -183,7 +183,7 @@ def test_a_numeric_selection_keeps_menu_order(
         app, interactive_args(config), input="example.com\nn\npassive\n3,1,1\nn\n"
     )
     assert result.exit_code == 0, result.stderr
-    (run_dir,) = list((tmp_path / "results" / "example.com").iterdir())
+    (run_dir,) = list((tmp_path / "results" / "mock" / "example.com").iterdir())
     document = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
     assert document["fields"] == ["hostname", "confidence"]
 
@@ -337,7 +337,7 @@ def test_a_multi_domain_file_scans_each_domain_separately(
     assert [target for target, _ in calls] == ["example.com", "testfire.net"]
     assert all(isinstance(target, str) and "," not in target for target, _ in calls)
     assert all(options.stages == (Stage.SUBS, Stage.DNS, Stage.URLS) for _, options in calls)
-    folders = sorted(path.name for path in (tmp_path / "results").iterdir())
+    folders = sorted(path.name for path in (tmp_path / "results" / "mock").iterdir())
     assert folders == ["example.com", "testfire.net"]
 
 
@@ -446,7 +446,7 @@ def test_a_present_scope_file_blocks_an_out_of_scope_interactive_target(
     assert result.exit_code == 2
     assert "is not in scope.yaml" in result.stderr
     # Option [d] aborts before any scan: no DB write, no report folder.
-    assert not (tmp_path / "results" / "example.com").exists()
+    assert not (tmp_path / "results" / "mock" / "example.com").exists()
 
 
 def test_full_mode_requests_every_stage_including_vulns(
@@ -585,7 +585,7 @@ def test_a_real_mock_run_reports_alive_fields_only_for_alive_hosts(
     as_tty(monkeypatch)
     result = CliRunner().invoke(app, interactive_args(config), input=PASSIVE_ANSWERS)
     assert result.exit_code == 0, result.stderr
-    (run_dir,) = list((tmp_path / "results" / "example.com").iterdir())
+    (run_dir,) = list((tmp_path / "results" / "mock" / "example.com").iterdir())
     document = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
     hosts = {host["hostname"]: host for host in document["hosts"]}
     assert hosts["gone.example.com"]["state"] == "DEAD"
@@ -635,7 +635,7 @@ def test_a_prior_run_folder_survives_a_second_cli_run(
     runner = CliRunner()
     assert runner.invoke(app, interactive_args(config), input=PASSIVE_ANSWERS).exit_code == 0
     assert runner.invoke(app, interactive_args(config), input=PASSIVE_ANSWERS).exit_code == 0
-    run_dirs = sorted((tmp_path / "results" / "example.com").iterdir())
+    run_dirs = sorted((tmp_path / "results" / "mock" / "example.com").iterdir())
     assert len(run_dirs) == 2
     for run_dir in run_dirs:
         assert (run_dir / "report.txt").is_file()
@@ -751,7 +751,7 @@ def test_a_flagged_run_writes_its_own_report_folder(
         app, ["passive", "-d", "example.com", "--mock", "--config", str(config)]
     )
     assert result.exit_code == 0
-    folders = sorted((tmp_path / "results" / "example.com").iterdir())
+    folders = sorted((tmp_path / "results" / "mock" / "example.com").iterdir())
     assert len(folders) == 1
     assert (folders[0] / "report.txt").is_file()
     assert (folders[0] / "report.json").is_file()

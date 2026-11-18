@@ -234,7 +234,7 @@ def test_flagged_run_writes_the_report_files_too(tmp_path: Path) -> None:
     result = CliRunner().invoke(app, scan_args(config, "passive"))
     assert result.exit_code == 0
     assert "report:" in result.stderr
-    folders = sorted((tmp_path / "results" / "example.com").iterdir())
+    folders = sorted((tmp_path / "results" / "mock" / "example.com").iterdir())
     assert len(folders) == 1
     assert (folders[0] / "report.txt").is_file()
     document = json.loads((folders[0] / "report.json").read_text(encoding="utf-8"))
@@ -260,7 +260,7 @@ def test_a_filtered_run_writes_only_what_it_showed_and_says_so(tmp_path: Path) -
         app, scan_args(config, "run", "--active", "--no-scope", "--only-alive")
     )
     assert result.exit_code == 0, result.stderr
-    folder = sorted((tmp_path / "results" / "example.com").iterdir())[0]
+    folder = sorted((tmp_path / "results" / "mock" / "example.com").iterdir())[0]
     document = json.loads((folder / "report.json").read_text(encoding="utf-8"))
     selection = document["selection"]
     assert selection["filter"] == "ALIVE"

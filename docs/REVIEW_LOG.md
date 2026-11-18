@@ -6625,3 +6625,30 @@ Saturation log line (fixture run, 2000 hosts, stage budget 1800, capped): the ad
 
 No ripple: `ToolLimits` is constructed in a handful of places and the new field has a default, so no equality-pinning test broke. No stop triggered.
 
+
+## 2026-11-18 (batch 2026-11-18) Part F - mock-run isolation (D30)
+
+### Investigation (raw)
+
+- Mock runs reach the store through `Engine.run` -> `create_target(target)`; the mock flag never changed the target identity, so fixture hosts (`www`/`api`/`dev`/`blog.example.com`) were stored under the real target id (the `testfire.net` run 69 pollution).
+- Reports are written by `report_directory(config.results_dir, target, run_at)` in `cli._run_scan`, so a mock run wrote into the same `results/<target>/` folder as a real run and could overwrite `report.txt`/`report.json`.
+- DB path comes from `config.db_path` (default `recon.db`) via `Engine.open(db_path=...)`; `--db` overrides it.
+
+### Mechanism chosen
+
+Preferred mechanism from the spec: separate DB by default + distinct results namespace.
+- `cli._run_scan`: when `mock` and no `--db` and `config.db_path == "recon.db"`, use `~/.reconkit/mock.db`.
+- `cli._run_scan`: when `mock`, `results_root = results/mock`, so reports land under `results/mock/<target>/`.
+- `Engine.open` untouched; the default is chosen in the CLI layer.
+
+Historical polluted rows are not deleted (no rewrite of history), as required.
+
+### Tests updated
+
+- `tests/test_cli.py` and `tests/test_interactive_scan.py`: report paths moved from `results/<target>/` to `results/mock/<target>/` for mock runs (7 + 2 sites).
+- Suite stays 899 (no new tests added here; the three named tests are the grader's).
+
+### Stop rule
+
+No ripple beyond the report-path edits; D20 report-on-every-scan behaviour preserved (mock still writes both files, now under the mock namespace). No stop triggered.
+

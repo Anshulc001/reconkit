@@ -802,6 +802,9 @@ def _run_scan(
             if activity_sink:
                 activity_sink[0](message)
 
+        # D30: a mock run defaults to an isolated DB unless --db was given.
+        if mock and db_path is None and config.db_path == "recon.db":
+            db_path = Path.home() / ".reconkit" / "mock.db"
         engine = Engine.open(
             config,
             db_path=db_path,
@@ -926,8 +929,13 @@ def _run_scan(
             # Every scan saves its report, interactive or not (docs/02 section 5).
             # The questions only choose the columns; a `-d`/`-l` run has no
             # question to answer, so it gets every stored field.
+            # D30: mock runs write under results/mock/<target>/ so they cannot
+            # overwrite a real run's report.
+            results_root = config.results_dir
+            if mock:
+                results_root = str(Path(config.results_dir) / "mock")
             run_at = datetime.now(UTC)
-            directory = report_directory(config.results_dir, target, run_at)
+            directory = report_directory(results_root, target, run_at)
             report_fields_for_run = plan.fields if plan is not None else REPORT_FIELDS
             report_text_path, report_json_path = write_field_report(
                 directory,
