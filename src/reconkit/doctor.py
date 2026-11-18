@@ -93,6 +93,10 @@ class DoctorReport:
     keys: tuple[KeyCheck, ...]
     missing: int
     warnings: tuple[str, ...]
+    # D36: the footer and `--json` must tell the same story, so both are
+    # derived here instead of counting twice.
+    installed: int = 0
+    manual: tuple[str, ...] = ()
     # D35: gowitness needs a Chromium-family browser for the shots stage; doctor
     # reports it as its own row so "shots produced 0" is never a mystery.
     chromium: str = MISSING
@@ -125,6 +129,11 @@ def default_status(spec: ToolSpec) -> InstallStatus:
 # (measured on this box: /usr/bin/chromium present, gowitness still reported
 # `failed to initialize chrome context`). The row must answer "can shots work
 # here", so it asks for the names gowitness actually launches (D35).
+def manual_tools(specs: Mapping[str, ToolSpec]) -> tuple[str, ...]:
+    """Tools the operator must place by hand (`manual: true`, D15/D36)."""
+    return tuple(name for name, spec in sorted(specs.items()) if spec.manual)
+
+
 BROWSER_NAMES = (
     "google-chrome",
     "google-chrome-stable",
@@ -290,6 +299,7 @@ def collect_report(
     )
 
     missing = sum(1 for check in tools if check.installed != YES)
+    installed_count = sum(1 for check in tools if check.installed == YES)
     warnings = [
         f"{check.name}: {check.path} is not the expected program; doctor ignores it. "
         "Install a known copy into the reconkit bin directory."
@@ -315,6 +325,8 @@ def collect_report(
         packages=package_checks,
         keys=keys,
         missing=missing,
+        installed=installed_count,
+        manual=manual_tools(specs),
         warnings=tuple(warnings),
         chromium=browser_state(),
     )

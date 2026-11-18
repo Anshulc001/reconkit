@@ -58,6 +58,9 @@ class ToolSpec:
     # Tools that cannot run without root (masscan's raw sockets). Selected only
     # when the process is root; otherwise skipped with `requires root / sudo`.
     needs_root: bool = False
+    # D36: no adapter and no install path reconkit can follow, so the operator
+    # places it by hand. doctor counts these as `manual`, not as missing.
+    manual: bool = False
     # Deterministic WAF merge (docs/MASTER_PLAN.md D12): the stored `waf` keeps
     # the detection of the highest priority, so completion order and rerun order
     # cannot change it. 0 = the tool makes no claim (every tool but the four
@@ -159,6 +162,7 @@ def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
         source=_optional_text(name, entry, "source"),
         exploitation=_exploitation(name, entry),
         needs_root=_flag(name, entry, "needs_root"),
+        manual=_flag(name, entry, "manual"),
         waf_priority=_waf_priority(name, entry),
     )
 

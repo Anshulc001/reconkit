@@ -6961,3 +6961,53 @@ Error: failed to initialize chrome context: exec: no chrome
 list), PROGRESS D35.
 
 Suite 915 -> 921.
+
+## 2026-11-18 (batch 2026-11-18b) B3 - doctor footer vs JSON (D36)
+
+### Investigation (raw, this box)
+
+```
+$ reconkit doctor --json | python -c "..."
+total tools: 48
+installed yes: 46
+not yes: [('amass', 'wrong program'), ('dnsreaper', 'missing')]
+json missing: 2
+$ reconkit doctor | tail -3
+Per-tool provenance: docs/10_TOOL_SOURCES.md.
+warning: amass: /usr/bin/amass is not the expected program; doctor ignores it.
+```
+
+So the brief's "47 installed, 1 manual" is the shape, not the numbers: on this box `amass` is a wrong program, so an
+honest footer must say 46 + 1 manual + 1 needing attention. The real defect was that the footer said
+`Missing tools: 2` while `--json` said `missing: 2` **and** listed 48 tools - two different stories from one command.
+
+### Implementation
+
+- `doctor.py`: `DoctorReport.installed` (count of `yes`) and `.manual` (tools whose registry entry says `manual: true`);
+  `manual_tools()` is one function. `registry.ToolSpec` gained `manual: bool` parsed by the existing `_flag`
+  (non-bool -> `ConfigError`); `tools.yaml` sets `manual: true` on `dnsreaper` only.
+- `ui.doctor_document()`: `installed` and `manual` added next to `missing`.
+- `ui.render_doctor()`: footer is now
+  `46 installed, 1 manual (dnsreaper), 1 needs attention (amass). Scans will use the tools that are installed and skip the rest. Per-tool provenance: docs/10_TOOL_SOURCES.md.`
+  (singular/plural handled; `missing` keeps its meaning).
+
+### Deviation, disclosed
+
+The first implementation derived "manual" from `source:` not starting with `apt:/pip:/go install/...`. That read the
+synthetic tools.yaml test fixtures as manual (`beta`, `gamma`) because they omit `source` entirely - a false positive
+the footer test caught. Replaced with an explicit registry flag, documented in docs/10.
+
+### Tests
+
+- `tests/test_doctor.py::test_missing_tools_keep_exit_code_zero` updated to the new footer.
+- `tests/test_doctor.py::test_footer_and_json_agree_on_installed_and_manual` - the actual D36 assertion.
+- `tests/test_doctor.py::test_a_manual_tool_is_counted_apart_from_missing` - `manual: true` is not "missing".
+- `tests/test_registry.py::test_manual_flag_is_parsed_and_defaults_to_false` (real `tools.yaml`).
+- `tests/test_registry.py::test_a_non_bool_manual_flag_is_a_config_error`.
+
+### Docs
+
+`docs/02_CLI_UX.md` (footer text + the `--json` key list), `docs/10_TOOL_SOURCES.md` (the `manual: true` registry flag),
+PROGRESS D36.
+
+Suite 921 -> 925.

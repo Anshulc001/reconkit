@@ -214,13 +214,59 @@ def test_missing_tools_keep_exit_code_zero(tmp_path: Path) -> None:
     report = report_for(tmp_path)
     stream = io.StringIO()
     assert render_doctor(report, stderr=stream) == 0
-    text = stream.getvalue()
+    text = " ".join(stream.getvalue().split())
+    # D36: the footer counts what is installed and what the operator must place
+    # by hand; it no longer says "Missing tools: N" while --json says otherwise.
     assert (
-        "Missing tools: 2. Scans will use the tools that are installed and skip the rest." in text
+        "2 installed, 0 manual, 2 need attention (beta, gamma). Scans will use the tools that "
+        "are installed and skip the rest." in text
     )
     assert "Per-tool provenance: docs/10_TOOL_SOURCES.md." in text
     assert "Install them yourself" not in text
     assert "reconkit install --all" not in stream.getvalue()
+
+
+def test_footer_and_json_agree_on_installed_and_manual(tmp_path: Path) -> None:
+    """D36: one set of numbers, so the table and the document cannot disagree."""
+    report = report_for(
+        tmp_path,
+        statuses={"beta": InstallStatus(installed=True, version="1.2.3", path=tmp_path / "beta")},
+    )
+    stream = io.StringIO()
+    render_doctor(report, stderr=stream)
+    footer = " ".join(stream.getvalue().split())
+    document_stream = io.StringIO()
+    render_doctor(report, json_output=True, stdout=document_stream)
+    document = json.loads(document_stream.getvalue())
+
+    assert document["installed"] == report.installed == 3
+    assert document["manual"] == list(report.manual)
+    assert f"{document['installed']} installed" in footer
+    assert f"{len(document['manual'])} manual" in footer
+    assert document["missing"] == report.missing == 1
+
+
+def test_a_manual_tool_is_counted_apart_from_missing(tmp_path: Path, monkeypatch) -> None:
+    """D36: `manual: true` is a known by-hand install (dnsreaper), not a gap."""
+    path = tmp_path / "tools.yaml"
+    path.write_text(
+        TOOLS_YAML + "  epsilon: {stage: vulns, kind: binary, tier: core, mode: active, phase: 3,\n"
+        "            manual: true, binary: epsilon}\n",
+        encoding="utf-8",
+    )
+    report = collect_report(
+        config=CONFIG,
+        tools_path=path,
+        env={},
+        scope_path=tmp_path / "scope.yaml",
+        dpkg_status=tmp_path / "dpkg-status",
+        status_of=lambda spec: InstallStatus(installed=False),
+    )
+    assert report.manual == ("epsilon",)
+    assert report.missing == 3
+    buffer = io.StringIO()
+    render_doctor(report, stderr=buffer)
+    assert "1 manual (epsilon)" in " ".join(buffer.getvalue().split())
 
 
 def test_python_too_old_exits_one(monkeypatch, tmp_path: Path) -> None:

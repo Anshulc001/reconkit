@@ -202,7 +202,11 @@ Rules it keeps:
   (installed / path / identity). A binary that exists but is the wrong program
   is `identity: failed` and fails the script. An entry with no automatic source
   is printed as `manual` **only while it is still missing** (today that is just
-  `dnsreaper`), and it is never counted as a failure.
+  `dnsreaper`), and it is never counted as a failure. That flag is now part of the
+  registry contract (D36): `tools.yaml` may carry `manual: true` (a non-bool is a
+  `ConfigError`), the registry parses it into `ToolSpec.manual`, and `reconkit
+  doctor` counts such a tool as **manual**, separately from the tools that need
+  attention - `46 installed, 1 manual (dnsreaper), 1 needs attention (amass)`.
 - `--dry-run` prints every command, `--check` reports only, `--update` re-runs
   `apt`/`go`/`pipx` for every tool, `--only <pattern>` narrows to one tool.
 

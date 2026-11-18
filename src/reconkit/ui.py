@@ -963,6 +963,9 @@ def doctor_document(report: DoctorReport) -> dict[str, object]:
             for key in report.keys
         ],
         "missing": report.missing,
+        # D36: same numbers the footer prints, so the two can never disagree.
+        "installed": report.installed,
+        "manual": list(report.manual),
         "warnings": list(report.warnings),
         # D35: absent browser = shots produces 0, and the run stays exit 0.
         "chromium": report.chromium,
@@ -1056,11 +1059,25 @@ def render_doctor(
             )
         out.print(keys)
     if report.missing:
+        # D36: one footer, one source of numbers (`DoctorReport.installed`/
+        # `.manual`), so the table and `--json` cannot disagree.
+        manual = f" ({', '.join(report.manual)})" if report.manual else ""
+        parts = [f"{report.installed} installed", f"{len(report.manual)} manual{manual}"]
+        rest = sorted(
+            check.name
+            for check in report.tools
+            if check.installed != YES and check.name not in report.manual
+        )
+        if rest:
+            verb = "needs" if len(rest) == 1 else "need"
+            parts.append(f"{len(rest)} {verb} attention ({', '.join(rest)})")
         out.print(
             Text(
-                f"Missing tools: {report.missing}. Scans will use the tools that are "
-                "installed and skip the rest. Per-tool provenance: "
-                "docs/10_TOOL_SOURCES.md.",
+                (
+                    ", ".join(parts)
+                    + ". Scans will use the tools that are installed and skip the rest. "
+                    "Per-tool provenance: docs/10_TOOL_SOURCES.md."
+                ),
                 style="yellow",
             )
         )

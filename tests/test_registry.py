@@ -189,3 +189,20 @@ def test_invalid_system_packages_is_a_config_error(tmp_path: Path) -> None:
     bad.write_text("system_packages: jq\ntools: {}\n", encoding="utf-8")
     with pytest.raises(ConfigError):
         load_system_packages(bad)
+
+
+def test_manual_flag_is_parsed_and_defaults_to_false() -> None:
+    """D36: dnsreaper is the one tool the operator must place by hand."""
+    assert get_spec("dnsreaper").manual is True
+    assert get_spec("crtsh").manual is False
+
+
+def test_a_non_bool_manual_flag_is_a_config_error(tmp_path: Path) -> None:
+    path = tmp_path / "tools.yaml"
+    path.write_text(
+        "tools:\n  zeta: {stage: vulns, kind: binary, tier: core, mode: active, phase: 3,\n"
+        "         manual: sometimes, binary: zeta}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="invalid 'manual'"):
+        load_tools(path)
