@@ -5904,3 +5904,32 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
 - **Gate:** `891 passed`; `ruff check .` "All checks passed!"; `ruff format --check .` "92 files
   already formatted"; `mypy src/reconkit` "Success: no issues found in 62 source files".
 
+### Part 3 follow-up - `timeouts.url_probe` needs a default, or old configs stop loading
+
+- **How it was found:** the real `--reprobe-urls` proof used `/tmp/rk4/config.yaml`, a copy taken
+  *before* D26. The run died with `cannot read config file ...: timeouts.url_probe` (exit 2) because
+  `Timeouts` has `extra="forbid"` and the new field was required: every externally kept
+  `config.yaml` written before today would have stopped loading.
+- **Fix:** `Timeouts.url_probe` is `Field(default=600, gt=0)`, the same value `config.yaml` ships, so
+  a config without the key loads and keeps the new deadline. `_stage_timeout()` already had a
+  `getattr` fallback, so nothing else needed to change.
+- **Test:** `test_a_config_without_timeouts_url_probe_still_loads` (drops the key from the real
+  config and asserts 600).
+- **Proof the flag works end to end** (`/tmp/rk4`, 20 answered URLs, `--tools pyprobe`, after the
+  default fix):
+
+  ```
+  BEFORE: |365   -2|40
+  url_probe: probing 20 URL(s)
+  url_probe: finished 20 URL(s)
+  warning: url_probe: probed the first 20 URL(s) only; re-run to probe the rest
+  EXIT=0
+  AFTER:  |365   -2|40
+  probe run params: {"scan_key": "...", "mode": "active", "tools": [], "mock": false,
+                     "active": true, "reprobe": true, "no_keys": false, "min_sources": 1}
+  ```
+
+  The NULL count did **not** move (a default pass would have taken it to 345), so the 20 requests
+  really were the already-answered rows, and `"reprobe": true` is on the run.
+- **Gate:** `892 passed`; ruff, format and mypy clean.
+

@@ -39,6 +39,17 @@ def test_the_urls_runtime_bounds_load_and_default(tmp_path: Path) -> None:
     assert load_config(legacy).urls.urlfinder_idle_s == 60
 
 
+def test_a_config_without_timeouts_url_probe_still_loads(tmp_path: Path) -> None:
+    """D26 added the key; a config.yaml written before it must keep working."""
+    import yaml
+
+    legacy = tmp_path / "legacy.yaml"
+    raw = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    raw["timeouts"].pop("url_probe")
+    legacy.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    assert load_config(legacy).timeouts.url_probe == 600
+
+
 def test_managed_bin_dir_has_one_source_of_truth(tmp_path: Path) -> None:
     """Moved from tests/test_install_cli.py:373 when `installer/` was deleted.
 
