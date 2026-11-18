@@ -116,6 +116,9 @@ class NucleiAdapter(BinaryAdapter):
             "-silent",
             "-nc",
             "-duc",
+            # The request/response pair is never parsed, and it is what pushed a
+            # real run past the 1 MB stdout cap and truncated the last JSON line.
+            "-or",
             "-tags",
             ",".join(SAFE_TAGS),
         ]

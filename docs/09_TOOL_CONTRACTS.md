@@ -257,14 +257,21 @@ the whole `urls` stage in **15 s wall clock** with `gau ok 345` and
 `urlfinder` is the one tool whose runtime could not be predicted: with the same
 command it returned 996 URLs in 15 s, then 206 in 506 s and 932 in 525 s on the
 next three runs, because a single slow source holds the whole enumeration. Its
-`-max-time` is now **3 minutes** (`min(budget, 180)` rounded up to minutes)
-instead of the stage budget (30 minutes for `urls`), so the stage has a ceiling;
-the URLs found before the cap are kept.
+own `-max-time` turned out **not to be enforced** by the binary (still running
+at 5m52s with `-max-time 3`), so the adapter now sets `runtime_cap_s = 180`:
+the process is killed at three minutes and the partial stdout is parsed, so the
+URLs found before the cap are kept (a plain timeout used to discard all of
+them). `-max-time 3` is still passed to the tool for its own bookkeeping.
 
 `nikto` has the same shape: one process per host, each with its share of the
 remaining stage budget, and the tool's own `-maxtime <share>s` so it stops
 itself cleanly and writes its JSON instead of being killed by our timeout. A
 real `--full` run had nikto killed at 600 s with 0 findings before this.
+
+`nuclei` gets `-or` (`-omit-raw`, verified in its `-help`). The request/response
+pair it embeds is never parsed, and on a real run it pushed the JSONL stdout
+past the 1 MB output cap, truncating the last line and failing the tool with
+`invalid JSON line`.
 
 This is deliberately limited to the **passive** tools and to these two
 one-process-per-item tools. Other active tools are bounded by the phase timeout
@@ -418,7 +425,7 @@ explicit `reconkit vulns` stage command, or an explicit `--tools` name.
 
 | Tool | Invocation | Records |
 |---|---|---|
-| `nuclei` | `-l <hosts file> -jsonl -silent -nc -duc -tags takeover,exposure,misconfig` | `FindingRecord(kind=<template type>, severity=<info.severity>, template_id=<template-id>, evidence=<matched-at>)` |
+| `nuclei` | `-l <hosts file> -jsonl -silent -nc -duc -or -tags takeover,exposure,misconfig` | `FindingRecord(kind=<template type>, severity=<info.severity>, template_id=<template-id>, evidence=<matched-at>)` |
 | `subzy` | `run --targets <hosts file> --hide_fails --output <json file>` | `FindingRecord(kind="takeover", severity="high", title=<service/documentation>)` for `vulnerable: true` entries only |
 | `ffuf` | `-u FHOST/FUZZ -w <hosts file>:FHOST -w <wordlist>:FFUF -mode clusterbomb -of json -o <json file> -mc 200,204,301,302,307,401,403 -t 50 -s -noninteractive` | `FindingRecord(kind="path", severity="info", title=`<status> <path>`, evidence=<url>)` for every match |
 

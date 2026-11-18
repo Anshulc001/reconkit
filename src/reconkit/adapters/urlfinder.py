@@ -39,6 +39,10 @@ MAX_ENUMERATION_S = 180
 
 
 class UrlfinderAdapter(BinaryAdapter):
+    # `-max-time` is not enforced by the real binary (measured: still running at
+    # 5m52s with `-max-time 3`), so the adapter caps the process itself and keeps
+    # whatever arrived.
+    runtime_cap_s = MAX_ENUMERATION_S
     name = "urlfinder"
     stage = Stage.URLS
     binary = "urlfinder"

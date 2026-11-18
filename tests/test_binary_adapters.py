@@ -20,6 +20,7 @@ from reconkit.adapters import ADAPTERS
 from reconkit.adapters import base as base_module
 from reconkit.adapters import nikto as nikto_module
 from reconkit.adapters import subfinder as subfinder_module
+from reconkit.adapters import urlfinder as urlfinder_module
 from reconkit.adapters.assetfinder import AssetfinderAdapter
 from reconkit.adapters.base import BinaryAdapter
 from reconkit.adapters.cdncheck import CdncheckAdapter
@@ -1584,6 +1585,31 @@ def test_urlfinder_skips_archived_junk_and_feeds_domains(monkeypatch: pytest.Mon
     assert calls == []
 
 
+def test_urlfinder_keeps_partial_urls_when_the_runtime_cap_fires(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: PIT-56 a capped run must not throw away what it found."""
+    adapter = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder")
+    ctx = make_ctx(hosts=["testfire.net"])
+    ctx.timeout = 1800.0  # the real `urls` stage budget
+    calls = fake_exec(
+        monkeypatch,
+        outcome(
+            stdout="https://testfire.net/login.jsp\nhttps://testfire.net/admin\n",
+            timed_out=True,
+        ),
+    )
+    result = asyncio.run(adapter.run(ctx))
+
+    assert calls[0][1]["timeout"] == float(urlfinder_module.MAX_ENUMERATION_S)
+    assert result.status is ToolStatus.OK
+    assert [record.url for record in result.records] == [
+        "https://testfire.net/login.jsp",
+        "https://testfire.net/admin",
+    ]
+    assert result.error is not None and "capped at" in result.error
+
+
 def test_urlfinder_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_exec(monkeypatch, outcome("[INF] Current Version: v0.0.3\n", stderr="some other tool\n"))
     status = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder").check_installed()
@@ -1832,6 +1858,9 @@ def test_nuclei_adapter_scans_the_given_hosts_with_safe_tags(tmp_path: Path) -> 
     command = adapter.build_command(ctx)
     assert command[1:4] == ["-l", str(tmp_path / f"nuclei-hosts-{os.getpid()}.txt"), "-jsonl"]
     assert "-duc" in command and "-silent" in command and "-nc" in command
+    # `-or` keeps the raw request/response out: on a real full run they pushed
+    # the JSONL past the 1 MB stdout cap and truncated the last line.
+    assert "-or" in command
     assert command[command.index("-tags") + 1] == "takeover,exposure,misconfig"
     assert "-severity" not in command  # severity is stored, never used to hide findings
     assert "-rl" not in command  # no pacing (D3)

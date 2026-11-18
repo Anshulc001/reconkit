@@ -151,6 +151,12 @@ class BaseToolAdapter(ABC):
     # that can only fail (pre-approved, D18). Unlike `tools.yaml` `keys`, which
     # describes an optional upgrade, this is a hard requirement.
     requires_env: ClassVar[tuple[str, ...]] = ()
+    # A tool whose own time flags are not enforced (urlfinder runs past
+    # `-max-time`) gets a hard cap here instead of the whole phase budget. On a
+    # capped timeout the partial output is still parsed, so the URLs found
+    # before the cap are kept (2026-11-18).
+
+    runtime_cap_s: ClassVar[float | None] = None
 
     def __init__(self, *, fixtures_dir: Path | None = None) -> None:
         self._fixtures_dir = fixtures_dir if fixtures_dir is not None else FIXTURES
@@ -229,16 +235,28 @@ class BaseToolAdapter(ABC):
                 records = self.parse_output(raw_text)
             else:
                 with self.prepare(ctx):
+                    cap = self.runtime_cap_s
                     outcome = await asyncio.to_thread(
                         run_exec,
                         self.build_command(ctx),
-                        timeout=ctx.timeout,
+                        timeout=ctx.timeout if cap is None else min(ctx.timeout, cap),
                         env=self.child_env(ctx),
                         stdin_text=self.stdin_text(ctx),
                     )
                     duration = outcome.duration_s
                     raw_text = capture_output(outcome.stdout, outcome.stderr)
                     if outcome.timed_out:
+                        if cap is not None:
+                            partial = self.parse_output(outcome.stdout)
+                            if partial:
+                                return ToolResult(
+                                    tool=self.name,
+                                    status=ToolStatus.OK,
+                                    records=partial,
+                                    duration_s=duration,
+                                    error=f"capped at {cap:g}s; kept partial output",
+                                    raw_text=raw_text,
+                                )
                         return ToolResult(
                             tool=self.name,
                             status=ToolStatus.TIMEOUT,
