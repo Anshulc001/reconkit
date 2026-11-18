@@ -199,7 +199,13 @@ while IFS=$'\t' read -r tag a b c; do
       esac
       ;;
     manual)
-      printf 'manual  %s\n' "${a}"
+      # No automatic source in the registry - but it may be present already,
+      # in which case it is not a gap (findomain/rustscan on this box).
+      if have "${a}"; then
+        printf 'have    %-16s (installed by hand)\n' "${a}"
+      else
+        printf 'manual  %s\t%s\n' "${a}" "${b}"
+      fi
       ;;
   esac
 done <"${PLAN}"

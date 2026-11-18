@@ -198,7 +198,9 @@ Rules it keeps:
 - **Verification is `reconkit doctor --json`**, the adapter's own probe
   (installed / path / identity). A binary that exists but is the wrong program
   is `identity: failed` and fails the script. Entries with no automatic source
-  are reported, not counted as failures.
+  are printed as `manual` **only while they are still missing** (`findomain` and
+  `rustscan` show as `have ... (installed by hand)`), and they are never counted
+  as failures.
 - `--dry-run` prints every command, `--check` reports only, `--update` re-runs
   `apt`/`go`/`pipx` for every tool, `--only <pattern>` narrows to one tool.
 

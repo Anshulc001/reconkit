@@ -4806,10 +4806,27 @@ $ ./scripts/install-tools.sh --check   # 33 have, 2 go, 3 manual
 dry-run: nothing was installed, nothing changed
 ```
 
-Three defects were caught while testing and fixed before commit: the `chaos`
+Four defects were caught while testing and fixed before commit: the `chaos`
 module kept a trailing `;` from its prose hint; `httpx_tech` was printed as manual
-although the `httpx` row installs that binary; and `--only` scoped the install
-but not the `doctor` verdict, so a one-tool run failed on unrelated tools.
+although the `httpx` row installs that binary; `--only` scoped the install but
+not the `doctor` verdict, so a one-tool run failed on unrelated tools; and
+`findomain`/`rustscan` were listed as `manual` although both were already
+installed - the manual list now only shows entries that are still missing.
+
+The end-to-end run on this box, nothing scoped:
+
+```
+$ ./scripts/install-tools.sh --yes
+== go install (1) -> /home/kali/.reconkit/bin ==
+>> github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest
+== verification: .../reconkit doctor ==
+Missing tools: 1. Scans will use the tools that are installed and skip the rest.
+every installable registry binary is installed and identified correctly.  (exit 0, 4 s)
+```
+
+The one remaining check is `dnsreaper`, the registry entry with no automatic
+source; it is reported, not failed. Final state: 40 binary entries, 39 installed
+with `identity: ok`, 1 manual gap.
 
 The **apt path did run**, under a pty so sudo could ask for the owner's password
 (the credential cache is per-tty, so priming it from another shell is not enough):
