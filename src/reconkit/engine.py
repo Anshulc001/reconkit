@@ -599,6 +599,11 @@ class Engine:
         self._now = now if now is not None else utc_now
         self._secrets = tuple(value for value in self.env.values() if value)
         self._warnings: list[str] = []
+        # D26: the last probe pass's bookkeeping, so a pass killed by its
+        # deadline can still be finished with the counts it reached.
+        self._url_probe_outcome: StageOutcome | None = None
+        self._url_probe_progress: tuple[int, int] = (0, 0)
+        self._url_probe_timeout: tuple[float, int, int] | None = None
 
     @classmethod
     def open(
@@ -727,6 +732,10 @@ class Engine:
         )
         target_id = self.store.create_target(target, created_at=self._now())
         self._warnings = []
+        # D26: cleared per run; only the timed-out pass sets them.
+        self._url_probe_outcome = None
+        self._url_probe_progress = (0, 0)
+        self._url_probe_timeout = None
         if not opts.active or opts.no_scope:
             self._note_passive_warning(target, opts)
 
@@ -754,9 +763,16 @@ class Engine:
                 continue
             if stage is Stage.URL_PROBE:
                 # Engine-owned, so it never goes through tool selection (D23).
-                probe, scope_error = await self._run_url_probe(
-                    target, target_id, opts, scan_key=scan_key
-                )
+                # D26: it gets the same deadline every tool stage has, from
+                # --phase-timeout or `timeouts.url_probe` in config.yaml.
+                probe_timeout = opts.phase_timeout or self._stage_timeout(Stage.URL_PROBE)
+                try:
+                    probe, scope_error = await asyncio.wait_for(
+                        self._run_url_probe(target, target_id, opts, scan_key=scan_key),
+                        timeout=probe_timeout,
+                    )
+                except TimeoutError:
+                    probe, scope_error = self._url_probe_timed_out(probe_timeout), None
                 if scope_error is not None:
                     summary.scope_denied = True
                     self._note_scope_refusal(target, scope_error)
@@ -994,6 +1010,15 @@ class Engine:
             elif external:
                 reasons = ", ".join(sorted(self._gap_reason(result) for result in external))
                 gaps.append(CompletionGap(outcome.stage, reasons, 0))
+        if self._url_probe_timeout is not None:
+            timeout, done, total = self._url_probe_timeout
+            gaps.append(
+                CompletionGap(
+                    Stage.URL_PROBE,
+                    f"timed out after {timeout:g}s ({done}/{total} URL(s) probed)",
+                    0,
+                )
+            )
         return gaps
 
     @staticmethod
@@ -1748,6 +1773,8 @@ class Engine:
             secrets=self._secrets,
         )
         outcome = StageOutcome(stage=Stage.URL_PROBE, run_id=run_id)
+        self._url_probe_outcome = outcome
+        self._url_probe_progress = (0, 0)
         if not rows:
             self._progress("url_probe: nothing to probe")
             self.store.finish_scan_run(run_id, "completed", finished_at=self._now())
@@ -1771,6 +1798,7 @@ class Engine:
                 return outcome, scope_error
             allowed = set(kept)
         pending = [row for row in rows if self._url_host(str(row["url"])) in allowed]
+        self._url_probe_progress = (0, len(pending))
         if not pending:
             self._progress("url_probe: nothing to probe (no in-scope URL)")
             self.store.finish_scan_run(run_id, "completed", finished_at=self._now())
@@ -1784,15 +1812,38 @@ class Engine:
             for start in range(0, len(pending), settings.batch_size):
                 batch = pending[start : start + settings.batch_size]
                 answers = await self._probe_url_batch(client, batch, settings)
-            with self.store.transaction():
-                for url_id, status in answers:
-                    self.store.set_url_status(url_id, status)
-            done += len(answers)
-            if done < len(pending):
-                self._progress(f"url_probe: {done}/{len(pending)} URL(s) probed")
+                # Commit per batch, inside the loop: a pass killed by its
+                # deadline keeps every batch that finished (D26).
+                with self.store.transaction():
+                    for url_id, status in answers:
+                        self.store.set_url_status(url_id, status)
+                done += len(answers)
+                self._url_probe_progress = (done, len(pending))
+                if done < len(pending):
+                    self._progress(f"url_probe: {done}/{len(pending)} URL(s) probed")
         self._progress(f"url_probe: finished {done} URL(s)")
         self.store.finish_scan_run(run_id, "completed", finished_at=self._now())
         return outcome, None
+
+    def _url_probe_timed_out(self, timeout: float) -> StageOutcome:
+        """Finish a probe pass that hit its deadline (D26, verification gap 4).
+
+        Every completed batch is already committed, so the partial answers keep
+        their place and the URLs that were never reached stay `NULL` for the
+        next run. The pass is recorded as `partial`, the run keeps exit 0, and a
+        completion gap names what was cut off - a timed-out probe is not a
+        failed scan.
+        """
+        outcome = self._url_probe_outcome or StageOutcome(Stage.URL_PROBE, run_id=-1)
+        done, total = self._url_probe_progress
+        if outcome.run_id > 0:
+            self.store.finish_scan_run(outcome.run_id, "partial", finished_at=self._now())
+        note = f"url_probe: timed out after {timeout:g}s ({done}/{total} URL(s) probed)"
+        if note not in self._warnings:
+            self._warnings.append(note)
+        self._progress(note)
+        self._url_probe_timeout = (timeout, done, total)
+        return outcome
 
     def _url_probe_client(self, settings: UrlProbeConfig) -> httpx.AsyncClient:
         """The one HTTP client a `url_probe` pass uses (D24).

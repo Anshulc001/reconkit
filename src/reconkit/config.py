@@ -43,6 +43,7 @@ class Timeouts(_StrictModel):
     ports: int = Field(gt=0)
     tech: int = Field(gt=0)
     urls: int = Field(gt=0)
+    url_probe: int = Field(gt=0)
     vulns: int = Field(gt=0)
 
 

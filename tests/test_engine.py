@@ -3778,3 +3778,75 @@ async def test_url_probe_sees_a_certificate_error_in_the_context_chain(tmp_path:
         "https://www.example.com/a": UNTRUSTED,
         "https://www.example.com/refused": UNREACHABLE,
     }
+
+
+def _slow_transport(delays: dict[str, float], calls: list[str]) -> httpx.MockTransport:
+    """A transport that never answers for a URL whose delay is huge."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        await asyncio.sleep(delays.get(str(request.url), 0.0))
+        return httpx.Response(200)
+
+    return httpx.MockTransport(handler)
+
+
+async def test_url_probe_respects_phase_timeout(tmp_path: Path) -> None:
+    """D26: the probe pass is bounded by --phase-timeout and keeps exit 0."""
+    calls: list[str] = []
+    transport = _slow_transport({"https://www.example.com/slow": 30.0}, calls)
+    engine = _probe_engine(
+        tmp_path, ["https://www.example.com/slow"], transport=transport, scope_text=None
+    )
+    summary = await engine.run("example.com", ScanOptions(active=True, phase_timeout=0.3))
+    assert summary.exit_code is ExitCode.SUCCESS
+    assert any("url_probe: timed out after 0.3s" in note for note in summary.warnings)
+    assert [row["status_code"] for row in rows(engine.store, "SELECT status_code FROM urls")] == [
+        None
+    ]
+    # A timed-out probe is a gap, not a partial run (docs/02 section 6).
+    assert summary.completion_status == "complete_with_gaps"
+    assert [(gap.stage, gap.reason) for gap in summary.gaps] == [
+        (Stage.URL_PROBE, "timed out after 0.3s (0/1 URL(s) probed)")
+    ]
+    statuses = [
+        str(row["status"])
+        for row in rows(
+            engine.store, "SELECT status FROM scan_runs WHERE stage = 'url_probe' ORDER BY id"
+        )
+    ]
+    assert statuses == ["partial"]
+
+
+async def test_url_probe_timeout_keeps_the_batches_it_finished(tmp_path: Path) -> None:
+    """Committed batches survive the kill; the unreached URL stays NULL."""
+    calls: list[str] = []
+    transport = _slow_transport({"https://www.example.com/slow": 30.0}, calls)
+    engine = _probe_engine(
+        tmp_path,
+        ["https://www.example.com/fast", "https://www.example.com/slow"],
+        transport=transport,
+        scope_text=None,
+    )
+    engine.config.url_probe.batch_size = 1
+    summary = await engine.run("example.com", ScanOptions(active=True, phase_timeout=0.5))
+    stored = {
+        str(row["url"]): row["status_code"]
+        for row in rows(engine.store, "SELECT url, status_code FROM urls ORDER BY id")
+    }
+    assert stored == {"https://www.example.com/fast": 200, "https://www.example.com/slow": None}
+    assert any("(1/2 URL(s) probed)" in note for note in summary.warnings)
+    assert summary.exit_code is ExitCode.SUCCESS
+
+
+async def test_url_probe_uses_the_config_timeout_when_no_flag_is_given(tmp_path: Path) -> None:
+    """No --phase-timeout: `timeouts.url_probe` from config.yaml is the deadline."""
+    calls: list[str] = []
+    transport = _slow_transport({"https://www.example.com/slow": 30.0}, calls)
+    engine = _probe_engine(
+        tmp_path, ["https://www.example.com/slow"], transport=transport, scope_text=None
+    )
+    engine.config.timeouts.url_probe = 1
+    summary = await engine.run("example.com", ScanOptions(active=True))
+    assert any("url_probe: timed out after 1s" in note for note in summary.warnings)
+    assert summary.exit_code is ExitCode.SUCCESS

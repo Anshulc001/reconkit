@@ -222,7 +222,7 @@ Speed control was removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN
 - **Config.** `config.yaml` has no `speeds` block and no `default_speed`; `AppConfig` rejects those keys as unknown.
 - **Scope.** `scope.yaml` `max_speed` is still accepted so an existing file keeps loading, and is ignored: there is no speed left to cap.
 - **Persistence.** `scan_runs` has no `speed` column (schema version 6; migration 5 dropped it and migration 6 added `scope_mode`), and `status` no longer prints a Speed column or field.
-- **Timeouts are not throttling** and remain: each stage has its phase timeout and each tool its per-tool timeout, both in `config.yaml`.
+- **Timeouts are not throttling** and remain: each stage has its phase timeout and each tool its per-tool timeout, both in `config.yaml`. The engine-owned `url_probe` stage is bounded by the same rule (D26): `--phase-timeout` or `timeouts.url_probe` (600 s) wraps `Engine._run_url_probe` in `asyncio.wait_for`; every finished batch is already committed, the pass row is closed as `partial`, and the timeout becomes a completion gap, not a failed run.
 - **Randomness** survives only where it is functional: wildcard probe labels (injected RNG), never for scheduling.
 
 ## 8. Consensus Engine

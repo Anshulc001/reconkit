@@ -5844,3 +5844,63 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
   SQL and was fixed to two static statements rather than adding an S608 suppression);
   `ruff format --check .` "92 files already formatted"; `mypy src/reconkit` clean.
 
+## 2026-11-18 (verification follow-up) - regression repair in Part 1's probe loop
+
+- **What broke:** the D24 edit that moved the `AsyncClient` out of `_probe_url_batch` left the
+  per-batch commit block (`with self.store.transaction(): ... set_url_status`) dedented one level,
+  outside the `for start in range(...)` loop. A pass with more than one batch would have committed
+  only the **last** batch and silently discarded every earlier answer.
+- **How it was found:** writing the Part 3 test `test_url_probe_timeout_keeps_the_batches_it_finished`
+  (batch_size 1, one fast URL and one that never answers). The warning said `1/2 URL(s) probed` while
+  both rows were still `NULL`, because the commit ran after the loop instead of inside it.
+- **Exposure:** none in practice - every measured pass (158 URLs, 20 URLs) was a single batch of at
+  most `batch_size` 200. It would have shown up on the first target with more than 200 unprobed URLs.
+- **Fix:** the `with self.store.transaction():` block and the `done`/progress updates are indented
+  back inside the loop, with a comment saying why (a pass killed by its deadline must keep every
+  batch that finished).
+- **Proof:** `pytest -q tests/test_engine.py -k "url_probe or reprobe or phase_timeout"` ->
+  `14 passed`. Full gate is in the Part 3 entry that follows.
+
+## 2026-11-18 (verification follow-up) Part 3 - `url_probe` respects the stage deadline (D26)
+
+- **Where it came from:** verification spot-check 4. The `Stage.URL_PROBE` branch of the run loop
+  handled the stage and `continue`d before `timeout = opts.phase_timeout or
+  self._stage_timeout(stage)`, so `--phase-timeout` never reached it, and `config.yaml` had no
+  `timeouts.url_probe` key at all. The pass was bounded only by `max_urls x timeout_s / threads`
+  (~1000 s).
+- **Docs first:** docs/02 (flag description + stage paragraph), docs/03 (timeout semantics),
+  docs/09 (unchanged table), COMMANDS.md, MASTER_PLAN D26, `config.yaml` comment.
+- **Code:** `Timeouts.url_probe: int` (config model) and `timeouts.url_probe: 600` in `config.yaml`;
+  the branch now runs
+  `asyncio.wait_for(self._run_url_probe(...), timeout=opts.phase_timeout or self._stage_timeout(Stage.URL_PROBE))`
+  and catches `TimeoutError`; `_url_probe_timed_out(timeout)` closes the `scan_runs` row as `partial`,
+  appends the warning `url_probe: timed out after {t:g}s ({done}/{total} URL(s) probed)`, and records
+  the counts on the engine so `_completion_gaps()` appends a `URL_PROBE` `CompletionGap`. Progress is
+  tracked in `_url_probe_progress` (updated per committed batch) and reset per run.
+- **Same commit:** the D24 regression (per-batch commit dedented out of the loop) is repaired; see
+  the entry above for its own evidence.
+- **Live proof with the real network (3 testfire URLs, `threads: 1`, `batch_size: 1`,
+  `phase_timeout=1.5`, single-stage run):**
+
+  ```
+  warnings: ['url_probe: timed out after 1.5s (2/3 URL(s) probed)']
+  gaps: [('url_probe', 'timed out after 1.5s (2/3 URL(s) probed)')]
+  completion: complete_with_gaps exit: 4
+  scan_run status: partial
+    https://testfire.net/                  status_code=-2
+    https://testfire.net/login.jsp         status_code=-2
+    https://testfire.net/index.jsp         status_code=None
+  ```
+
+  The two completed answers survived the kill and the third stayed `NULL`. The exit is `4` only
+  because this artificial run consists of `url_probe` alone, so it produced no results at all
+  (the existing "nothing usable" rule); in a real scan, where urls/live ran, a probe timeout is
+  exit **0** - `test_url_probe_respects_phase_timeout` asserts `ExitCode.SUCCESS` plus the
+  `complete_with_gaps` status.
+- **Tests:** 888 -> 891. New: `test_url_probe_respects_phase_timeout` (0.3 s deadline, warning,
+  NULLs kept, gap, `partial` run row, exit 0), `test_url_probe_timeout_keeps_the_batches_it_finished`
+  (`(1/2 URL(s) probed)`, the finished answer stays, exit 0),
+  `test_url_probe_uses_the_config_timeout_when_no_flag_is_given` (`timeouts.url_probe = 1`).
+- **Gate:** `891 passed`; `ruff check .` "All checks passed!"; `ruff format --check .` "92 files
+  already formatted"; `mypy src/reconkit` "Success: no issues found in 62 source files".
+

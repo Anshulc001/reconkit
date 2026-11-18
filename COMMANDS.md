@@ -400,6 +400,12 @@ leaves every `status_code` at `NULL`. `--reprobe-urls` overwrites the stored
 answer in place, which is how a URL that has since gone dead is found; adding
 `--skip-url-probe` makes it a no-op and the run says so.
 
+The pass is bounded by `--phase-timeout`, or by `timeouts.url_probe` (600 s) in
+`config.yaml` when the flag is absent (D26). A pass that hits the deadline keeps
+every batch it already committed, leaves the rest `NULL`, prints
+`url_probe: timed out after Ns (M/N URL(s) probed)`, reports a completion gap and
+still exits 0.
+
 ---
 
 ## Confirming it works

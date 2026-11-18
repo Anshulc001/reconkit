@@ -122,6 +122,13 @@ so a mock run leaves every `status_code` at `NULL` and says so;
 stored URL again instead of only the `NULL` ones, which is how a URL that has
 since gone dead is found; it overwrites the stored answer in place.
 
+The pass has a deadline (D26): `--phase-timeout`, or `timeouts.url_probe` (600 s)
+when the flag is absent. On timeout the batches that finished keep their answers,
+the URLs never reached stay `NULL`, the pass is recorded as `partial`, stderr
+prints `url_probe: timed out after Ns (M/N URL(s) probed)`, the run reports a
+completion gap (so `--json` says `complete_with_gaps`) and the exit code stays
+**0** - a probe that ran out of time is a gap, not a failed scan.
+
 ### Workflows
 | Command | Pipeline |
 |---|---|
@@ -308,7 +315,7 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | `--resolvers PATH` | Resolver list for `massdns` and `puredns`, replacing the packaged `src/reconkit/data/resolvers.txt` (16 public resolvers, D16). The file must exist and be readable; a missing file is a failed `massdns`/`puredns` result, never a silent fallback to the system resolver |
 | `--redact-headers` / `--show-headers` | Hide (default) or reveal header values in JSON and UI output |
 | `--min-sources N` | Hide results confirmed by fewer than N tools |
-| `--phase-timeout SEC` | Stage time limit. `--timeout-<stage>` is deferred; `--phase-timeout` is the only stage-timeout control in this build. |
+| `--phase-timeout SEC` | Stage time limit, applied to **every** stage including the engine-owned `url_probe` (D26). `--timeout-<stage>` is deferred; `--phase-timeout` is the only stage-timeout control in this build. Without it, each stage uses its `timeouts:` entry (`timeouts.url_probe` is 600 s). |
 | `--mock` | Use fixtures instead of real tools/network |
 | `--resume` | Continue the latest unfinished run for the target; completed stages are not repeated |
 | `--no-keys` | Force free mode on the scan commands: ignore API keys from `.env` (policy in docs/05 §6.1) |

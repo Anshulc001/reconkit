@@ -1025,6 +1025,30 @@ D24. 2026-11-18 - Faster `url_probe`, and `--reprobe-urls` (owner-requested batc
     `--skip-url-probe` the flag has no stage to act on, so the run prints a
     warning and continues.
 
+D26. 2026-11-18 - `url_probe` respects `--phase-timeout` and `timeouts.url_probe`
+    (verification gap 4).
+
+    Problem: the `Stage.URL_PROBE` branch in the run loop handled the stage and
+    `continue`d before the tool path, so it never reached
+    `timeout = opts.phase_timeout or self._stage_timeout(stage)`. `--phase-timeout`
+    was silently ignored and there was no `timeouts.url_probe` key at all, leaving
+    the pass bounded only by `max_urls x timeout_s / threads` (about 1000 s).
+
+    Fix: `timeouts.url_probe: 600` (new `Timeouts` field, same default shape as
+    the other stages) and the branch now wraps `_run_url_probe` in
+    `asyncio.wait_for(..., timeout=opts.phase_timeout or _stage_timeout(URL_PROBE))`.
+    On timeout: batches already committed stay committed (the commit sits inside
+    the batch loop), the not-yet-reached URLs stay `NULL`, the `scan_runs` row is
+    closed as `partial`, stderr gets `url_probe: timed out after Ns (M/N URL(s)
+    probed)`, `summary.gaps` gains a `URL_PROBE` `CompletionGap` (so `--json`
+    reports `complete_with_gaps`) and the exit code stays 0 - the same rule as
+    every other gap (D9): a probe that ran out of time did all it could.
+
+    Also repaired in this commit: D24's client-reuse edit had left the per-batch
+    commit dedented out of the loop, so a multi-batch pass wrote only its last
+    batch. No measured run was affected (all were single-batch); found by D26's
+    partial-commit test.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

@@ -18,6 +18,7 @@ timeouts:
   ports: 3600
   tech: 900
   urls: 1800
+  url_probe: 600      # D26: the probe's own deadline; --phase-timeout overrides it
   vulns: 7200
 
 # Per-tool runtime bounds for the urls stage (docs/09 sections 4a2b and 4a3).
