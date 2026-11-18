@@ -6681,3 +6681,71 @@ which the mock contract forbids (a fixture is a stand-in for real tool output).
 **D31 is withdrawn**, not deferred: there is no code defect to fix. Suite 899 -> 903 (the four D32 tests from
 Part H, which is in the same working tree).
 
+
+## 2026-11-18 (batch 2026-11-18) Part H - the render_error sites route through `redact()` (D32)
+
+### The actual site list (raw)
+
+Before (raw, from the working tree at HEAD 5e5ee71):
+
+```
+$ grep -n "render_error" src/reconkit/cli.py
+43:    render_error,
+401:        render_error(
+454:            render_error(f"invalid host state {part!r}", no_color=no_color)
+604:    render_error(redact(message), no_color=no_color)
+1220:        render_error(str(exc), no_color=no_color)
+1223:        render_error(str(exc), no_color=no_color)
+1231:    render_error("scope import is Phase 3 and is not available in this build.")
+1259:        render_error(str(exc), no_color=no_color)
+1291:        render_error(str(exc), no_color=no_color)
+1312:        render_error(str(exc), no_color=no_color)
+1316:        render_error(
+1329:    render_error("db list is not wired in Part 8; no data was read.")
+1341:    render_error("db export is not wired in Part 8; no data was written.")
+1353:    render_error("export is not wired in Part 8; no report was written.")
+```
+
+After:
+
+```
+$ grep -n "render_error" src/reconkit/cli.py
+43:    render_error,
+401:        render_error(
+454:            render_error(f"invalid host state {part!r}", no_color=no_color)
+604:    render_error(redact(message), no_color=no_color)
+1220:        render_error(redact(str(exc)), no_color=no_color)
+1223:        render_error(redact(str(exc)), no_color=no_color)
+1231:    render_error("scope import is Phase 3 and is not available in this build.")
+1259:        render_error(redact(str(exc)), no_color=no_color)
+1291:        render_error(redact(str(exc)), no_color=no_color)
+1312:        render_error(redact(str(exc)), no_color=no_color)
+1316:        render_error(
+1329:    render_error("db list is not wired in Part 8; no data was read.")
+1341:    render_error("db export is not wired in Part 8; no data was written.")
+1353:    render_error("export is not wired in Part 8; no report was written.")
+```
+
+The 1220/1223 pair is `scope check` (ValueError, then ConfigError/ScopeError), then `diff` 1259, `status` 1291,
+`doctor` 1312. Three exceptions used to reach `render_error` in other commands: none. Lines 401/454/604/1231/1316/
+1329/1341/1353 already carried a literal string or a redacted message.
+
+Five sites, not six: the `install` site the old note listed went with the installer (D4, 2026-11-17).
+
+### Change
+
+Every one of the five became `render_error(redact(str(exc)), no_color=no_color)`. `redact()`'s semantics are
+unchanged: it masks header values (`Authorization`, `Cookie`, `Set-Cookie`) and key-shaped pairs, and leaves paths
+and domains alone, so no site's message loses information it legitimately shows.
+
+### Tests
+
+Four new tests in `tests/test_cli.py`, one per surviving command site (`doctor`'s error path is the fifth `except`
+and shares the `diff`/`status` shape):
+
+`test_scope_check_error_is_redacted`, `test_diff_error_is_redacted`, `test_status_error_is_redacted`,
+`test_doctor_error_is_redacted`. Each raises an exception whose message contains `Authorization: Bearer abc123` and
+asserts `abc123` appears in neither stream while `***` does.
+
+Suite 899 -> 903.
+

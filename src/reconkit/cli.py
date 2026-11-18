@@ -1217,10 +1217,10 @@ def scope_check(
     try:
         decision = check_target(domain, path=scope_path)
     except ValueError as exc:
-        render_error(str(exc), no_color=no_color)
+        render_error(redact(str(exc)), no_color=no_color)
         raise typer.Exit(code=int(ExitCode.USAGE)) from None
     except (ConfigError, ScopeError) as exc:
-        render_error(str(exc), no_color=no_color)
+        render_error(redact(str(exc)), no_color=no_color)
         raise typer.Exit(code=exc.exit_code) from None
     render_message(decision, no_color=no_color)
     raise typer.Exit(code=0 if decision.startswith("ALLOWED") else int(ExitCode.SCOPE))
@@ -1256,7 +1256,7 @@ def diff_command(
             )
         )
     except (ConfigError, ScopeError, ValueError) as exc:
-        render_error(str(exc), no_color=no_color)
+        render_error(redact(str(exc)), no_color=no_color)
         raise typer.Exit(
             code=exc.exit_code if hasattr(exc, "exit_code") else int(ExitCode.USAGE)
         ) from None
@@ -1288,7 +1288,7 @@ def status_command(
             )
         )
     except (ConfigError, ScopeError, ValueError) as exc:
-        render_error(str(exc), no_color=no_color)
+        render_error(redact(str(exc)), no_color=no_color)
         raise typer.Exit(
             code=exc.exit_code if hasattr(exc, "exit_code") else int(ExitCode.USAGE)
         ) from None
@@ -1309,7 +1309,7 @@ def doctor_command(
         config = load_config(config_path)
         report = collect_report(config=config, config_path=config_path)
     except (ConfigError, ValueError) as exc:
-        render_error(str(exc), no_color=no_color)
+        render_error(redact(str(exc)), no_color=no_color)
         raise typer.Exit(code=int(ExitCode.ERROR)) from None
     code = render_doctor(report, json_output=json_output, no_color=no_color)
     if not report.python_ok:

@@ -16,6 +16,7 @@ from reconkit import ui
 from reconkit.cli import app
 from reconkit.core.store import configure_redaction
 from reconkit.engine import MODE_STAGES, Engine, HostSnapshot, ScanOptions, ScanSummary
+from reconkit.errors import ConfigError, ScopeError
 from reconkit.models import Confidence, HostState, Tier
 
 REPO = Path(__file__).resolve().parents[1]
@@ -1144,3 +1145,65 @@ def test_out_of_scope_non_interactive_warns_and_exits_three(tmp_path: Path) -> N
         "active scan refused: example.com not in scope.yaml. "
         "Re-run with --no-scope or add example.com to scope.yaml."
     ) in messages
+
+
+# ---------------------------------- D32 render_error sites route through redact()
+
+AUTHORIZATION_SECRET = "Authorization: Bearer " + "abc123"
+
+
+def _assert_redacted(result) -> None:
+    assert "abc123" not in result.stderr, result.stderr
+    assert "abc123" not in result.stdout, result.stdout
+    assert "***" in result.stderr
+
+
+def test_scope_check_error_is_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D32: the `scope check` render_error site masks a header value."""
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise ScopeError(f"scope said no: {AUTHORIZATION_SECRET}")
+
+    monkeypatch.setattr("reconkit.cli.check_target", boom)
+    result = CliRunner().invoke(app, ["scope", "check", "-d", "example.com"])
+    assert result.exit_code == 3
+    _assert_redacted(result)
+
+
+def test_diff_error_is_redacted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """D32: the `diff` render_error site masks a header value."""
+    config = make_config(tmp_path)
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise ConfigError(f"cannot diff: {AUTHORIZATION_SECRET}")
+
+    monkeypatch.setattr(Engine, "diff", boom)
+    result = CliRunner().invoke(app, ["diff", "-d", "example.com", "--config", str(config)])
+    assert result.exit_code == 2
+    _assert_redacted(result)
+
+
+def test_status_error_is_redacted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """D32: the `status` render_error site masks a header value."""
+    config = make_config(tmp_path)
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise ConfigError(f"cannot list runs: {AUTHORIZATION_SECRET}")
+
+    monkeypatch.setattr(Engine, "recent_runs", boom)
+    result = CliRunner().invoke(app, ["status", "--config", str(config)])
+    assert result.exit_code == 2
+    _assert_redacted(result)
+
+
+def test_doctor_error_is_redacted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """D32: the `doctor` render_error site masks a header value."""
+    config = make_config(tmp_path)
+
+    def boom(**_kwargs: object) -> None:
+        raise ConfigError(f"cannot inspect tools: {AUTHORIZATION_SECRET}")
+
+    monkeypatch.setattr("reconkit.cli.collect_report", boom)
+    result = CliRunner().invoke(app, ["doctor", "--config", str(config)])
+    assert result.exit_code == 1
+    _assert_redacted(result)
