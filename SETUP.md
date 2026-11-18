@@ -1,6 +1,6 @@
 # SETUP.md - set up reconkit
 
-reconkit runs on Linux (Kali or Ubuntu, native or WSL2). That is the only
+reconkit runs on Linux (Kali or Ubuntu, native). That is the only
 supported platform.
 reconkit installs nothing.
 
@@ -99,7 +99,6 @@ named (docs/05 rule 2). There is no speed preset or throttling.
 | A tool shows `missing` although it is on the machine | Put it on `PATH` or in `~/.reconkit/bin` (checked first), then re-run `reconkit doctor`. A Go binary usually lands in `~/go/bin`. |
 | `naabu` fails with a `pcap.h` error | `naabu` needs `libpcap-dev`; `doctor` lists it under system packages. |
 | `httpx` runs the wrong program | Two different programs share the name. Put ProjectDiscovery's binary in `~/.reconkit/bin` (checked first); `bootstrap.sh` puts that directory first in the activated venv's `PATH`. Re-activate and run `reconkit doctor`. |
-| `database is locked` or very slow scans | Move the project off `/mnt/c/...` to the Linux filesystem. |
 | Python is older than 3.11 | Use Python 3.11+ from python.org or `uv`, then re-run `./scripts/bootstrap.sh`. |
 
 ## Useful checks

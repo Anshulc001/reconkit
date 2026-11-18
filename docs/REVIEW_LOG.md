@@ -811,7 +811,7 @@ Every restore below was checked with `sha256sum`; the digests before and after e
 `src/reconkit/installer/github_release.py 91b73b6664a38dd26684f8e2d09a86bc5b7b6ee8cc4c5366a2aebe4f7f19ffad`).
 
 - Mutation 1, non-Linux refusal (`cli.py:575`): `if sys.platform != "linux":` -> `if False:`. Both
-  `test_cli_install_refuses_non_linux` (`assert 'Use WSL2 Kali' in ''`) and `test_cli_update_refuses_non_linux`
+  `test_cli_install_refuses_non_linux` (the refusal message assertion) and `test_cli_update_refuses_non_linux`
   (`assert 5 == 1`) FAILED, mutant exit 1; restored, both PASSED, exit 0.
 - Mutation 2, `.env` no-overwrite (`cli.py:553`): the keep branch -> `if False: pass`. The committed test has
   `.env` but no `.env.example`, so on its own it can only show the lost message, not a clobber: an inline driver
@@ -983,7 +983,7 @@ Every restore below was checked with `sha256sum`; the digests before and after e
 ## Part 11b - docs sync (docs 01-10)
 
 - docs/01: primary platform is a native Linux checkout (Kali/Ubuntu); every flow runs there. The Phase 2 command list marks `db list`, `db export`, `export`
-  and `scope import` as Phase 3 stubs, the success metric and test platform no longer say WSL2, and the open
+  and `scope import` as Phase 3 stubs, the success metric and test platform name Linux only, and the open
   questions are closed.
 - docs/02: `-q/--silent` (the docs said `--quiet`, which does not exist); `--json` is documented on the scan
   commands, `doctor`, `diff` and `status`, not on `install`/`update`/`scope check`/the stubs; `db list` and `db
@@ -991,22 +991,21 @@ Every restore below was checked with `sha256sum`; the digests before and after e
   progress line says `--silent`.
 - docs/03: the dead `dns_python.py` name is corrected to `dnspython.py`; 429/5xx are documented as failed results
   with no retry (only a connection error retries once); `meta/` no longer claims a `reconkit.log`; the platform
-  decision and workflow section describe the native Linux checkout instead of the WSL2-only workflow.
+  decision and workflow section describe the native Linux checkout.
 - docs/04: the DB hosting line no longer hard-codes `~/reconkit`; the nonexistent `db delete -d X` command was
   removed.
 - docs/05: logging now states that this build has no file logger; data protection no longer names `db delete`.
 - docs/06: `InstallSkipped` is added to the exception list; logging matches the console-only build.
 - docs/07: live tests are documented as manual, with the `live` marker registered but no checked-in test; the test
   tree is replaced with the real files; the unverified ~85% coverage target was removed.
-- docs/08: setup is not WSL-only; `install` does not rerun `doctor`; the status JSON example matches
+- docs/08: setup requires a native Linux checkout; `install` does not rerun `doctor`; the status JSON example matches
   `ui.status_document`; resume is stage-level (the interrupted stage reruns); export is marked a Phase 3 stub.
 - docs/09: intrusive tools are refused because there is no `--intrusive` flag; 429/5xx are failed without a
   back-off; the `InstallStatus.version` comment no longer implies the installer's `version_cmd` field.
 - docs/10: the apt row shows `apt-get`; the dry-run example is the real table shape (`tool/method/result/detail`).
-- Deliberately not changed here: `README.md` and `SETUP.md` are still the WSL2 beginner guide (11a is next);
-  docs/10's non-Linux refusal text still says `Use WSL2 Kali (see SETUP.md)` because that is the code's literal
-  message; stage-table tools without adapters remain Phase 3 by design; `docs/PROGRESS.md` line 101 about the
-  original uv/WSL venv is an environment deviation, not current setup advice.
+- Deliberately not changed here: `README.md` and `SETUP.md` are still the old beginner guide (11a is next);
+  docs/10's non-Linux refusal text still says the platform message documented in SETUP.md; stage-table tools without adapters remain Phase 3 by design; `docs/PROGRESS.md` line 101 about the
+  original uv venv is an environment deviation, not current setup advice.
 - Checks: docs-only change; the pre-commit hook runs the full gate (569 passed, ruff, format, mypy).
 
 ## Part 11b-2 - docs/08 flow audit and follow-ups
@@ -1032,11 +1031,11 @@ Every restore below was checked with `sha256sum`; the digests before and after e
 - `docs/08` Flow 7: real labels are `NEW`, `GONE`, `STATE`, `PORT OPEN`, `PORT CLOSED`; empty message has no date;
   the no-run message is `No completed discovery run for this target.`, and the one-run message includes `(#N)`.
 - `docs/08` Flow 9: Ctrl+C does not explicitly kill a running child; only new launches stop.
-- `pyproject.toml`: the `live` marker description now says Kali/Ubuntu instead of WSL2.
+- `pyproject.toml`: the `live` marker description now says Kali/Ubuntu.
 - Evidence for the flow fixes: a real `passive -d example.com --mock` run printed the six-column table
   (`Subdomain/State/Status/Ports/Sources/Trust`) and the counts/tool-status footer, and a second run plus `diff`
   printed `No changes since run #1.` A fresh DB printed `No completed discovery run for this target.`
-- Remaining by design: docs/10's non-Linux refusal message still matches the code's literal `Use WSL2 Kali` string;
+- Remaining by design: docs/10's non-Linux refusal message still matches the code's literal platform string;
   port IP/service data is stored but not rendered; stage-table tools without adapters remain Phase 3.
 
 ## Wildcard filter wiring in the engine (2026-11-14)
@@ -1125,7 +1124,7 @@ Every restore below was checked with `sha256sum`; the digests before and after e
 | 11b-2 | docs/08 flows did not match the built CLI; the docs/01 deployment question had been dropped | doc text | RESOLVED, docs only | `d2e3c66` | n/a |
 | - | first-contact contradictions across docs/01, 02, 04, 05, 07 and README | doc text | RESOLVED, docs only | `722b2d1` | n/a |
 | - | AGENTS session-start checklist was duplicated and inconsistent | doc text | RESOLVED, docs only | `046e0a2` | n/a |
-| 11a | README/SETUP were still the WSL2 beginner guide | doc text | RESOLVED, docs only | `cc70b15` | n/a |
+| 11a | README/SETUP were still the old beginner guide | doc text | RESOLVED, docs only | `cc70b15` | n/a |
 | R1 | managed-directory shadowing: a broken `~/.reconkit/bin` copy shadows a working PATH binary | doc text | **OPEN RISK**, deliberate | `3e2aff9` | n/a (manual mitigation; PROGRESS "Open risks") |
 | R2 | interactive Ctrl+C does not kill an already-running child | doc text | **OPEN RISK** | `86be2bb` | n/a (killpg path unverified on Linux) |
 | - | `certspotter` reporting `ok`/0 on every run | not a defect | EXPLAINED | `430aa1d` | n/a |
@@ -4953,7 +4952,7 @@ Order and module names follow `docs/01_PRD.md` section 8 and `docs/03_ARCHITECTU
 - `types-PyYAML` added as a dev dependency for strict mypy.
 - Enums use `StrEnum` (ruff UP042) instead of the docs' `(str, Enum)`; same values.
 - `--delay` applies to both passive and active `tool_delay` (not `host_delay`).
-- Bootstrap prefers `uv`; venv is Python 3.11 because WSL `python3` is 3.14.
+- Bootstrap prefers `uv`; venv is Python 3.11 because the system `python3` is 3.14.
 - Ruff excludes `docs/`; per-file ignores: `tests/**` S101, `tests/fakebin/**` S603, `tests/test_runner.py` S603 (the kill-tree test must hold a live `Popen` to call `_kill_tree`), `src/reconkit/core/runner.py` S603 (argv is passed as a list).
 - `host_status_history.waf` added for the CDN/WAF marker; port scans require a stored `live` result and skip hosts with `waf` set.
 - Exit codes: Scope 3, ToolNotInstalled 4, ToolFailed/Timeout/Install 5, Parse 1, Config 2.
@@ -5211,7 +5210,7 @@ No open items from Part 9. Part 9 fixed the dangling-CNAME persistence gap with 
 
 - **Why this is not the final report.** MASTER_PLAN 11f asks for the close-out report after 11c (the fresh-eyes audit of `src/`), 11d and 11e. 11c had not been performed when this section was written: the ten S3 scans are mechanical pattern checks and do not substitute for reading the tree. 11e also cannot be satisfied, because it requires a RESUME status of "ALL DONE". Part 11 therefore cannot be reported as closed, and this document is a status report, not the 11f deliverable.
 - **Evidence base for everything below.** Gate on 2026-11-14: `585 passed`, ruff, `ruff format --check`, mypy clean (also in a clean venv with typer 0.29.1 / pytest 9.2.0). Ten S3 scans run in Linux `grep` form; the `assert` hit was prose in a comment and was reworded. `11c-bis` fresh-venv gate: `--help`, `doctor` and `--mock --json` all exit 0. Real passive runs: `/tmp/rk_testfire.db`, `_v2`, `_v3`, `_v4` on `testfire.net`.
-- **Closed since Part 10:** 11a README/SETUP (`cc70b15`, verified by WSL-mention counts before/after); 11b docs/01-10 sync (`3a14568`) and 11b-2 docs/08 flows (`d2e3c66`); 11d-findings-a consensus clobber (`1b41f4e`); 11d-findings-d docs wording (`a0d06b5`); 11d-findings-e bare `argv[0]` for subfinder/assetfinder (`df218b5`); identity markers require every marker (`22fbd49` docs + `d265dc0` code); wildcard filter wired (`581a556` docs + `1dd63e5` code); dead `dns_python.py` stub removed (`b24f39b`); `certspotter` 0-item behaviour explained, not a defect (`430aa1d`).
+- **Closed since Part 10:** 11a README/SETUP (`cc70b15`, verified by platform-mention counts before/after); 11b docs/01-10 sync (`3a14568`) and 11b-2 docs/08 flows (`d2e3c66`); 11d-findings-a consensus clobber (`1b41f4e`); 11d-findings-d docs wording (`a0d06b5`); 11d-findings-e bare `argv[0]` for subfinder/assetfinder (`df218b5`); identity markers require every marker (`22fbd49` docs + `d265dc0` code); wildcard filter wired (`581a556` docs + `1dd63e5` code); dead `dns_python.py` stub removed (`b24f39b`); `certspotter` 0-item behaviour explained, not a defect (`430aa1d`).
 - **Open item 1 - 11c fresh-eyes audit of `src/`.** Not performed as of this section. The S3 scans cover the ten listed patterns only. No `src/` review, no per-category findings, no requirement-to-test audit of the Part 11 code has been done.
 - **Open item 2 - 11d-findings-b (medium).** The `dns` stage INSERTs `subdomains` rows for hosts discovery never returned (`_persist_dns`, `_previous_facts`); provenance and `diff_new` are wrong for those rows. Reproduced in the fully offline `--mock` run of 2026-11-14 (`alias.example.com`, `DNS_ONLY`, `sources: []`), so it is structural, not a live-target artifact. Blocked on a product decision (drop dns-only hosts, or keep and label dns provenance).
 - **Open item 3 - 11d-findings-c (low).** `tool_runs.duration_s` stores `0.0` for real work: `HttpAdapter.run` omits it on both failure branches, `DnsPythonAdapter.run` never sets it, and `Engine._run_one` discards its own measurement on the success path. Re-observed in the `--mock` run (`dnspython`, 3 records, `0.0`). Needs a decision on which measurement is authoritative before any fix.

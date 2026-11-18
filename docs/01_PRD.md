@@ -5,7 +5,7 @@
 - **Product name:** reconkit
 - **One-line description:** A CLI that runs several recon tools per stage, cross-checks their results, and tracks what changed between scans.
 - **Product type:** Command-line tool (single-user, local-first)
-- **Platform:** Linux (Kali or Ubuntu), native or WSL2, and nothing else. reconkit installs nothing, so there is no platform-specific install path (docs/10 §4).
+- **Platform:** Linux (Kali or Ubuntu), native, and nothing else. reconkit installs nothing, so there is no platform-specific install path (docs/10 §4).
 
 ## 2. Problem
 

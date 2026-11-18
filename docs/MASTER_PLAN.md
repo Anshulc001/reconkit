@@ -217,7 +217,7 @@ MUTATION targets: no-overwrite of .env, failure isolation.
 =====================================================
 PART 11: docs sync, README, final audit (commit `docs:`)
 =====================================================
-11a. README.md and SETUP.md for the single Linux checkout (Kali/Ubuntu, native or WSL2): beginner steps for `--mock`/passive use and for the full tool set. Fix hard-coded paths.
+11a. README.md and SETUP.md for the single Linux checkout (Kali/Ubuntu, native): beginner steps for `--mock`/passive use and for the full tool set. Fix hard-coded paths.
 11b. Docs 01-10 must match the code. List in REVIEW_LOG every change and every remaining disagreement.
 11c. FRESH-EYES AUDIT: re-read the whole src tree as if reviewing someone else's pull request. Specifically hunt for: any code path where an active tool can run without --active + scope pass; any place a DNS/HTTP timeout can become DEAD/SHUT_DOWN; any secret reaching argv/log/db/workspace/UI; any exception that escapes to a traceback in the CLI; any blocking call in async code; confidence computed from non-distinct tools; any docs/code mismatch. Write a test for each finding, fix, and log under "Bugs found". Also run every S3 scan one final time.
 11c-bis. Run the end-to-end mock run from a fresh venv (`python -m venv` in a temp dir, documented install command, `reconkit --help`, `reconkit doctor`, `reconkit -d example.com --mock --json`) and record raw output.

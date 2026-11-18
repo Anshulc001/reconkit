@@ -277,7 +277,6 @@ Speed control was removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN
 |---|---|---|
 | Python | Fast to write/fix with AI agents; simple parsing; Kali ships Python | Go (AutoAR's language): single binary, but slower to extend with AI for this use case |
 | SQLite + workspace files | Diffing, resume, queries; plus human-browsable raw output | Flat files only (no history), Postgres (too heavy) |
-| Native Linux checkout (Kali/Ubuntu) | Real Linux tools; fast disk; no CRLF/locking issues | WSL2-only workflow; `/mnt/c` |
 | Natural-pace execution | The owner asked for no throttling (2026-11-17, D3); every tool runs at its own rate | Speed presets, delays, shuffling, rate limiter |
 | Adapter + registry | Add a tool without touching core | Hard-coded pipelines |
 | Own `~/.reconkit/bin` (checked first) | No sudo, no global breakage, correct `httpx` | System PATH only |
@@ -312,7 +311,7 @@ Single machine, thousands of hosts per target. Beyond that is out of scope (see 
 
 ## 14. Linux Workflow Rules
 
-- Repo in a native Linux checkout (current path in PROGRESS "Environment"). Never `/mnt/c/...`.
+- Repo in a native Linux checkout (current path in PROGRESS "Environment").
 - Terminal, venv and tools all live in that Linux checkout.
 - Unit tests use fixtures and need no installed tools.
 - Real tool runs and integration smoke tests happen on Kali/Ubuntu.

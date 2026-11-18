@@ -18,6 +18,7 @@ import yaml
 
 from reconkit.adapters import ADAPTERS
 from reconkit.adapters import base as base_module
+from reconkit.adapters import nikto as nikto_module
 from reconkit.adapters import subfinder as subfinder_module
 from reconkit.adapters.assetfinder import AssetfinderAdapter
 from reconkit.adapters.base import BinaryAdapter
@@ -1573,6 +1574,12 @@ def test_urlfinder_skips_archived_junk_and_feeds_domains(monkeypatch: pytest.Mon
         "-max-time",
         "1",
     ]
+    # `-max-time` never exceeds 3 minutes, whatever the stage budget is: one
+    # slow source otherwise held the enumeration for 500 s (2026-11-18).
+    big = make_ctx(hosts=["testfire.net"])
+    big.timeout = 1800.0
+    capped = adapter.build_command(big)
+    assert capped[capped.index("-max-time") + 1] == "3"
     assert adapter.stdin_text(ctx) == "testfire.net\nwww.testfire.net\n"
     assert calls == []
 
@@ -2587,10 +2594,45 @@ def test_nikto_runs_once_per_host_with_json_output(tmp_path: Path) -> None:
     adapter = NiktoAdapter(finder=lambda _name: "/usr/bin/nikto")
     ctx = make_ctx(hosts=["testfire.net", "www.testfire.net"])
     ctx.workspace = tmp_path
-    command = adapter._command(ctx, "testfire.net", 0)
+    command = adapter._command(ctx, "testfire.net", 0, 75.0)
     assert command[1:3] == ["-h", "testfire.net"]
+    assert command[command.index("-maxtime") + 1] == "75s"
     assert command[command.index("-Format") + 1] == "json"
     assert command[command.index("-output") + 1].endswith(".json")
+
+
+def test_nikto_shares_the_stage_budget_across_hosts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: PIT-55 one slow host must not use the whole stage budget.
+
+    The engine cancels the tool at `ctx.timeout`, so a single host allowed to
+    run for the entire budget left nikto with a timeout and 0 findings on every
+    real full run. Each host now gets the remaining time divided by the hosts
+    still to run.
+    """
+    adapter = NiktoAdapter(finder=lambda _name: "/usr/bin/nikto")
+    ctx = make_ctx(hosts=["a.testfire.net", "b.testfire.net", "c.testfire.net"])
+    ctx.timeout = 30.0
+    ctx.workspace = tmp_path
+    calls: list[float] = []
+
+    def fake(argv: list[str], **kwargs: object) -> ExecResult:
+        calls.append(float(kwargs["timeout"]))  # type: ignore[arg-type]
+        Path(argv[argv.index("-output") + 1]).write_text(
+            fixture("adapters", "nikto.synthetic.json"), encoding="utf-8"
+        )
+        return outcome()
+
+    monkeypatch.setattr(nikto_module, "run_exec", fake)
+    result = asyncio.run(adapter.run(ctx))
+
+    assert result.status is ToolStatus.OK
+    assert len(calls) == 3
+    # The first host gets a third of the budget; a host that returns at once
+    # hands its unused time to the next one, but no share may exceed the budget.
+    assert calls[0] <= 10.1
+    assert all(1.0 <= value <= 30.0 for value in calls)
 
 
 def test_gowitness_writes_screenshots_and_manifest(

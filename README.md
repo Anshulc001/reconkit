@@ -19,7 +19,7 @@ Phase 2 (working core) is complete: passive discovery (`subs`, `dns`), `live`, `
 
 | Platform | What works |
 |---|---|
-| Kali / Ubuntu (native or WSL2) | Everything, including the real tools - obtaining them is your own job, outside reconkit. Python 3.11+ and `git` for the checkout. This is the only supported platform. |
+| Kali / Ubuntu (native) | Everything, including the real tools - obtaining them is your own job, outside reconkit. Python 3.11+ and `git` for the checkout. This is the only supported platform. |
 
 ## Quick start (Kali / Ubuntu)
 

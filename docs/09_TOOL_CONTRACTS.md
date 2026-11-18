@@ -253,8 +253,22 @@ the whole `urls` stage in **15 s wall clock** with `gau ok 345` and
 `urlfinder ok 933`, where the 2026-11-18 morning run needed 664 s and recorded
 `gau timeout 0`.
 
-This is deliberately limited to the **passive** tools. Active tools are bounded
-by the phase timeout only, because their work *is* the scan.
+**Whole-enumeration cap (2026-11-18, owner request for consistent runtimes).**
+`urlfinder` is the one tool whose runtime could not be predicted: with the same
+command it returned 996 URLs in 15 s, then 206 in 506 s and 932 in 525 s on the
+next three runs, because a single slow source holds the whole enumeration. Its
+`-max-time` is now **3 minutes** (`min(budget, 180)` rounded up to minutes)
+instead of the stage budget (30 minutes for `urls`), so the stage has a ceiling;
+the URLs found before the cap are kept.
+
+`nikto` has the same shape: one process per host, each with its share of the
+remaining stage budget, and the tool's own `-maxtime <share>s` so it stops
+itself cleanly and writes its JSON instead of being killed by our timeout. A
+real `--full` run had nikto killed at 600 s with 0 findings before this.
+
+This is deliberately limited to the **passive** tools and to these two
+one-process-per-item tools. Other active tools are bounded by the phase timeout
+only, because their work *is* the scan.
 
 ### 4a3. Adapter wave 3 (2026-11-17): hakrawler, gospider, subjs, urlfinder
 
@@ -680,7 +694,7 @@ registry has **48 tools and 44 adapters**.
 | `massdns` | `-r <resolvers> -t A -o S -w <workspace file> <workspace hosts file>` | `S` (simple) lines; finds are read from `-w`, never stdout |
 | `puredns` | `resolve <hosts file> -r <resolvers> -b <massdns> -w <workspace file>` | shells out to massdns; `-b` is always the absolute path |
 | `gowitness` | `scan single -u <url> -s <screenshots dir> --screenshot-format png` | one process per URL (https, then http if no PNG); files plus JSONL manifest, **no DB rows** (D17); `shots` is `--full` only (D19) |
-| `nikto` | `-h <host> -nointeractive -Format json -output <workspace file>` | one process per host (`-h` takes one target); `severity="info"`, `kind="nikto"` |
+| `nikto` | `-h <host> -nointeractive -Format json -output <workspace file>` | one process per host (`-h` takes one target), each with its share of the remaining stage budget (2026-11-18: a single slow host used to consume the whole budget and the engine cancelled the tool with 0 results); `severity="info"`, `kind="nikto"` |
 
 **`dig` stays next to `dnspython` on purpose.** `dnspython` is the resolver with
 the wildcard probe and dangling-CNAME logic; `dig` is an independent second DNS

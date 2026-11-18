@@ -32,6 +32,10 @@ from reconkit.models import Record, RunContext, Stage, UrlRecord
 # values against testfire.net: 996 URLs in 15 s, against 932 URLs in 554 s for the
 # old command - faster and no worse. `-max-time` still comes from the run budget.
 REQUEST_TIMEOUT_S = 30
+# One slow source can hold the whole enumeration: measured 506 s and 525 s on
+# testfire.net where the same command finished in 15 s once. 3 minutes keeps the
+# stage predictable and still returns what the sources found (2026-11-18).
+MAX_ENUMERATION_S = 180
 
 
 class UrlfinderAdapter(BinaryAdapter):
@@ -60,7 +64,7 @@ class UrlfinderAdapter(BinaryAdapter):
             raise ToolFailed("urlfinder: no hosts to query")
         # Verified: `-all`, `-silent`, `-timeout int`, `-max-time int`, `-nc`.
         # Both timeouts are capped by the run budget so `--phase-timeout` still
-        # wins, and `-max-time` is rounded up so a 600 s budget stays 10 minutes.
+        # wins; `-max-time` never exceeds MAX_ENUMERATION_S.
         budget = max(1, int(ctx.timeout))
         return [
             self.binary_path() or self.binary,
@@ -70,7 +74,7 @@ class UrlfinderAdapter(BinaryAdapter):
             "-timeout",
             str(min(REQUEST_TIMEOUT_S, budget)),
             "-max-time",
-            str(max(1, (budget + 59) // 60)),
+            str(max(1, (min(budget, MAX_ENUMERATION_S) + 59) // 60)),
         ]
 
     def stdin_text(self, ctx: RunContext) -> str | None:

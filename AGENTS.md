@@ -76,7 +76,7 @@ If a decision is on neither list, stop and ask - one short question, not a parag
 - **Purpose:** A command-line reconnaissance orchestrator for **authorized** security testing. It runs several recon tools per stage, merges and deduplicates their output, scores confidence by how many tools agree, and tracks changes between scans in SQLite.
 - **Users:** Penetration testers and bug bounty hunters working inside a written scope.
 - **Stack:** Python 3.11+, Typer (CLI), Rich (terminal UI), Pydantic v2 (schemas), asyncio, httpx (HTTP), dnspython, PyYAML, SQLite (stdlib `sqlite3`), pytest, ruff, mypy.
-- **Environment:** Linux (Kali or Ubuntu, native or WSL2) is the only supported platform. Use one canonical checkout: this repository root only, no second copy of this checkout (no second WSL checkout, no `/mnt/c` mirror). Run checks from this checkout only. Python 3.11+ is required; use the active `.venv` and verify with `python --version`.
+- **Environment:** Linux (Kali or Ubuntu, native) is the only supported platform. Use one canonical checkout: this repository root only. Run checks from this checkout only. Python 3.11+ is required; use the active `.venv` and verify with `python --version`.
 
 ## 2. Source of truth
 
@@ -114,7 +114,7 @@ Do not contradict these documents. If code and docs disagree, stop and report th
 7. **Do not invent** CLI flags, tool flags, DB columns, endpoints or business rules. Change the docs first, then the code. If a tool's flags are unknown, check its `--help` output or ask. Do not guess.
 8. **Honest User-Agent:** `reconkit/<version>` for our own HTTP requests. No User-Agent rotation or evasion features.
 9. **Tests never touch the network or require installed tools.** Use fixtures in `tests/fixtures/`.
-10. **Paths:** use `pathlib.Path`. No hard-coded `/` or `\` separators, no `/mnt/c` assumptions.
+10. **Paths:** use `pathlib.Path`. No hard-coded `/` or `\` separators.
 
 ## 4. Planning (non-trivial tasks)
 

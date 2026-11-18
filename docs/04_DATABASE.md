@@ -3,7 +3,7 @@
 ## 1. Engine
 
 - **Database:** SQLite (single file, default `recon.db`, path from `config.yaml` or `--db`)
-- **Hosting:** local file inside the project checkout (never a `/mnt/c` path)
+- **Hosting:** local file inside the project checkout (always a local path)
 - **Settings on connect:** `PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`
 - **Access:** only through `core/store.py`. No SQL anywhere else.
 

@@ -54,12 +54,16 @@ class NiktoAdapter(BinaryAdapter):
     def _output_file(self, ctx: RunContext, index: int) -> Path:
         return ctx.workspace / f"nikto-{os.getpid()}-{index}.json"
 
-    def _command(self, ctx: RunContext, host: str, index: int) -> list[str]:
+    def _command(self, ctx: RunContext, host: str, index: int, limit_s: float) -> list[str]:
         return [
             self.binary_path() or self.binary,
             "-h",
             host,
             "-nointeractive",
+            # The tool's own limit stops it cleanly and writes its JSON just
+            # before our kill timer would discard it (2026-11-18).
+            "-maxtime",
+            f"{max(1, int(limit_s))}s",
             "-Format",
             "json",
             "-output",
@@ -77,13 +81,17 @@ class NiktoAdapter(BinaryAdapter):
         raw_parts: list[str] = []
         records: list[Record] = []
         failures: list[str] = []
+        deadline = started + ctx.timeout
         for index, host in enumerate(hosts):
             output = self._output_file(ctx, index)
             output.unlink(missing_ok=True)
+            # Each host gets an equal share of what is left of the stage budget,
+            # so one slow host cannot use it all and get the tool cancelled.
+            share = max(1.0, (deadline - time.perf_counter()) / (len(hosts) - index))
             outcome = await asyncio.to_thread(
                 run_exec,
-                self._command(ctx, host, index),
-                timeout=ctx.timeout,
+                self._command(ctx, host, index, share),
+                timeout=share,
                 env=self.child_env(ctx),
             )
             raw_parts.append(capture_output(outcome.stdout, outcome.stderr))
