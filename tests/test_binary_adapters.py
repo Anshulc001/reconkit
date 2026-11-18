@@ -1394,6 +1394,35 @@ def test_waybackurls_feeds_domains_on_stdin(monkeypatch: pytest.MonkeyPatch) -> 
     assert calls == []
 
 
+def test_waybackurls_asks_once_per_root_not_once_per_host() -> None:
+    """2026-11-18: `*.<apex>/*` already covers the subdomains, per its own `-h`.
+
+    Feeding all 42 hosts asked the same wildcard question 42 times in sequence:
+    302 s in the 10:14 run, against 503 answers that morning.
+    """
+    adapter = WaybackurlsAdapter(finder=lambda _name: "/usr/bin/waybackurls")
+    hosts = [
+        "testfire.net",
+        "www.testfire.net",
+        "api.testfire.net",
+        "WWW.TestFire.net",
+        "other.example",
+        "sub.other.example",
+    ]
+    ctx = make_ctx(hosts=hosts, target="testfire.net")
+    # Every testfire host folds into one wildcard query; the other domain keeps
+    # its own line, and its own subdomain cannot be assumed covered by it.
+    assert adapter.stdin_text(ctx) == "testfire.net\nother.example\nsub.other.example\n"
+
+
+def test_waybackurls_does_not_swallow_a_lookalike_apex() -> None:
+    """`nottestfire.net` is not under `testfire.net`; suffix matching without
+    the dot would have folded it into the wrong query."""
+    adapter = WaybackurlsAdapter(finder=lambda _name: "/usr/bin/waybackurls")
+    ctx = make_ctx(hosts=["nottestfire.net"])
+    assert adapter.stdin_text(ctx) == "nottestfire.net\n"
+
+
 def test_waybackurls_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_exec(monkeypatch, outcome("Usage of /usr/bin/waybackurls:\n  -other\n"))
     status = WaybackurlsAdapter(finder=lambda _name: "/usr/bin/waybackurls").check_installed()

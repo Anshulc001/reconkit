@@ -236,6 +236,14 @@ defaults and, for `gau`, fatal:
 |---|---|---|---|
 | `gau` | `--timeout=600` (the budget) | `--timeout=45 --threads=5 --retries=1` | **31 s, 345 URLs** vs `timeout` at 600 s, 0 items |
 | `urlfinder` | `-timeout 600` (the budget), no `-max-time` | `-timeout 30 -max-time 10` | **15 s, 996 URLs** vs 554 s, 932 URLs |
+| `waybackurls` | all 42 hosts on stdin (42 wildcard queries) | the apex once, other domains as their own line | **2.4 s** vs 302 s, 0 items both ways (archive.org answered 503 all morning) |
+
+`waybackurls` has no timeout flag at all, so the host list is the only lever. Its
+own `-h` says `-no-subs` means "don't include subdomains of the target domain",
+which proves the default `*.<line>/*` query already covers them - feeding it all
+42 discovered hosts therefore asked the same wildcard question 42 times in a row.
+The adapter now feeds the apex once and passes through any host that is not under
+it (a scope file can name several domains), so nothing is lost.
 
 Both values are capped by the run budget (`min(...)`), so a small
 `--phase-timeout` still wins, and `urlfinder -max-time` is the budget rounded up

@@ -4708,6 +4708,45 @@ Tests: `test_gau_caps_its_http_timeout_instead_of_using_the_run_budget` and the
 updated `test_urlfinder_skips_archived_junk_and_feeds_domains` (now asserts
 `-max-time` as well).
 
+### 9. waybackurls: one wildcard query, not 42 (owner: "why so slow and no results")
+
+First the premise: `waybackurls` **is** installed - at
+`/home/kali/.reconkit/bin/waybackurls`, and `reconkit doctor` reports
+`Installed yes / Identity ok` with that path. A bare `command -v waybackurls` in
+an interactive shell only missed it because `~/.reconkit/bin` is deliberately on
+the *child* PATH, not the user's. Nothing was being run that is not installed;
+missing tools are already `skipped (not installed)` at selection time (doctor:
+"Scans will use the tools that are installed and skip the rest").
+
+The 2026-11-18 10:14 run recorded `waybackurls ok 0 items 302.3 s`. Cause:
+waybackurls reads **one domain per stdin line** and asks the CDX API for
+`*.<line>/*`; the adapter put all 42 discovered hosts on stdin, so the same
+wildcard question was asked 42 times in sequence. Its own `-h` proves the
+default covers subdomains (`-no-subs  don't include subdomains of the target
+domain`). The adapter now feeds the apex once and keeps only hosts that are not
+under it (other domains from a scope file), with a dot-boundary check so
+`nottestfire.net` is never folded into `testfire.net`.
+
+Measured with the same 42 hosts from the 10:39 report, real binary, real
+archive:
+
+```
+42 hosts in that run; the old adapter put all of them on stdin
+stdin now: 'testfire.net\napi.example.com\nblog.example.com\ndev.example.com\nwww.example.com\n'
+status=ok items=0 elapsed=2.4s
+```
+
+302 s -> 2.4 s (126x). The **0 items are not ours**: `curl` on the same CDX
+wildcard endpoint returned `HTTP 503 Internet Archive: Temporarily Offline`, and
+the single-domain query returned 200 in 31 s. archive.org was down for wildcard
+queries all morning; on a healthy day the one query is the same one that used to
+be run 42 times. `gau` reaches the Wayback data through a different endpoint and
+still returned 345 URLs, so coverage is unchanged.
+
+Tests: `test_waybackurls_asks_once_per_root_not_once_per_host`,
+`test_waybackurls_does_not_swallow_a_lookalike_apex`. Gate after:
+`827 passed`, ruff check/format clean, mypy clean on 62 files.
+
 ### Previous open question (closed)
 
 Parallelism was not the lever for the `urls` stage - the timeout semantics were.
