@@ -45,7 +45,7 @@ from reconkit.adapters.subjs import SubjsAdapter
 from reconkit.adapters.subzy import SubzyAdapter
 from reconkit.adapters.tlsx import TlsxAdapter
 from reconkit.adapters.unfurl import UnfurlAdapter
-from reconkit.adapters.urlfinder import UrlfinderAdapter
+from reconkit.adapters.urlfinder import UrlfinderAdapter, enumeration_cap_s
 from reconkit.adapters.wafw00f import Wafw00fAdapter
 from reconkit.adapters.waybackurls import WaybackurlsAdapter
 from reconkit.adapters.webanalyze import WebanalyzeAdapter
@@ -1771,6 +1771,51 @@ def test_urlfinder_runs_to_stage_budget_if_productive(
     assert len(result.records) == 50
     assert "capped at" not in (result.error or "")
     assert "idle for" not in (result.error or "")
+
+
+def test_urlfinder_cap_scales_with_host_count() -> None:
+    """D27: cap = min(stage_budget, max(180, 4 * hosts))."""
+    assert enumeration_cap_s(500, 1800) == 1800  # 2000 scaled, clipped to the stage
+    assert enumeration_cap_s(43, 1800) == 180  # testfire.net, unchanged
+    assert enumeration_cap_s(100, 1800) == 400
+
+
+def test_urlfinder_cap_floor_is_180() -> None:
+    """D27: a small target keeps the proven 180 s, not 4 * 10 = 40."""
+    assert enumeration_cap_s(10, 1800) == 180
+    assert enumeration_cap_s(0, 1800) == 180
+
+
+def test_urlfinder_cap_respects_stage_budget() -> None:
+    """D27: the stage deadline wins, so --phase-timeout still bounds the run."""
+    assert enumeration_cap_s(500, 600) == 600
+    assert enumeration_cap_s(43, 120) == 120
+
+
+def test_urlfinder_cap_config_override() -> None:
+    """D27: `urlfinder.max_enumeration_s` replaces the formula when non-zero."""
+    assert enumeration_cap_s(10, 1800, override=300) == 300
+    assert enumeration_cap_s(500, 1800, override=300) == 300
+    assert enumeration_cap_s(10, 1800, override=0) == 180
+
+
+def test_urlfinder_partial_output_line_includes_cap_and_host_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D27: a capped run says which cap and how many hosts produced it."""
+    adapter = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder")
+    ctx = make_ctx(hosts=[f"h{index}.testfire.net" for index in range(43)])
+    ctx.timeout = 600.0
+    ctx.limits = {"urlfinder": ToolLimits(max_s=180.0, idle_s=60.0, min_s=180.0)}
+    calls = fake_exec(
+        monkeypatch,
+        outcome(stdout="https://testfire.net/login.jsp\n", timed_out=True),
+    )
+    result = asyncio.run(adapter.run(ctx))
+
+    assert calls[0][1]["timeout"] == 180.0
+    assert result.error == "capped at 180s (hosts=43); kept partial output"
+    assert [record.url for record in result.records] == ["https://testfire.net/login.jsp"]
 
 
 def test_urlfinder_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:

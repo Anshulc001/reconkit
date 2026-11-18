@@ -265,14 +265,15 @@ them).
 
 The first version was a flat `runtime_cap_s = 180`. That is right for
 `testfire.net` (43 hosts) and wrong for a target with hundreds of hosts, where
-sources are still answering productively at three minutes. The cap is now three
-values, whichever fires first:
+sources are still answering productively at three minutes. The cap is now bounded
+by these keys, whichever fires first:
 
 | Key (`config.yaml`) | Default | Meaning |
 |---|---|---|
 | `urls.urlfinder_min_s` | `180` | Floor: never kill before this many seconds |
 | `urls.urlfinder_idle_s` | `60` | Kill once stdout has been silent this long (the floor applies first) |
-| `urls.urlfinder_max_s` | `1800` | Ceiling: the stage-budget default, whatever the tool is doing |
+| `urls.urlfinder_max_s` | `1800` | Hard ceiling on the computed cap, whatever the tool is doing (D27) |
+| `urlfinder.max_enumeration_s` | `0` | `0` = compute the cap from the host count; non-zero replaces the formula (D27) |
 | `urls.hakrawler_max_s` | `120` | Hard cap for `hakrawler` (2.2) |
 | `urls.subjs_max_s` | `60` | Hard cap for `subjs` (2.2) |
 
@@ -283,7 +284,31 @@ min_runtime=)` kills the process group when stdout has been silent for
 `idle_timeout` seconds after `min_runtime` has elapsed, and `ExecResult.idle_killed`
 says which clock fired. A silent tool is therefore killed at about
 `min_s + idle_s` (240 s by default) and a productive one runs to `max_s`.
-`-max-time 30` is still passed for the tool's own bookkeeping.
+`-max-time` gets the computed cap in whole minutes, for the tool's own
+bookkeeping.
+
+**The cap scales with the host count (2026-11-18, D27).** A flat ceiling either
+wastes a large target or over-serves a small one, so the ceiling is computed per
+run:
+
+```
+cap_s = min(stage_budget, max(180, 4 * host_count))
+```
+
+- `host_count` is the number of rows on urlfinder's stdin for this run:
+  `tool_hosts["urlfinder"]` when the stage supplies a per-tool list (the `urls`
+  stage gives a passive tool the target plus the discovered names), otherwise
+  `RunContext.hosts`. Nothing new records it.
+- `stage_budget` is the deadline the stage already has - `--phase-timeout` when
+  given, otherwise `timeouts.urls`. No new timeout source is introduced.
+- 43 hosts -> `min(1800, max(180, 172))` = **180 s**, exactly the number
+  `testfire.net` was tuned at; 100 hosts -> 400 s; 500 hosts -> 2000 s, clipped
+  to the 1800 s stage budget.
+- `urlfinder.max_enumeration_s` (default `0`) replaces the formula with one fixed
+  value when it is non-zero, for debugging and CI. `urls.urlfinder_max_s` stays a
+  hard ceiling on top of either.
+- The floor stays 180 s, a capped run keeps its partial stdout, and the detail
+  line names both numbers: `capped at 180s (hosts=43); kept partial output`.
 
 `nikto` has the same shape: one process per host, each with its share of the
 remaining stage budget, and the tool's own `-maxtime <share>s` so it stops

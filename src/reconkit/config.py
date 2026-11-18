@@ -67,6 +67,17 @@ class UrlsConfig(_StrictModel):
     subjs_max_s: int = Field(default=60, gt=0)
 
 
+class UrlfinderConfig(_StrictModel):
+    """`urlfinder`'s own knobs (D27).
+
+    `max_enumeration_s = 0` means "compute the cap from the host count":
+    `min(stage deadline, max(180, 4 * hosts))`. A non-zero value replaces that
+    formula with one fixed number, for debugging and CI.
+    """
+
+    max_enumeration_s: int = Field(default=0, ge=0)
+
+
 class UrlProbeConfig(_StrictModel):
     """Bounds for the engine-owned `url_probe` stage (D23, docs/09 section 5).
 
@@ -109,6 +120,7 @@ class AppConfig(_StrictModel):
     # Defaulted so a config file written before this key existed still loads.
     urls: UrlsConfig = Field(default_factory=UrlsConfig)
     url_probe: UrlProbeConfig = Field(default_factory=UrlProbeConfig)
+    urlfinder: UrlfinderConfig = Field(default_factory=UrlfinderConfig)
     confidence: ConfidenceConfig
     wildcard_check: WildcardCheck
     install: InstallConfig

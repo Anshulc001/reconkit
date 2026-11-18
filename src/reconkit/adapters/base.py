@@ -211,6 +211,14 @@ class BaseToolAdapter(ABC):
         # Per run; `_skip_note()` turns the list into the detail line.
         self.skipped_lines: list[str] = []
 
+    def cap_suffix(self, ctx: RunContext) -> str:
+        """Extra words for the `capped at <n>s` detail line (D27).
+
+        Default: nothing. `urlfinder` names the host count it scaled the cap
+        from, so a capped run says why it was given that many seconds.
+        """
+        return ""
+
     def _skip_note(self) -> str | None:
         """One detail line for the lines a parser could not use, or None.
 
@@ -337,7 +345,8 @@ class BaseToolAdapter(ABC):
                             note = (
                                 f"idle for {idle:g}s; kept partial output"
                                 if outcome.idle_killed and idle is not None
-                                else f"capped at {budget:g}s; kept partial output"
+                                else f"capped at {budget:g}s{self.cap_suffix(ctx)};"
+                                " kept partial output"
                             )
                             detail = "; ".join(part for part in (note, self._skip_note()) if part)
                             return ToolResult(

@@ -6383,3 +6383,70 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
   really were the already-answered rows, and `"reprobe": true` is on the run.
 - **Gate:** `892 passed`; ruff, format and mypy clean.
 
+## 2026-11-18 (batch 2026-11-18) Part B - urlfinder's cap scales with the host count (D27)
+
+- **Where it came from:** the owner flagged the flat ceiling. It was already not
+  the original flat 180 s: `b331927`'s `runtime_cap_s = 180` became
+  `MIN 180 / IDLE 60 / MAX 1800`, so every target - 43 hosts or 500 - was allowed
+  the same 1800 s, which over-served small targets and wasted large ones.
+- **Docs first:** docs/09 section 4a2b (the formula, the floor, the override, the
+  new log line), `config.yaml` `urlfinder.max_enumeration_s`, MASTER_PLAN D27.
+- **The formula** (`adapters/urlfinder.py`), pure and unit-tested:
+
+  ```python
+  cap_s = min(stage_budget, max(180, 4 * host_count))
+  ```
+
+  `host_count` is `len(tool_hosts.get("urlfinder", hosts))` - the rows urlfinder
+  receives on stdin for this run (the urls stage sets `tool_hosts["urlfinder"]`
+  for a passive tool to the target plus the discovered names). `stage_budget` is
+  the `timeout` the run loop already computed for the stage
+  (`opts.phase_timeout or self._stage_timeout(stage)`), threaded into `_run_tools`
+  as a new keyword argument and used only to compute these limits: D26's probe
+  `wait_for` and the stage `wait_for` are unchanged.
+- **Wiring:** the engine computes the cap and hands it down as
+  `ToolLimits(max_s=cap, idle_s=60, min_s=min(180, cap))`, so the adapter still
+  never reads `config.yaml`. `urlfinder.max_enumeration_s` (default 0) replaces
+  the formula when non-zero; `urls.urlfinder_max_s` (1800) stays a hard ceiling.
+- **Log line:** `BaseToolAdapter.cap_suffix(ctx)` (default `""`) is appended to
+  the capped note; urlfinder returns ` (hosts=N)`. Result:
+  `capped at 180s (hosts=43); kept partial output`.
+- **Raw proofs:**
+
+  ```
+  computed cap, stage budget 1800 (timeouts.urls):
+    hosts=43 -> 180s
+    hosts=500 -> 1800s
+  stage budget 600 (--phase-timeout 600):
+    hosts=500 -> 600s
+
+  fixture run: 43 hosts on stdin, override=3 -> cap 3s
+    wall clock: 3.0s
+    status: ok, items: 2
+    urls: ['https://testfire.net/login.jsp', 'https://testfire.net/admin']
+    detail: capped at 3s (hosts=43); kept partial output
+  ```
+
+  The fixture run used a stand-in `urlfinder` (two URLs, then `sleep 30`) with
+  `max_enumeration_s` overridden to 3 s, so a real child was killed by the cap
+  and its partial stdout was parsed. The first attempt pointed at the managed
+  binary by mistake and returned `ok, items: 0`; that was the adapter resolving
+  `~/.reconkit/bin/urlfinder` ahead of the stub, not a runner defect - `run_exec`
+  keeps a killed child's stdout (`timed_out: True ... stdout: 'https://testfire.net/login.jsp\nhttps://testfire.net/admin\n'`).
+
+  ```
+  $ grep -n 'max_enumeration_s' config.yaml
+  38:  max_enumeration_s: 0
+  ```
+- **Tests:** 892 -> 898. New `test_urlfinder_cap_scales_with_host_count` (500/43/100),
+  `test_urlfinder_cap_floor_is_180` (10 hosts, 0 hosts), `test_urlfinder_cap_respects_stage_budget`
+  (500 hosts/600 s, 43 hosts/120 s), `test_urlfinder_cap_config_override` (300 with
+  10 and 500 hosts, 0 keeps the formula), `test_urlfinder_partial_output_line_includes_cap_and_host_count`
+  (exact string), `test_urlfinder_cap_override_defaults_to_the_formula` (config
+  default plus a config file without the block).
+- **Updated test (disclosed behaviour change):** `test_url_tools_receive_the_configured_runtime_bounds`
+  expected `(1800.0, 60.0, 180.0)` for a one-host urls stage; D27 gives that stage
+  the 180 s floor, so it now expects `(180.0, 60.0, 180.0)`.
+- **Gate:** `898 passed`; `ruff check .` clean; `ruff format --check .` 92 files;
+  `mypy src/reconkit` clean (62 source files).
+

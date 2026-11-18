@@ -1049,6 +1049,37 @@ D26. 2026-11-18 - `url_probe` respects `--phase-timeout` and `timeouts.url_probe
     batch. No measured run was affected (all were single-batch); found by D26's
     partial-commit test.
 
+D27. 2026-11-18 - urlfinder's runtime cap scales with the host count.
+
+    Problem: the whole-enumeration ceiling was a flat 1800 s
+    (`urls.urlfinder_max_s`), reached after the earlier flat 180 s cap was
+    replaced by floor/idle/ceiling. A flat ceiling over-serves a small target and
+    still wastes a large one: `testfire.net` (43 hosts) and a 500-host target got
+    the same number, and the owner flagged it as not scaling.
+
+    Owner's formula, implemented as given:
+
+        cap_s = min(stage_budget, max(180, 4 * host_count))
+
+    `host_count` is the number of rows on urlfinder's stdin (the urls stage hands
+    a passive tool the target plus the discovered names; `tool_hosts["urlfinder"]`,
+    else `RunContext.hosts`). `stage_budget` is the deadline the stage already
+    has - `--phase-timeout`, else `timeouts.urls` - so no new timeout source
+    exists and D26's probe deadline is untouched. 43 hosts keeps exactly 180 s,
+    100 gives 400 s, 500 gives 2000 s clipped to 1800 s. The formula is a pure
+    function (`adapters/urlfinder.py: enumeration_cap_s`) called by the engine,
+    which passes the result down as `ToolLimits.max_s`; `min_s` is clipped to the
+    cap so the inactivity floor cannot outlive it.
+
+    `urlfinder.max_enumeration_s` (default 0) replaces the formula with one fixed
+    value when non-zero, for debugging and CI. `urls.urlfinder_max_s` stays a
+    hard ceiling on top of either. The capped detail line now names both numbers:
+    `capped at 180s (hosts=43); kept partial output`.
+
+    Behaviour change disclosed: a one-host run used to be allowed 1800 s and is
+    now 180 s (the floor). `test_url_tools_receive_the_configured_runtime_bounds`
+    was updated from (1800, 60, 180) to (180, 60, 180).
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

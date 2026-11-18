@@ -31,6 +31,12 @@ urls:
   hakrawler_max_s: 120
   subjs_max_s: 60
 
+# urlfinder's whole-enumeration cap scales with the host count (D27):
+#   cap = min(stage deadline, max(180, 4 * hosts))
+# 0 means "use that formula"; a non-zero value replaces it (debugging/CI).
+urlfinder:
+  max_enumeration_s: 0
+
 # URL liveness probe (D23, docs/09 section 5). One GET per stored URL that has
 # no status yet; a URL that does not answer is stored as -1 and never retried.
 url_probe:

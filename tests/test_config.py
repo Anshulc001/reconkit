@@ -39,6 +39,19 @@ def test_the_urls_runtime_bounds_load_and_default(tmp_path: Path) -> None:
     assert load_config(legacy).urls.urlfinder_idle_s == 60
 
 
+def test_urlfinder_cap_override_defaults_to_the_formula(tmp_path: Path) -> None:
+    """D27: 0 means "compute from the host count"; an older file without it loads."""
+    import yaml
+
+    assert load_config(CONFIG).urlfinder.max_enumeration_s == 0
+
+    legacy = tmp_path / "legacy.yaml"
+    raw = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    raw.pop("urlfinder")
+    legacy.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    assert load_config(legacy).urlfinder.max_enumeration_s == 0
+
+
 def test_a_config_without_timeouts_url_probe_still_loads(tmp_path: Path) -> None:
     """D26 added the key; a config.yaml written before it must keep working."""
     import yaml

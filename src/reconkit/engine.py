@@ -30,6 +30,7 @@ from reconkit.adapters import ADAPTERS
 from reconkit.adapters.base import USER_AGENT, BaseToolAdapter, running_as_root
 from reconkit.adapters.pyscan import default_resolve
 from reconkit.adapters.registry import ToolSpec, load_tools
+from reconkit.adapters.urlfinder import enumeration_cap_s
 from reconkit.config import AppConfig, UrlProbeConfig
 from reconkit.core.runner import validate_host, validate_target
 from reconkit.core.scope import load_scope, passive_warning, require_active, scope_present
@@ -862,6 +863,7 @@ class Engine:
                         tool_hosts,
                         results,
                         done,
+                        stage_budget=timeout,
                     ),
                     timeout=timeout,
                 )
@@ -1354,10 +1356,21 @@ class Engine:
         tool_hosts: dict[str, list[str]],
         results: list[ToolResult],
         done: set[str],
+        *,
+        stage_budget: float,
     ) -> RunContext:
         # Every tool in the stage starts at once and runs at its own natural
         # pace (2026-11-17, MASTER_PLAN D3).
         urls_config = self.config.urls
+        # D27: urlfinder's whole-enumeration cap scales with the size of the list
+        # it was given (the stdin rows), inside the stage deadline that is already
+        # in force. `max_enumeration_s` replaces the formula when non-zero.
+        urlfinder_cap = enumeration_cap_s(
+            len(tool_hosts.get("urlfinder", hosts)),
+            stage_budget,
+            override=float(self.config.urlfinder.max_enumeration_s),
+            ceiling=float(urls_config.urlfinder_max_s),
+        )
         ctx = RunContext(
             target=target,
             hosts=hosts,
@@ -1374,9 +1387,10 @@ class Engine:
             # Per-tool runtime bounds from `config.yaml` `urls:` (docs/09 4a2b).
             limits={
                 "urlfinder": ToolLimits(
-                    max_s=float(urls_config.urlfinder_max_s),
+                    max_s=urlfinder_cap,
                     idle_s=float(urls_config.urlfinder_idle_s),
-                    min_s=float(urls_config.urlfinder_min_s),
+                    # The inactivity floor cannot outlive the cap itself.
+                    min_s=min(float(urls_config.urlfinder_min_s), urlfinder_cap),
                 ),
                 "hakrawler": ToolLimits(max_s=float(urls_config.hakrawler_max_s)),
                 "subjs": ToolLimits(max_s=float(urls_config.subjs_max_s)),
