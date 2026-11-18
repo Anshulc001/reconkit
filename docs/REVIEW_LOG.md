@@ -4828,6 +4828,48 @@ The one remaining check is `dnsreaper`, the registry entry with no automatic
 source; it is reported, not failed. Final state: 40 binary entries, 39 installed
 with `identity: ok`, 1 manual gap.
 
+### `findomain` and `rustscan` now come from Kali's signed repository
+
+Both were the last two entries with no automatic source, and both were installed
+by hand from release zips. Two facts changed that (2026-11-18):
+
+```
+$ apt-cache policy findomain rustscan
+findomain:  Candidate: 11.0.0-beta.2-0kali2   (kali-rolling/main)
+rustscan:   Candidate: 2.4.1-0kali1           (kali-rolling/main)
+```
+
+so `source:` became `apt: findomain` and `apt: rustscan`. The apt builds were
+then tested against exactly what the adapters send, not assumed:
+
+```
+$ /usr/bin/findomain -h  | grep -E "^\s+-t,|quiet"     -> -t, --target; -q, --quiet
+$ /usr/bin/rustscan --help | grep -E "greppable|ulimit|--top|addresses"
+                                              -> -a, -n, -g, -u/--ulimit, --top
+$ timeout 90 /usr/bin/findomain -t example.com -q | head -5
+gexglxkm.example.com
+z12ujb5gbf.example.com
+...                                    (bare labels, one per line, exit 0)
+$ reconkit doctor --json
+findomain /usr/bin/findomain ok
+rustscan  /usr/bin/rustscan  ok
+```
+
+The hand-installed copies were moved to `/tmp/*.hand.bak` so the apt binaries are
+the ones that actually run - otherwise `~/.reconkit/bin` would shadow them and
+`apt upgrade` would fix nothing.
+
+Two facts worth knowing and now written in the registry `notes:`: Kali ships
+`findomain` as **11.0.0-beta.2**, older than the 11.0.0 GitHub release it
+replaced; and the `rustscan` package is versioned 2.4.1 while its binary prints
+`rustscan 2.3.0`. The `version_regex` still matches, so `identity` stays `ok`, but
+the apt package number is not a reliable version.
+
+Two tests in `tests/test_tools_registry.py` asserted the old truth (findomain's
+source naming its repository and "no checksums are published"). They were
+rewritten to assert the new one - both rows are `apt:`, and a release-only row
+still names its repository - rather than deleted. Suite stays at 827.
+
 The **apt path did run**, under a pty so sudo could ask for the owner's password
 (the credential cache is per-tty, so priming it from another shell is not enough):
 

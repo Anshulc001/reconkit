@@ -7,10 +7,11 @@ one. To see which are present, run `reconkit doctor`.
 There is one optional, human-run shortcut for Kali/Debian -
 `scripts/install-tools.sh`. It is a shell script, not a CLI command, it reads
 this same registry, and it covers what the registry can install automatically
-(`apt:`, `go install`, `pipx`). Three entries have no automatic source
-(`findomain`, `rustscan`, `dnsreaper`) and it prints them with their upstream URL
-instead of downloading anything. Skip it entirely if you prefer to install tools
-yourself; nothing else in reconkit depends on it. See section 5.
+(`apt:`, `go install`, `pipx`). Kali packages `findomain` and `rustscan` in its
+signed repositories, so both install with `sudo apt-get` like the rest; only
+`dnsreaper` has no automatic source, and the script prints its upstream URL
+instead of downloading anything. Skip the script entirely if you prefer to
+install tools yourself; nothing else in reconkit depends on it. See section 5.
 
 ## 1. What this document is
 
@@ -33,7 +34,7 @@ anything, because installing is not something reconkit does or asks for.
 | `subfinder` | subs | Passive subdomain enumeration over many sources | https://github.com/projectdiscovery/subfinder/releases |
 | `assetfinder` | subs | Subdomain finder built on CT and other public sources | github.com/tomnomnom/assetfinder |
 | `amass` | subs | OWASP attack-surface and subdomain enumeration (passive by default in v5) | Debian package `amass` |
-| `findomain` | subs | Fast subdomain finder across several passive sources | https://github.com/Findomain/Findomain/releases |
+| `findomain` | subs | Fast subdomain finder across several passive sources | Kali package `findomain` (11.0.0-beta.2; the GitHub release zip is the non-Debian fallback) |
 | `chaos` | subs | ProjectDiscovery Chaos dataset lookup (optional key) | https://github.com/projectdiscovery/chaos-client/releases |
 | `github_subdomains` | subs | GitHub code search for domains (optional key) | github.com/gwen001/github-subdomains |
 | `dnspython` | dns | Resolver used for A/CNAME/NS lookups and NXDOMAIN classification | in-tree adapter, no external binary |
@@ -49,7 +50,7 @@ anything, because installing is not something reconkit does or asks for.
 | `pyscan` | ports | TCP connect scan gated by the scope CIDR predicate | in-tree adapter, no external binary |
 | `naabu` | ports | Fast SYN/connect port scanner | https://github.com/projectdiscovery/naabu/releases (needs `libpcap-dev`) |
 | `nmap` | ports | Port scan with service and version fingerprints | Debian package `nmap` |
-| `rustscan` | ports | Fast port scanner that hands open ports to `nmap` | https://github.com/bee-san/RustScan/releases |
+| `rustscan` | ports | Fast port scanner that hands open ports to `nmap` | Kali package `rustscan` (packaged as 2.4.1, self-reports 2.3.0; the release `.deb` is the fallback) |
 | `masscan` | ports | Very fast Internet-wide style port scanner (`opt_in`) | Debian package `masscan` |
 | `httpx_tech` | tech | Technology and CDN detection; reuses the `httpx` binary with `-td` | https://github.com/projectdiscovery/httpx/releases (same binary as `httpx`) |
 | `whatweb` | tech | Web technology and CMS fingerprinting | Debian package `whatweb` |
@@ -194,13 +195,14 @@ Rules it keeps:
 - **It downloads nothing itself.** `apt-get` and `go install` fetch from their
   own official sources; there is no `curl`, no release archive, no checksum
   handling. The nine ProjectDiscovery release-only entries carry a verified
-  `(or: go install ...)` hint that the script uses instead.
+  `(or: go install ...)` hint that the script uses instead, and `findomain` /
+  `rustscan` come from Kali's signed repositories rather than their release
+  assets (2026-11-18).
 - **Verification is `reconkit doctor --json`**, the adapter's own probe
   (installed / path / identity). A binary that exists but is the wrong program
-  is `identity: failed` and fails the script. Entries with no automatic source
-  are printed as `manual` **only while they are still missing** (`findomain` and
-  `rustscan` show as `have ... (installed by hand)`), and they are never counted
-  as failures.
+  is `identity: failed` and fails the script. An entry with no automatic source
+  is printed as `manual` **only while it is still missing** (today that is just
+  `dnsreaper`), and it is never counted as a failure.
 - `--dry-run` prints every command, `--check` reports only, `--update` re-runs
   `apt`/`go`/`pipx` for every tool, `--only <pattern>` narrows to one tool.
 

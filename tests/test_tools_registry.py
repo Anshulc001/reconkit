@@ -164,9 +164,13 @@ def test_a_release_source_names_its_repository() -> None:
     specs = load_tools()
     assert "github.com/projectdiscovery/subfinder" in (specs["subfinder"].source or "")
     assert "github.com/projectdiscovery/nuclei" in (specs["nuclei"].source or "")
-    assert "github.com/Findomain/Findomain" in (specs["findomain"].source or "")
-    assert specs["findomain"].source is not None
-    assert "no checksums are published" in specs["findomain"].source
+    assert "github.com/projectdiscovery/chaos-client" in (specs["chaos"].source or "")
+
+    # These two used to cite their release pages. Kali packages both, so the
+    # registry now installs them from the signed repository instead
+    # (2026-11-18); the release page is the fallback named in `notes:`.
+    assert specs["findomain"].source == "apt: findomain"
+    assert specs["rustscan"].source == "apt: rustscan"
 
 
 def test_a_shared_binary_tool_still_has_a_source() -> None:
@@ -284,7 +288,6 @@ def test_the_source_notes_are_preserved() -> None:
     """
     specs = load_tools()
     assert "chaos-client" in (specs["chaos"].source or "")
-    assert "no checksums are published" in (specs["findomain"].source or "")
     assert "punk-security/dnsReaper" in (specs["dnsreaper"].source or "")
     assert "no PyPI package" in (specs["dnsreaper"].source or "")
     assert specs["puredns"].version_cmd == ["puredns", "--version"]
