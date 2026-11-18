@@ -450,11 +450,15 @@ One folder per domain per run, never reused:
   `all`). Until this change a flagged run wrote nothing at all, which left the
   operator with a terminal table and no artifact; the inconsistency was reported
   from a real scan on 2026-11-18.
-- The report is built from **every host row the run stored**, not from the
-  filtered table: `--only-alive`/`--only-states`/`--status-codes` narrow what is
-  printed on screen and never what is stored (section 3), so a filtered run's
-  `report.txt` can hold more rows than the table you saw. That is deliberate -
-  the artifact is the run's record, not a screenshot of one view.
+- **The report follows the display filters, and says so.** A run with
+  `--only-alive` writes only the `ALIVE` hosts to `report.txt`/`report.json`,
+  so the artifact matches the table you just read instead of hiding 34 `DEAD`
+  rows under 8. The filters still change nothing in the database (section 3) -
+  every host stays stored and `status`/`diff` still see it. Because a filtered
+  artifact must never look complete, the report records the selection it used:
+  `report.txt` carries `selection: 8 of 42 hosts (ALIVE)`, and `report.json`
+  carries `"selection": {"filter": "ALIVE", "matched": 8, "total": 42}`;
+  without filters the key is `null` and every stored row is written.
 - The same `report: <txt> and <json>` line on stderr announces the files, so a
   run always says where its report went; `--silent` suppresses that line only.
 - A report that can not be written is a run error (exit 1), never a silent

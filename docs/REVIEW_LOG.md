@@ -4636,12 +4636,82 @@ report: /tmp/spin/results/example.com/20261118T101312Z/report.txt and ...report.
 A redirected run contains none of those frames - the same `script` run with
 stderr to a file showed only the plain `<stage>: <tool> ok N item(s)` lines.
 
-### Open question for the owner
+### 7. The report follows the filters (owner: "do whatever is good")
 
-Parallelism is not the lever for the `urls` stage; `gau` spending its whole
-600 s per-tool budget and returning 0 items is. Shortening the per-tool timeout
-for archive tools is a config/registry decision (it trades coverage for time),
-so it is left alone.
+The first version of D20 wrote **every** stored row, so the owner's
+`--only-alive` run saved 42 rows under a table that showed 8. That is a bad
+artifact: it answers a question the operator did not ask. But silently dropping
+34 hosts would make a narrowed file look complete, which is worse.
+
+Decision: honour the filter **and record it**.
+
+- `ui.ReportSelection(description, matched, total)`; `report_document` gains
+  `"selection": {"filter", "matched", "total"}` (`null` when nothing was
+  filtered); `report_text` gains one line, `selection: 8 of 42 hosts (ALIVE)`.
+- `write_field_report(..., selection=)`; `cli.py` filters the **snapshots** with
+  the same predicates as the display rows (the first attempt passed the display
+  `HostRow`s, which have no `state` enum - caught by 38 failing CLI tests, fixed
+  in the caller, not by weakening them) and builds the label with
+  `_selection_label` (`ALIVE`, `ALIVE + DNS_ONLY`, `... + status 200`).
+- The database is untouched: `--only-alive` still only narrows output (docs/02
+  section 3), so `status`/`diff` see every host.
+
+Tests: `test_a_filtered_run_writes_only_what_it_showed_and_says_so` (`--active
+--no-scope --only-alive`: `filter == "ALIVE"`, `matched == len(hosts)`, every
+row `ALIVE`, the text line present) and `selection is None` asserted in
+`test_flagged_run_writes_the_report_files_too`.
+
+### 8. Passive tools: the run budget was being passed as an HTTP timeout
+
+Owner: "speed is only for recon one tool which run passively". Investigating the
+600 s `gau` timeout found a real defect, not a tuning question:
+
+```
+$ gau --help | grep timeout
+      --timeout uint   timeout (in seconds) for HTTP client (default 45)
+$ urlfinder -h | grep -A2 OPTIMIZATION
+   -timeout int   seconds to wait before timing out (default 30)
+   -max-time int  minutes to wait for enumeration results (default 10)
+```
+
+Both adapters passed `ctx.timeout` - the per-tool **run budget** (600 s) - into a
+flag that is a **per-request** timeout, so a single stalled archive source could
+block for ten minutes.
+
+Measured on testfire.net, same box, same day:
+
+| command | result |
+|---|---|
+| `gau --json --timeout=600` (old) | `timeout` at 600 s, **0 items** |
+| `gau --json --timeout=45 --retries=1 --threads=5` | **31 s, 345 URLs** |
+| `urlfinder -all -silent -nc -timeout=600` (old) | 554 s, 932 URLs |
+| `urlfinder -all -silent -nc -timeout 30 -max-time 10` | **15 s, 996 URLs** |
+
+Through the engine (`reconkit urls -d testfire.net --active --no-scope --tools
+gau,urlfinder`):
+
+```
+| urlfinder | urls | ok | 933 |
+| gau       | urls | ok | 345 |
+42 hosts: ... | tools: 2 ok, 0 failed, 0 skipped, 0 timeout
+report: results/testfire.net/20261118T103917Z/report.txt and ...report.json
+wall=15s
+```
+
+The same two tools took 664 s of stage wall clock in the morning run, with `gau`
+recorded as `timeout 0 items`. Both new values are `min(...)`-capped by the run
+budget, so `--phase-timeout` still wins, and `urlfinder -max-time` is the budget
+rounded up to minutes. **Active tools are untouched** - the change is limited to
+the two passive archive readers, per the owner's instruction.
+
+Tests: `test_gau_caps_its_http_timeout_instead_of_using_the_run_budget` and the
+updated `test_urlfinder_skips_archived_junk_and_feeds_domains` (now asserts
+`-max-time` as well).
+
+### Previous open question (closed)
+
+Parallelism was not the lever for the `urls` stage - the timeout semantics were.
+The per-tool-timeout question is answered above and no owner ruling is needed.
 
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 

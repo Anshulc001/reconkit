@@ -15,6 +15,18 @@ from reconkit.adapters.base import BinaryAdapter, normalize_url, strip_ansi
 from reconkit.errors import ParseError, ToolFailed
 from reconkit.models import Record, RunContext, Stage, UrlRecord
 
+# gau's `--timeout` is its HTTP client timeout in seconds, and its own default is
+# 45 (`gau --help`: "timeout (in seconds) for HTTP client (default 45)"). It is
+# NOT a run budget: the adapter used to pass the per-tool budget (600 s) here, so
+# a single stalled provider request could block for ten minutes and the tool was
+# killed at the stage timeout with nothing found. Measured on 2026-11-18 with
+# these values against testfire.net: 345 URLs in 31 s, where the 600 s run gave
+# 0 items. `--threads` defaults to 1; five is enough to keep the four providers
+# busy without hammering any single archive.
+HTTP_TIMEOUT_S = 45
+THREADS = 5
+RETRIES = 1
+
 
 class GauAdapter(BinaryAdapter):
     name = "gau"
@@ -34,13 +46,17 @@ class GauAdapter(BinaryAdapter):
                 hosts.append(host)
         if not hosts:
             raise ToolFailed("gau: no hosts to query")
-        # Verified against the real binary: `--json`, `--timeout` and `--threads`
-        # are the flags it documents, and domains are positional arguments (it
-        # accepts several). gau has no `-silent`/`-nc`/`-duc`.
+        # Verified against the real binary: `--json`, `--timeout`, `--threads`,
+        # `--retries`, `--providers` and `--subs` are the flags it documents, and
+        # domains are positional arguments (it accepts several). gau has no
+        # `-silent`/`-nc`/`-duc`. The HTTP timeout is capped by the run's own
+        # budget so a short `--phase-timeout` is still respected.
         argv = [
             self.binary_path() or self.binary,
             "--json",
-            f"--timeout={max(1, int(ctx.timeout))}",
+            f"--timeout={min(HTTP_TIMEOUT_S, max(1, int(ctx.timeout)))}",
+            f"--threads={THREADS}",
+            f"--retries={RETRIES}",
         ]
         return [*argv, *hosts]
 

@@ -442,12 +442,34 @@ def _write_atomically(path: Path, text: str) -> None:
     os.replace(temporary, path)
 
 
+@dataclass(frozen=True)
+class ReportSelection:
+    """What the display filters left in a report (docs/02 section 5).
+
+    A report that honoured `--only-alive` must not look like a complete scan, so
+    the size of the whole run travels with it. `description` is the human form of
+    the filter (`ALIVE`, `ALIVE + status 200`), `matched` the rows written and
+    `total` every host the run stored.
+    """
+
+    description: str
+    matched: int
+    total: int
+
+    def as_document(self) -> dict[str, object]:
+        return {"filter": self.description, "matched": self.matched, "total": self.total}
+
+    def as_line(self) -> str:
+        return f"selection: {self.matched} of {self.total} hosts ({self.description})"
+
+
 def report_document(
     target: str,
     rows: Sequence[HostSnapshot],
     fields: Sequence[ReportField],
     *,
     run_at: datetime,
+    selection: ReportSelection | None = None,
 ) -> dict[str, object]:
     """Build the report's JSON document from stored values only."""
 
@@ -455,6 +477,7 @@ def report_document(
         "type": "report",
         "target": target,
         "generated_at": run_at.astimezone(UTC).isoformat(timespec="seconds"),
+        "selection": None if selection is None else selection.as_document(),
         "fields": [field.key for field in fields],
         "hosts": [{field.key: field_value(row, field) for field in fields} for row in rows],
     }
@@ -478,6 +501,7 @@ def report_text(
     fields: Sequence[ReportField],
     *,
     run_at: datetime,
+    selection: ReportSelection | None = None,
 ) -> str:
     """Build the report's plain-text table from stored values only."""
 
@@ -491,6 +515,7 @@ def report_text(
         f"target: {target}",
         f"generated: {run_at.astimezone(UTC).isoformat(timespec='seconds')}",
         f"hosts: {len(rows)}",
+        *([selection.as_line()] if selection is not None else []),
         "",
         "  ".join(label.ljust(width) for label, width in zip(header, widths, strict=True)),
     ]
@@ -508,18 +533,22 @@ def write_field_report(
     fields: Sequence[ReportField],
     *,
     run_at: datetime,
+    selection: ReportSelection | None = None,
 ) -> tuple[Path, Path]:
     """Write `report.txt` and `report.json` into this run's folder.
 
     Both files are always written, whatever the field selection was, and both come
-    from the same snapshots, so they cannot disagree.
+    from the same snapshots, so they cannot disagree. `selection` is not None only
+    when a display filter narrowed the rows (docs/02 section 5).
     """
 
     json_path = directory / "report.json"
     text_path = directory / "report.txt"
-    document = report_document(target, rows, fields, run_at=run_at)
+    document = report_document(target, rows, fields, run_at=run_at, selection=selection)
     _write_atomically(json_path, json.dumps(document, indent=2, sort_keys=False) + "\n")
-    _write_atomically(text_path, report_text(target, rows, fields, run_at=run_at))
+    _write_atomically(
+        text_path, report_text(target, rows, fields, run_at=run_at, selection=selection)
+    )
     return text_path, json_path
 
 

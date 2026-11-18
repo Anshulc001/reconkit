@@ -25,6 +25,14 @@ from reconkit.core.runner import validate_host
 from reconkit.errors import ParseError, ToolFailed
 from reconkit.models import Record, RunContext, Stage, UrlRecord
 
+# `-timeout` is a per-request value in seconds (its documented default is 30) and
+# `-max-time` is the whole enumeration in minutes (default 10). The adapter used
+# to pass the per-tool budget (600 s) as `-timeout`, so every slow archive source
+# was given ten minutes to answer one request. Measured on 2026-11-18 with these
+# values against testfire.net: 996 URLs in 15 s, against 932 URLs in 554 s for the
+# old command - faster and no worse. `-max-time` still comes from the run budget.
+REQUEST_TIMEOUT_S = 30
+
 
 class UrlfinderAdapter(BinaryAdapter):
     name = "urlfinder"
@@ -50,14 +58,19 @@ class UrlfinderAdapter(BinaryAdapter):
     def build_command(self, ctx: RunContext) -> list[str]:
         if not self._hosts(ctx):
             raise ToolFailed("urlfinder: no hosts to query")
-        # Verified: `-all`, `-silent`, `-timeout int`, `-nc, -no-color`.
+        # Verified: `-all`, `-silent`, `-timeout int`, `-max-time int`, `-nc`.
+        # Both timeouts are capped by the run budget so `--phase-timeout` still
+        # wins, and `-max-time` is rounded up so a 600 s budget stays 10 minutes.
+        budget = max(1, int(ctx.timeout))
         return [
             self.binary_path() or self.binary,
             "-all",
             "-silent",
             "-nc",
             "-timeout",
-            str(max(1, int(ctx.timeout))),
+            str(min(REQUEST_TIMEOUT_S, budget)),
+            "-max-time",
+            str(max(1, (budget + 59) // 60)),
         ]
 
     def stdin_text(self, ctx: RunContext) -> str | None:

@@ -240,6 +240,33 @@ def test_flagged_run_writes_the_report_files_too(tmp_path: Path) -> None:
     assert document["target"] == "example.com"
     # No question was asked, so the report carries every stored field.
     assert document["fields"] == [field.key for field in ui.REPORT_FIELDS]
+    # No filter was given, so nothing was narrowed and nothing is claimed.
+    assert document["selection"] is None
+
+
+def test_a_filtered_run_writes_only_what_it_showed_and_says_so(tmp_path: Path) -> None:
+    """2026-11-18: the report follows --only-alive, and records the selection.
+
+    A saved artifact that silently dropped the DEAD hosts would look like a
+    complete scan, so the count of the whole run travels with it.
+    """
+    config = make_config(tmp_path)
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    raw["results_dir"] = str(tmp_path / "results")
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    result = CliRunner().invoke(
+        app, scan_args(config, "run", "--active", "--no-scope", "--only-alive")
+    )
+    assert result.exit_code == 0, result.stderr
+    folder = sorted((tmp_path / "results" / "example.com").iterdir())[0]
+    document = json.loads((folder / "report.json").read_text(encoding="utf-8"))
+    selection = document["selection"]
+    assert selection["filter"] == "ALIVE"
+    assert selection["matched"] == len(document["hosts"])
+    assert selection["total"] >= selection["matched"]
+    assert {host["state"] for host in document["hosts"]} == {"ALIVE"}
+    text = (folder / "report.txt").read_text(encoding="utf-8")
+    assert f"selection: {selection['matched']} of {selection['total']} hosts (ALIVE)" in text
     assert "UNKNOWN" in result.stderr or "ALIVE" in result.stderr
 
 

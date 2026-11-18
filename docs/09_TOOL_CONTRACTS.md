@@ -177,7 +177,7 @@ flat `<tool>.synthetic.*` lookup in `base._read_fixture` looks).
 | `dnsx` | dns | `-silent -json -a -or -duc -nc -l <comma-separated hosts>` | `SubdomainRecord(ips=[a...])`; `HostStatusRecord(DEAD)` only for `status_code: NXDOMAIN` (PIT-01) |
 | `tlsx` | live | `-silent -json -san -duc -nc -u <host>` (one `-u` per host) | `HostStatusRecord(ALIVE)` when `probe_status` is true, `UNKNOWN` with `detail="tls probe failed"` when false; one `SubdomainRecord(source="tlsx:san")` per certificate SAN, `*.` stripped |
 | `katana` | urls | `-silent -jsonl -or -ob -duc -nc -u <host>` (one `-u` per host) | `UrlRecord` from `request.endpoint`; a line carrying only `error` (for example `max depth reached`) is skipped |
-| `gau` | urls | `--json --timeout=<n> <host...>` (hosts are positional; gau has no `-silent`/`-nc`/`-duc`) | `UrlRecord` from `{"url": ...}` per line, and from plain URL lines too (older builds); the stderr `level=warning msg="error reading config..."` notice is ignored because only stdout is parsed |
+| `gau` | urls | `--json --timeout=<s> --threads=5 --retries=1 <host...>` (hosts are positional; gau has no `-silent`/`-nc`/`-duc`). **`--timeout` is the HTTP client timeout (its default 45), not the run budget** - see the 2026-11-18 note below | `UrlRecord` from `{"url": ...}` per line, and from plain URL lines too (older builds); the stderr `level=warning msg="error reading config..."` notice is ignored because only stdout is parsed |
 
 `dnsx` has no repeatable input flag, so its hosts travel in one `-l` list
 (`-l` documents "file or comma separated or stdin"); every host is validated
@@ -226,6 +226,28 @@ keeps `-version` (its own banner) and the ProjectDiscovery markers.
   nothing, and a record naming a host outside the target is dropped like every
   other off-target record.
 
+### 4a2b. Passive-tool timeouts (2026-11-18): gau and urlfinder
+
+Both archive readers were passing the per-tool **run budget** into a flag that
+means a **per-request HTTP timeout**, which made them slower than their own
+defaults and, for `gau`, fatal:
+
+| tool | old | new | measured on testfire.net (2026-11-18) |
+|---|---|---|---|
+| `gau` | `--timeout=600` (the budget) | `--timeout=45 --threads=5 --retries=1` | **31 s, 345 URLs** vs `timeout` at 600 s, 0 items |
+| `urlfinder` | `-timeout 600` (the budget), no `-max-time` | `-timeout 30 -max-time 10` | **15 s, 996 URLs** vs 554 s, 932 URLs |
+
+Both values are capped by the run budget (`min(...)`), so a small
+`--phase-timeout` still wins, and `urlfinder -max-time` is the budget rounded up
+to minutes (600 s -> 10, its own default). Through the real engine:
+`reconkit urls -d testfire.net --active --no-scope --tools gau,urlfinder` finished
+the whole `urls` stage in **15 s wall clock** with `gau ok 345` and
+`urlfinder ok 933`, where the 2026-11-18 morning run needed 664 s and recorded
+`gau timeout 0`.
+
+This is deliberately limited to the **passive** tools. Active tools are bounded
+by the phase timeout only, because their work *is* the scan.
+
 ### 4a3. Adapter wave 3 (2026-11-17): hakrawler, gospider, subjs, urlfinder
 
 Three are `urls` / `active` / `core` (`hakrawler`, `gospider`, `subjs`), so they
@@ -241,7 +263,7 @@ engine and turn them into URLs themselves:
 | `hakrawler` | `-d 2 -u -timeout <s>`, URLs on **stdin** | both `https://<host>/` and `http://<host>/` | `UrlRecord` per crawled URL |
 | `gospider` | `-S <sites file> -d 2 -q -t 10 -m <s>` | sites file with both schemes | `UrlRecord`; a leading `[tag] - [code-200] - ` is stripped |
 | `subjs` | `-c 10 -t <s> -ua <reconkit UA>`, URLs on **stdin** | both schemes | `UrlRecord` per JavaScript URL |
-| `urlfinder` | `-all -silent -nc -timeout <s>`, domains on **stdin** | bare hostnames | `UrlRecord` per archived URL (mode `passive`: runs in all three modes) |
+| `urlfinder` | `-all -silent -nc -timeout <s> -max-time <min>`, domains on **stdin** | bare hostnames | `UrlRecord` per archived URL (mode `passive`: runs in all three modes) |
 
 Why the two-scheme form: the engine hands the stage bare hostnames, and these
 crawlers need a URL. `https://<host>/` then `http://<host>/` is the same order

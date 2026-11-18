@@ -1195,6 +1195,22 @@ async def test_gau_ignores_its_stderr_config_warning(monkeypatch: pytest.MonkeyP
     assert [record.url for record in result.records] == ["http://testfire.net/"]
 
 
+def test_gau_caps_its_http_timeout_instead_of_using_the_run_budget() -> None:
+    """2026-11-18: `--timeout` is gau's HTTP client timeout, not a run budget.
+
+    The adapter passed the per-tool budget here, so one stalled provider request
+    could block for the whole stage: a real run timed out at 600 s with 0 items,
+    where `--timeout=45 --retries=1 --threads=5` returned 345 URLs in 31 s.
+    """
+    adapter = GauAdapter(finder=lambda _name: "/usr/bin/gau")
+    command = adapter.build_command(make_ctx(hosts=["testfire.net"]))
+    assert "--timeout=5" in command  # the 5 s run budget is smaller, so it wins
+    assert "--threads=5" in command
+    assert "--retries=1" in command
+    assert "--json" in command
+    assert command[-1] == "testfire.net"
+
+
 def test_gau_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
     """Regression: PIT-14 pattern - a namesake binary is not gau."""
     fake_exec(monkeypatch, outcome("gau 0.1.0-something-else\n"))
@@ -1515,7 +1531,19 @@ def test_urlfinder_skips_archived_junk_and_feeds_domains(monkeypatch: pytest.Mon
     calls = fake_exec(monkeypatch, outcome(stdout=good))
     adapter = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder")
     ctx = make_ctx(hosts=["testfire.net", "www.testfire.net"])
-    assert adapter.build_command(ctx)[1:] == ["-all", "-silent", "-nc", "-timeout", "5"]
+    # 2026-11-18: `-timeout` is the per-request timeout (capped at 30 s, its own
+    # default) and `-max-time` the whole enumeration in minutes; the per-tool
+    # budget used to be passed as `-timeout`, which gave every slow source ten
+    # minutes to answer one request.
+    assert adapter.build_command(ctx)[1:] == [
+        "-all",
+        "-silent",
+        "-nc",
+        "-timeout",
+        "5",
+        "-max-time",
+        "1",
+    ]
     assert adapter.stdin_text(ctx) == "testfire.net\nwww.testfire.net\n"
     assert calls == []
 

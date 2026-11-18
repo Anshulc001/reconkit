@@ -34,6 +34,7 @@ from reconkit.ui import (
     REPORT_FIELDS,
     HostRow,
     ReportField,
+    ReportSelection,
     activity_spinner,
     make_console,
     render,
@@ -845,7 +846,15 @@ def _run_scan(
                 shown = [row for row in shown if row.state.value in states]
             if status_codes:
                 shown = [row for row in shown if row.status_code in status_codes]
+            # The report is built from snapshots, not from the display rows, so
+            # the same filter has to be applied to them (docs/02 section 5).
+            report_rows = snapshots
+            if states:
+                report_rows = [item for item in report_rows if item.state.value in states]
+            if status_codes:
+                report_rows = [item for item in report_rows if item.status_code in status_codes]
             filter_info: dict[str, object] | None = None
+            selection: ReportSelection | None = None
             if only_alive or only_states or status_codes:
                 filter_info = {
                     "only_states": sorted(states),
@@ -854,6 +863,13 @@ def _run_scan(
                 }
                 if status_codes:
                     filter_info["status_codes"] = list(status_codes)
+                # docs/02 section 5: the report follows the filters, and records
+                # the selection so a narrowed artifact never looks complete.
+                selection = ReportSelection(
+                    description=_selection_label(states, status_codes),
+                    matched=len(shown),
+                    total=len(rows),
+                )
             injections: dict[str, object] | None = None
             if ports or status_codes or headers or user_agent or ffuf_wordlist or resolvers:
                 injections = {
@@ -889,7 +905,12 @@ def _run_scan(
             directory = report_directory(config.results_dir, target, run_at)
             report_fields_for_run = plan.fields if plan is not None else REPORT_FIELDS
             report_text_path, report_json_path = write_field_report(
-                directory, target, snapshots, report_fields_for_run, run_at=run_at
+                directory,
+                target,
+                report_rows,
+                report_fields_for_run,
+                run_at=run_at,
+                selection=selection,
             )
             render_progress(
                 f"report: {report_text_path} and {report_json_path}",
@@ -913,6 +934,20 @@ def _run_scan(
     finally:
         if engine is not None:
             engine.close()
+
+
+def _selection_label(states: set[str], status_codes: tuple[int, ...]) -> str:
+    """The human form of the display filters, recorded in the report (docs/02 5).
+
+    `ALIVE` / `ALIVE + DNS_ONLY` / `ALIVE + status 200`, so a saved report says
+    which view of the run it holds instead of looking like the whole scan.
+    """
+    parts: list[str] = []
+    if states:
+        parts.append(" + ".join(sorted(states)))
+    if status_codes:
+        parts.append("status " + ",".join(str(code) for code in status_codes))
+    return " + ".join(parts) or "unfiltered"
 
 
 def _scan_command(
