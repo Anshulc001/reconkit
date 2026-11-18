@@ -2226,15 +2226,68 @@ from reconkit.adapters.github_subdomains import GithubSubdomainsAdapter  # noqa:
 
 
 def test_amass_adapter_parses_subdomains() -> None:
-    """Real amass stdout is decorative (`Session Scope` / `FQDN:`); only hosts count."""
-    records = AmassAdapter().parse_output(fixture("adapters", "amass.synthetic.txt"))
+    """The parsed text is `subs -names` output: one host per line, no decoration."""
+    records = AmassAdapter().parse_output(fixture("adapters", "amass.subs.txt"))
     assert [record.fqdn for record in records] == [
-        "api.testfire.net",
+        "altoro.testfire.net",
         "demo.testfire.net",
+        "demo2.testfire.net",
+        "evil.testfire.net",
+        "ftp.testfire.net",
+        "localhost.testfire.net",
         "testfire.net",
         "www.testfire.net",
     ]
     assert all(record.source == "amass" for record in records)
+
+
+def test_amass_enum_header_alone_yields_only_the_target() -> None:
+    """v5 `enum` stdout is the header only; it used to become one useless record."""
+    records = AmassAdapter().parse_output("\nSession Scope\n\nFQDN:\n\ntestfire.net\n")
+    assert [record.fqdn for record in records] == ["testfire.net"]
+
+
+def test_amass_reads_findings_back_from_subs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successful `enum` is followed by `subs -names`, whose stdout is parsed."""
+    replies = [
+        outcome(stdout="\nSession Scope\n\nFQDN:\n\ntestfire.net\n"),
+        outcome(stdout=fixture("adapters", "amass.subs.txt")),
+    ]
+    calls: list[list[str]] = []
+
+    def fake(argv: list[str], **_kwargs: object) -> ExecResult:
+        calls.append(argv)
+        return replies[len(calls) - 1]
+
+    monkeypatch.setattr(base_module, "run_exec", fake)
+    adapter = AmassAdapter(finder=lambda _name: "/usr/bin/amass")
+    result = asyncio.run(adapter.run(make_ctx(target="testfire.net")))
+    assert len(calls) == 2
+    assert calls[0][1:4] == ["enum", "-d", "testfire.net"]
+    assert calls[1][1:] == ["subs", "-d", "testfire.net", "-names"]
+    assert result.status is ToolStatus.OK
+    assert len(result.records) == 8
+    assert "altoro.testfire.net" in [record.fqdn for record in result.records]
+
+
+def test_amass_failed_read_back_is_a_failed_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Findings that can not be read back mean the run produced nothing usable."""
+    replies = [
+        outcome(stdout="\nSession Scope\n\nFQDN:\n\ntestfire.net\n"),
+        outcome(returncode=1, stderr="no database"),
+    ]
+    calls: list[list[str]] = []
+
+    def fake(argv: list[str], **_kwargs: object) -> ExecResult:
+        calls.append(argv)
+        return replies[len(calls) - 1]
+
+    monkeypatch.setattr(base_module, "run_exec", fake)
+    result = asyncio.run(
+        AmassAdapter(finder=lambda _name: "/usr/bin/amass").run(make_ctx(target="testfire.net"))
+    )
+    assert result.status is ToolStatus.FAILED
+    assert result.error is not None and "read-back" in result.error
 
 
 def test_amass_uses_v5_subcommand_syntax() -> None:
@@ -2341,6 +2394,23 @@ def test_dig_adapter_parses_a_records() -> None:
     assert by_host["demo.testfire.net"].ips == ["65.61.137.117"]
     assert by_host["www.testfire.net"].cnames == ["testfire.net"]
     assert all(record.source == "dig" for record in records)
+
+
+def test_dig_ignores_resolver_diagnostics() -> None:
+    """2026-11-18: a resolver timeout is a lost lookup, not a corrupt answer.
+
+    A real run of testfire.net failed the whole tool with
+    `dig: unexpected answer line ';; communications error to 192.168.31.1#53:
+    timed out'`, which turns one resolver hiccup into `dig failed 0 item(s)`.
+    """
+    raw = (
+        ";; communications error to 192.168.31.1#53: timed out\n"
+        "; <<>> DiG 9.20 <<>> +noall +answer\n"
+        "testfire.net.\t\t300\tIN\tA\t65.61.137.117\n"
+    )
+    records = DigAdapter().parse_output(raw)
+    assert [record.fqdn for record in records] == ["testfire.net"]
+    assert records[0].ips == ["65.61.137.117"]
 
 
 def test_dig_uses_a_hosts_file_not_repeated_arguments(tmp_path: Path) -> None:

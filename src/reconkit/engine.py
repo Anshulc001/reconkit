@@ -157,6 +157,9 @@ def allow_all_ip(_ip: str) -> bool:
 Now = Callable[[], str]
 # One short progress line for the CLI to render on stderr (docs/03 section 5).
 Progress = Callable[[str], None]
+# A running-tool snapshot for the live status line: no newline, replaced in place
+# (docs/02 section 5). Separate from `Progress`, whose lines are permanent.
+Activity = Callable[[str], None]
 
 
 class ExitCode(IntEnum):
@@ -519,12 +522,16 @@ class Engine:
         installed: InstalledCheck | None = None,
         now: Now | None = None,
         progress: Progress | None = None,
+        activity: Activity | None = None,
     ) -> None:
         self.config = config
         self.store = store
         # Injected reporting callback (docs/03 section 5). The engine never prints
         # and never formats: it hands the CLI one short line, or nothing at all.
         self._progress_cb = progress
+        # Second, transient channel: the CLI renders it as a spinner, so it must
+        # never be appended to a log or asserted on (docs/02 section 5).
+        self._activity_cb = activity
         self.specs = dict(specs) if specs is not None else load_tools()
         self.adapters = dict(adapters) if adapters is not None else dict(ADAPTERS)
         self.scope_path = scope_path
@@ -571,6 +578,11 @@ class Engine:
         """Emit one progress line to the injected callback, if any."""
         if self._progress_cb is not None:
             self._progress_cb(message)
+
+    def _activity(self, message: str) -> None:
+        """Emit one running-tool snapshot to the live-status callback, if any."""
+        if self._activity_cb is not None:
+            self._activity_cb(message)
 
     def host_rows(self, target_id: int) -> list[HostSnapshot]:
         """Read stored host rows for the UI without exposing Store to the CLI."""
@@ -1231,15 +1243,41 @@ class Engine:
             results_dir=Path(self.config.results_dir),
         )
 
+        total = len(selected)
+        running: set[str] = set()
+        started_at = time.perf_counter()
+
+        def snapshot() -> None:
+            """The live line: how far the stage got and what is still in flight."""
+            elapsed = time.perf_counter() - started_at
+            names = ", ".join(sorted(running)) or "none"
+            self._activity(
+                f"{stage.value}: {len(done)}/{total} tool(s) done, "
+                f"{elapsed:.0f}s elapsed - running: {names}"
+            )
+
         async def one(spec: ToolSpec, adapter: type[BaseToolAdapter]) -> None:
             overrides: dict[str, object] = {"env": self._tool_env(spec, opts)}
             if spec.name in tool_hosts:
                 # docs/05 rule 6: naabu's verified IPs replace the name list.
                 overrides["hosts"] = tool_hosts[spec.name]
             tool_ctx = ctx.model_copy(update=overrides)
-            result = await self._run_one(run_id, adapter, tool_ctx, workspace)
+            running.add(spec.name)
+            snapshot()
+            finished = False
+            try:
+                result = await self._run_one(run_id, adapter, tool_ctx, workspace)
+                finished = True
+            finally:
+                # Both sets move before the snapshot, or the line a finished tool
+                # produces would still count it as running (found 2026-11-18). A
+                # cancelled tool is not done: the phase-timeout bookkeeping reads
+                # `done` to decide which tools get a timeout row.
+                running.discard(spec.name)
+                if finished:
+                    done.add(spec.name)
+                snapshot()
             results.append(result)
-            done.add(spec.name)
 
         await asyncio.gather(*(one(spec, adapter) for spec, adapter in selected))
         return ctx

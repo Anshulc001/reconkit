@@ -190,6 +190,7 @@ def make_engine(
     now: Callable[[], str] | None = None,
     installed: Callable[[type[BaseToolAdapter]], bool] | None = None,
     resolve: Callable[[str], object] | None = None,
+    activity: Callable[[str], None] | None = None,
 ) -> Engine:
     config = load_config(CONFIG)
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -211,6 +212,7 @@ def make_engine(
         installed=installed,
         now=now,
         resolve=resolve,
+        activity=activity,
     )
 
 
@@ -633,6 +635,30 @@ async def test_all_tools_failing_is_not_an_exception(tmp_path: Path) -> None:
     assert all(result.status is ToolStatus.FAILED for result in summary.stages[0].results)
     run = engine.store._conn.execute("SELECT status FROM scan_runs").fetchone()
     assert run["status"] == "partial"
+
+
+async def test_activity_reports_the_running_tool_snapshot(tmp_path: Path) -> None:
+    """2026-11-18: the live status line names the tools still in flight.
+
+    The durable progress lines only appear when a tool finishes, so a 600 s run
+    looked like a hang; this channel carries the in-place snapshot the CLI shows
+    as a spinner (docs/02 section 5).
+    """
+    rec = Recorder()
+    specs = {"a": tool("a", Stage.SUBS), "b": tool("b", Stage.SUBS)}
+    adapters = {
+        "a": adapter("a", Stage.SUBS, rec, records=[]),
+        "b": adapter("b", Stage.SUBS, rec, records=[]),
+    }
+    seen: list[str] = []
+    engine = make_engine(tmp_path, specs, adapters, activity=seen.append)
+    await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,)))
+    assert seen, "the activity channel must say something while a stage runs"
+    assert seen[0] == "subs: 0/2 tool(s) done, 0s elapsed - running: a"
+    # Every tool is announced as it starts, so no tool is invisible while it runs.
+    assert any("running: b" in message for message in seen)
+    # The last snapshot of the stage is empty: nothing is left to run.
+    assert seen[-1].endswith("2/2 tool(s) done, 0s elapsed - running: none")
 
 
 async def test_phase_timeout_records_a_timeout_row(tmp_path: Path) -> None:

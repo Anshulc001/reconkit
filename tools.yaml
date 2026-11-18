@@ -91,7 +91,7 @@ tools:
       - env: VT_API_KEY
         url: "https://www.virustotal.com/gui/join-us"
         adds: "Free VirusTotal Public API key: adds the virustotal source (4 requests/minute, 500/day)."
-  amass:        {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: amass, version_cmd: [amass, -version], source: "apt: amass", notes: "v5.1.3: passive is the default; enum -passive still parses but is deprecated. Slow - keep it last. Check `amass enum -h` before writing an adapter (v5 CLI: assoc|engine|enum|subs|track|viz)."}
+  amass:        {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: amass, version_cmd: [amass, -version], source: "apt: amass", notes: "v5.1.3: enum prints ONLY the Session Scope header (findings go to its engine), so the adapter reads them back with `amass subs -d DOMAIN -names` via post_command - without it amass reports 1 item, the target. -o does not exist (-oA/-dir do; -dir writes config templates only). passive is the default; enum -passive still parses but is deprecated. Slow - keep it last. v5 CLI: assoc|engine|enum|subs|track|viz."}
   findomain:    {stage: subs, kind: binary, tier: core, mode: passive, phase: 3, binary: findomain, version_cmd: [findomain, --version], source: "https://github.com/Findomain/Findomain/releases (findomain-linux.zip; no checksums are published)", notes: "Download only over HTTPS from the registry repo."}
   chaos:
     stage: subs

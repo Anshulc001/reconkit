@@ -4439,6 +4439,210 @@ install residue. No new feature, no behaviour change, no code-logic change.
 - **Not verified:** the pty transcripts were produced with `script(1)` and mock data; the Windows path has no pty evidence (as before). No real target was scanned; no intrusive tool was run (none has an adapter).
 - **Next part must know:** `MODE_STAGES`/`MODE_TOOLS` are the only mode table; `exploitation: true` is the only automatic-run block; `scan_runs.scope_mode` is schema 6; the interactive out-of-scope prompt is the only place that writes `scope.yaml`.
 
+## Reports on both paths, live status line, amass read-back (2026-11-18, MASTER_PLAN D20)
+
+**Trigger:** the owner ran `reconkit run -d testfire.net --active --no-scope
+--only-alive` and asked where the report was. There was none: `cli.py` wrote
+`report.txt`/`report.json` only under `if plan is not None`, and `plan` is set
+only when a scan command got neither `-d` nor `-l` and stdin is a TTY
+(`cli.py:701-704`). docs/02 section 5 documented that asymmetry; the owner
+called it what it was - an inconsistent project.
+
+### 1. Reports on both paths
+
+`src/reconkit/cli.py`: the writer is no longer gated. `run_at`,
+`report_directory(...)` and `write_field_report(...)` run for every scan; the
+fields are `plan.fields` in interactive mode and `REPORT_FIELDS` (every column,
+the same set as answering `all`) otherwise. docs/02 section 5 was rewritten
+first (title, the "every scan" rule, the filter/storage note, the stderr
+announcement, and "a report that can not be written is a run error (exit 1)" -
+which is what the generic `except Exception` does).
+
+Raw evidence (mock, one flagged run, before -> after):
+
+```
+before: results/  newest folder 20261117T164046Z   (nothing from the 2026-11-18 run)
+after : results/example.com/<stamp>/report.txt + report.json, "report:" line on stderr
+```
+
+Tests: `test_flagged_run_writes_the_report_files_too` (new; asserts the folder,
+both files, and `document["fields"] == [field.key for field in ui.REPORT_FIELDS]`).
+`test_a_flagged_run_writes_no_report_folder` was **renamed and re-asserted** as
+`test_a_flagged_run_writes_its_own_report_folder` - the old name pinned the
+behaviour the owner asked to remove, so this is a contract change, not a
+weakened assertion. The no-prompt promise is still covered by
+`test_a_flagged_run_never_asks_a_question`.
+
+### 2. Live status line (`activity` channel)
+
+Why: the durable progress lines are emitted only when a tool *finishes*
+(`_run_one` -> `self._progress`), so the real run printed nothing for 600 s
+while `gau` timed out. The owner asked for a loading indicator that also says
+which tool is running.
+
+- `engine.py`: `Activity = Callable[[str], None]`, a new `activity=` constructor
+  argument, and `_run_tools` emits
+  `<stage>: <done>/<total> tool(s) done, <n>s elapsed - running: <names>` on
+  every tool start and finish.
+- `ui.py`: `activity_spinner(console=..., *, enabled=...)`, a context manager
+  returning `status.update`, or `_ignore_activity` when disabled or when the
+  console is not a terminal. `Console.status(..., spinner="dots", transient`
+  implicit) - the line erases itself.
+- `cli.py`: `activity_sink` proxy, opened only around `engine.run(target, ...)`
+  so the results tables never print under a live region; cleared in `finally`.
+
+Two defects were caught by the existing suite during this work, both fixed in
+the code and not in the test:
+
+1. The snapshot was taken before `done.add(...)`, so the last line of a stage
+   said `1/2` instead of `2/2`; both sets now move first.
+2. Moving `done.add` into the `finally` made a **cancelled** tool count as done,
+   so `test_phase_timeout_records_a_timeout_row` got no `timeout` row. The
+   update is now behind `finished = True` after the await returns, which keeps
+   the phase-timeout bookkeeping honest.
+
+Tests: `test_activity_reports_the_running_tool_snapshot` (engine: first snapshot
+`subs: 0/2 tool(s) done, 0s elapsed - running: a`, every tool announced, last
+snapshot `2/2 ... running: none`) and
+`test_activity_spinner_writes_nothing_to_a_non_terminal` (ui: a `StringIO`
+console receives zero bytes).
+
+### 3. amass always reported exactly 1 item
+
+Owner question: "check amass why its returning always one result domain name
+only". Root cause found from the real capture, not guessed:
+
+```
+workspaces/testfire.net/subs/84-amass.txt (stdout):
+    Session Scope
+    FQDN:
+    testfire.net
+(stderr: the 187-name progress bar reaching 100%)
+```
+
+v5.1.3 `enum` is a thin client for its own engine - the engine log
+(`~/.config/amass/amass_engine_*.log`) shows `POST /api/v1/sessions`, a session
+id, and `GET .../stats` polling; the findings belong to the session. The adapter
+parsed every line that passed `validate_host`, so the `FQDN:` block's
+`testfire.net` was always the one and only record - always the target, never
+finding anything. Verified on the box: `amass subs -d testfire.net -names`
+printed the same 8 hosts the scan table shows
+(`testfire.net, demo, evil, demo2, localhost, altoro, ftp, www`), and `-o` is
+not a v5 flag (`flag provided but not defined`, usage printed, exit 1) while
+`-dir` writes only `config.yaml`/`datasources.yaml`/`namelist.txt`.
+
+Fix: new documented adapter hook `post_command(ctx) -> list[str] | None` in
+`BaseToolAdapter` (default `None`). After a successful primary run, when
+`read_output` returned `None`, the base flow runs the follow-up through
+`core/runner.run_exec` with the same timeout and child env, parses its stdout,
+and stores both streams as the raw output; a follow-up that times out or exits
+non-zero is a `FAILED` tool with a `read-back` error rather than a silent zero.
+`AmassAdapter.post_command` returns `[amass, subs, -d, <target>, -names]`.
+
+Measured: fixture `tests/fixtures/adapters/amass.subs.txt` is the real 8-line
+read-back; `test_amass_reads_findings_back_from_subs` asserts both argv calls and
+8 records; `test_amass_enum_header_alone_yields_only_the_target` pins the old
+behaviour so a regression is visible;
+`test_amass_failed_read_back_is_a_failed_run` asserts a `read-back` error.
+
+### 4. Two premises that did not hold (reported, not re-implemented)
+
+- **"Tools are not parallel"** - they are: `_run_tools` awaits
+  `asyncio.gather(*(one(spec, adapter) ...))` (line 1244). Real timings for the
+  owner's run (`tool_runs.duration_s`): `gau timeout 600.0`, `urlfinder 554.6`,
+  `waybackurls 298.3`, `gospider 55.0`, `hakrawler 45.2`, `katana 18.9`,
+  `subjs 10.4` - sum 1581 s, but `scan_runs` shows the urls stage running
+  `08:48:35Z -> 08:59:39Z` = **664 s**. That is one parallel stage, not a serial
+  one; the cost is `gau` hitting the 600 s per-tool default.
+- **"Duplicates pass from one phase to the next / into the report"** - they do
+  not: `discovered` is a `set`, `_stage_hosts` calls `_clean_hosts` (a `seen`
+  set), `_persist_urls` keys a `dict` by URL, and the schema has
+  `UNIQUE(target_id, fqdn)` and `UNIQUE(target_id, url)`. Measured on the real DB:
+  `urls WHERE target_id=1` -> 1655 rows / 1655 distinct; `subdomains` -> 41 / 41;
+  `GROUP BY fqdn HAVING COUNT(*) > 1` -> no rows. 2084 tool items collapsed to
+  1655 stored URLs, i.e. 429 cross-tool duplicates were already removed.
+
+### Gate (this batch, run one command at a time)
+
+```
+$ pytest -q
+823 passed in 14.97s
+$ ruff check .
+All checks passed!
+$ ruff format --check .
+91 files already formatted
+$ mypy src/reconkit
+Success: no issues found in 62 source files
+```
+
+Suite 816 -> 823 (+2 report/spinner CLI+UI, +1 engine activity, +3 amass, +1 dig;
+one test renamed in place).
+
+### 5. A fifth defect found by the live rerun: `dig failed 0`
+
+The live rerun (below) reported `dns: dig failed 0 item(s)` where every earlier
+run had `dig ok 8`. The stored reason was
+(`tool_runs.error`):
+
+```
+dig: unexpected answer line ';; communications error to 192.168.31.1#53: timed out'
+```
+
+The local resolver timed out and `dig` printed its diagnostic, which the strict
+parser treated as a corrupt answer - so one resolver hiccup failed the whole
+tool and pushed the run to exit 5. `dig` prefixes *every* comment and diagnostic
+with `;`, so `parse_output` now skips `;`-prefixed lines and keeps the hard
+`ParseError` for anything else. Test:
+`test_dig_ignores_resolver_diagnostics` uses the exact captured line.
+
+### 6. Live rerun of the owner's command
+
+`reconkit run -d testfire.net --active --no-scope --only-alive --verbose`
+(real traffic, 2026-11-18). Relevant lines:
+
+```
+subs: amass ok 8 item(s)            <- was: amass ok 1 item(s)
+dns: dig failed 0 item(s)            <- the diagnostic line, fixed in item 5
+urls: gau timeout 0 item(s)
+8 hosts: 8 ALIVE, ... | tools: 28 ok, 2 failed, 2 skipped, 1 timeout
+report: results/testfire.net/20261118T102600Z/report.txt and results/testfire.net/20261118T102600Z/report.json
+LIVE exit=5
+```
+
+That `report:` line is the whole point of the batch - the same command that
+produced nothing before now names its files. `tool_runs`: `amass ok 8`,
+`dig failed 0`, `gau timeout 0`.
+
+The artifact itself:
+
+```
+report.json: fields 12, hosts 42, unique hostnames 42, duplicates []
+report.txt : 13200 bytes, "reconkit report / target: testfire.net / hosts: 42"
+```
+
+42 stored hosts against 8 printed ones: `--only-alive` narrows the table, and the
+report carries every stored row by design (docs/02 section 5). `exit 5` is the
+pre-existing rule for a failed or timed-out tool, not a new failure.
+
+Spinner proof on a real pty (`script -qec ... /dev/null`, mock run, real frames):
+
+```
+⠋ subs: 0/9 tool(s) done, 0s elapsed - running: crtsh
+⠋ subs: 1/9 tool(s) done, 0s elapsed - running: certspotter
+⠋ subs: 7/9 tool(s) done, 0s elapsed - running: amass
+report: /tmp/spin/results/example.com/20261118T101312Z/report.txt and ...report.json
+```
+
+A redirected run contains none of those frames - the same `script` run with
+stderr to a file showed only the plain `<stage>: <tool> ok N item(s)` lines.
+
+### Open question for the owner
+
+Parallelism is not the lever for the `urls` stage; `gau` spending its whole
+600 s per-tool budget and returning 0 items is. Shortening the per-tool timeout
+for archive tools is a config/registry decision (it trades coverage for time),
+so it is left alone.
+
 ## PROGRESS archive (moved 2026-11-15 by the PROGRESS.md trim)
 
 Everything from the first `###` heading below was moved **verbatim** out of

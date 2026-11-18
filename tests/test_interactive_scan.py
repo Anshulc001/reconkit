@@ -731,17 +731,27 @@ def test_a_directory_instead_of_a_domain_is_a_usage_error(
     assert "Traceback" not in result.stderr
 
 
-def test_a_flagged_run_writes_no_report_folder(
+def test_a_flagged_run_writes_its_own_report_folder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The interactive file layout must not appear on the flag-based path."""
+    """A `-d` run saves a report too, even when a terminal is on stdin (2026-11-18).
+
+    Before this change the writer was gated on the interactive plan, so a flagged
+    run produced no artifact at all; the two paths now agree.
+    """
     config = make_config(tmp_path)
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    raw["results_dir"] = str(tmp_path / "results")
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
     as_tty(monkeypatch)
     result = CliRunner().invoke(
         app, ["passive", "-d", "example.com", "--mock", "--config", str(config)]
     )
     assert result.exit_code == 0
-    assert not (tmp_path / "results").exists()
+    folders = sorted((tmp_path / "results" / "example.com").iterdir())
+    assert len(folders) == 1
+    assert (folders[0] / "report.txt").is_file()
+    assert (folders[0] / "report.json").is_file()
 
 
 def test_field_zero_is_out_of_range(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

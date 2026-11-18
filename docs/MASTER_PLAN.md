@@ -827,6 +827,51 @@ skip; the actual behaviour is pinned by
 the owner wants screenshots to stay behind an explicit flag in full mode, that
 is a separate ruling and a new rule in `MODE_TOOLS`.
 
+D20. 2026-11-18 - Reports on both paths, a live status line, and the amass
+read-back (owner batch after a real `run -d testfire.net --active --no-scope`).
+
+(1) **The report is written by every scan.** docs/02 section 5 said only the
+interactive mode wrote `report.txt`/`report.json`; the owner reported the effect
+plainly - a `-d` run printed tables and left no artifact. The writer is no longer
+gated on the interactive plan: the questions now only *choose columns*, and a
+flagged run passes every `REPORT_FIELDS` key. No new flag, no new prompt, no new
+stdout; the `report: <txt> and <json>` line still goes to stderr and `--silent`
+still suppresses it. `test_a_flagged_run_writes_no_report_folder` became
+`test_a_flagged_run_writes_its_own_report_folder` (the old name asserted the
+behaviour that was removed; it is a contract change, not a weakened assertion).
+
+(2) **A transient activity channel for the live status line.** `Engine` gained
+`activity=callable`, a second callback carrying
+`<stage>: <done>/<total> tool(s) done, <n>s elapsed - running: <tools>` on every
+tool start/finish, rendered by `ui.activity_spinner` as one in-place Rich status
+line on stderr. It exists because the durable progress lines only appear when a
+tool *finishes*: `gau` ran 600 s with no sign of life. Constraints kept: stderr
+only, drawn only when stderr is a terminal, transient, `--silent` removes it,
+and `done` advances only for a tool that actually finished (a phase-timeout
+cancellation must still get its `timeout` row - caught by
+`test_phase_timeout_records_a_timeout_row` during this batch).
+
+(3) **amass: `post_command` and the v5 read-back.** A real run reported `amass ok
+1 item(s)` every time. v5.1.3 `enum` is a thin client for its own engine
+(`POST /api/v1/sessions`) and prints only `Session Scope` / `FQDN:` / the target
+to stdout, so the parser was harvesting the target from the header. Findings are
+read back with `amass subs -d DOMAIN -names` (verified: the same 8 hosts the
+table showed) through a new documented adapter hook `post_command(ctx)`, run by
+the base flow after a successful primary run, only when `read_output` returned
+`None`; its stdout is parsed and a failed read-back is a FAILED tool. `-o` does
+not exist in v5 and `-dir` writes only config templates, so neither is a
+findings channel (docs/09 wave-7 note corrected).
+
+**Two premises in the request did not hold, so they were reported rather than
+re-implemented.** Stage tools were already concurrent (`asyncio.gather` in
+`_run_tools`, D3): the `urls` stage spent 664 s wall clock on 1581 s of summed
+tool time. Duplicates already do not cross a stage boundary (`discovered` is a
+`set`, `_stage_hosts` runs `_clean_hosts` with a `seen` set, `_persist_urls`
+keys a `dict`, and the schema has `UNIQUE(target_id, fqdn)` /
+`UNIQUE(target_id, url)`); measured on the real DB: 1655 url rows = 1655
+distinct, 41 hosts = 41 distinct, zero duplicate groups. The report therefore
+cannot repeat a host or a URL.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

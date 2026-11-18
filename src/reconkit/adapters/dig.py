@@ -80,6 +80,13 @@ class DigAdapter(BinaryAdapter):
             text = line.strip()
             if not text:
                 continue
+            if text.startswith(";"):
+                # `dig` prefixes every comment and diagnostic with `;`, including
+                # `;; communications error to 192.168.31.1#53: timed out`, which a
+                # real run emitted when the local resolver timed out (2026-11-18).
+                # That is a lost lookup, not a corrupt answer: failing the whole
+                # tool over it turned one resolver hiccup into `dig failed 0`.
+                continue
             fields = text.split()
             if len(fields) < 5 or "IN" not in fields:
                 raise ParseError(f"dig: unexpected answer line {text!r}")

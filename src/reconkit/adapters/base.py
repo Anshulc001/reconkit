@@ -184,9 +184,38 @@ class BaseToolAdapter(ABC):
         """
         return None
 
+    def post_command(self, ctx: RunContext) -> list[str] | None:
+        """A read-back command to run after a successful primary run (docs/09 3).
+
+        `None` means "parse the primary command's stdout", which is every adapter
+        but `amass`: v5.1.3 `amass enum` hands its findings to its own engine and
+        prints only a `Session Scope` header, so the names have to be read back
+        with `amass subs -names`. The follow-up is only reached when
+        `read_output` returned `None`, and its stdout - not the primary's - is
+        what `parse_output` receives. A follow-up that fails makes the tool
+        FAILED, because a run whose findings can not be read back produced
+        nothing usable.
+        """
+        return None
+
     def prepare(self, ctx: RunContext) -> AbstractContextManager[None]:
         """Optional per-run setup (for example a temporary config file)."""
         return nullcontext()
+
+    async def _post_output(self, ctx: RunContext) -> str | None:
+        """Run `post_command`, if any, and return its stdout."""
+        argv = self.post_command(ctx)
+        if argv is None:
+            return None
+        outcome = await asyncio.to_thread(
+            run_exec, argv, timeout=ctx.timeout, env=self.child_env(ctx)
+        )
+        if outcome.timed_out:
+            raise ToolFailed(f"{self.name}: read-back command timed out")
+        if outcome.returncode:
+            detail = outcome.stderr.strip()[:MAX_ERROR_CHARS] or "no output"
+            raise ToolFailed(f"{self.name}: read-back exit {outcome.returncode}: {detail}")
+        return str(outcome.stdout)
 
     async def run(self, ctx: RunContext) -> ToolResult:
         """Default binary flow: mock fixture or run_exec, then parse."""
@@ -238,6 +267,12 @@ class BaseToolAdapter(ABC):
                     produced = self.read_output(ctx)
                     if produced is not None:
                         raw_text = capture_output(produced, outcome.stderr)
+                    else:
+                        # Only reached by a tool that keeps its findings elsewhere
+                        # than stdout and than a file (amass, docs/09 section 3).
+                        produced = await self._post_output(ctx)
+                        if produced is not None:
+                            raw_text = capture_output(outcome.stdout, produced)
                     records = self.parse_output(outcome.stdout if produced is None else produced)
         except (ParseError, FetchFailed, ToolFailed) as exc:
             return ToolResult(

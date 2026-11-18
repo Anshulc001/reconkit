@@ -412,6 +412,20 @@ def test_progress_is_suppressed_only_in_silent_mode() -> None:
     assert "(4s)" in stream.getvalue()
 
 
+def test_activity_spinner_writes_nothing_to_a_non_terminal() -> None:
+    """2026-11-18: the live status line stays out of piped output and stdout.
+
+    A spinner frame in a redirect target would be garbage in every log, so a
+    non-terminal console gets the no-op updater and the durable progress lines
+    remain the only thing written.
+    """
+    stream = StringIO()
+    console = ui.make_console(stream)
+    with ui.activity_spinner(console) as update:
+        update("subs: 0/9 tool(s) done, 3s elapsed - running: amass, otx")
+    assert stream.getvalue() == ""
+
+
 def test_the_gaps_block_goes_to_stderr_and_the_json_carries_completion() -> None:
     """Added 2026-11-17: the owner's completion block (docs/02 section 6)."""
     summary = sample_summary()

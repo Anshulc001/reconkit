@@ -438,6 +438,18 @@ Verified on this box (`nuclei` v3.11.1 in `~/go/bin`, `subzy` v1.2.0 in
   `stdout`, so timeout/failed/parse handling stays in one place. A
   `--output`-only tool is a real class (`subzy` now, `ffuf`/`dnsreaper` later),
   which is why the hook is generic rather than a `subzy`-only `run()` override.
+- **`post_command(ctx)` is the read-back hook (added 2026-11-18, amass).** Some
+  tools keep their findings neither on stdout nor in a file they were told to
+  write, but in their own local database, and expose them only through a second
+  subcommand. `post_command` returns that subcommand's argv, or `None` (every
+  adapter but `amass`). The base flow runs it through `core/runner.run_exec`
+  right after a successful primary run - only when `read_output` returned `None`
+  - and hands its stdout to `parse_output`, storing both streams as the raw
+  output. A read-back that times out or exits non-zero turns the tool into
+  `FAILED` with a `read-back` error, because findings that can not be read back
+  produced nothing usable; it is not a silent zero. Both commands run under the
+  same per-tool timeout and child environment, so `needs_home` applies to the
+  read-back too.
 - subzy needs `HOME` (`needs_home = True`): it stores
   `~/<subzy>/fingerprints.json` beside the user's config and writes it on first
   run.
@@ -589,14 +601,30 @@ findomain 11.0.0, chaos 0.5.2, github-subdomains with no version flag):
   adapter never looks at `PATH`. A keyless search returns `results[]` {HTTP 200},
   and `URLSCAN_API_KEY` is for submissions - the adapter sends it when present
   and still runs when it is not.
-- **amass v5's stdout is not a name list.** A real `amass enum -d testfire.net`
-  prints a `Session Scope` block (`Session Scope`, `FQDN:`, the target) before any
-  findings, and `amass --version` prints only `v5.1.3` with no program name. The
-  identity probe is therefore `amass enum -h` (banner:
-  `OWASP Amass Project - @owaspamass`) and the parser keeps only lines that pass
-  `validate_host`, so decoration can not become a record. v5 also starts an
-  `amass engine` child process; on this box a 200 s run had not finished, so the
-  findings block is documented from the header shape, not from a completed run.
+- **amass v5's stdout carries no findings at all.** A real `amass enum -d
+  testfire.net` prints a `Session Scope` block (`Session Scope`, `FQDN:`, the
+  target) and nothing else, and `amass --version` prints only `v5.1.3` with no
+  program name. The identity probe is therefore `amass enum -h` (banner:
+  `OWASP Amass Project - @owaspamass`).
+  v5 is a thin client for its own engine (`POST /api/v1/sessions`), and the
+  findings land in that session, not on stdout. Corrected 2026-11-18 from a real
+  completed run (was: "documented from the header shape, not from a completed
+  run"): the raw capture of run 84 was the header alone while 187 names were
+  scanned on stderr, so the parser turned the header's target into one record -
+  **amass always reported exactly 1 item, always the target itself**. The
+  read-back is `amass subs -d DOMAIN -names`, which prints one name per line from
+  the engine's graph database; the adapter declares `post_command` for it (see
+  the hook note above) and the parser still tolerates the header, since a future
+  version may print it again. `subs` returns every name the database holds for
+  the domain, not only this run's additions, and the engine dedupes it. `-o`
+  does not exist in v5 (`-oA`, `-dir` do) and `-dir` only writes the config
+  templates, so neither is a findings channel.
+- **`dig` prefixes every comment and diagnostic with `;`, and a real run emitted
+  one** (2026-11-18): `;; communications error to 192.168.31.1#53: timed out`
+  from the local resolver made the strict parser fail the whole tool
+  (`dig failed 0 item(s)`). Those lines are now skipped, so a resolver timeout
+  costs that lookup only; a line that is not `;`-prefixed and still does not
+  parse stays a hard `ParseError`.
 - **findomain writes nothing to the CWD** without `-o`/`-u`; a real run printed
   35 names for testfire.net.
 - **github-subdomains' `-o` default is `<domain>.txt` in the current directory**,

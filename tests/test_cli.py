@@ -12,6 +12,7 @@ import yaml
 from typer.main import get_command
 from typer.testing import CliRunner
 
+from reconkit import ui
 from reconkit.cli import app
 from reconkit.core.store import configure_redaction
 from reconkit.engine import MODE_STAGES, Engine, HostSnapshot, ScanOptions, ScanSummary
@@ -216,6 +217,29 @@ def test_mock_human_output_uses_rich_tables_on_stderr(tmp_path: Path) -> None:
     assert result.stdout == ""
     assert "Results" in result.stderr
     assert "Tools" in result.stderr
+
+
+def test_flagged_run_writes_the_report_files_too(tmp_path: Path) -> None:
+    """2026-11-18: a `-d` run used to leave no artifact; it writes both files now.
+
+    Found on a real scan of testfire.net: the tables went to the terminal and
+    nothing was saved, because the writer was gated on the interactive plan.
+    """
+    config = make_config(tmp_path)
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    raw["results_dir"] = str(tmp_path / "results")
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    result = CliRunner().invoke(app, scan_args(config, "passive"))
+    assert result.exit_code == 0
+    assert "report:" in result.stderr
+    folders = sorted((tmp_path / "results" / "example.com").iterdir())
+    assert len(folders) == 1
+    assert (folders[0] / "report.txt").is_file()
+    document = json.loads((folders[0] / "report.json").read_text(encoding="utf-8"))
+    assert document["type"] == "report"
+    assert document["target"] == "example.com"
+    # No question was asked, so the report carries every stored field.
+    assert document["fields"] == [field.key for field in ui.REPORT_FIELDS]
     assert "UNKNOWN" in result.stderr or "ALIVE" in result.stderr
 
 

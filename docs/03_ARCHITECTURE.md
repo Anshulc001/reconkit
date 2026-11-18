@@ -119,8 +119,11 @@ workspaces/<domain>/
   already owns every rendering of the same snapshot rows and imports only the
   standard library, Rich and shared output types. A new module would have meant a
   new file outside docs/03, which G3 forbids.
-- Only the interactive path (docs/02 section 2b) calls them, so a `-d`/`-l` run
-  writes exactly what it wrote before this feature.
+- **Both paths call them** (changed 2026-11-18, D20). The interactive path
+  (docs/02 section 2b) passes the fields the operator picked; a `-d`/`-l` run has
+  no question to answer and passes every `REPORT_FIELDS` key. Until this change
+  the call was gated on the interactive plan, so a flagged run saved no report at
+  all - the inconsistency the owner reported from a real scan.
 
 ### Engine API (`engine.py`)
 
@@ -132,6 +135,14 @@ workspaces/<domain>/
   (the default, and what every test uses) makes it a no-op, so the engine's
   behaviour is unchanged when it is absent. `Engine.open(...)` forwards the same
   argument from the CLI.
+- `Engine(..., activity=callable)` is a second, **transient** channel (added
+  2026-11-18). While a stage runs, the engine calls it with a replaced-in-place
+  snapshot - `<stage>: <done>/<total> tool(s) done, <n>s elapsed - running: a, b`
+  - whenever a tool starts or finishes. Unlike `progress`, these lines are not
+  meant to be kept: the CLI renders them as one spinner line on stderr and the
+  tests treat `None` as a no-op. `done` is only advanced by a tool that actually
+  finished, so a phase-timeout cancellation still leaves it out and gets its
+  `timeout` row.
 - `Engine.host_rows(target_id)` returns typed `HostSnapshot` rows (fqdn, state, confidence, sources, status code, open ports) for the UI; `HostSnapshot`
   also carries the extra stored values the interactive report menu needs -
   `source_count`, `ips`, `title`, `location`, `tech` - read from the existing
@@ -242,6 +253,10 @@ Speed control was removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN
   one-document `--json` contract on stdout is untouched (docs/02 section 5).
   `Engine` receives it as an injected `progress` callback, so the engine still
   prints nothing itself.
+- `ui.activity_spinner(console=..., *, enabled=...)` is a context manager that
+  yields an updater for the live status line (the engine's `activity` snapshot),
+  or a no-op updater when `enabled` is false or the console is not a terminal.
+  The spinner is transient and never reaches stdout or a redirected stream.
 - `ui.render_message(...)` writes one non-error line; `ui.render_diff(...)` and `ui.render_status(...)` render the `diff`/`status` documents to stderr or stdout JSON.
 - `HostRow` is the plain input for the host table/JSON: `fqdn`, `state`, `confidence`, `sources`, `status_code`, `ports`, `detail`. The engine or CLI supplies these precomputed values; `ui.py` never computes confidence or state. `detail` is the stored, already-redacted reason from the latest status row (docs/04 section 5) and is emitted in `--json` only.
 - `ui.py` imports only Rich, the standard library and shared output types; it never imports `core.store`, `core.scope`, adapters or `cli.py`. It does write the `results/` report files (docs/02 section 5): that is rendering to a file, it uses only `pathlib`/`json`/`os`, and every value comes from the engine's snapshots.

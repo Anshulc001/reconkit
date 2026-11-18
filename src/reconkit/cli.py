@@ -6,6 +6,7 @@ import asyncio
 import re
 import sys
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +34,7 @@ from reconkit.ui import (
     REPORT_FIELDS,
     HostRow,
     ReportField,
+    activity_spinner,
     make_console,
     render,
     render_diff,
@@ -769,7 +771,22 @@ def _run_scan(
         progress = (
             None if silent else (lambda message: render_progress(message, console=progress_console))
         )
-        engine = Engine.open(config, db_path=db_path, scope_path=scope_path, progress=progress)
+        # The spinner is transient and only alive while a target runs, so the
+        # engine gets one stable proxy that forwards to whichever display is
+        # currently open (docs/02 section 5).
+        activity_sink: list[Callable[[str], None]] = []
+
+        def activity(message: str) -> None:
+            if activity_sink:
+                activity_sink[0](message)
+
+        engine = Engine.open(
+            config,
+            db_path=db_path,
+            scope_path=scope_path,
+            progress=progress,
+            activity=activity,
+        )
         exit_code = int(ExitCode.SUCCESS)
         for target in targets:
             # Item 2: loud pre-flight block, stderr only, and the run never stops.
@@ -777,31 +794,36 @@ def _run_scan(
                 block = preflight_warning(target, path=scope_path)
                 if block is not None:
                     render_message(block, console=progress_console, no_color=no_color)
-            summary = asyncio.run(
-                engine.run(
-                    target,
-                    ScanOptions(
-                        stages=stages,
-                        tools=_csv(tools),
-                        exclude=frozenset(_csv(exclude)),
-                        include_noisy=include_noisy,
-                        active=is_active,
-                        full=full,
-                        no_scope=no_scope,
-                        no_keys=no_keys,
-                        mock=mock,
-                        phase_timeout=phase_timeout,
-                        min_sources=min_sources,
-                        resume=resume,
-                        ports=ports,
-                        status_codes=status_codes,
-                        headers=headers,
-                        user_agent=user_agent,
-                        redact_headers=redact_headers,
-                        ffuf_wordlist=ffuf_wordlist,
-                    ),
-                )
-            )
+            with activity_spinner(progress_console, enabled=progress is not None) as show_activity:
+                activity_sink.append(show_activity)
+                try:
+                    summary = asyncio.run(
+                        engine.run(
+                            target,
+                            ScanOptions(
+                                stages=stages,
+                                tools=_csv(tools),
+                                exclude=frozenset(_csv(exclude)),
+                                include_noisy=include_noisy,
+                                active=is_active,
+                                full=full,
+                                no_scope=no_scope,
+                                no_keys=no_keys,
+                                mock=mock,
+                                phase_timeout=phase_timeout,
+                                min_sources=min_sources,
+                                resume=resume,
+                                ports=ports,
+                                status_codes=status_codes,
+                                headers=headers,
+                                user_agent=user_agent,
+                                redact_headers=redact_headers,
+                                ffuf_wordlist=ffuf_wordlist,
+                            ),
+                        )
+                    )
+                finally:
+                    activity_sink.clear()
             snapshots = engine.host_rows(summary.target_id)
             rows = [
                 HostRow(
@@ -860,17 +882,20 @@ def _run_scan(
                 filter_info=filter_info,
                 injections=injections,
             )
-            if plan is not None:
-                run_at = datetime.now(UTC)
-                directory = report_directory(config.results_dir, target, run_at)
-                report_text_path, report_json_path = write_field_report(
-                    directory, target, snapshots, plan.fields, run_at=run_at
-                )
-                render_progress(
-                    f"report: {report_text_path} and {report_json_path}",
-                    console=progress_console,
-                    silent=silent,
-                )
+            # Every scan saves its report, interactive or not (docs/02 section 5).
+            # The questions only choose the columns; a `-d`/`-l` run has no
+            # question to answer, so it gets every stored field.
+            run_at = datetime.now(UTC)
+            directory = report_directory(config.results_dir, target, run_at)
+            report_fields_for_run = plan.fields if plan is not None else REPORT_FIELDS
+            report_text_path, report_json_path = write_field_report(
+                directory, target, snapshots, report_fields_for_run, run_at=run_at
+            )
+            render_progress(
+                f"report: {report_text_path} and {report_json_path}",
+                console=progress_console,
+                silent=silent,
+            )
         return exit_code
     except ConfigError as exc:
         return _report_error(str(exc), exc.exit_code, no_color=no_color)

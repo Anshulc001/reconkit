@@ -414,8 +414,20 @@ marker, and a closing line per stage with its item count.
   code still carries the outcome).
 - The lines are plain text, so they are readable with `--no-color` and when stderr
   is a file.
+- **A live status line exists because finished-tool lines are not enough** (added
+  2026-11-18). The lines above only appear when a tool *finishes*, so a stage
+  holding a 600 s tool looked frozen. While a target runs, one spinner line on
+  stderr is rewritten in place with
+  `<stage>: <done>/<total> tool(s) done, <n>s elapsed - running: <tools>`; it
+  names the tools still in flight, and all of a stage's tools appear at once
+  because the stage starts them together. It is transient (erased when the run
+  ends, nothing left behind), it is only drawn when stderr is a terminal, and it
+  never writes to stdout - a redirected or piped stderr gets exactly the plain
+  lines it got before, and `--silent` removes it too. Which tool starts next is
+  still not predicted: the line reports what is running, in the order the stage
+  started it.
 
-### Saved reports (interactive mode)
+### Saved reports (every scan)
 One folder per domain per run, never reused:
 
 ```
@@ -432,8 +444,21 @@ One folder per domain per run, never reused:
 - Both files are always written, whatever field selection was made. A field the
   run could not observe prints `not applicable` (section 2b point 4) rather than
   a guessed value.
-- Only the interactive mode writes these; a `-d`/`-l` invocation keeps today's
-  behaviour exactly and writes nothing new.
+- **Every scan writes these two files** (changed 2026-11-18). The interactive
+  questions only *choose the columns*; a `-d`/`-l` run has no question to answer,
+  so it writes every stored field (`REPORT_FIELDS`, the same set as answering
+  `all`). Until this change a flagged run wrote nothing at all, which left the
+  operator with a terminal table and no artifact; the inconsistency was reported
+  from a real scan on 2026-11-18.
+- The report is built from **every host row the run stored**, not from the
+  filtered table: `--only-alive`/`--only-states`/`--status-codes` narrow what is
+  printed on screen and never what is stored (section 3), so a filtered run's
+  `report.txt` can hold more rows than the table you saw. That is deliberate -
+  the artifact is the run's record, not a screenshot of one view.
+- The same `report: <txt> and <json>` line on stderr announces the files, so a
+  run always says where its report went; `--silent` suppresses that line only.
+- A report that can not be written is a run error (exit 1), never a silent
+  success.
 
 ### Empty, error and success states
 - **Empty:** `No results from 3 tools (crtsh, subfinder, otx). Check 'reconkit doctor'.`

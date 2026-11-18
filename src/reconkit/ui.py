@@ -7,7 +7,8 @@ import os
 import secrets
 import sys
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -373,6 +374,39 @@ def render_progress(
         extra.append(f"pause {next_pause_s:.0f}s")
     suffix = f" ({' '.join(extra)})" if extra else ""
     target_console.print(Text(f"{message}{suffix}"), soft_wrap=True)
+
+
+def _ignore_activity(_message: str) -> None:
+    """No-op updater for a run that has no spinner (piped stderr, `--silent`)."""
+
+
+@contextmanager
+def activity_spinner(
+    console: Console | None = None,
+    *,
+    enabled: bool = True,
+) -> Iterator[Callable[[str], None]]:
+    """A spinning status line on stderr: what the scan is doing right now.
+
+    The durable `<stage>: <tool> ok N item(s)` lines are unchanged; this adds the
+    "still working" indicator a long stage needs, because those lines only appear
+    when a tool *finishes* and a 600 s tool would otherwise look like a hang. The
+    caller gets an updater for the status text (the engine's running-tool
+    snapshot). The spinner is transient, so it erases itself and leaves no frame
+    behind.
+
+    A stderr that is not a terminal, or `--silent`, gets a no-op updater: piped
+    output and the tests keep exactly the lines they had before. Nothing here
+    writes to stdout, so the `--json` contract stays intact (docs/02 section 5).
+    """
+
+    target_console = console if console is not None else make_console()
+    if not enabled or not target_console.is_terminal:
+        yield _ignore_activity
+        return
+    status = target_console.status("starting", spinner="dots", spinner_style="cyan")
+    with status:
+        yield status.update
 
 
 def report_directory(results_root: Path | str, target: str, run_at: datetime) -> Path:
