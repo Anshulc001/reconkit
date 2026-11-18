@@ -27,31 +27,31 @@ REGRESSION AND PITFALLS RULES
 R1. Every bug fix adds a guarding test named `test_regression_<short_slug>` or containing a docstring that starts `Regression: <PIT-ID>`. Show it FAILING before the fix (record the raw output in REVIEW_LOG), then passing after the fix.
 R2. Add the pitfall row to the table at the top of docs/REVIEW_LOG.md in the SAME commit as the fix. A fix without a test is not allowed. If a bug truly cannot be tested (for example it needs real Linux), say why, add it to "Not verified", and mark the row UNTESTED.
 R3. Non-code problems (environment, tooling, platform, flaky tests, external API behavior) also get a row; the Guarding test column may be `n/a` with the reason, so the next session does not rediscover it.
-R4. Session start (G1) reads the Known pitfalls table. `scripts/check.ps1` warns when the most recent commit subject starts `fix:` and the commit changes no file under `tests/`. The S7 report includes `Pitfalls added this part: <IDs or none>`.
+R4. Session start (G1) reads the Known pitfalls table. The pre-commit hook warns when the most recent commit subject starts `fix:` and the commit changes no file under `tests/`. The S7 report includes `Pitfalls added this part: <IDs or none>`.
 R5. Back-fill: every bug already fixed in d03a231, e40091d, 80ddd93, the Part 3-AUDIT or later must have a `test_regression_*`/`Regression:` guard. If missing, add it (mutation first) in the addendum or the next `fix:` commit and fill its row.
 
 =====================================================
 SELF-REVIEW LOOP (mandatory after EVERY part, before moving on)
 =====================================================
-S1. CHECKS: run scripts/check.ps1 and paste/record the raw output; run pytest a SECOND time to catch flaky and order-dependent tests (also `pytest -p no:randomly` is not needed; just run twice).
+S1. CHECKS: run the four checks (`pytest -q`, `ruff check .`, `ruff format --check .`, `mypy src/reconkit`) and paste/record the raw output; run pytest a SECOND time to catch flaky and order-dependent tests (also `pytest -p no:randomly` is not needed; just run twice).
 S2. READ YOUR OWN DIFF: run `git diff HEAD~1 --stat` and read `git diff HEAD~1 -- src` line by line. In REVIEW_LOG list: every broad except and why; every external input and where it is validated; every place a secret could reach a log, error, argv, URL or file; every blocking call inside async code; every exception that could escape an adapter or the engine; every unfinished path. If a list is empty, say how you checked.
-S3. SCANS (PowerShell; record raw output in REVIEW_LOG):
-  Get-ChildItem src -Recurse -Filter *.py | Select-String -Pattern "\bassert\b"              # expect none
-  Get-ChildItem src -Recurse -Filter *.py | Select-String -Pattern "shell\s*=\s*True"         # expect none
-  Get-ChildItem src -Recurse -Filter *.py | Select-String -Pattern "TODO|FIXME|XXX|HACK"      # expect none
-  Get-ChildItem src -Recurse -Filter *.py | Select-String -Pattern "print\("                  # expect only ui.py
-  Get-ChildItem src -Recurse -Filter *.py | Select-String -Pattern "subprocess"               # expect only runner.py
-  Get-ChildItem src -Recurse -Filter *.py | Select-String -Pattern "sqlite3"                  # expect only store.py
-  Get-ChildItem src -Recurse -Filter *.py | Select-String -Pattern "os\.environ"              # justify each; adapters none
-  Get-ChildItem src -Recurse -Filter *.py | Select-String -Pattern "except\s*:|except Exception|except BaseException"   # justify each
-  Get-ChildItem src,tests -Recurse -Filter *.py | Select-String -Pattern "noqa|type:\s*ignore" # compare with Part 0 baseline; no new ones
-  Get-ChildItem src\reconkit\adapters -Filter *.py | Select-String -Pattern "import (store|scope|ui|cli)|from reconkit\.(core\.store|core\.scope|ui|cli)"   # expect none
+S3. SCANS (bash grep; record raw output in REVIEW_LOG):
+  grep -rn --include=*.py -E '\bassert\b' src                                   # expect none
+  grep -rn --include=*.py -E 'shell\s*=\s*True' src                             # expect none
+  grep -rn --include=*.py -E 'TODO|FIXME|XXX|HACK' src                            # expect none
+  grep -rn --include=*.py -F 'print(' src                                         # expect only ui.py
+  grep -rn --include=*.py -F 'subprocess' src                                     # expect only runner.py
+  grep -rn --include=*.py -F 'sqlite3' src                                        # expect only store.py
+  grep -rn --include=*.py -F 'os.environ' src                                     # justify each; adapters none
+  grep -rn --include=*.py -E 'except\s*:|except Exception|except BaseException' src # justify each
+  grep -rn --include=*.py -E 'noqa|type:\s*ignore' src tests                      # compare with the baseline; no new ones
+  grep -rn --include=*.py -E 'import (store|scope|ui|cli)|from reconkit\.(core\.store|core\.scope|ui|cli)' src/reconkit/adapters   # expect none
   Any unexpected hit is a bug (S6).
 S4. REQUIREMENT -> TEST TABLE in REVIEW_LOG: every requirement bullet of the part with the exact test name proving it. A bullet without a test gets a test now.
 S5. ADVERSARIAL + MUTATION: (a) every case in the part's ADVERSARIAL list plus at least 3 you invent gets a test, or a written reason it cannot happen. (b) For each of the part's MUTATION targets: deliberately break the code, run only the related tests, record the FAILING output, restore with `git checkout -- <file>`, and record `git status --short` showing a clean tree. A test that does not fail on the broken code is worthless: rewrite it.
 S6. FIX LOOP for every bug: write a test that reproduces it and confirm it FAILS; fix; confirm it passes; re-run S1-S3; record in REVIEW_LOG "Bugs found" (symptom, root cause, fix, guarding test). Bugs found before the part commit go into that commit; later ones into a `fix:` commit. Max 3 iterations, then A2.
 S7. RECORD: append the REVIEW_LOG entry, update the PROGRESS table and RESUME block, then print a short REPORT in chat (part, hash, checks result, bugs found/fixed, decisions for user review, not verified, and "Pitfalls added this part: <IDs or none>").
-GATE: move to the next part ONLY if: scripts/check.ps1 passes twice; scans clean or justified; every requirement has a test; mutation proofs recorded; no open bug. Otherwise fix (S6) or A2.
+GATE: move to the next part ONLY if: the four checks pass twice; scans clean or justified; every requirement has a test; mutation proofs recorded; no open bug. Otherwise fix (S6) or A2.
 
 REVIEW_LOG ENTRY TEMPLATE (one per part):
   ## Part N: <title>  (commit subject; hash filled by next commit)
@@ -65,7 +65,7 @@ REVIEW_LOG ENTRY TEMPLATE (one per part):
   - Self-review findings (S2 lists, S3 raw output):
   - Bugs found: symptom / root cause / fix / guarding test
   - Mutation proofs: behavior / failing test / restored clean (yes/no)
-  - Raw check output (last lines of scripts/check.ps1, twice for pytest):
+  - Raw check output (last lines of the four checks, pytest run twice):
   - Not verified (needs real network, Linux, installed tools):
   - Next part must know:
 
@@ -83,8 +83,8 @@ RESUME BLOCK (top of docs/PROGRESS.md, max 25 lines, rewrite after every part):
 =====================================================
 PART 0: baseline (commit `docs:`)
 =====================================================
-0a. Record raw in REVIEW_LOG: `git status --short`, `git log --oneline -8`, `git ls-remote reconkit main`, `Get-ChildItem tests\fixtures -Recurse | Select-Object FullName, Length`, and `git check-ignore -v .env` (if .env is not ignored, add it to .gitignore). Confirm `.tmpfetch` is gone (delete if present and untracked).
-0b. Baseline: run scripts/check.ps1 and all S3 scans; record counts (tests passed/skipped, existing noqa/type-ignore count).
+0a. Record raw in REVIEW_LOG: `git status --short`, `git log --oneline -8`, `git ls-remote reconkit main`, `find tests/fixtures -type f | sort`, and `git check-ignore -v .env` (if .env is not ignored, add it to .gitignore). Confirm `.tmpfetch` is gone (delete if present and untracked).
+0b. Baseline: run the four checks and all S3 scans; record counts (tests passed/skipped, existing noqa/type-ignore count).
 0c. Add a retroactive REVIEW_LOG entry for f1 (89ba34f): known unverified: OTX fixture is synthetic, key env names unverified, domain filtering happens in run(), hook is weak.
 0d. Run the loop (S1, S3, S7 only).
 
@@ -134,7 +134,7 @@ PART 4: binary adapters f3 (commit `feat:`)
 Implement an adapter for every remaining phase-2 tool in tools.yaml using BaseToolAdapter + run_exec. For each tool:
 - check_installed verifies IDENTITY, not just presence on PATH. ProjectDiscovery `httpx` can collide with the Python httpx CLI; check `-version` output; document how.
 - build_command returns a list (no shell). Rate flags come from tool_rate_args via the registry. Every host/target passes validate_host first, and a value starting with "-" must never reach argv as a possible flag (reject it or use the tool's documented separator; test it).
-- Never put a key in argv. If a tool needs a key (subfinder), write a temporary provider-config file from the allowed env names with restrictive permissions, delete it in a finally block (also on timeout and exception), never log its content. Open risk: chmod is weak on Windows.
+- Never put a key in argv. If a tool needs a key (subfinder), write a temporary provider-config file from the allowed env names with restrictive permissions, delete it in a finally block (also on timeout and exception), never log its content.
 - parse_output tested against real or documented sample output; malformed output returns a failed result, never an exception. Non-zero exit, timeout and a binary that cannot be spawned at run time are distinct `failed`/`timeout` results with different messages; a binary that is absent at selection time is `skipped` and never runs (docs/03 section 13, docs/09 selection rules).
 - Opt-in tools (masscan) obey tiers from tools.yaml: hard-capped rates; build_command refuses rates above the cap; the run gate itself lives in the engine.
 - `rustscan` and `nmap` are `tier: core` but `phase: 3`: they install and run by default once their adapters land. `phase` is build tracking only (the engine reports "no adapter yet (phase N)"), never a security gate.
@@ -150,7 +150,7 @@ Docs first: quote docs/03 and docs/04 for both modules.
 - wildcard: detect wildcard DNS per root domain by resolving N random labels via the injected resolver (reuse the dnspython adapter logic, not a second resolver stack; rng injected). Return the wildcard IP set; hosts resolving only to wildcard IPs get is_wildcard. A resolver timeout must not be read silently as "no wildcard": return an explicit unknown state for the engine to warn about.
 - workspace: create `workspaces/<domain>/` per docs; safe path joining (reject traversal; domain validated with validate_target); atomic writes (temp file then replace); ALL raw tool output goes through store.redact() before touching disk. Layout names from docs only.
 Tests: wildcard yes/no/unknown(timeout), partial wildcard, traversal rejected, redaction applied to saved output, atomic write leaves no partial file on failure.
-ADVERSARIAL: labels where some resolve and some NXDOMAIN; CNAME wildcard; `..`, absolute paths, `C:\`, UNC paths, reserved Windows names (CON, NUL), trailing dot/space; two secrets in one output; empty output; very large output; same filename written twice.
+ADVERSARIAL: labels where some resolve and some NXDOMAIN; CNAME wildcard; `..`, absolute paths, `C:\`, UNC paths, trailing dot/space; two secrets in one output; empty output; very large output; same filename written twice.
 MUTATION targets: traversal check, redact call, unknown-vs-no-wildcard.
 
 =====================================================
@@ -204,20 +204,20 @@ Re-read REVIEW_LOG "Bugs found", "Decisions for user review" and "Not verified" 
 PART 10: installer/ + doctor.py (commit `feat:`)
 =====================================================
 Status: CLOSED (2026-11-14). Decisive items: `5df7e98` (children stay in the parent's session so a cached `sudo -v` ticket is visible) and `9c4319b` (apt tools with no version flag report dpkg's version); live fresh `massdns` install recorded in REVIEW_LOG.
-Docs/10 first. DECISION (log under Deviations): the installer targets Debian-family Linux (Kali/Ubuntu). On native Windows, `doctor` runs and reports found/missing, `--mock` and the pure-Python adapters work, and `install`/`update` refuse with a clear message and a documented nonzero exit code; they never try apt. Write this into docs/10.
+Docs/10 first. DECISION (log under Deviations): the installer targets Debian-family Linux (Kali/Ubuntu) and refuses to run on any other platform with a clear message and a documented nonzero exit code; it never tries a foreign package manager. Write this into docs/10.
 - Prerequisites: libpcap-dev, jq, dnsutils, Go and Go bin in PATH, pipx/pip for Python tools. Verify package names for Kali AND Ubuntu from official package pages before writing them; cite URLs and dates in PROGRESS. Use `python3` >= 3.11, never a pinned apt python.
 - Every install command is an argv list via the runner (shell=False). Never pipe curl into a shell. sudo only when not root and only for apt, announced before running. Go tools via `go install <module>@<version policy from docs>`; pin or justify.
 - `install --all`, `update --all`, per-tool install; idempotent; one failing tool does not stop the rest; final summary table; exit code per docs.
 - Keys flow from Part 2 (interactive TTY question, .env.example copy without overwrite, Keys table). Non-TTY/--silent/--json never prompt. Wire `--no-keys` end to end.
 - doctor: tool table (installed, version, identity verified, tier), prerequisites, Keys table, scope.yaml presence, Python version, DB writable, config/wordlist presence per docs; `--json` supported. Replace the Part 8 stubs.
-Tests use an injected runner and platform probe; NOTHING really installs: already-installed skipped; failure isolated; Windows refusal; non-TTY no prompt; .env never overwritten; doctor JSON valid; every argv is a list of strings with no shell metacharacters; sudo only for apt; root gets no sudo.
+Tests use an injected runner and platform probe; NOTHING really installs: already-installed skipped; failure isolated; non-TTY no prompt; .env never overwritten; doctor JSON valid; every argv is a list of strings with no shell metacharacters; sudo only for apt; root gets no sudo.
 ADVERSARIAL: apt succeeds but the binary is still missing; unparsable version string; wrong binary on PATH; .env exists but empty; .env.example missing; second `install` changes nothing; Ctrl-C mid-install.
-MUTATION targets: Windows refusal, no-overwrite of .env, failure isolation.
+MUTATION targets: no-overwrite of .env, failure isolation.
 
 =====================================================
 PART 11: docs sync, README, final audit (commit `docs:`)
 =====================================================
-11a. README.md and SETUP.md for the single Windows-native checkout: remove WSL-only and old Kali-only steps; keep clear beginner steps for Windows mock/passive use and for the full tool install on Kali/Ubuntu. Fix hard-coded paths.
+11a. README.md and SETUP.md for the single Linux checkout (Kali/Ubuntu, native or WSL2): beginner steps for `--mock`/passive use and for the full tool set. Fix hard-coded paths.
 11b. Docs 01-10 must match the code. List in REVIEW_LOG every change and every remaining disagreement.
 11c. FRESH-EYES AUDIT: re-read the whole src tree as if reviewing someone else's pull request. Specifically hunt for: any code path where an active tool can run without --active + scope pass; any place a DNS/HTTP timeout can become DEAD/SHUT_DOWN; any secret reaching argv/log/db/workspace/UI; any exception that escapes to a traceback in the CLI; any blocking call in async code; confidence computed from non-distinct tools; any docs/code mismatch. Write a test for each finding, fix, and log under "Bugs found". Also run every S3 scan one final time.
 11c-bis. Run the end-to-end mock run from a fresh venv (`python -m venv` in a temp dir, documented install command, `reconkit --help`, `reconkit doctor`, `reconkit -d example.com --mock --json`) and record raw output.
@@ -285,7 +285,7 @@ DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
   Tests: a mock run writes exactly one redacted file per executed tool and sets
   `raw_path`; a failing/timed-out tool still writes its partial output; a secret
   in tool output never reaches the file (extend the PIT-22 test to a real
-  adapter result); Windows path containment unchanged.
+  adapter result); path containment unchanged.
   Adversarial: tool output containing a token, an ANSI escape, NUL bytes, a
   filename that collides across two tools in one stage, a workspace write that
   raises (the run must still record the tool result).
@@ -400,7 +400,7 @@ DECISIONS (owner or docs-first) vs ASSUMPTIONS (this plan):
   memfd/O_TMPFILE. Do not accept-the-risk.
   Size: small (one adapter + docs/09 + a cleanup step), no schema change.
   Tests: a run leaves no provider file; a stale file from a previous run is
-  removed on the next start; Windows path behaves as documented; the file is
+  removed on the next start; the file is
   never in argv except as a path.
   Adversarial: two concurrent runs (must not cleanse each other's live file);
   crash between mkdir and write.
@@ -905,8 +905,7 @@ D21. 2026-11-18 - `scripts/install-tools.sh`: the owner reinstates installation,
     to install reports `installed != yes` or `identity != ok`, which is the
     adapter's own probe (D5/D6), so a binary that exists but is the wrong
     program counts as a failure.
-    (5) **Linux only** - bash script, Kali/Debian. Windows support was removed
-    from the project by owner decision on 2026-11-18.
+    (5) **Linux only** - bash script, Kali/Debian, by owner decision (2026-11-18).
 
 =====================================================
 LATER BUG FIXES (any session)

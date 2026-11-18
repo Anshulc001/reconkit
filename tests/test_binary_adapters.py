@@ -924,7 +924,7 @@ def test_cleanup_leaves_a_concurrent_runs_directory_alone(tmp_path: Path) -> Non
 def test_when_liveness_is_unknown_age_alone_decides(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Windows has no safe liveness probe; the documented fallback is the age rule."""
+    """When liveness is unknown, the documented fallback is the age rule."""
     monkeypatch.setattr(subfinder_module, "_pid_alive", lambda _pid: True)
     fresh = tmp_path / "reconkit-subfinder-424242-fresh"
     stale = tmp_path / "reconkit-subfinder-424242-stale"

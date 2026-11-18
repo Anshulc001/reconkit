@@ -40,8 +40,8 @@ STALE_AFTER_S = 900.0
 
 
 def _pid_alive(pid: int) -> bool:
-    """Best-effort liveness probe; Windows has none (`os.kill` would terminate)."""
-    if os.name != "posix" or pid <= 0:
+    """Best-effort liveness probe for a PID recorded in a directory name."""
+    if pid <= 0:
         return True
     try:
         os.kill(pid, 0)
@@ -57,7 +57,7 @@ def cleanup_stale_provider_dirs(root: Path | None = None, *, now: float | None =
 
     Never raises. A directory whose pid is still alive is kept until its mtime is
     older than `STALE_AFTER_S`, so concurrent runs cannot delete each other's
-    live config; that age rule is also the only one on Windows.
+    live config.
     """
     base = Path(tempfile.gettempdir()) if root is None else root
     clock = time.time() if now is None else now

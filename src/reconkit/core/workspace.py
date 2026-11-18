@@ -24,25 +24,10 @@ FILE_MODE = 0o600
 _NAME_LIMIT = 128
 
 _NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
-_RESERVED_NAMES = frozenset(
-    {
-        "CON",
-        "PRN",
-        "AUX",
-        "NUL",
-        *(f"COM{number}" for number in range(1, 10)),
-        *(f"LPT{number}" for number in range(1, 10)),
-    }
-)
-
-
-def _reserved(stem: str) -> bool:
-    """Windows reserves device names even with an extension (CON.txt)."""
-    return stem.split(".")[0].upper() in _RESERVED_NAMES
 
 
 def _chmod(path: Path, mode: int) -> None:
-    """Best effort: Windows only honours a subset of POSIX modes."""
+    """Best effort: the filesystem may not support every POSIX mode."""
     with suppress(OSError):
         path.chmod(mode)
 
@@ -67,8 +52,6 @@ class Workspace:
     def __init__(self, root: Path | str, target: str, *, secrets: Iterable[str] = ()) -> None:
         self.root = Path(root)
         self.target = validate_target(target)
-        if _reserved(self.target.split(".")[0]):
-            raise ValueError(f"target directory is reserved on Windows: {self.target!r}")
         self.secrets = tuple(secrets)
         self.directory = self.root / self.target
 
@@ -99,7 +82,7 @@ class Workspace:
             raise ValueError(f"unsafe workspace filename: {filename!r}")
         if len(filename) > _NAME_LIMIT:
             raise ValueError(f"workspace filename is longer than {_NAME_LIMIT} characters")
-        if filename.endswith(".") or _reserved(filename):
+        if filename.endswith("."):
             raise ValueError(f"unsafe workspace filename: {filename!r}")
 
         stage_dir = self.directory / stage

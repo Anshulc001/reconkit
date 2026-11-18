@@ -328,7 +328,7 @@ class BaseToolAdapter(ABC):
 
 
 def running_as_root() -> bool:
-    """True only on a POSIX host whose effective uid is 0 (Windows is never root).
+    """True when the effective uid is 0.
 
     Used by the registry's `needs_root` selection rule (docs/09 section 4a6) and
     by the masscan adapter's own guard, so both ask the same question once.

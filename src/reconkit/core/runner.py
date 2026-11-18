@@ -7,7 +7,6 @@ import os
 import re
 import signal
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Iterable, Mapping
@@ -110,7 +109,6 @@ def run_exec(
 
     child_env = dict(env or {})
     started = time.monotonic()
-    is_windows = sys.platform == "win32"
     try:
         process = subprocess.Popen(
             argv,
@@ -120,12 +118,11 @@ def run_exec(
             env=child_env,
             cwd=None if cwd is None else str(cwd),
             shell=False,
-            # POSIX: stay in the parent's session so a sudo ticket cached by
+            # Stay in the parent's session so a sudo ticket cached by
             # tty_tickets stays visible (PIT-32), but lead a new process group
-            # so a timeout kill cannot reach reconkit. Windows ignores both
-            # arguments; it kills the child with process.kill() instead.
-            start_new_session=is_windows,
-            process_group=None if is_windows else 0,
+            # so a timeout kill cannot reach reconkit.
+            start_new_session=False,
+            process_group=0,
         )
     except OSError as exc:
         return ExecResult(
@@ -213,13 +210,10 @@ def _validate_argv(argv: list[str]) -> None:
 
 
 def _kill_tree(process: subprocess.Popen[bytes]) -> None:
-    if sys.platform != "win32":
-        try:
-            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        return
-    process.kill()
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 def _redact(text: str, secrets: Iterable[str]) -> str:

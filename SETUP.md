@@ -95,7 +95,7 @@ named (docs/05 rule 2). There is no speed preset or throttling.
 
 | Problem | Fix |
 |---|---|
-| `reconkit: command not found` | The venv is not active in this terminal: `source .venv/bin/activate` (Linux/Git Bash) or `.venv\Scripts\Activate.ps1` (PowerShell). Or run `.venv/bin/reconkit`. |
+| `reconkit: command not found` | The venv is not active in this terminal: `source .venv/bin/activate`. Or run `.venv/bin/reconkit`. |
 | A tool shows `missing` although it is on the machine | Put it on `PATH` or in `~/.reconkit/bin` (checked first), then re-run `reconkit doctor`. A Go binary usually lands in `~/go/bin`. |
 | `naabu` fails with a `pcap.h` error | `naabu` needs `libpcap-dev`; `doctor` lists it under system packages. |
 | `httpx` runs the wrong program | Two different programs share the name. Put ProjectDiscovery's binary in `~/.reconkit/bin` (checked first); `bootstrap.sh` puts that directory first in the activated venv's `PATH`. Re-activate and run `reconkit doctor`. |
