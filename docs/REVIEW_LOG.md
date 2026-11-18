@@ -5418,3 +5418,31 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
   --- mypy src/reconkit ---  Success: no issues found in 36 source files
   ```
   No code, test, schema, flag or config change: `git diff --name-only` lists only `docs/PROGRESS.md` and `docs/REVIEW_LOG.md`. Suite stays 686, as expected.
+
+## 2026-11-18 - Linux only, redaction, JSONL truncation and runtime caps (live-verified on testfire.net)
+
+- **Owner request:** no Windows anywhere in the project; every command tested live (passive and active), timings recorded, errors investigated before pushing.
+- **Windows removal.** Docs first (`6b904eb`), then code (`549c7e0`): the `win32` branches in `runner.py` (`start_new_session`/`process_group`, `_kill_tree`), the reserved-device-name rejection in `workspace.py` (target and filename), the non-POSIX `_pid_alive` fallback in `subfinder.py` and the platform note in `base.running_as_root` are gone, with the two reserved-name filename parameters and the `con.example.com` target parameter deleted from their tests (suite 827 -> 821). Every doc, the pitfall table, the MASTER_PLAN gate instructions, `SETUP.md`, `README.md`, `docs/01`, `03`, `04`, `09`, `10`, `PROGRESS` and the dated log entries now name Linux only; `/mnt/c` and WSL2 references are gone too (`e27f433`). `.githooks/pre-commit` lost its `.venv/Scripts` fallback.
+- **Bugs found by the live runs, not by the suite:**
+  - **PIT-54, redaction truncating JSONL.** `nuclei` failed with `invalid JSON line`. `_COOKIE_HEADER`, `_AUTH_HEADER`, `_FLAG_VALUE` and `_SECRET_PAIR` ran to the next *real* newline; nuclei embeds request/response in one JSONL line with escaped `\r\n`, so everything after the header became `***`. Fixed in `9df0950` (`_HEADER_VALUE` stops at a real or escaped line end; the `\b` before the header name was dropped because an escaped `\n` leaves a word character in front of it). Regression: `test_redaction_keeps_a_jsonl_line_parseable`.
+  - **PIT-56, a timeout threw away found URLs.** `urlfinder` was the one unpredictable tool: 996 URLs in 15 s, then 206 in 506 s, 932 in 525 s, an engine timeout with 0 items. Its `-max-time` is **not enforced** (measured still running at 5m52s with `-max-time 3`). Adapters now declare `runtime_cap_s`; `urlfinder` caps at 180 s and a capped timeout parses the partial stdout (`b331927`).
+  - **nuclei stdout cap.** With `-or` absent, the unused request/response pair pushed a run to 999060 bytes, just under the 1 MB `MAX_OUTPUT_BYTES`, truncating the last JSON line. `-or` (`-omit-raw`, from its `-help`) is now passed.
+  - **nikto never returned.** One process per host, each given the whole per-tool budget, so the engine cancelled the tool at 600 s with 0 findings on two full runs. Each host now gets `remaining / hosts left` and nikto's own `-maxtime <share>s`.
+- **Live evidence (all on `testfire.net`, in scope).**
+  | command | wall | exit | result |
+  |---|---|---|---|
+  | `scope check -d testfire.net` | 0.3 s | 0 | `ALLOWED (matches testfire.net)` |
+  | `doctor` | 1.7 s | 0 | 1 tool missing, rest installed |
+  | `status` | 0.3 s | 0 | run table printed |
+  | `diff -d testfire.net` | 0.3 s | 0 | 26 port rows |
+  | `passive -d testfire.net` | 617 s | 5 | 16 ok, 2 failed (otx 429, hackertarget quota), 6 skipped; 43 hosts, urls: gau 348, urlfinder 206 |
+  | `run --active` | 737 s | 5 | 28 ok, 3 failed (otx 429, hackertarget quota, crtsh 502), 2 skipped; 8 ALIVE of 43 |
+  | `run --full` | 2027 s | 5 | 37 ok, 2 failed (same quotas), 1 timeout (nikto); `nuclei ok 26` after the redaction fix |
+  | `run --full` (verify) | 1942 s | 5 | nuclei failed again - the 1 MB truncation above; urlfinder timeout 0 |
+  | `run --full` (final, after all fixes) | 1466 s | 5 | 38 ok, 2 failed (same quotas), 8 skipped, **0 timeouts**; `nuclei ok 112`, `urlfinder ok 933 (capped at 180s; kept partial)`, `nikto ok 8` |
+
+  The final run is 1466 s against 2027 s for the same `--full` command before the caps: 28% less wall clock, and the two tools that had never returned now produce findings.
+- **Environment findings, not defects:** `tech` returned 0 items in one run because the target's hosts were unreachable at that moment (`no route to host`, connect timeouts in the raw files); `crtsh` 502 and `otx` 429 / hackertarget quota are upstream and vary per run; `gowitness` produces no PNG on this box because Chromium is not installed (documented in its adapter).
+- **Not verified:** no intrusive/exploitation tool was run; no keyed provider; the interactive prompts were not exercised this session.
+- **Gate:** `824 passed`, `ruff check` clean, `ruff format --check` clean, `mypy` clean (62 source files).
+- **Pushed:** the owner asked for the work to go to GitHub once the live runs were clean; the branch is `main` -> `reconkit/main`.
