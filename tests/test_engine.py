@@ -3852,3 +3852,76 @@ async def test_url_probe_uses_the_config_timeout_when_no_flag_is_given(tmp_path:
     summary = await engine.run("example.com", ScanOptions(active=True))
     assert any("url_probe: timed out after 1s" in note for note in summary.warnings)
     assert summary.exit_code is ExitCode.SUCCESS
+
+
+async def test_degraded_tools_never_exit_five_but_a_local_fault_does(tmp_path: Path) -> None:
+    """R8 (2026-11-18): "upstream said no" is a gap; "reconkit broke" is exit 5.
+
+    The four cases the ruling names, in one place:
+      * every failure is an upstream refusal -> exit 0, completion gaps named;
+      * a local failure next to a refusal      -> exit 5, the gap never masks it;
+      * a missing binary next to a working tool -> exit 5;
+      * every tool ok                           -> exit 0, no gaps.
+    `ToolStatus.GAP` is the encoded name for R8's "degraded" (D34).
+    """
+    upstream = {
+        "otx": adapter(
+            "otx", Stage.SUBS, Recorder(), status=ToolStatus.GAP, detail="otx: HTTP 429"
+        ),
+        "hackertarget": adapter(
+            "hackertarget",
+            Stage.SUBS,
+            Recorder(),
+            status=ToolStatus.GAP,
+            detail="hackertarget: free quota exceeded",
+        ),
+    }
+    specs = {name: tool(name, Stage.SUBS) for name in upstream}
+    summary = await make_engine(tmp_path, specs, upstream).run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True)
+    )
+    assert summary.exit_code is ExitCode.SUCCESS
+    assert summary.completion_status == "complete_with_gaps"
+    assert [gap.stage for gap in summary.gaps] == [Stage.SUBS]
+
+    mixed = {
+        "otx": adapter(
+            "otx", Stage.SUBS, Recorder(), status=ToolStatus.GAP, detail="otx: HTTP 429"
+        ),
+        "crtsh": adapter(
+            "crtsh",
+            Stage.SUBS,
+            Recorder(),
+            status=ToolStatus.FAILED,
+            detail="crtsh: invalid JSON line",
+        ),
+    }
+    summary = await make_engine(
+        tmp_path / "mixed", {name: tool(name, Stage.SUBS) for name in mixed}, mixed
+    ).run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
+    assert summary.exit_code is ExitCode.PARTIAL
+
+    missing = {
+        "otx": adapter("otx", Stage.SUBS, Recorder(), records=[]),
+        "crtsh": adapter(
+            "crtsh",
+            Stage.SUBS,
+            Recorder(),
+            status=ToolStatus.FAILED,
+            detail="not installed or not executable: no such file",
+        ),
+    }
+    summary = await make_engine(
+        tmp_path / "missing", {name: tool(name, Stage.SUBS) for name in missing}, missing
+    ).run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
+    assert summary.exit_code is ExitCode.PARTIAL
+
+    ok = {
+        "otx": adapter("otx", Stage.SUBS, Recorder(), records=[]),
+        "crtsh": adapter("crtsh", Stage.SUBS, Recorder(), records=[]),
+    }
+    summary = await make_engine(
+        tmp_path / "ok", {name: tool(name, Stage.SUBS) for name in ok}, ok
+    ).run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
+    assert summary.exit_code is ExitCode.SUCCESS
+    assert summary.gaps == []

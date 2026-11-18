@@ -71,9 +71,12 @@ _GAP_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\btoo many requests\b", re.IGNORECASE),
     re.compile(r"\bquota\b", re.IGNORECASE),
     re.compile(r"\bapi count exceeded\b", re.IGNORECASE),
+    # R8 (2026-11-18) names 429/500/502/503 explicitly, so any upstream 5xx in
+    # an HTTP context counts; a bare number (an item count, a port) never does.
     re.compile(
-        r"\bhttp\s*5(?:02|03|04)\b|\bserver error \(http 5\d\d\)|\bbad gateway\b|"
-        r"\bservice unavailable\b|\bgateway time-?out\b",
+        r"\bhttp\s*5\d{2}\b|\bserver error \(http 5\d\d\)|\bbad gateway\b|"
+        r"\bservice unavailable\b|\bgateway time-?out\b|"
+        r"\binternal server error\b",
         re.IGNORECASE,
     ),
 )

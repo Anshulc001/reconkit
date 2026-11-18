@@ -6862,3 +6862,57 @@ Side effect worth noting: before this fixture, pyprobe had **no** fixture for `t
 `pyprobe: no fixture for testfire.net` in every mock `--active` run on that target. The new file fixes that too.
 
 Suite 908 -> 909.
+
+## 2026-11-18 (batch 2026-11-18b) B1 - exit-5 classification (R8 / D34)
+
+### Investigation (raw)
+
+The machinery R8 asks for already existed under the name `gap` (added 2026-11-18 by the sakec.ac.in ruling):
+`ToolStatus.GAP`, one classifier `adapters.base.classify_external_gap()`, `tool_runs.status='gap'` (schema 8),
+`Engine._completion_gaps()`, and three engine tests. So the question was not "does it exist" but "does the signature
+list match R8". Raw matrix before the change:
+
+```
+True  <- otx: HTTP 429
+True  <- otx: rate limited (HTTP 429)
+True  <- hackertarget: free quota exceeded
+True  <- crtsh: server error (HTTP 502)
+False <- HTTP 500 Internal Server Error      <-- the one R8 names that did not match
+True  <- 503 Service Unavailable
+False <- 401 Unauthorized
+False <- 403 Forbidden
+False <- not installed or not executable: no such file
+False <- invalid JSON line
+False <- connect ECONNREFUSED 1.2.3.4:443
+```
+
+Raw CLI proof of the exit codes on this box (mock, `example.com` has fixtures for every passive tool, `testfire.net`
+does not have a `dnspython` fixture, so that tool is a genuine local fault):
+
+```
+example.com: exit=0 | gap, 0 failed, 6 skipped, 0 timeout
+testfire.net: exit=5 | gap, 1 failed, 6 skipped, 0 timeout
+```
+
+### Implementation
+
+- `adapters/base.py` `_GAP_PATTERNS`: the 5xx alternative is now `http\s*5\d{2}` (was `5(02|03|04)`) plus
+  `internal server error`; `429` was already matched in an HTTP context. One list, one function - no regex anywhere else.
+- No new `ToolStatus` member (see D34): `gap` **is** R8's degraded state.
+
+### Tests
+
+- `tests/test_adapters.py::test_classify_external_gap_matches_only_third_party_signatures` extended with
+  `HTTP 500 Internal Server Error` (True), `server error (HTTP 500)` (True), `500 items parsed` (False),
+  `401 Unauthorized` (False), `403 Forbidden` (False).
+- `tests/test_engine.py::test_degraded_tools_never_exit_five_but_a_local_fault_does`: the four cases R8 names
+  (all-gap -> 0 + gaps, gap + local fault -> 5, missing binary + working tool -> 5, all ok -> 0) in one test.
+  The existing `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps` and
+  `test_a_gap_never_masks_a_real_failure` keep their heavier assertions (DB rows, completion status, stage rows).
+
+### Docs
+
+`docs/03_ARCHITECTURE.md` (status semantics paragraph), `docs/02_CLI_UX.md` (the external-service bullet now names the
+signatures and the "degraded" spelling; local faults and auth errors are explicitly not degraded), PROGRESS D34.
+
+Suite 909 -> 911.

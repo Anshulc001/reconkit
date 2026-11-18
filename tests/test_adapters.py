@@ -218,6 +218,13 @@ async def test_hackertarget_quota_answer_is_a_gap() -> None:
         ("crtsh: server error (HTTP 502)", True),
         ("503 Service Unavailable", True),
         ("504 Gateway Timeout", True),
+        # R8 (2026-11-18) names 500 explicitly; the http context is required so
+        # a bare count never reads as an upstream failure.
+        ("HTTP 500 Internal Server Error", True),
+        ("server error (HTTP 500)", True),
+        ("500 items parsed", False),
+        ("401 Unauthorized", False),
+        ("403 Forbidden", False),
         ("connect ECONNREFUSED 1.2.3.4:443", False),
         ("invalid JSON line", False),
         ("tool is not installed", False),
