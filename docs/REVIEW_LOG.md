@@ -6782,3 +6782,41 @@ Fixed by `db_path.parent.mkdir(parents=True, exist_ok=True)` next to the D30 bra
 Suite 903 -> 907, then -> 908 with `test_active_mock_run_stores_hosts_alive`, the Part G test name kept as a
 regression pin for the behaviour the part assumed was broken (`www.example.com` 200, `api.example.com` 401).
 
+
+## 2026-11-18 (batch 2026-11-18b) Part I - close the prior batch's acceptance gaps
+
+**The premise "903 tests, three D30 tests missing" was already false at HEAD 6d77834.** The previous turn's audit
+found the same gaps and shipped them one commit earlier, so this part is a *reconciliation*: the tests existed but
+under different names and with weaker setups than this batch names. Raw state at session start:
+
+```
+$ git log --oneline -5
+6d77834 test: pin mock active ALIVE as a regression (D31 withdrawn)
+7cf1b20 test: add the missing D29/D30 acceptance tests; create ~/.reconkit for the mock DB
+1ce0768 fix: render_error sites route through redact (D32)
+5e5ee71 docs: withdraw D31 - mock active already stores ALIVE (premise disproved)
+9b5b61e fix: mock runs use an isolated DB and results namespace (D30)
+$ pytest -q | tail -1
+908 passed in 20.09s
+```
+
+### What changed here (tests only, no `src/`)
+
+- `test_urlfinder_cap_follows_the_stage_budget_with_no_extra_ceiling` renamed to the batch's
+  `test_urlfinder_cap_3600_when_only_the_stage_budget_is_raised` (same three assertions, incl. `UrlsConfig().urlfinder_max_s == 0`).
+- `test_mock_run_does_not_overwrite_a_real_report`: the sentinel now lives at `results/testfire.net/report.txt` as
+  specified (it used `results/example.com/`); the scan target stays `example.com`, because a **mock passive run for
+  `testfire.net` exits 5 today** (`tools: 17 ok, 0 gap, 1 failed, 6 skipped`) - that is B1's subject, not this part's.
+- `test_mock_db_default_is_separate_unless_db_given`: now asserts the default mock DB is **byte-identical** after an
+  explicit `--db` run, not merely that `--db`'s file exists.
+- `COMMANDS.md`: the probe-only exit-4 line is mirrored into the `--phase-timeout` flag row itself (it was only in the
+  `url_probe` narrative section from the previous turn).
+
+### Disclosed deviation from this part's brief
+
+The brief says "no src changes" and "suite 903 -> 907". Both are impossible against this HEAD: the four tests already
+existed (hence 908, unchanged), and commit `7cf1b20` had to add `db_path.parent.mkdir(parents=True, exist_ok=True)` in
+`cli._run_scan` because the D30 default crashed with `unable to open database file` when `~/.reconkit` did not exist.
+No `src/` change is made in this commit.
+
+Suite 908 -> 908. Gate: `908 passed`, `All checks passed!`, `92 files already formatted`, mypy clean.

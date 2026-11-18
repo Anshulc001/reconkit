@@ -536,14 +536,17 @@ def test_mock_run_does_not_overwrite_a_real_report(
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     config = make_config(tmp_path)
-    real_report = tmp_path / "results" / "example.com" / "report.txt"
+    sentinel = "real testfire.net output - do not overwrite"
+    real_report = tmp_path / "results" / "testfire.net" / "report.txt"
     real_report.parent.mkdir(parents=True)
-    real_report.write_text("real run output", encoding="utf-8")
+    real_report.write_text(sentinel, encoding="utf-8")
 
+    # The scan target is example.com (it has fixtures for every passive tool);
+    # the sentinel sits where a real testfire.net run would have written.
     result = CliRunner().invoke(app, scan_args(config))
     assert result.exit_code == 0, result.stderr
 
-    assert real_report.read_text(encoding="utf-8") == "real run output"
+    assert real_report.read_text(encoding="utf-8") == sentinel
     (run_dir,) = (tmp_path / "results" / "mock" / "example.com").iterdir()
     assert (run_dir / "report.txt").exists()
     assert (run_dir / "report.json").exists()
@@ -561,14 +564,18 @@ def test_mock_db_default_is_separate_unless_db_given(
     config.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
     assert CliRunner().invoke(app, scan_args(config)).exit_code == 0
-    assert (tmp_path / ".reconkit" / "mock.db").exists()
+    mock_db = tmp_path / ".reconkit" / "mock.db"
+    assert mock_db.exists()
     assert not (tmp_path / "recon.db").exists()
+    before = mock_db.read_bytes()
 
     explicit = tmp_path / "chosen.db"
     assert (
         CliRunner().invoke(app, scan_args(config, "passive", "--db", str(explicit))).exit_code == 0
     )
     assert explicit.exists()
+    # `--db` wins and the default mock DB is not touched at all.
+    assert mock_db.read_bytes() == before
 
 
 def test_diff_and_status_after_two_mock_runs(tmp_path: Path) -> None:

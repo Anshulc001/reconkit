@@ -146,6 +146,8 @@ and `dns`, because those commands run no active stage.
 
 ```bash
 --phase-timeout <seconds>      # stage time limit (config default: 1800s; per-stage overrides in config.yaml)
+                               # a timed-out url_probe keeps finished batches, reports a gap, exits 0;
+                               # a probe-ONLY run with nothing usable exits 4 (docs/02_CLI_UX.md:132)
 --mock                         # fixtures only: no network, no external processes
 --no-keys                      # force free-tier behavior even when .env has keys
 --resume                       # continue the latest unfinished run

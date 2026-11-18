@@ -1799,7 +1799,7 @@ def test_urlfinder_cap_config_override() -> None:
     assert enumeration_cap_s(10, 1800, override=0) == 180
 
 
-def test_urlfinder_cap_follows_the_stage_budget_with_no_extra_ceiling() -> None:
+def test_urlfinder_cap_3600_when_only_the_stage_budget_is_raised() -> None:
     """D29: with urlfinder_max_s = 0, raising --phase-timeout alone raises the cap.
 
     Before D29 the 1800 s `urls.urlfinder_max_s` ceiling was applied after the

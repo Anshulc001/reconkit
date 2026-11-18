@@ -4,7 +4,8 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status: **BATCH 2026-11-18 COMPLETE (Parts D-H) + acceptance follow-up.** Suite 908. The follow-up added the three D30 tests and the missing D29 stage-budget test, the missing `COMMANDS.md` probe-only note, and fixed a real bug the missing tests hid: the mock DB default did not create `~/.reconkit`, so a fresh machine failed with `unable to open database file`. Evidence in REVIEW_LOG "follow-up".
+- Status: **BATCH 2026-11-18b (Parts I, J, L, M) in progress.** Part I done: the four prior-batch acceptance tests reconciled to this batch's names/setups (`test_urlfinder_cap_3600_when_only_the_stage_budget_is_raised`, the testfire.net sentinel, byte-identical mock DB) and the probe-only exit-4 line mirrored into the `--phase-timeout` row of COMMANDS.md. Suite stays 908 - the tests landed one commit earlier in `7cf1b20`, which also had to create `~/.reconkit`. Next action: Part J.
+- Previous status: **BATCH 2026-11-18 COMPLETE (Parts D-H) + acceptance follow-up.** Suite 908. The follow-up added the three D30 tests and the missing D29 stage-budget test, the missing `COMMANDS.md` probe-only note, and fixed a real bug the missing tests hid: the mock DB default did not create `~/.reconkit`, so a fresh machine failed with `unable to open database file`. Evidence in REVIEW_LOG "follow-up".
 - Previous status: **BATCH 2026-11-18 COMPLETE (Parts D-H).** D28 rulings recorded, D29 double-ceiling cleanup, D30 mock isolation, D31 withdrawn (premise disproved), D32 redaction routing. Suite 898 -> 903. Next action: none; report.
 - Previous status: **BATCH 2026-11-18 (Part F) DONE: D30 mock isolation.** Suite 899. Next action: Part G (mock ALIVE).
 - Previous status: **BATCH 2026-11-18 (Part E) DONE: D29 double-ceiling cleanup.** `urls.urlfinder_max_s` default 0; saturation logged. Suite 898 -> 899. Next action: Part F (mock isolation).
