@@ -1,8 +1,8 @@
 # SETUP.md - set up reconkit
 
-reconkit runs on Linux (Kali or Ubuntu, native or WSL2) for real scans, and on
-native Windows for `doctor`, `--mock` runs and the pure-Python passive flow.
-reconkit installs nothing, on any platform.
+reconkit runs on Linux (Kali or Ubuntu, native or WSL2). That is the only
+supported platform.
+reconkit installs nothing.
 
 You need **Python 3.11 or newer**. Do the environment steps once, then activate
 the virtual environment in every new terminal.
@@ -27,16 +27,8 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
 
-On native Windows, in PowerShell:
-
-```powershell
-py -3.11 -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-```
-
-Git Bash on Windows: `./scripts/bootstrap.sh` then `source .venv/Scripts/activate`.
-If `py -3.11` is not available, use Python 3.11+ from python.org or `uv`.
+If the `python3` on your system is older than 3.11, install a newer one from
+python.org or use `uv`.
 
 ## 2. `reconkit: command not found`
 

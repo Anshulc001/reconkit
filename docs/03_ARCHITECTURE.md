@@ -90,7 +90,7 @@ workspaces/<domain>/
 ### Workspace API (`core/workspace.py`)
 
 - `Workspace.create(root, target, secrets=...)` validates `target` with `validate_target()`, creates `workspaces/<domain>/` and exactly the six stage directories above (mode `0700`), and is idempotent.
-- `workspace.path(stage, filename)` accepts only a documented stage and one plain filename. Traversal, absolute/UNC paths, `..`, trailing dot/space, hidden names and Windows device names (`CON`, `NUL`, `COM1`, ...) are rejected with `ValueError`. A target whose first label is a device name is rejected too, because Windows cannot create that directory.
+- `workspace.path(stage, filename)` accepts only a documented stage and one plain filename. Traversal, absolute/UNC paths, `..`, trailing dot/space, hidden names and reserved device names (`CON`, `NUL`, `COM1`, ...) are rejected with `ValueError`. A target whose first label is a reserved device name is rejected too; that check and the `sys.platform == "win32"` branches elsewhere are defensive leftovers from the earlier Windows target, kept because they cost nothing and narrowing them would only remove tested behaviour.
 - `workspace.write(stage, filename, text, *, secrets=None, max_bytes=MAX_OUTPUT_BYTES)` passes `text` through `store.redact()` with the run's secrets before any bytes reach disk, caps the result at `max_bytes` UTF-8 bytes, then writes a temporary file in the same directory and `os.replace()`s it (mode `0600`). A failure leaves the destination untouched and no temporary file behind. Writing the same filename again replaces it atomically. `MAX_OUTPUT_BYTES` is `core/runner.MAX_OUTPUT_BYTES` (1,000,000), the same limit `run_exec` applies to a child's output, so the cap has one definition and needs no config key. A longer text is cut at the cap, never dropped and never written unbounded; a multi-byte character split by the cut is dropped rather than written as a broken byte sequence. Redaction happens before the cap, so a secret that straddles the cut cannot survive as a prefix.
 - Raw adapter output is written by the engine as `<stage>/<run_id>-<tool>.txt`: one file per executed tool per stage run (`run_id` is the `scan_runs` id), so two tools in one stage and the same tool in two runs never collide, and a rerun never overwrites an earlier run's evidence. The `dns` stage has no raw directory of its own - the workspace keeps exactly the six documented directories - so its files go to `meta/`, which also holds `vulns`/`shots` output when those phases exist. `write` returns the path and the engine stores it unchanged in `ToolResult.raw_path`, so it is relative while `workspace_dir` is relative (the shipped `config.yaml` value) and absolute when the caller passed an absolute root. The path is not shown in the human tables (docs/02) but does appear in `--json` under `stages[].results`, because that object is the docs/09 `ToolResult` schema.
 - Raw tool output uses `subs`, `live`, `ports`, `urls` or `tech`; run metadata and summaries use `meta`. No other directory is created.
@@ -277,7 +277,7 @@ Speed control was removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN
 |---|---|---|
 | Python | Fast to write/fix with AI agents; simple parsing; Kali ships Python | Go (AutoAR's language): single binary, but slower to extend with AI for this use case |
 | SQLite + workspace files | Diffing, resume, queries; plus human-browsable raw output | Flat files only (no history), Postgres (too heavy) |
-| Native Linux checkout (Kali/Ubuntu), separate Windows checkout | Real Linux tools; fast disk; no CRLF/locking issues | WSL2-only workflow; `/mnt/c` |
+| Native Linux checkout (Kali/Ubuntu) | Real Linux tools; fast disk; no CRLF/locking issues | WSL2-only workflow; `/mnt/c` |
 | Natural-pace execution | The owner asked for no throttling (2026-11-17, D3); every tool runs at its own rate | Speed presets, delays, shuffling, rate limiter |
 | Adapter + registry | Add a tool without touching core | Hard-coded pipelines |
 | Own `~/.reconkit/bin` (checked first) | No sudo, no global breakage, correct `httpx` | System PATH only |
@@ -313,7 +313,7 @@ Single machine, thousands of hosts per target. Beyond that is out of scope (see 
 ## 14. Linux Workflow Rules
 
 - Repo in a native Linux checkout (current path in PROGRESS "Environment"). Never `/mnt/c/...`.
-- Terminal, venv and tools all live in that Linux checkout; VS Code may attach to it from Windows.
-- Unit tests use fixtures and also pass on plain Windows (no tools needed).
+- Terminal, venv and tools all live in that Linux checkout.
+- Unit tests use fixtures and need no installed tools.
 - Real tool runs and integration smoke tests happen on Kali/Ubuntu.
 - The current path, environment and check commands live in PROGRESS "Environment".

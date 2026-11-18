@@ -4,7 +4,7 @@ Journey overview: **setup -> doctor -> obtain the tools you need -> scope -> pas
 
 ## Flow 1 - First run (setup)
 
-1. User follows SETUP.md (native Kali/Ubuntu for real tools, or Windows for mock/passive use and `doctor`).
+1. User follows SETUP.md (native Kali/Ubuntu, the only supported platform).
 2. `reconkit doctor`
 3. Output: table of tools (installed / path / identity), per-stage coverage, system packages, Python version, `scope.yaml` found?, API key names set/unset.
 4. Footer line: `Missing tools: 14. Scans will use the tools that are installed and skip the rest. Per-tool provenance: docs/10_TOOL_SOURCES.md.`

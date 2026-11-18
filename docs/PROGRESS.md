@@ -38,9 +38,8 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## Environment
 
-- **Canonical, actively developed checkout: Kali, `/home/kali/Desktop/reconkit`** (native Linux). Every commit after the Windows-to-Kali copy exists only here. `C:\Users\anshu\Desktop\recon\reconkit` is a **stale pre-copy snapshot**, not a mirror: do not treat it as current and do not edit it. Only the owner decides how it is replaced (a real `git clone`, never another copy-paste).
-- The exact Windows commit is not determinable from Kali; from the owner's statement it is at or before `cd57fb5`. Read it on the Windows box if it matters.
-- Venv: `.venv` (`python3 -m venv`, Python 3.14.8), activate with `source .venv/bin/activate`. The Windows snapshot's own `.venv/Scripts` belongs to that snapshot and is not used here.
+- **Canonical checkout: Kali, `/home/kali/Desktop/reconkit`** (native Linux, the only supported platform). There is no other working copy: the old second checkout was abandoned by the owner on 2026-11-18, when support for non-Linux platforms was removed from the docs. Do not create a second checkout.
+- Venv: `.venv` (`python3 -m venv`, Python 3.14.8), activate with `source .venv/bin/activate`.
 - Gate (run all four, report PASS/FAIL with `if cmd; then ... else ... fi`, never `echo $?`; no pipe before the `if`, or use `set -o pipefail`):
 
   ```bash
@@ -50,7 +49,7 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
   mypy src/reconkit
   ```
 
-- Pre-commit hook (`.githooks/pre-commit`) runs those checks and requires `docs/PROGRESS.md` when `src/` or `tests/` change; `git config core.hooksPath .githooks` comes from `scripts/bootstrap.sh`. `scripts/check.ps1` is an optional Windows wrapper, not a required step.
+- Pre-commit hook (`.githooks/pre-commit`) runs those checks and requires `docs/PROGRESS.md` when `src/` or `tests/` change; `git config core.hooksPath .githooks` comes from `scripts/bootstrap.sh`. There is no wrapper script for the four checks; run them directly.
 - `.gitattributes` forces LF for `*.py`, `*.md`, `*.yaml`, `*.toml`, `*.sh`, `.githooks/*`; some docs are CRLF on disk and git warns on checkout - that is pre-existing, not an edit.
 - Commits are authored by `Anshul <anshulc4444@gmail.com>`; no attribution trailers are added, by anyone or any tool.
 
@@ -76,6 +75,8 @@ There is no `core/consensus.py`: consensus lives in `engine.py`. Order and modul
 ## Deviations and assumptions
 
 Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session, the `diff` two-miss rule) is in the `REVIEW_LOG` archive.
+
+- **Windows support removed (2026-11-18, owner decision).** The owner never built for Windows and asked for the claim to go. Removed here: the Windows row in README's requirements table and its whole "Quick start (Windows, mock/passive)" section, the PowerShell block in SETUP.md, the Windows platform lines in AGENTS.md, docs/01 (platform + non-goals + acceptance), docs/03 (checkout table, VS Code note, fixture-tests note), docs/08 flow 1, docs/09 (two subfinder notes), docs/10 section 5, the D21 line in MASTER_PLAN, and `scripts/check.ps1` itself (git-tracked, now deleted, and its two references). Kept on purpose: `docs/REVIEW_LOG.md` and the dated MASTER_PLAN entries, because they are a record of what happened and what was decided at the time - rewriting them would falsify the log. Also kept: the `sys.platform == "win32"` branches in `runner.py`, `workspace.py`, `subfinder.py` and `base.py`, plus the reserved-device-name check, with a note in docs/03 explaining they are defensive leftovers; deleting them is a code change with test impact and was not part of this docs pass.
 
 - `types-PyYAML` is a dev dependency for strict mypy. Enums use `StrEnum` (ruff UP042) instead of the docs' `(str, Enum)`; same values.
 - `--delay` applied to both passive and active `tool_delay` (not `host_delay`); the flag and the pacer were removed on 2026-11-17 (MASTER_PLAN D3), so this line is history.
@@ -540,20 +541,20 @@ Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session
 
 ## Open risks
 
-- **2026-11-18, D21:** `scripts/install-tools.sh` ran its real apt branch under a pty (`--update --only nmap`, sudo prompt answered by the owner): `apt-get update` + `apt-get install -y nmap` -> `0 upgraded, 0 newly installed`, then `doctor` verification, exit 0, 10 s. A **fresh** apt install is still unproven (every apt tool was already present, so apt had nothing to do), and the script is untested on Windows (bash only) and not covered by `pytest`. Without a terminal it exits 2 with a clear message instead of hanging (verified).
+- **2026-11-18, D21:** `scripts/install-tools.sh` ran its real apt branch under a pty (`--update --only nmap`, sudo prompt answered by the owner): `apt-get update` + `apt-get install -y nmap` -> `0 upgraded, 0 newly installed`, then `doctor` verification, exit 0, 10 s. A **fresh** apt install is still unproven (every apt tool was already present, so apt had nothing to do), and the script is not covered by `pytest`. Without a terminal it exits 2 with a clear message instead of hanging (verified).
 - **2026-11-18, D21:** one registry entry has no automatic source and is printed rather than installed: `dnsreaper` (no PyPI package, no build files). It stays `manual` until someone verifies an install path from real evidence. `findomain` and `rustscan` left this list the same day - Kali's signed repository packages both, and their `source:` is now `apt:`.
 - **2026-11-18, D21:** the Kali `findomain` package is `11.0.0-beta.2`, older than the 11.0.0 release zip it replaced, and the `rustscan` package is versioned `2.4.1` while its binary prints `rustscan 2.3.0`. Both work with the adapters (flags checked, `identity ok`), but the apt version number is not trustworthy for either.
 
 - **FOUND 2026-11-18, not fixed, needs a ruling:** a `--mock` run stores the fixture's hosts under whatever target it was given. Run 69 (`testfire.net`, `subs`, `mock=1`, 2026-11-17 16:40) wrote the four `example.com` fixture hosts (`www`/`api`/`dev`/`blog.example.com`) into `subdomains` with `target_id` = testfire.net, so every later testfire.net report carries four hosts that have nothing to do with the target (42 rows, 38 real). The obvious fix - store only hosts equal to or under a scope domain - is not obviously correct, because a `scope.yaml` may name several unrelated domains and a discovered host is then legitimately outside the typed target (D1 phrase "typed target plus what is discovered in association with it" does not settle whether `example.com` was discovered *in association with* testfire.net). Stopped here instead of guessing.
 - **12e is closed (PIT-47, 2026-11-15)**: a first `live` pass that got a record writes `UNKNOWN`/LOW with the reason, and a pass with no record still writes nothing. A later consumer that read "no row" as "not probed" must read the state instead.
 - **CLOSED 2026-11-16 by Part 13:** `--json` used to write no progress at all while docs/02 said tables and progress stay on stderr. All scan modes now emit stage/tool progress on stderr; only `--silent` suppresses it, and stdout remains one JSON document.
-- **Part 13, open for the owner:** the pty run (`results/testfire.net/...`, an in-scope domain at `--speed fast`, a flag removed on 2026-11-17 by MASTER_PLAN D3 - the historical run is unchanged) is the only real-network exercise of the interactive flow, and Windows is still untested, so the interactive prompts and the report folders have no Windows evidence.
+- **Part 13, open for the owner:** the pty run (`results/testfire.net/...`, an in-scope domain at `--speed fast`, a flag removed on 2026-11-17 by MASTER_PLAN D3 - the historical run is unchanged) is the only real-network exercise of the interactive flow, so its prompts and report folders have exactly one piece of evidence.
 - **Pre-existing, not caused by Part 13 and not fixed:** `reconkit run --active --mock` stores every host as `UNKNOWN` (the mock live adapter returns records the engine reads as inconclusive). Verified on the flag path before Part 13 existed; the interactive `active`/`full` modes inherit it. Needs its own ruling.
 - **Part 13, accepted:** the saved report contains only values already stored in the run's DB (no recomputation), so a stored `title` that happened to contain a provider key would appear in `report.txt`/`report.json` exactly as it already appears in the SQLite file. Files are written 0600 inside `results_dir`.
 - Six typed `render_error(str(exc))` sites in `cli.py` (scope check, `diff`, `status`, `doctor`, `install`) still bypass `redact()`; every message is built from our own values today, so no leak is known. Needs its own ruling.
 - **Historical (installer removed 2026-11-17, D4):** `libpcap-dev` is absent and `sudo` needs a password here, so the apt prerequisite step never ran live; `naabu` is already installed, which also meant `install --all` did not attempt it.
 - **Historical (installer removed 2026-11-17, D4):** the sudo-authenticated half of the installer never ran end to end: `massdns`, `amass`, `dig`, `nmap`, `whatweb` and `libpcap-dev` were only ever exercised as `skipped`.
-- **Windows acceptance criteria are unverified anywhere with the current code**: no Windows run since the copy, `uname -a` is Linux, and the Windows `Popen` arguments (PIT-32) were only read in CPython source.
+- **Windows support was removed on 2026-11-18 by owner decision.** The docs no longer claim it, `scripts/check.ps1` is deleted, and the `sys.platform == "win32"` branches that remain in `runner.py`/`workspace.py`/`subfinder.py` are defensive leftovers, not a promise (see docs/03 §6). They are unreachable on Linux and still covered by their existing tests, so they were left alone rather than refactored in the same change.
 - **Historical (installer removed 2026-11-17, D4):** GitHub release lookups were unauthenticated (60 requests/hour per IP); a 403 failed every `github_release` tool. Nothing looks up a release any more.
 - **Historical (installer removed 2026-11-17, D4):** `update` re-ran `go install` for every `@latest` go_install tool and reported `installed` rather than `up to date`.
 - `installed_version()` returns the first line of the version text, so `katana` shows `__` and `nuclei` shows `[I…`, which also defeats `_same_version()` for them; `sqlmap` has no `version_cmd` and shows a bare path.

@@ -905,8 +905,8 @@ D21. 2026-11-18 - `scripts/install-tools.sh`: the owner reinstates installation,
     to install reports `installed != yes` or `identity != ok`, which is the
     adapter's own probe (D5/D6), so a binary that exists but is the wrong
     program counts as a failure.
-    (5) **Windows is untouched** - bash script, Kali/Debian only, and the smoke
-    path there is still `doctor`.
+    (5) **Linux only** - bash script, Kali/Debian. Windows support was removed
+    from the project by owner decision on 2026-11-18.
 
 =====================================================
 LATER BUG FIXES (any session)

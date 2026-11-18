@@ -5,7 +5,7 @@
 - **Product name:** reconkit
 - **One-line description:** A CLI that runs several recon tools per stage, cross-checks their results, and tracks what changed between scans.
 - **Product type:** Command-line tool (single-user, local-first)
-- **Primary platform:** Linux (Kali or Ubuntu), native. Windows is a separate checkout for mock/passive use and `doctor`; reconkit installs nothing anywhere, so there is no platform-specific install path (docs/10 §4).
+- **Platform:** Linux (Kali or Ubuntu), native or WSL2, and nothing else. reconkit installs nothing, so there is no platform-specific install path (docs/10 §4).
 
 ## 2. Problem
 
@@ -113,7 +113,7 @@
 - Cloud storage uploads, chat bots, AI agent loops.
 - Mobile app analysis (APK/IPA/ADB), GitHub/S3 scanning, AEM or 100+ misconfig checks.
 - Exploitation tools in `core` or `opt_in` tiers.
-- Native Windows execution of recon tools; Windows runs mock/passive flows and `doctor` only.
+- Support for any platform other than Linux.
 - Evasion features (User-Agent rotation, proxy rotation).
 
 ## 8. MVP Scope
@@ -124,7 +124,7 @@
 - Skeleton, config, scope gate, SQLite store, consensus engine, `--mock`.
 - Commands: `doctor`, `passive`, `live`, `ports`, `diff`, `status`; `db list`, `db export`, `export` and `scope import` are explicit Phase 3 stubs (exit 1) in this build, and docs/02 marks them as such. (`install`, `update` and `doctor --fix` existed in Phase 2 and were removed on 2026-11-17.)
 - Adapters: crtsh, certspotter, otx, hackertarget, subfinder, assetfinder, dnspython, pyprobe, httpx, pyscan, naabu.
-- Tests passing on Linux and on plain Windows (fixtures).
+- Tests passing on Linux (fixtures only, no tools needed).
 
 **Phase 3 (one adapter or feature per prompt):** remaining tools in `tools.yaml`, `urls`/`tech`/`vulns`/`shots`, `lite`/`run` polish, `monitor` with webhook, `scope import`, URL pattern sorting (xss/sqli/ssrf/lfi/redirect candidate lists), intrusive tier.
 

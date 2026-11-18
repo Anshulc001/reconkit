@@ -19,8 +19,7 @@ Phase 2 (working core) is complete: passive discovery (`subs`, `dns`), `live`, `
 
 | Platform | What works |
 |---|---|
-| Kali / Ubuntu (native or WSL2) | Everything, including the real tools - obtaining them is your own job, outside reconkit. Python 3.11+ and `git` for the checkout. |
-| Windows | `doctor`, `--mock` runs and the pure-Python passive flow. Real tools need a Linux checkout (native Kali/Ubuntu or WSL2); reconkit installs nothing on any platform, so there is no install command to refuse. |
+| Kali / Ubuntu (native or WSL2) | Everything, including the real tools - obtaining them is your own job, outside reconkit. Python 3.11+ and `git` for the checkout. This is the only supported platform. |
 
 ## Quick start (Kali / Ubuntu)
 
@@ -40,19 +39,6 @@ reconkit diff -d <authorized-domain>
 ```
 
 **Activate the venv in every new terminal.** `source .venv/bin/activate` is what puts `reconkit` on `PATH`; without it you get `reconkit: command not found`. The equivalent without activation is `.venv/bin/reconkit ...`. See [SETUP.md](SETUP.md) for the full beginner walkthrough and troubleshooting.
-
-## Quick start (Windows, mock/passive)
-
-```powershell
-py -3.11 -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-
-reconkit doctor
-reconkit passive -d example.com --mock
-```
-
-In Git Bash, use `./scripts/bootstrap.sh` and `source .venv/Scripts/activate` instead. There is no install command to run on Windows or anywhere else: the real tools need a Linux checkout, and obtaining them is your own job - [docs/10_TOOL_SOURCES.md](docs/10_TOOL_SOURCES.md) shows where each project lives, not how to install it.
 
 ## Commands
 
@@ -93,7 +79,7 @@ No changes since run #1.
 | File | Purpose |
 |---|---|
 | AGENTS.md | Rules for AI coding agents (read first) |
-| SETUP.md | Beginner setup for Kali/Ubuntu and Windows |
+| SETUP.md | Beginner setup for Kali/Ubuntu |
 | docs/01_PRD.md | Product scope and acceptance criteria |
 | docs/02_CLI_UX.md | Commands, flags, output, exit codes |
 | docs/03_ARCHITECTURE.md | Layers, structure, concurrency, consensus |

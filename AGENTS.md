@@ -16,7 +16,7 @@ Read this file first, every session. It points to the documents in `docs/`.
    mypy src/reconkit
    ```
 
-   Report the baseline and record it in REVIEW_LOG. If anything fails, fix that first. `scripts/check.ps1` is an optional Windows convenience wrapper for the same four checks, not a required step; there is no bash wrapper.
+   Report the baseline and record it in REVIEW_LOG. If anything fails, fix that first. There is no wrapper script for these four commands in either direction; run them directly.
 4. If the tree is dirty, identify which part the changes belong to and finish or complete that part; never discard work.
 5. Continue from the RESUME "Next action" following docs/MASTER_PLAN.md, doing only that task (or the one I give you), one task per turn, then stop. Never push. Never redo finished parts. When all parts are done, print the final report and stop.
 
@@ -76,7 +76,7 @@ If a decision is on neither list, stop and ask - one short question, not a parag
 - **Purpose:** A command-line reconnaissance orchestrator for **authorized** security testing. It runs several recon tools per stage, merges and deduplicates their output, scores confidence by how many tools agree, and tracks changes between scans in SQLite.
 - **Users:** Penetration testers and bug bounty hunters working inside a written scope.
 - **Stack:** Python 3.11+, Typer (CLI), Rich (terminal UI), Pydantic v2 (schemas), asyncio, httpx (HTTP), dnspython, PyYAML, SQLite (stdlib `sqlite3`), pytest, ruff, mypy.
-- **Environment:** Linux (Kali or Ubuntu, native or WSL2) is the primary platform; Windows supports mock/passive flows and `doctor`. Use one canonical checkout: this repository root only, no second copy of this checkout (no second WSL checkout, no `/mnt/c` mirror). Run checks from this checkout only. Python 3.11+ is required; use the active `.venv` and verify with `python --version`.
+- **Environment:** Linux (Kali or Ubuntu, native or WSL2) is the only supported platform. Use one canonical checkout: this repository root only, no second copy of this checkout (no second WSL checkout, no `/mnt/c` mirror). Run checks from this checkout only. Python 3.11+ is required; use the active `.venv` and verify with `python --version`.
 
 ## 2. Source of truth
 

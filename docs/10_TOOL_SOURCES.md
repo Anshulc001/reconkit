@@ -206,5 +206,5 @@ Rules it keeps:
 - `--dry-run` prints every command, `--check` reports only, `--update` re-runs
   `apt`/`go`/`pipx` for every tool, `--only <pattern>` narrows to one tool.
 
-It is not tested on Windows and is not part of `pytest`; Windows users keep
-using `doctor`.
+It is a bash script for Linux; it is not part of `pytest`, and `doctor` remains
+the thing that tells you what is present.

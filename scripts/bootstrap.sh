@@ -8,7 +8,7 @@ cd "$ROOT"
 PYTHON="${PYTHON:-python3}"
 
 if command -v uv >/dev/null 2>&1; then
-    # uv can fetch its own 3.11, so a system 3.10 (for example on Windows) is fine.
+    # uv can fetch its own 3.11, so an older system python is fine.
     if [ ! -d .venv ]; then
         uv venv --python 3.11 .venv
     fi
