@@ -12,10 +12,12 @@ from pathlib import Path
 
 import pytest
 
+from reconkit.core import runner as runner_module
 from reconkit.core.runner import (
     ExecResult,
     _kill_tree,
     run_exec,
+    terminate_tree,
     validate_host,
     validate_target,
 )
@@ -319,3 +321,108 @@ def test_stdin_text_survives_a_child_that_never_reads_it() -> None:
     )
     assert result.returncode == 0
     assert "done" in result.stdout
+
+
+def test_terminate_tree_kills_a_real_child_and_reaps_it() -> None:
+    """Regression: PIT-06 / D37 - a Ctrl+C or timeout must leave no orphan.
+
+    A real `sleep 60` child, in its own process group exactly like run_exec's
+    children, must be dead and reaped well inside two seconds.
+    """
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=False,
+        process_group=0,
+    )
+    started = time.monotonic()
+    terminate_tree(process)
+    assert process.poll() is not None, "the child is still running"
+    assert time.monotonic() - started < 2.0
+
+
+def test_ctrl_c_during_a_run_kills_the_child_and_reraises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D37: KeyboardInterrupt inside run_exec kills the group, then propagates.
+
+    The interrupt has to arrive in the thread that is waiting, so the real
+    class's `wait` raises it on its first call; that is the frame a real SIGINT
+    unwinds through. Later calls (the reap inside `terminate_tree`) behave.
+    """
+    real_popen = subprocess.Popen
+    real_wait = real_popen.wait
+    spawned: list[subprocess.Popen[bytes]] = []
+    state = {"raised": False}
+
+    def tracking_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    def ctrl_c_wait(self: subprocess.Popen[bytes], *args: object, **kwargs: object) -> int:
+        if not state["raised"]:
+            state["raised"] = True
+            raise KeyboardInterrupt
+        return real_wait(self, *args, **kwargs)
+
+    kills: list[int] = []
+
+    real_kill = runner_module._kill_tree
+
+    def recording_kill(process: subprocess.Popen[bytes]) -> None:
+        kills.append(process.pid)
+        real_kill(process)
+
+    monkeypatch.setattr(real_popen, "wait", ctrl_c_wait)
+    monkeypatch.setattr(subprocess, "Popen", tracking_popen)
+    monkeypatch.setattr(runner_module, "_kill_tree", recording_kill)
+
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            run_exec([sys.executable, "-c", "import time; time.sleep(60)"], timeout=30.0)
+        assert len(spawned) == 1
+        assert kills == [spawned[0].pid]
+        # terminate_tree's reap still ran, so the child is dead, not a zombie.
+        assert spawned[0].poll() is not None
+    finally:
+        for process in spawned:
+            if process.poll() is None:  # pragma: no cover - only on a failure
+                real_kill(process)
+
+
+def test_a_real_sigint_reaches_run_exec_and_leaves_no_orphan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D37 integration: a genuine SIGINT kills the real child within 2 s.
+
+    SIGINT is delivered to this process from another thread, which is what a
+    terminal Ctrl+C does; the handler raises KeyboardInterrupt in the main
+    thread, exactly where `run_exec` is waiting.
+    """
+    real_popen = subprocess.Popen
+    spawned: list[subprocess.Popen[bytes]] = []
+
+    def tracking_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", tracking_popen)
+
+    def poke() -> None:
+        time.sleep(0.3)
+        os.kill(os.getpid(), signal.SIGINT)
+
+    threading.Thread(target=poke, daemon=True).start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            run_exec([sys.executable, "-c", "import time; time.sleep(60)"], timeout=30.0)
+        assert time.monotonic() - started < 5.0
+        assert spawned, "no child was spawned"
+        assert spawned[0].poll() is not None, "the child survived the interrupt"
+    finally:
+        for process in spawned:
+            if process.poll() is None:  # pragma: no cover - only on a failure
+                process.kill()

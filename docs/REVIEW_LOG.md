@@ -7011,3 +7011,46 @@ the footer test caught. Replaced with an explicit registry flag, documented in d
 PROGRESS D36.
 
 Suite 921 -> 925.
+
+## 2026-11-18 (batch 2026-11-18b) B4 - Ctrl+C kills the child (D37)
+
+### Investigation (raw)
+
+`grep -n "start_new_session\|_kill_tree\|KeyboardInterrupt\|killpg" src/reconkit/core/runner.py` before the change:
+
+```
+128:        process = subprocess.Popen(
+139:            start_new_session=False,       # same session (PIT-32), new process group
+209:            _kill_tree(process)            # timeout path only
+224:            _kill_tree(process)            # idle-kill path only
+254:def _kill_tree(process):
+256:        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+```
+
+No `KeyboardInterrupt` anywhere in the runner. Because the child leads its own process group, the terminal's SIGINT
+(which goes to the foreground group) reaches reconkit only, so the tool survived a Ctrl+C as an orphan.
+
+### Implementation
+
+- `runner.terminate_tree(process, *, wait_timeout=5.0)`: `_kill_tree` + reap; now used by **both** timeout/idle paths
+  and the interrupt path, so one helper kills the same set.
+- The wait loop is wrapped in `try/except KeyboardInterrupt: terminate_tree(process); raise`.
+- CLI behaviour unchanged: `except KeyboardInterrupt` -> `interrupted; state is saved and the run is resumable`, 130.
+
+### Tests
+
+- `tests/test_runner.py::test_terminate_tree_kills_a_real_child_and_reaps_it` - a real `sleep 60` in its own process
+  group is dead and reaped in under 2 s.
+- `tests/test_runner.py::test_ctrl_c_during_a_run_kills_the_child_and_reraises` - the interrupt frame kills the group and
+  the exception still propagates (no swallowing).
+- `tests/test_runner.py::test_a_real_sigint_reaches_run_exec_and_leaves_no_orphan` - the integration case: SIGINT is
+  delivered to this process from another thread (what Ctrl+C does), `run_exec` raises, the real child is gone. This one
+  worked first try, so no gap was declared for it.
+
+### Known gap (disclosed)
+
+The engine executes adapters through `asyncio.to_thread`, so a Ctrl+C lands in the main thread while the worker sits in
+`run_exec`. `run_exec`'s own handler covers the direct-call path (tests above); the engine path needs a live-process
+registry, which is outside this ruling. Recorded in PROGRESS D37 and "Open risks".
+
+Suite 925 -> 928.

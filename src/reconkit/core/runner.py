@@ -202,28 +202,33 @@ def run_exec(
     timed_out = False
     idle_killed = False
     deadline = started + timeout
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            timed_out = True
-            _kill_tree(process)
-            process.wait()
-            break
-        try:
-            process.wait(timeout=min(remaining, _POLL_INTERVAL))
-            break
-        except subprocess.TimeoutExpired:
-            pass
-        if idle_timeout is None or time.monotonic() - started < min_runtime:
-            continue
-        with activity_lock:
-            silent_for = time.monotonic() - last_activity[0]
-        if silent_for >= idle_timeout:
-            timed_out = True
-            idle_killed = True
-            _kill_tree(process)
-            process.wait()
-            break
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                terminate_tree(process)
+                break
+            try:
+                process.wait(timeout=min(remaining, _POLL_INTERVAL))
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            if idle_timeout is None or time.monotonic() - started < min_runtime:
+                continue
+            with activity_lock:
+                silent_for = time.monotonic() - last_activity[0]
+            if silent_for >= idle_timeout:
+                timed_out = True
+                idle_killed = True
+                terminate_tree(process)
+                break
+    except KeyboardInterrupt:
+        # D37: the child leads its own process group (so a timeout kill cannot
+        # reach reconkit), which also means the terminal's Ctrl+C reaches only
+        # this process - without this the tool keeps running as an orphan.
+        terminate_tree(process)
+        raise
 
     out_thread.join()
     err_thread.join()
@@ -256,6 +261,17 @@ def _kill_tree(process: subprocess.Popen[bytes]) -> None:
         os.killpg(os.getpgid(process.pid), signal.SIGKILL)
     except ProcessLookupError:
         pass
+
+
+def terminate_tree(process: subprocess.Popen[bytes], *, wait_timeout: float = 5.0) -> None:
+    """Kill the child's whole process group and reap it (D37).
+
+    One helper for the timeout path and the Ctrl+C path, so both kill the same
+    set of processes: the child and anything it spawned.
+    """
+    _kill_tree(process)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=wait_timeout)
 
 
 def _redact(text: str, secrets: Iterable[str]) -> str:
