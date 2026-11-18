@@ -48,6 +48,7 @@ DOCUMENTED_OPTIONS = {
     "--show-headers",
     "--ffuf-wordlist",
     "--resolvers",
+    "--skip-url-probe",
     "--no-keys",
     "--resume",
     "--no-color",
@@ -823,12 +824,12 @@ def test_run_help_describes_stages_tool_modes_and_tiers() -> None:
     """
     from reconkit.cli import _ACTIVE_HELP, _FULL_HELP, _NO_SCOPE_HELP
 
-    assert "Run active stages: subs, dns, live, tech, urls." in _ACTIVE_HELP
+    assert "Run active stages: subs, dns, live, tech, urls, url_probe." in _ACTIVE_HELP
     assert "Uses passive and active tools" in _ACTIVE_HELP
     assert "no intrusive/aggressive tools" in _ACTIVE_HELP
     assert (
-        "Run a full scan: all stages (subs, dns, live, ports, tech, urls, shots, vulns)."
-        in _FULL_HELP
+        "Run a full scan: all stages (subs, dns, live, ports, tech, urls, url_probe,"
+        " shots, vulns)." in _FULL_HELP
     )
     assert "passive, active, and intrusive-tier tools" in _FULL_HELP
     assert "Implies --active and --include-noisy" in _FULL_HELP
@@ -838,6 +839,47 @@ def test_run_help_describes_stages_tool_modes_and_tiers() -> None:
     assert result.exit_code == 0
     for flag in ("--active", "--full", "--no-scope", "--only-alive", "--header"):
         assert flag in result.stdout
+
+
+def test_skip_url_probe_drops_the_stage_from_an_active_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D23: the flag narrows the run; the stage is simply not requested."""
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        app,
+        [
+            "run",
+            "-d",
+            "example.com",
+            "--active",
+            "--mock",
+            "--json",
+            "--config",
+            str(config),
+            "--skip-url-probe",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    stages = [stage["stage"] for stage in json.loads(result.stdout)["stages"]]
+    assert "url_probe" not in stages
+    assert "urls" in stages
+
+
+def test_active_run_requests_the_url_probe_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default: an active run includes the probe, and mock mode says it skipped."""
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        app, ["run", "-d", "example.com", "--active", "--mock", "--json", "--config", str(config)]
+    )
+    assert result.exit_code == 0, result.stderr
+    document = json.loads(result.stdout)
+    assert "url_probe" in [stage["stage"] for stage in document["stages"]]
+    assert any("url_probe: skipped in --mock" in note for note in document["warnings"])
 
 
 def test_full_json_skips_exploitation_tools_and_does_not_tier_skip_opt_in(
@@ -865,6 +907,8 @@ def test_full_json_skips_exploitation_tools_and_does_not_tier_skip_opt_in(
         "ports",
         "tech",
         "urls",
+        # D23: engine-owned, so it adds a stage with no tool results.
+        "url_probe",
         "shots",
         "vulns",
     ]

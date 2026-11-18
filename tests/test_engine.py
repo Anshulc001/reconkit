@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import ssl
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
+import httpx
 import pytest
 
 from reconkit import engine as engine_module
@@ -29,6 +31,8 @@ from reconkit.engine import (
     MODE_STAGES,
     MODE_TOOLS,
     STAGE_ORDER,
+    UNREACHABLE,
+    UNTRUSTED,
     CompletionGap,
     DnsSignal,
     Engine,
@@ -195,6 +199,7 @@ def make_engine(
     installed: Callable[[type[BaseToolAdapter]], bool] | None = None,
     resolve: Callable[[str], object] | None = None,
     activity: Callable[[str], None] | None = None,
+    url_probe_transport: object | None = None,
 ) -> Engine:
     config = load_config(CONFIG)
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -217,6 +222,7 @@ def make_engine(
         now=now,
         resolve=resolve,
         activity=activity,
+        url_probe_transport=url_probe_transport,
     )
 
 
@@ -2995,7 +3001,14 @@ def test_mode_stages_and_mode_tools_dicts_are_the_single_source_of_truth() -> No
     """docs/02 section 2: the two tables are the only place a mode is defined."""
     assert MODE_STAGES == {
         "passive": (Stage.SUBS, Stage.DNS, Stage.URLS),
-        "active": (Stage.SUBS, Stage.DNS, Stage.LIVE, Stage.TECH, Stage.URLS),
+        "active": (
+            Stage.SUBS,
+            Stage.DNS,
+            Stage.LIVE,
+            Stage.TECH,
+            Stage.URLS,
+            Stage.URL_PROBE,
+        ),
         "full": STAGE_ORDER,
     }
     assert MODE_TOOLS["passive"].tool_modes == frozenset({Mode.PASSIVE})
@@ -3069,6 +3082,8 @@ async def test_active_mode_runs_urls_and_tech_stages(tmp_path: Path) -> None:
         Stage.LIVE,
         Stage.TECH,
         Stage.URLS,
+        # D23: the probe follows the crawl and is engine-owned (no tools).
+        Stage.URL_PROBE,
     ]
     assert {"webanalyze-like", "cdncheck-like", "katana-like"} <= set(rec.names)
     # tech and the active crawler both see the alive host, in that order.
@@ -3107,7 +3122,7 @@ async def test_active_mode_urls_stage_runs_after_live(tmp_path: Path) -> None:
 async def test_full_mode_unchanged_by_expansion() -> None:
     """D19: full is every stage, `shots` included since the stage was wired."""
     assert MODE_STAGES["full"] == STAGE_ORDER
-    assert len(MODE_STAGES["full"]) == 8
+    assert len(MODE_STAGES["full"]) == 9
     assert set(MODE_STAGES["full"]) == set(Stage)
     assert set(MODE_STAGES["passive"]) < set(MODE_STAGES["active"]) < set(MODE_STAGES["full"])
 
@@ -3488,3 +3503,222 @@ async def test_a_tool_that_cannot_run_without_a_key_is_skipped_not_failed(
     # With the key present the tool is selected and runs; the fake adapter there
     # records nothing, so the proof is that no skip reason is produced.
     assert "keyed" not in [skip.tool for skip in with_key.skipped]
+
+
+def _probe_transport(answers: dict[str, object], calls: list[str]) -> httpx.MockTransport:
+    """A `url_probe` transport: a status per URL, or an exception to raise."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        answer = answers.get(str(request.url))
+        if isinstance(answer, Exception):
+            raise answer
+        return httpx.Response(int(answer or 200))
+
+    return httpx.MockTransport(handler)
+
+
+def _probe_engine(
+    tmp_path: Path,
+    urls: list[str],
+    *,
+    transport: object | None = None,
+    scope_text: str | None = SCOPE,
+) -> Engine:
+    rec = Recorder()
+    specs = {"urls-fake": tool("urls-fake", Stage.URLS, mode=Mode.ACTIVE)}
+    adapters = {
+        "urls-fake": adapter(
+            "urls-fake",
+            Stage.URLS,
+            rec,
+            records=[UrlRecord(url=url, source="fake") for url in urls],
+        )
+    }
+    return make_engine(
+        tmp_path, specs, adapters, scope_text=scope_text, url_probe_transport=transport
+    )
+
+
+async def test_url_probe_stores_status_codes_and_marks_unreachable(tmp_path: Path) -> None:
+    """D23: one GET per stored URL; `-1` is the stored answer for no answer."""
+    calls: list[str] = []
+    transport = _probe_transport(
+        {
+            "https://www.example.com/a": 200,
+            "https://www.example.com/b": 404,
+            "https://www.example.com/c": httpx.ConnectError("refused"),
+        },
+        calls,
+    )
+    engine = _probe_engine(
+        tmp_path,
+        [
+            "https://www.example.com/a",
+            "https://www.example.com/b",
+            "https://www.example.com/c",
+        ],
+        transport=transport,
+        scope_text=None,
+    )
+    summary = await engine.run("example.com", ScanOptions(active=True))
+    stored = {
+        str(row["url"]): row["status_code"]
+        for row in rows(engine.store, "SELECT url, status_code FROM urls ORDER BY id")
+    }
+    assert stored == {
+        "https://www.example.com/a": 200,
+        "https://www.example.com/b": 404,
+        "https://www.example.com/c": -1,
+    }
+    assert sorted(calls) == sorted(stored)
+    # The probe is engine-owned: a stage outcome, but no tool row of its own.
+    assert [stage.stage for stage in summary.stages] == [Stage.URLS, Stage.URL_PROBE]
+    assert summary.stages[-1].results == []
+    tools = [str(row["tool"]) for row in rows(engine.store, "SELECT tool FROM tool_runs")]
+    assert tools == ["urls-fake"]
+    # An engine-owned stage is never an "empty stage": exit 0, no warnings.
+    assert summary.exit_code is ExitCode.SUCCESS
+    assert not [note for note in summary.warnings if "url_probe" in note]
+
+
+async def test_url_probe_never_reprobes_a_stored_answer(tmp_path: Path) -> None:
+    """`NULL` alone means "not probed"; `-1` is an answer and is never retried."""
+    calls: list[str] = []
+    transport = _probe_transport({}, calls)
+    engine = _probe_engine(
+        tmp_path, ["https://www.example.com/a"], transport=transport, scope_text=None
+    )
+    await engine.run("example.com", ScanOptions(active=True))
+    assert calls == ["https://www.example.com/a"]
+    # A second run finds nothing NULL and sends nothing.
+    await engine.run("example.com", ScanOptions(active=True))
+    assert calls == ["https://www.example.com/a"]
+
+
+async def test_url_probe_uses_the_url_probe_config_bounds(tmp_path: Path) -> None:
+    """The `url_probe:` block bounds one pass and the run says what it skipped."""
+    calls: list[str] = []
+    transport = _probe_transport({}, calls)
+    engine = _probe_engine(
+        tmp_path,
+        [f"https://www.example.com/{index}" for index in range(5)],
+        transport=transport,
+        scope_text=None,
+    )
+    engine.config.url_probe.max_urls = 2
+    summary = await engine.run("example.com", ScanOptions(active=True))
+    assert len(calls) == 2
+    assert any("probed the first 2 URL(s) only" in note for note in summary.warnings)
+    left = rows(engine.store, "SELECT COUNT(*) FROM urls WHERE status_code IS NULL")
+    assert int(left[0][0]) == 3
+
+
+async def test_url_probe_is_skipped_in_mock_mode(tmp_path: Path) -> None:
+    """`--mock` sends no traffic and leaves every status NULL, saying so."""
+    calls: list[str] = []
+    transport = _probe_transport({}, calls)
+    engine = _probe_engine(
+        tmp_path, ["https://www.example.com/a"], transport=transport, scope_text=None
+    )
+    summary = await engine.run("example.com", ScanOptions(active=True, mock=True))
+    assert calls == []
+    assert [row["status_code"] for row in rows(engine.store, "SELECT status_code FROM urls")] == [
+        None
+    ]
+    assert any(
+        "url_probe: skipped in --mock (1 URL(s) left unprobed)" in note for note in summary.warnings
+    )
+
+
+async def test_skipping_the_url_probe_stage_leaves_every_status_null(tmp_path: Path) -> None:
+    """`--skip-url-probe` narrows the stage list; nothing is probed."""
+    calls: list[str] = []
+    transport = _probe_transport({}, calls)
+    engine = _probe_engine(
+        tmp_path, ["https://www.example.com/a"], transport=transport, scope_text=None
+    )
+    stages = tuple(stage for stage in STAGE_ORDER if stage is not Stage.URL_PROBE)
+    summary = await engine.run("example.com", ScanOptions(stages=stages, active=True))
+    assert calls == []
+    assert [row["status_code"] for row in rows(engine.store, "SELECT status_code FROM urls")] == [
+        None
+    ]
+    assert Stage.URL_PROBE not in [stage.stage for stage in summary.stages]
+
+
+async def test_url_probe_sends_only_in_scope_urls(tmp_path: Path) -> None:
+    """The probe is an active stage: the scope gate filters its input (docs/05)."""
+    calls: list[str] = []
+    transport = _probe_transport({}, calls)
+    engine = _probe_engine(
+        tmp_path,
+        ["https://www.example.com/a", "https://api.example.com/b"],
+        transport=transport,
+    )
+    await engine.run("example.com", ScanOptions(active=True))
+    assert calls == ["https://www.example.com/a"]
+    stored = {
+        str(row["url"]): row["status_code"]
+        for row in rows(engine.store, "SELECT url, status_code FROM urls ORDER BY id")
+    }
+    assert stored["https://api.example.com/b"] is None
+
+
+async def test_url_probe_marks_an_unverified_certificate_apart_from_unreachable(
+    tmp_path: Path,
+) -> None:
+    """`-2` (answered, certificate did not verify) is not `-1` (no answer) - D23.
+
+    Found on a real testfire.net run: every URL there has a certificate issued
+    for `www.testfire.net`, so a hostname mismatch stored `-1` and made a live
+    site look dead. Verification stays on; the fact is just recorded as itself.
+    """
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        cause = ssl.SSLCertVerificationError("certificate is not valid for 'testfire.net'")
+        raise httpx.ConnectError(str(cause), request=request) from cause
+
+    engine = _probe_engine(
+        tmp_path,
+        ["https://www.example.com/index.jsp"],
+        transport=httpx.MockTransport(handler),
+    )
+    summary = await engine.run("example.com", ScanOptions(active=True))
+    assert len(requests) == 1
+    stored = [row["status_code"] for row in rows(engine.store, "SELECT status_code FROM urls")]
+    assert stored == [UNTRUSTED]
+    assert summary.exit_code is ExitCode.SUCCESS
+
+
+async def test_url_probe_sees_a_certificate_error_in_the_context_chain(tmp_path: Path) -> None:
+    """httpx/httpcore chain the ssl error through `__context__`, not `__cause__`."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/refused":
+            # The plain case: no ssl error anywhere in the chain.
+            raise httpx.ConnectError("connection refused", request=request)
+        certificate = ssl.SSLCertVerificationError("hostname mismatch")
+        try:
+            raise certificate
+        except ssl.SSLCertVerificationError:
+            # `from None` keeps the ssl error off `__cause__`, exactly as httpx
+            # and httpcore leave it: it survives only as `__context__`.
+            raise httpx.ConnectError(str(certificate), request=request) from None
+
+    engine = _probe_engine(
+        tmp_path,
+        ["https://www.example.com/a", "https://www.example.com/refused"],
+        transport=httpx.MockTransport(handler),
+    )
+    await engine.run("example.com", ScanOptions(active=True))
+    stored = {
+        str(row["url"]): row["status_code"]
+        for row in rows(engine.store, "SELECT url, status_code FROM urls")
+    }
+    assert stored == {
+        "https://www.example.com/a": UNTRUSTED,
+        "https://www.example.com/refused": UNREACHABLE,
+    }

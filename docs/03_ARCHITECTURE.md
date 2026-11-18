@@ -128,7 +128,7 @@ workspaces/<domain>/
 ### Engine API (`engine.py`)
 
 - `Engine.open(config, *, db_path=..., scope_path=..., env_file=..., ...)` is the CLI-facing factory: it creates the `Store`, loads optional `.env` values inside the engine, and returns an `Engine`. `close()` closes the store. The constructor remains injectable for tests.
-- `Engine(config, store, now=...).run(target, ScanOptions(...))` runs the selected stages in the fixed order `subs, dns, live, ports, tech, urls, shots, vulns` (D19). `ScanOptions` carries `stages`, `tools`, `exclude`, `include_noisy`, `active`, `no_keys`, `mock`, `phase_timeout`, `min_sources` and `resume` (there is no `speed`; see section 7).
+- `Engine(config, store, now=...).run(target, ScanOptions(...))` runs the selected stages in the fixed order `subs, dns, live, ports, tech, urls, url_probe, shots, vulns` (D19, D23). `ScanOptions` carries `stages`, `tools`, `exclude`, `include_noisy`, `active`, `no_keys`, `mock`, `phase_timeout`, `min_sources` and `resume` (there is no `speed`; see section 7).
 - `Engine(..., progress=callable)` is an optional injected reporting callback. The
   engine calls it with one short string at stage start, once per finished tool and
   once per finished stage; it never prints, formats or decides anything. `None`
@@ -154,7 +154,7 @@ workspaces/<domain>/
 - Active tools run only when `--active` is set. **A scope file is optional:** when the resolved path (default `./scope.yaml`, `--scope` overrides) does not exist, active and full scanning run unrestricted against the operator's targets and the hosts discovered under them - no scope object is constructed and nothing is derived from the target to restrict it (docs/05 rule 2). When a scope file **is** present, `require_active()` runs unchanged: discovered hosts are revalidated and re-checked against scope before they reach an active `RunContext`; dropped hosts are reported, never probed; and a denial skips the active tools (exit 3) instead of raising out of the stage. The file is only read.
 - Each tool's `RunContext.env` contains only the env names in that tool's `keys` (none with `--no-keys`). Every tool selected for a stage starts together under `asyncio.gather`; there is no pacer, semaphore, rate limiter, delay or shuffling (section 7, 2026-11-17).
 - `--mock` reads only the fixtures, never calls `check_installed()`, the network or a subprocess. Stage asset writes are batched with `store.transaction()`; tool runs are recorded individually.
-- `_persist_stage` routes per stage: `subs` (discovery), `dns`, `live`, `ports`, `tech` and `urls`. The `tech` branch is `_persist_tech`: it merges the pass's `tech`/`waf` into each host's newest `host_status_history` row through `Store.update_host_extras` and never appends a status row, because a technology match is not a liveness verdict (docs/04 section 5, D11).
+- `_persist_stage` routes per stage: `subs` (discovery), `dns`, `live`, `ports`, `tech` and `urls`. `url_probe` has no adapter and therefore no `_persist_stage` branch: `Engine._run_url_probe()` writes `urls.status_code` itself (D23, docs/04 section 5). It runs through the same active-stage scope gate as every other active stage and creates its own tool-less `scan_runs` row, so it appears in `stages` and in a `--resume` plan. The `tech` branch is `_persist_tech`: it merges the pass's `tech`/`waf` into each host's newest `host_status_history` row through `Store.update_host_extras` and never appends a status row, because a technology match is not a liveness verdict (docs/04 section 5, D11).
 - A binary child that takes its input list on stdin gets it through `runner.run_exec(..., stdin_text=...)`, fed from its own thread; the adapter side is the `stdin_text(ctx)` hook (httprobe, waybackurls). Everything else still passes argv lists and nothing else (docs/05 rule 1).
 
 - `_run_one` writes the raw-output file for every executed tool, whatever its status: it takes the adapter's `ToolResult.raw_text` (docs/09 section 3), writes it through `Workspace.write` - redacted with the run's secrets, capped at `MAX_OUTPUT_BYTES`, into the stage's directory - and sets `raw_path` on the result only after the write returns. An empty capture still produces an empty file, so "one executed tool = one file" holds for a crash, a timeout and a quiet tool alike. A workspace write that raises (disk full, permissions, a rejected filename) is contained: the tool result and its `tool_runs` row are recorded unchanged and `raw_path` stays `None`. Raw capture is a diagnostic side channel; it never changes a status, an error or an exit code.
@@ -172,8 +172,8 @@ The engine owns the mode definition; nothing else restates it. `engine.py` has
 two module-level tables and one helper:
 
 - `MODE_STAGES`: `passive` = `(SUBS, DNS, URLS)`; `active` = `(SUBS, DNS,
-  LIVE, TECH, URLS)`; `full` = all eight stages in `STAGE_ORDER` (the seven
-  discovery stages plus `SHOTS`, which is full-only). Every tuple is
+  LIVE, TECH, URLS, URL_PROBE)`; `full` = all nine stages in `STAGE_ORDER`
+  (the eight discovery stages plus `SHOTS`, which is full-only). Every tuple is
   in `STAGE_ORDER`, so help text and the interactive legend list the stages in
   the order they actually run; `URLS` always follows `LIVE` when `LIVE` runs.
   A mode's stage of a pipeline can therefore have no input: in `passive` the

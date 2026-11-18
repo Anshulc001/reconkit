@@ -223,6 +223,7 @@ def test_the_mode_is_asked_until_a_valid_answer_is_typed(
         Stage.LIVE,
         Stage.TECH,
         Stage.URLS,
+        Stage.URL_PROBE,
     )
     assert options.active is True
 
@@ -372,7 +373,8 @@ def test_aggressive_yes_adds_the_ports_stages(
     assert "service/version detection is not wired" in result.stderr
     (options,) = calls
     # passive stages (with urls since D10) + the aggressive live/ports stages,
-    # still in STAGE_ORDER.
+    # still in STAGE_ORDER. A passive run never requests url_probe (D23): the
+    # probe sends HTTP, so aggressive questions do not add it either.
     assert options.stages == (
         Stage.SUBS,
         Stage.DNS,
@@ -415,7 +417,7 @@ def test_aggressive_no_leaves_the_plan_alone(
     )
     assert (
         "plan: example.com; mode active; scope no scope file; "
-        "stages subs, dns, live, tech, urls; tools passive+active"
+        "stages subs, dns, live, tech, urls, url_probe; tools passive+active"
         in " ".join(result.stderr.split())
     )
     plan_line = result.stderr.split("plan:")[1].splitlines()[0]
@@ -482,6 +484,7 @@ def test_full_mode_requests_every_stage_including_vulns(
         Stage.PORTS,
         Stage.TECH,
         Stage.URLS,
+        Stage.URL_PROBE,
         Stage.SHOTS,
         Stage.VULNS,
     )

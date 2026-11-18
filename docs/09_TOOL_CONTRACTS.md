@@ -911,6 +911,30 @@ only when some row has a note, so an ordinary table keeps its six columns), the
 `N hosts (M unique after www-dedup)` summary and the `duplicate_of` field plus
 `www_dedup` block in `--json` (docs/02 section 5).
 
+### URL liveness probe (D23, 2026-11-18)
+
+The `urls` stage records what the archives and the crawler returned; it never
+says whether a URL still answers. The `url_probe` stage fills that in and is
+**engine-owned**: there is no adapter, no `tools.yaml` entry, and no row in the
+Tools table, because there is no external program to run.
+
+| Item | Value |
+|---|---|
+| Position | `STAGE_ORDER` after `urls`, before `shots` |
+| Modes | `active` and `full`; never `passive` (it sends HTTP) |
+| Input | `urls` rows of the current target whose `status_code` is `NULL` |
+| Write | `urls.status_code` = the HTTP status, `-1` when unreachable, `-2` when its certificate did not verify |
+| Transport | one `GET` per URL through httpx, honest `reconkit/<version>` UA, no retries |
+| Bounds | `config.yaml` `url_probe:` - `max_urls` 5000, `batch_size` 200, `threads` 50, `timeout_s` 10 |
+| Off switch | `--skip-url-probe` |
+| Mock | sends nothing, leaves `status_code` `NULL`, says so on stderr |
+
+`-1` and `-2` are *stored answers* ("no answer" and "answered with a certificate that does not verify"), so neither is retried;
+`NULL` keeps its single meaning of "not probed yet". The probe runs through the
+same active-stage scope gate as every other active stage (docs/05 rule 2) and
+writes one integer per URL row - no host state, confidence or `diff` input is
+touched.
+
 ## 6. JSON Output
 
 `--json` writes ONE JSON document to stdout (shape in docs/02 section 5), not JSONL. Each host object carries `confidence`, `sources` and `state`; the top-level `summary` object carries counts and tool statuses. Human tables and progress stay on stderr.

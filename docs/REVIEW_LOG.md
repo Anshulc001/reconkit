@@ -69,6 +69,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-48 | `doctor` showed junk for two installed tools (`katana` -> `__`, `nuclei` -> `[I…` plus ANSI escapes), and `update` could not call `katana` up to date, so an already-current binary would be downloaded again on every run (12j) | `installed_version()` returned `text.splitlines()[0]` for every tool, but `katana -version` prints four lines of ASCII art (the real version is on line 8, on stderr) and `nuclei -version` prints a coloured `[INF]` line first, so `_same_version()` compared a release tag against a logo | A tool may carry a top-level `version_regex` in `tools.yaml`; `installed_version()` searches the whole `version_cmd` output, returns the first capture group (or the whole match when the pattern has no group), and falls back to `splitlines()[0]` when the field is absent or nothing matches. A pattern that does not compile is a `ConfigError` at registry load, before any command runs | `test_katana_version_ignores_the_ascii_banner` (`Regression: PIT-48`), `test_nuclei_version_drops_the_ansi_log_prefix` (`Regression: PIT-48`), `test_a_regex_with_no_match_falls_back_to_the_first_line`, `test_a_version_regex_without_a_group_returns_the_match`, `test_version_regex_is_parsed_from_the_registry`, `test_a_broken_version_regex_is_a_config_error`, `test_version_regex_survives_the_plan_copy` |
 | PIT-58 | A real scan reported `katana: invalid JSON line` and threw away the whole crawl (0 items) although katana had found URLs; `hakrawler`/`gospider`/`subjs` had the same shape (any line their parser could not turn into an http(s) URL raised `ParseError`) | The parsers treated "this line is not output I understand" as "this tool failed", and the tools that print a warning on stdout (katana) or a log line (gospider) produced exactly such lines. PIT-52 fixed only the known non-web schemes, so any other noise was still fatal | A urls parser skips an unusable line, counts it, and keeps parsing: `ToolResult.error` carries one message per skipped line up to 10, then a single `skipped N unusable line(s); last: ...` summary, and the status stays `ok` because the parsed records are the tool's real output. `urlfinder` keeps its stricter archive rule (see docs/09 4a3) | `test_katana_skips_invalid_json_lines` (`Regression: PIT-58`), `test_katana_warning_lines_reach_the_detail_and_stay_ok`, `test_katana_many_junk_lines_are_summarised_once`, `test_crawler_parsers_skip_unusable_lines` |
 | PIT-59 | The results table counted one website twice: `sakec.ac.in` (301) and `www.sakec.ac.in` (200) were two ALIVE hosts, and the same for `admission`, `iprc`, `research`, `portal`, so 39 "ALIVE" rows suggested 39 sites | Nothing in the pipeline related a `www.` name to its bare name: DNS resolves both, the live pass probes both, and neither `subdomains` nor `host_status_history` had anywhere to say they are the same site | A post-`live` pass (`Engine._dedupe_www_variants`) writes **metadata only** (`duplicate_of`, `www_note`, schema 9) on the newest status row: 3xx+2xx marks the 3xx name, two 2xx marks neither, same non-2xx plus a shared IP marks `www.X`, a dead variant and an unknown IP set mark nothing. Host state, confidence and every count query are untouched. The table gains a Notes column (only when a row has a note) and the summary line a unique count (only when a duplicate exists) | `test_www_redirect_to_bare_is_marked_duplicate` (`Regression: PIT-59`), `test_bare_redirect_to_www_is_marked_duplicate`, `test_both_200_independent_servers_not_marked_duplicate`, `test_same_status_on_one_server_marks_the_www_variant`, `test_same_status_on_different_servers_is_only_a_note`, `test_www_dead_is_not_marked_duplicate`, `test_single_variant_not_touched`, `test_www_dedup_never_changes_host_state_or_confidence`, `test_set_host_duplicate_updates_in_place_and_keeps_state`, `test_www_duplicate_rows_get_notes_and_the_summary_counts_unique` |
+| PIT-60 | Nothing said whether a stored URL still answers: the urls stage kept 11,785 rows from the archives and the crawler, so a 2019 `/admin` and a page that answered today were the same evidence | `urls` had no status column and no stage sent a request per URL, so the whole archive looked equally alive | `Stage.URL_PROBE` runs after `urls` in `active`/`full` (engine-owned, no adapter) and writes `urls.status_code`: the HTTP status, `-1` for no answer, `-2` when the server answered with a certificate that does not verify. `NULL` alone means "not probed", and a stored answer is never retried. `--skip-url-probe` turns it off; `--mock` leaves NULLs and says so. Host state, confidence, `diff` and counts are untouched | `test_url_probe_stores_status_codes_and_marks_unreachable` (`Regression: PIT-60`), `test_url_probe_never_reprobes_a_stored_answer`, `test_url_probe_marks_an_unverified_certificate_apart_from_unreachable`, `test_url_probe_sends_only_in_scope_urls`, `test_url_probe_is_skipped_in_mock_mode` |
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
@@ -5668,4 +5669,103 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
   `host_status_history` (a real v7 database has one; v9 alters it), and
   `test_json_output_is_one_valid_document_with_documented_schema` gained
   `www_dedup` plus the two host keys.
+
+## 2026-11-18 (batch) Part 4 - `url_probe` stage checks archive URL liveness
+
+- **Owner request (batch, part 4):** the urls stage records 11,785 URLs and
+  nothing says which of them still answer, so a 2019 `/admin` and a page that
+  answered today are the same evidence. Add a URL liveness probe stage.
+- **Docs first:** docs/02 (mode table, stage-order text, `--skip-url-probe`,
+  "What the url_probe stage does"), docs/03 (stage order, `MODE_STAGES`,
+  `_persist_stage` note), docs/04 (the `urls.status_code` column and schema 10),
+  docs/09 ("URL liveness probe (D23)"), MASTER_PLAN D23, COMMANDS.md.
+- **Engine-owned, not an adapter.** `url_probe` has no `tools.yaml` entry, no
+  adapter and no Tools-table row, because no external program runs: the CLI
+  drops the stage for `--skip-url-probe`, `Engine._run_url_probe()` sends the
+  requests through httpx with the honest `reconkit/0.1` User-Agent, and
+  `_empty_stages()` excludes it so a tool-less stage can never make an otherwise
+  complete run exit 5. `MODE_STAGES["active"]` gains it; `full` gets it through
+  `STAGE_ORDER`, and `passive` never does (it sends HTTP).
+- **Schema: 9 -> 10** (`_SCHEMA_V10`: `ALTER TABLE urls ADD COLUMN
+  status_code INTEGER`, nullable, no default). `NULL` means exactly one thing,
+  "not probed yet"; `unprobed_urls()` selects only those rows, and
+  `set_url_status()` updates in place, so the probe never appends a URL row.
+- **Scope.** It is an active stage, so it calls the same `_active_hosts()` gate
+  as the others and sends nothing for a host the gate drops
+  (`test_url_probe_sends_only_in_scope_urls`).
+- **Bounds.** `config.yaml` `url_probe:` - `max_urls` 5000 per pass (a bigger
+  list is cut and the run warns), `batch_size` 200, `threads` 50 (semaphore and
+  httpx `Limits`), `timeout_s` 10 per request, no retries.
+- **A real-run defect found and fixed before commit: `-2`.** The first real
+  testfire.net pass stored `-1` for **every** URL, including
+  `https://testfire.net` - the site answers, but its certificate is issued for
+  `www.testfire.net`, so strict verification raised
+  `SSLCertVerificationError` and "answered, bad certificate" was stored as
+  "does not answer". Verification is never disabled here (that would be a
+  security regression and a lint finding), so the case got its own stored
+  answer: `urls.status_code = -2` (`ENGINE.UNTRUSTED`), documented in docs/02,
+  docs/04, docs/09, COMMANDS.md and D23. The detector walks **both**
+  `__cause__` and `__context__`: httpcore re-raises implicitly, so the ssl error
+  is usually only in `__context__` (the first version walked causes only and
+  silently stayed at `-1`; the context-chain test is the regression).
+- **Mock.** `--mock` sends nothing, leaves every `status_code` `NULL` and warns
+  `url_probe: skipped in --mock (N URL(s) left unprobed)`, so a mock run can
+  never look like a probed one.
+- **Real proof (testfire.net, small, no re-scan of sakec.ac.in).** The
+  workspace `/tmp/rk4` used a copy of `config.yaml` with `max_urls: 20` and the
+  command `reconkit run -d testfire.net --active --no-scope --tools
+  pyprobe,katana,gau`:
+
+  ```
+  urls: katana ok 58 item(s)
+  urls: gau ok 345 item(s)
+  url_probe: probing 20 URL(s)
+  url_probe: finished 20 URL(s)
+  warning: url_probe: probed the first 20 URL(s) only; re-run to probe the rest
+  EXIT=0
+
+  $ sqlite3 recon.db "SELECT status_code, COUNT(*) FROM urls GROUP BY status_code"
+  |365        # NULL = not probed yet
+  -2|40       # https://testfire.net/* - certificate is for www.testfire.net
+  ```
+
+  The next run probed 20 more and nothing already answered was retried. Three
+  requests on the real host show all three outcomes through `_probe_url_batch`:
+
+  ```
+    200    http://testfire.net/
+     -2  -2 untrusted  https://www.testfire.net/
+     -1  -1 unreachable  https://does-not-exist.testfire.net/
+  ```
+
+  The `-2` on `https://www.testfire.net/` is real too: that certificate does not
+  chain to a trusted CA from this box, so the answer is "certificate not
+  verified", not "dead".
+- **Tests:** 869 -> 882. New: `test_url_probe_stores_status_codes_and_marks_unreachable`,
+  `test_url_probe_never_reprobes_a_stored_answer`,
+  `test_url_probe_uses_the_url_probe_config_bounds`,
+  `test_url_probe_is_skipped_in_mock_mode`,
+  `test_skipping_the_url_probe_stage_leaves_every_status_null`,
+  `test_url_probe_sends_only_in_scope_urls`,
+  `test_url_probe_marks_an_unverified_certificate_apart_from_unreachable`,
+  `test_url_probe_sees_a_certificate_error_in_the_context_chain`,
+  `test_v9_database_migrates_the_url_status_column`,
+  `test_unprobed_urls_and_set_url_status`,
+  `test_unprobed_urls_is_bounded_by_the_limit`,
+  `test_skip_url_probe_drops_the_stage_from_an_active_run`,
+  `test_active_run_requests_the_url_probe_stage`. Changed: the seven
+  `SCHEMA_VERSION == 9` assertions in `tests/test_store.py` became `== 10` (and
+  their old-version fixtures now create a minimal `urls` table, since v10 alters
+  it), the `MODE_STAGES`/stage-order literals in `tests/test_engine.py` and
+  `tests/test_cli.py` gained `url_probe`, and
+  `tests/test_interactive_scan.py`'s active and full stage tuples do too. The
+  engine tests inject answers through the new
+  `Engine(url_probe_transport=...)` keyword, an `httpx.MockTransport`, so the
+  suite never touches the network (AGENTS rule 9).
+- **Deviations.** (1) schema 10, not the 8 the brief assumed - 8 and 9 were
+  already spent by Parts 1 and 3. (2) `-2` is a value the brief did not name; it
+  was added because the real target proved `-1` would report a live site as
+  dead, and it changes no host state, confidence, `diff` or count query.
+  (3) `--skip-url-probe` is the named flag the brief allowed; no other flag was
+  added.
 

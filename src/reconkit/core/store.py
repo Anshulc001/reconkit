@@ -16,7 +16,7 @@ from pathlib import Path
 
 from reconkit.errors import ConfigError
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 REDACTED = "***"
 # docs/04 section 5: the stored reason is one line of at most this many characters.
 DETAIL_MAX_CHARS = 200
@@ -192,6 +192,12 @@ ALTER TABLE host_status_history ADD COLUMN duplicate_of TEXT;
 ALTER TABLE host_status_history ADD COLUMN www_note TEXT;
 """
 
+# docs/04 section 11 (2026-11-18, MASTER_PLAN D23): the URL liveness answer.
+# Additive: every existing URL reads NULL, which means "not probed yet".
+_SCHEMA_V10 = """
+ALTER TABLE urls ADD COLUMN status_code INTEGER;
+"""
+
 _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, _SCHEMA_V1),
     (2, _SCHEMA_V2),
@@ -202,6 +208,7 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (7, _SCHEMA_V7),
     (8, _SCHEMA_V8),
     (9, _SCHEMA_V9),
+    (10, _SCHEMA_V10),
 )
 
 _COUNT_SQL: dict[str, str] = {
@@ -822,6 +829,29 @@ class Store:
             "SELECT id FROM urls WHERE target_id = ? AND url = ?", (target_id, url)
         ).fetchone()
         return int(row["id"])
+
+    def unprobed_urls(self, target_id: int, *, limit: int) -> list[dict[str, object]]:
+        """The target's URLs that have no liveness answer yet (D23).
+
+        `NULL` is the only "not probed" value: a URL that did not answer is
+        stored as `-1`, so it is never handed back here.
+        """
+        rows = self._conn.execute(
+            "SELECT id, url FROM urls WHERE target_id = ? AND status_code IS NULL"
+            " ORDER BY id LIMIT ?",
+            (target_id, limit),
+        ).fetchall()
+        return [{"id": int(row["id"]), "url": str(row["url"])} for row in rows]
+
+    def set_url_status(self, url_id: int, status_code: int) -> None:
+        """Write the `url_probe` answer on the URL row (D23).
+
+        Updates in place: no new row, and no other column is touched, so
+        `first_seen_run`, `source_count` and `diff` see exactly what they saw
+        before the probe existed.
+        """
+        self._conn.execute("UPDATE urls SET status_code = ? WHERE id = ?", (status_code, url_id))
+        self._commit()
 
     def previous_state(self, subdomain_id: int) -> str | None:
         row = self._conn.execute(

@@ -128,6 +128,10 @@ _RESOLVERS_HELP = (
     "Resolver list for massdns and puredns. Default: the packaged resolvers.txt "
     "(16 public resolvers). The file must exist and be readable."
 )
+_SKIP_URL_PROBE_HELP = (
+    "Skip the url_probe stage: leave every stored URL without an HTTP status "
+    "(D23). It runs after urls in --active and --full."
+)
 _REDACT_HELP = "Hide header values in JSON and UI output (default on)."
 _SHOW_HEADERS_HELP = "Reveal header values in JSON output (overrides --redact-headers)."
 _HEADER_NAME = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
@@ -695,6 +699,7 @@ def _run_scan(
     redact_headers: bool = True,
     ffuf_wordlist: Path | None = None,
     resolvers: Path | None = None,
+    skip_url_probe: bool = False,
 ) -> int:
     engine: Engine | None = None
     try:
@@ -734,6 +739,10 @@ def _run_scan(
         # docs/02 section 2: the passive-only commands run no active stage, so
         # accepting --active would promise work the command cannot do.
         stages = plan.stages if plan is not None else _stages(command, is_active, full)
+        if skip_url_probe:
+            # D23: the flag only narrows this run; a stage command never has the
+            # stage to begin with, so it is a no-op there (docs/02 section 3).
+            stages = tuple(stage for stage in stages if stage is not Stage.URL_PROBE)
         progress_console = make_console(no_color=no_color)
         if no_scope and not is_active:
             render_message(
@@ -820,6 +829,7 @@ def _run_scan(
                                 user_agent=user_agent,
                                 redact_headers=redact_headers,
                                 ffuf_wordlist=ffuf_wordlist,
+                                skip_url_probe=skip_url_probe,
                             ),
                         )
                     )
@@ -1008,6 +1018,9 @@ def _scan_command(
         Path | None, typer.Option("--ffuf-wordlist", help=_FFUF_WORDLIST_HELP)
     ] = None,
     resolvers: Annotated[Path | None, typer.Option("--resolvers", help=_RESOLVERS_HELP)] = None,
+    skip_url_probe: Annotated[
+        bool, typer.Option("--skip-url-probe", help=_SKIP_URL_PROBE_HELP)
+    ] = False,
     no_keys: Annotated[bool, typer.Option("--no-keys", help="Force free mode.")] = False,
     resume: Annotated[
         bool, typer.Option("--resume", help="Continue the latest unfinished run.")
@@ -1046,6 +1059,7 @@ def _scan_command(
             redact_headers=redact_headers,
             ffuf_wordlist=ffuf_wordlist,
             resolvers=resolvers,
+            skip_url_probe=skip_url_probe,
             no_keys=no_keys,
             resume=resume,
             no_color=no_color,
@@ -1114,6 +1128,9 @@ def main(
         bool,
         typer.Option("--redact-headers/--show-headers", help=_REDACT_HELP),
     ] = True,
+    skip_url_probe: Annotated[
+        bool, typer.Option("--skip-url-probe", help=_SKIP_URL_PROBE_HELP)
+    ] = False,
     no_keys: Annotated[bool, typer.Option("--no-keys", help="Force free mode.")] = False,
     resume: Annotated[
         bool, typer.Option("--resume", help="Continue the latest unfinished run.")
@@ -1154,6 +1171,7 @@ def main(
             headers=_headers(header),
             user_agent=user_agent,
             redact_headers=redact_headers,
+            skip_url_probe=skip_url_probe,
             no_keys=no_keys,
             resume=resume,
             no_color=no_color,

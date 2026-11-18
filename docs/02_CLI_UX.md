@@ -26,18 +26,22 @@ same two dicts.
 | Mode | Stages | Tool modes included | Tool tiers included | CLI | Interactive |
 |---|---|---|---|---|---|
 | `passive` | `subs`, `dns`, `urls` | passive only | `core`, `opt_in`* | (default) | `passive` |
-| `active` | `subs`, `dns`, `live`, `tech`, `urls` | passive + active | `core`, `opt_in`* | `--active` | `active` |
-| `full` | all: `subs`, `dns`, `live`, `ports`, `tech`, `urls`, `shots`, `vulns` | passive + active | `core`, `opt_in`, `intrusive` | `--full` | `full` |
+| `active` | `subs`, `dns`, `live`, `tech`, `urls`, `url_probe` | passive + active | `core`, `opt_in`* | `--active` | `active` |
+| `full` | all: `subs`, `dns`, `live`, `ports`, `tech`, `urls`, `url_probe`, `shots`, `vulns` | passive + active | `core`, `opt_in`, `intrusive` | `--full` | `full` |
 
 \*`opt_in` requires `--include-noisy`, unless the mode is `full` (which implies
 it). `--full` also implies `--active`.
 
 Stages still run in the fixed `STAGE_ORDER` (`subs`, `dns`, `live`, `ports`,
-`tech`, `urls`, `shots`, `vulns`); a mode only decides which of them are in
-scope. So in `passive` the order is `subs`, `dns`, `urls`, and in `active` it is
-`subs`, `dns`, `live`, `tech`, `urls` - `urls` always runs after `live` when
-`live` runs. `shots` exists in `full` only (D19) and sits between `urls` and
-`vulns`, so a browser never delays the findings stage.
+`tech`, `urls`, `url_probe`, `shots`, `vulns`); a mode only decides which of
+them are in scope. So in `passive` the order is `subs`, `dns`, `urls`, and in
+`active` it is `subs`, `dns`, `live`, `tech`, `urls`, `url_probe` - `urls`
+always runs after `live` when `live` runs. `url_probe` (D23, 2026-11-18) sends
+HTTP to the URLs the crawl found, so it is an active stage: `passive` never
+requests it, and there is no scope file rule of its own - it goes through the
+same scope gate as every other active stage (docs/05 rule 2). `shots` exists in
+`full` only (D19) and sits between `url_probe` and `vulns`, so a browser never
+delays the findings stage.
 
 **What a urls tool receives depends on its `mode:`** (2026-11-17, D10):
 
@@ -95,13 +99,33 @@ section 4.
 | `urls` | URLs, params, JS | yes (crawling) | 3 |
 | `vulns` | takeover and exposure checks | yes | 3 |
 
+There is no `url_probe` stage command (D23): the probe is part of a scan, not a
+command of its own. A flagged `run -d X --active` (or `--full`) runs it after
+`urls`, and `--skip-url-probe` leaves it out.
+
+**What the url_probe stage does (D23, 2026-11-18).** The urls stage records what
+the archive and the crawl returned, not whether any of it still answers. The
+probe sends one `GET` to each stored URL whose `urls.status_code` is still
+`NULL` (the current target only), and stores the HTTP status; a URL that cannot
+be reached - connection refused, timeout, DNS failure - is stored as `-1`, and a
+server that answers but whose TLS certificate does not verify (hostname mismatch,
+untrusted chain) is stored as `-2`: `reconkit` never disables verification, so a
+mismatched certificate is recorded as the fact it is instead of passing for a
+dead URL. It is engine-owned: there is no adapter and no `tools.yaml` entry, so it
+never appears in the Tools table, and it sends the honest `reconkit/<version>`
+User-Agent (docs/05 rule 8). Bounds come from the `url_probe:` block in
+`config.yaml`: `max_urls` (5000, the probe stops after that many and warns).
+`batch_size` (200), `threads` (50) and `timeout_s` (10) shape how it works.
+`--mock` never sends traffic, so a mock run leaves every `status_code` at
+`NULL` and says so; `--skip-url-probe` does the same deliberately.
+
 ### Workflows
 | Command | Pipeline |
 |---|---|
 | `lite -d X` | passive only (quick) |
 | `run -d X` | passive mode: subs + dns + urls |
-| `run -d X --active` | active mode: subs + dns + live + tech + urls; resumable |
-| `run -d X --full` | full mode: all eight stages (the seven discovery stages plus `shots`), `opt_in` enabled; implies `--active` and `--include-noisy` |
+| `run -d X --active` | active mode: subs + dns + live + tech + urls + url_probe; resumable |
+| `run -d X --full` | full mode: all nine stages (the eight discovery stages plus `shots`), `opt_in` enabled; implies `--active` and `--include-noisy` |
 
 `passive` is the stage command: it runs the subs, dns and urls stages for one target, with passive tools only. `lite` is the workflow shortcut for exactly that passive pipeline and nothing active; adapters, flags and exit codes are the same. Only `run` includes active stages (and `run` is where `--full` applies).
 
@@ -276,6 +300,7 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | `--header "Name: Value"` | Add an HTTP header for `httpx` and `pyprobe`; repeatable. A tool without `-H` logs `--header not applied to <tool> (no -H support)` and does not fail |
 | `--user-agent STR` | Override the default User-Agent for `httpx` and `pyprobe` |
 | `--ffuf-wordlist PATH` | Wordlist for `ffuf` content discovery, replacing the packaged `common.txt` (about 110 paths, D13). The file must exist and be readable; a missing file is a failed `ffuf` result, never a silent fallback |
+| `--skip-url-probe` | Skip the `url_probe` stage for this run (D23): the archived URLs keep `status_code = NULL`, exactly as they were before the stage existed. Use it when the target's URL list is huge or the operator only wants discovery. The stage command `urls` never probes (it has no probe stage), so the flag is accepted and has nothing to skip |
 | `--resolvers PATH` | Resolver list for `massdns` and `puredns`, replacing the packaged `src/reconkit/data/resolvers.txt` (16 public resolvers, D16). The file must exist and be readable; a missing file is a failed `massdns`/`puredns` result, never a silent fallback to the system resolver |
 | `--redact-headers` / `--show-headers` | Hide (default) or reveal header values in JSON and UI output |
 | `--min-sources N` | Hide results confirmed by fewer than N tools |

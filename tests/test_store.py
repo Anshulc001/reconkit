@@ -97,6 +97,12 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (1);
+        -- A real database of this version has urls; schema 10 alters it.
+        CREATE TABLE urls (
+          id        INTEGER PRIMARY KEY,
+          target_id INTEGER NOT NULL,
+          url       TEXT NOT NULL
+        );
         -- A real database of this version has tool_runs; schema 8 rebuilds it.
         CREATE TABLE tool_runs (
           id           INTEGER PRIMARY KEY,
@@ -162,7 +168,7 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 9
+        assert migrated.schema_version == SCHEMA_VERSION == 10
         assert "cnames_json" in columns
         assert "dangling_cname" in columns
         assert "detail" in columns
@@ -185,6 +191,12 @@ def test_v8_database_migrates_the_www_dedup_columns(tmp_path: Path) -> None:
             """
             CREATE TABLE schema_version (version INTEGER NOT NULL);
             INSERT INTO schema_version (version) VALUES (8);
+            -- A real database of this version has urls; schema 10 alters it.
+            CREATE TABLE urls (
+              id        INTEGER PRIMARY KEY,
+              target_id INTEGER NOT NULL,
+              url       TEXT NOT NULL
+            );
             CREATE TABLE host_status_history (
               id           INTEGER PRIMARY KEY,
               subdomain_id INTEGER NOT NULL,
@@ -201,7 +213,7 @@ def test_v8_database_migrates_the_www_dedup_columns(tmp_path: Path) -> None:
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 9
+        assert migrated.schema_version == SCHEMA_VERSION == 10
         columns = {
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
@@ -213,6 +225,64 @@ def test_v8_database_migrates_the_www_dedup_columns(tmp_path: Path) -> None:
         assert (row["duplicate_of"], row["www_note"]) == (None, None)
     finally:
         migrated.close()
+
+
+def test_v9_database_migrates_the_url_status_column(tmp_path: Path) -> None:
+    """D23: schema 10 adds urls.status_code; an existing URL reads NULL (not probed)."""
+    db_path = tmp_path / "recon.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version (version) VALUES (9);
+            CREATE TABLE urls (
+              id        INTEGER PRIMARY KEY,
+              target_id INTEGER NOT NULL,
+              url       TEXT NOT NULL
+            );
+            INSERT INTO urls (target_id, url) VALUES (1, 'https://example.com/a');
+            """
+        )
+    finally:
+        conn.close()
+
+    migrated = Store(db_path)
+    try:
+        assert migrated.schema_version == SCHEMA_VERSION == 10
+        columns = {str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(urls)")}
+        assert "status_code" in columns
+        row = migrated._conn.execute("SELECT status_code FROM urls").fetchone()
+        assert row["status_code"] is None
+    finally:
+        migrated.close()
+
+
+def test_unprobed_urls_and_set_url_status(store: Store) -> None:
+    """`NULL` is the only "not probed" value; `-1` is a stored answer (D23)."""
+    target_id, run_id = make_run(store)
+    first = store.upsert_url(target_id, "https://example.com/a", run_id=run_id)
+    second = store.upsert_url(target_id, "https://example.com/b", run_id=run_id)
+    assert store.unprobed_urls(target_id, limit=10) == [
+        {"id": first, "url": "https://example.com/a"},
+        {"id": second, "url": "https://example.com/b"},
+    ]
+    store.set_url_status(first, -1)
+    store.set_url_status(second, 200)
+    assert store.unprobed_urls(target_id, limit=10) == []
+    assert store.unprobed_urls(target_id, limit=1) == []
+    stored = [
+        (str(row["url"]), row["status_code"])
+        for row in store._conn.execute("SELECT url, status_code FROM urls ORDER BY id")
+    ]
+    assert stored == [("https://example.com/a", -1), ("https://example.com/b", 200)]
+
+
+def test_unprobed_urls_is_bounded_by_the_limit(store: Store) -> None:
+    target_id, run_id = make_run(store)
+    for index in range(3):
+        store.upsert_url(target_id, f"https://example.com/{index}", run_id=run_id)
+    assert len(store.unprobed_urls(target_id, limit=2)) == 2
 
 
 def test_set_host_duplicate_updates_in_place_and_keeps_state(store: Store) -> None:
@@ -302,6 +372,12 @@ def test_v3_database_migrates_the_additive_detail_column(tmp_path: Path) -> None
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (3);
+        -- A real database of this version has urls; schema 10 alters it.
+        CREATE TABLE urls (
+          id        INTEGER PRIMARY KEY,
+          target_id INTEGER NOT NULL,
+          url       TEXT NOT NULL
+        );
         -- A real database of this version has tool_runs; schema 8 rebuilds it.
         CREATE TABLE tool_runs (
           id           INTEGER PRIMARY KEY,
@@ -346,7 +422,7 @@ def test_v3_database_migrates_the_additive_detail_column(tmp_path: Path) -> None
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 9
+        assert migrated.schema_version == SCHEMA_VERSION == 10
         columns = {
             str(row["name"])
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
@@ -718,6 +794,12 @@ def test_v2_database_migrates_provenance_with_backfill(tmp_path: Path) -> None:
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (2);
+        -- A real database of this version has urls; schema 10 alters it.
+        CREATE TABLE urls (
+          id        INTEGER PRIMARY KEY,
+          target_id INTEGER NOT NULL,
+          url       TEXT NOT NULL
+        );
         -- A real database of this version has tool_runs; schema 8 rebuilds it.
         CREATE TABLE tool_runs (
           id           INTEGER PRIMARY KEY,
@@ -784,7 +866,7 @@ def test_v2_database_migrates_provenance_with_backfill(tmp_path: Path) -> None:
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(subdomains)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 9
+        assert migrated.schema_version == SCHEMA_VERSION == 10
         assert "provenance" in columns
         rows = {
             str(row["fqdn"]): str(row["provenance"])
@@ -1031,6 +1113,12 @@ def test_v4_database_migrates_by_removing_the_speed_column(tmp_path: Path) -> No
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (4);
+        -- A real database of this version has urls; schema 10 alters it.
+        CREATE TABLE urls (
+          id        INTEGER PRIMARY KEY,
+          target_id INTEGER NOT NULL,
+          url       TEXT NOT NULL
+        );
         -- A real database of this version has tool_runs; schema 8 rebuilds it.
         CREATE TABLE tool_runs (
           id           INTEGER PRIMARY KEY,
@@ -1068,7 +1156,7 @@ def test_v4_database_migrates_by_removing_the_speed_column(tmp_path: Path) -> No
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 9
+        assert migrated.schema_version == SCHEMA_VERSION == 10
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(scan_runs)")
         }
@@ -1094,6 +1182,12 @@ def test_v7_database_rebuilds_tool_runs_for_the_gap_status(tmp_path: Path) -> No
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (7);
+        -- A real database of this version has urls; schema 10 alters it.
+        CREATE TABLE urls (
+          id        INTEGER PRIMARY KEY,
+          target_id INTEGER NOT NULL,
+          url       TEXT NOT NULL
+        );
         CREATE TABLE scan_runs (
           id          INTEGER PRIMARY KEY,
           target_id   INTEGER NOT NULL,
@@ -1132,7 +1226,7 @@ def test_v7_database_rebuilds_tool_runs_for_the_gap_status(tmp_path: Path) -> No
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 9
+        assert migrated.schema_version == SCHEMA_VERSION == 10
         row = migrated._conn.execute(
             "SELECT id, run_id, tool, status, item_count, duration_s, error FROM tool_runs"
         ).fetchone()
@@ -1172,6 +1266,12 @@ def test_v6_database_migrates_the_waf_priority_column(tmp_path: Path) -> None:
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (6);
+        -- A real database of this version has urls; schema 10 alters it.
+        CREATE TABLE urls (
+          id        INTEGER PRIMARY KEY,
+          target_id INTEGER NOT NULL,
+          url       TEXT NOT NULL
+        );
         CREATE TABLE scan_runs (
           id          INTEGER PRIMARY KEY,
           target_id   INTEGER NOT NULL,
@@ -1207,7 +1307,7 @@ def test_v6_database_migrates_the_waf_priority_column(tmp_path: Path) -> None:
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 9
+        assert migrated.schema_version == SCHEMA_VERSION == 10
         columns = {
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")

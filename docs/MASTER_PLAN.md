@@ -939,6 +939,42 @@ D22. 2026-11-18 - www/non-www deduplication (owner request: "www.anywebsite.com
     reason and is exposed as `hosts[].detail`, so a second column (`www_note`)
     keeps the two meanings apart.
 
+D23. 2026-11-18 - URL liveness probe (`url_probe` stage, owner-requested after
+    the sakec.ac.in scan).
+
+    Problem: the urls stage records what the archives and the crawl returned
+    (11,785 URLs on that target) but nothing says which of them still answers,
+    so every URL is equally good evidence and `/admin` from 2019 looks the same
+    as a page that answered today.
+
+    Design: a new `Stage.URL_PROBE` in `STAGE_ORDER` after `URLS` and before
+    `SHOTS`, in `MODE_STAGES["active"]` and (through `STAGE_ORDER`) in `full`;
+    never in `passive`, because it sends HTTP. It has **no adapter and no
+    `tools.yaml` entry**: `Engine._run_url_probe()` owns the pass, uses httpx
+    with the honest `reconkit/<version>` UA, and writes `urls.status_code`
+    (schema 10) itself. A URL that cannot be reached is stored as `-1`, so a
+    later run does not retry a dead URL and `NULL` keeps its single meaning:
+    "not probed yet". A server that answers with a certificate that does not
+    verify (hostname mismatch, untrusted chain) is stored as `-2`, not `-1`:
+    verification is never disabled, and "answered, bad certificate" must not
+    pass for "dead" - found on the first real testfire.net run, where every
+    URL carries a `www.testfire.net` certificate.
+
+    Bounds (`config.yaml` `url_probe:`): `max_urls` 5000 per run (a bigger list
+    is cut and the run says so), `batch_size` 200, `threads` 50, `timeout_s` 10
+    per request. `--skip-url-probe` turns the stage off (a named flag, per the
+    batch prompt). `--mock` never sends traffic: it leaves `status_code` NULL
+    and says so on stderr rather than inventing answers.
+
+    Scope: it is an active stage, so it goes through `_active_hosts()` like
+    every other one - with a scope file present, only URLs whose host the gate
+    allows are probed, and a denial is exit 3 with the usual block. `--no-scope`
+    behaves exactly as if no scope file existed (docs/05 section 3).
+
+    Frozen rules untouched: no change to host-state definitions, to the
+    confidence formula, to `decide_host_state`, or to `diff`. The probe writes
+    one integer on the `urls` row and nothing else.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

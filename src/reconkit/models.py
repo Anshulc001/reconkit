@@ -17,6 +17,8 @@ class Stage(StrEnum):
     PORTS = "ports"
     TECH = "tech"
     URLS = "urls"
+    # URL liveness probe (D23): engine-owned, no adapter, no tools.yaml entry.
+    URL_PROBE = "url_probe"
     VULNS = "vulns"
     SHOTS = "shots"
 

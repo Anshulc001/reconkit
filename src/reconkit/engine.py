@@ -13,6 +13,7 @@ import asyncio
 import ipaddress
 import json
 import secrets
+import ssl
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
@@ -22,13 +23,14 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
 
+import httpx
 from dotenv import dotenv_values
 
 from reconkit.adapters import ADAPTERS
-from reconkit.adapters.base import BaseToolAdapter, running_as_root
+from reconkit.adapters.base import USER_AGENT, BaseToolAdapter, running_as_root
 from reconkit.adapters.pyscan import default_resolve
 from reconkit.adapters.registry import ToolSpec, load_tools
-from reconkit.config import AppConfig
+from reconkit.config import AppConfig, UrlProbeConfig
 from reconkit.core.runner import validate_host, validate_target
 from reconkit.core.scope import load_scope, passive_warning, require_active, scope_present
 from reconkit.core.store import Store, redact, utc_now
@@ -53,6 +55,17 @@ from reconkit.models import (
     UrlRecord,
 )
 
+# The `urls.status_code` values for a URL that has no HTTP status (D23). Both
+# are stored answers, not missing ones: the probe never retries them.
+#   UNREACHABLE - no answer at all: refused, timed out, DNS failed.
+#   UNTRUSTED   - the server answered but its TLS certificate did not verify
+#                 (hostname mismatch or untrusted chain). Kept apart from -1
+#                 because "answers with a bad certificate" is a different fact
+#                 from "does not answer", and the first is common on purpose
+#                 (testfire.net is one). Verification is never disabled.
+UNREACHABLE = -1
+UNTRUSTED = -2
+
 STAGE_ORDER: tuple[Stage, ...] = (
     Stage.SUBS,
     Stage.DNS,
@@ -60,6 +73,8 @@ STAGE_ORDER: tuple[Stage, ...] = (
     Stage.PORTS,
     Stage.TECH,
     Stage.URLS,
+    # The liveness probe follows the crawl: it needs the stored URLs (D23).
+    Stage.URL_PROBE,
     # Screenshots come after URL discovery (they need alive hosts and the crawl
     # has already run) and before vulns, so a slow browser never delays the
     # findings stage (D19).
@@ -84,7 +99,15 @@ class ModeRules:
 # Every surface that needs "which stages does mode X run" reads this dict.
 MODE_STAGES: dict[str, tuple[Stage, ...]] = {
     "passive": (Stage.SUBS, Stage.DNS, Stage.URLS),
-    "active": (Stage.SUBS, Stage.DNS, Stage.LIVE, Stage.TECH, Stage.URLS),
+    "active": (
+        Stage.SUBS,
+        Stage.DNS,
+        Stage.LIVE,
+        Stage.TECH,
+        Stage.URLS,
+        # Sends HTTP, so it is never a passive stage (D23).
+        Stage.URL_PROBE,
+    ),
     # `shots` is full-only (D19): it is in STAGE_ORDER, and therefore here, but
     # in neither tuple above. gowitness is `opt_in`/`active`, so the tier and
     # tool-mode rules in MODE_TOOLS still decide whether it runs.
@@ -398,6 +421,8 @@ class ScanOptions:
     ffuf_wordlist: Path | None = None
     # `--resolvers` (D16): a resolver list replaces the packaged default.
     resolvers: Path | None = None
+    # `--skip-url-probe` (D23): leave every `urls.status_code` at NULL.
+    skip_url_probe: bool = False
 
     @property
     def mode(self) -> str:
@@ -543,6 +568,7 @@ class Engine:
         now: Now | None = None,
         progress: Progress | None = None,
         activity: Activity | None = None,
+        url_probe_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.config = config
         self.store = store
@@ -563,6 +589,9 @@ class Engine:
         # docs/05 rule 6: the engine, not naabu, resolves names when a scope file
         # is present; injected so tests never touch DNS.
         self._resolve = resolve if resolve is not None else default_resolve
+        # The `url_probe` client's transport (D23), injectable for tests exactly
+        # like the adapters' `transport` argument. `None` is a real connection.
+        self._url_probe_transport = url_probe_transport
         self._installed = installed
         self._now = now if now is not None else utc_now
         self._secrets = tuple(value for value in self.env.values() if value)
@@ -719,6 +748,17 @@ class Engine:
                 continue
             if stage in completed:
                 summary.stages.append(StageOutcome(stage, completed[stage], resumed=True))
+                continue
+            if stage is Stage.URL_PROBE:
+                # Engine-owned, so it never goes through tool selection (D23).
+                probe, scope_error = await self._run_url_probe(
+                    target, target_id, opts, scan_key=scan_key
+                )
+                if scope_error is not None:
+                    summary.scope_denied = True
+                    self._note_scope_refusal(target, scope_error)
+                if probe is not None:
+                    summary.stages.append(probe)
                 continue
             hosts = self._stage_hosts(stage, target, discovered, alive)
             selected, skipped = await self._select(stage, opts)
@@ -955,11 +995,16 @@ class Engine:
 
     @staticmethod
     def _empty_stages(summary: ScanSummary) -> list[Stage]:
-        """Requested stages that executed zero tools; a resumed stage is not new work."""
+        """Requested stages that executed zero tools; a resumed stage is not new work.
+
+        `url_probe` is engine-owned and has no tools by design, so an empty
+        result list there means "the probe ran", not "the stage was empty"
+        (D23); it can never make a run partial.
+        """
         return [
             outcome.stage
             for outcome in summary.stages
-            if not outcome.resumed and not outcome.results
+            if not outcome.resumed and not outcome.results and outcome.stage is not Stage.URL_PROBE
         ]
 
     def _resume_plan(self, target_id: int, opts: ScanOptions) -> tuple[str, dict[Stage, int], bool]:
@@ -1652,6 +1697,134 @@ class Engine:
                 if warning not in self._warnings:
                     self._warnings.append(warning)
 
+    async def _run_url_probe(
+        self, target: str, target_id: int, opts: ScanOptions, *, scan_key: str
+    ) -> tuple[StageOutcome | None, str | None]:
+        """The `url_probe` stage (D23, 2026-11-18).
+
+        Engine-owned: there is no adapter and no `tools.yaml` entry, so this pass
+        sends the requests itself with the honest `reconkit/<version>` UA and
+        writes `urls.status_code` - nothing else. A URL that does not answer is
+        stored as `UNREACHABLE`, which is a *stored answer*, so a dead URL is
+        paid for once and `NULL` keeps its one meaning: "not probed yet".
+
+        Bounds come from `config.yaml` `url_probe:`. `--mock` never touches the
+        network, so it leaves every `status_code` at `NULL` and says so instead
+        of inventing answers. The scope gate is the same one every active stage
+        goes through (docs/05 rule 2).
+        """
+        settings = self.config.url_probe
+        rows = self.store.unprobed_urls(target_id, limit=settings.max_urls + 1)
+        if len(rows) > settings.max_urls:
+            rows = rows[: settings.max_urls]
+            note = (
+                f"url_probe: probed the first {settings.max_urls} URL(s) only; "
+                "re-run to probe the rest"
+            )
+            if note not in self._warnings:
+                self._warnings.append(note)
+        run_id = self.store.create_scan_run(
+            target_id,
+            Stage.URL_PROBE.value,
+            params=json.dumps(
+                {
+                    "scan_key": scan_key,
+                    "mode": opts.mode,
+                    "tools": [],
+                    "mock": opts.mock,
+                    "active": opts.active,
+                    "no_keys": opts.no_keys,
+                    "min_sources": opts.min_sources,
+                }
+            ),
+            started_at=self._now(),
+            scope_mode=self._scope_mode(opts),
+            secrets=self._secrets,
+        )
+        outcome = StageOutcome(stage=Stage.URL_PROBE, run_id=run_id)
+        if not rows:
+            self._progress("url_probe: nothing to probe")
+            self.store.finish_scan_run(run_id, "completed", finished_at=self._now())
+            return outcome, None
+        if opts.mock:
+            note = f"url_probe: skipped in --mock ({len(rows)} URL(s) left unprobed)"
+            if note not in self._warnings:
+                self._warnings.append(note)
+            self._progress(note)
+            self.store.finish_scan_run(run_id, "completed", finished_at=self._now())
+            return outcome, None
+
+        hosts = self._clean_hosts([self._url_host(str(row["url"])) for row in rows], target)
+        allowed = set(hosts)
+        if opts.active:
+            kept, _dropped, scope_error = await asyncio.to_thread(
+                self._active_hosts, target, hosts, opts
+            )
+            if scope_error is not None:
+                self.store.finish_scan_run(run_id, "completed", finished_at=self._now())
+                return outcome, scope_error
+            allowed = set(kept)
+        pending = [row for row in rows if self._url_host(str(row["url"])) in allowed]
+        if not pending:
+            self._progress("url_probe: nothing to probe (no in-scope URL)")
+            self.store.finish_scan_run(run_id, "completed", finished_at=self._now())
+            return outcome, None
+
+        self._progress(f"url_probe: probing {len(pending)} URL(s)")
+        done = 0
+        for start in range(0, len(pending), settings.batch_size):
+            batch = pending[start : start + settings.batch_size]
+            answers = await self._probe_url_batch(batch, settings)
+            with self.store.transaction():
+                for url_id, status in answers:
+                    self.store.set_url_status(url_id, status)
+            done += len(answers)
+            if done < len(pending):
+                self._progress(f"url_probe: {done}/{len(pending)} URL(s) probed")
+        self._progress(f"url_probe: finished {done} URL(s)")
+        self.store.finish_scan_run(run_id, "completed", finished_at=self._now())
+        return outcome, None
+
+    async def _probe_url_batch(
+        self, batch: list[dict[str, object]], settings: UrlProbeConfig
+    ) -> list[tuple[int, int]]:
+        """One GET per URL, bounded by `threads`; `UNREACHABLE` on any failure."""
+        semaphore = asyncio.Semaphore(settings.threads)
+        limits = httpx.Limits(
+            max_connections=settings.threads,
+            max_keepalive_connections=settings.threads,
+        )
+        async with httpx.AsyncClient(
+            limits=limits,
+            timeout=httpx.Timeout(float(settings.timeout_s)),
+            # Default certificate verification: a certificate that does not
+            # match the URL is an answer about that URL, and it is reported the
+            # same way any other failure is (`UNREACHABLE`).
+            follow_redirects=False,
+            headers={"User-Agent": USER_AGENT},
+            transport=self._url_probe_transport,
+        ) as client:
+
+            async def one(url_id: int, url: str) -> tuple[int, int]:
+                async with semaphore:
+                    try:
+                        response = await client.get(url)
+                    except (httpx.HTTPError, OSError, ValueError) as exc:
+                        if _certificate_not_verified(exc):
+                            return (url_id, UNTRUSTED)
+                        return (url_id, UNREACHABLE)
+                    return (url_id, int(response.status_code))
+
+            return list(
+                await asyncio.gather(
+                    *(one(int(cast(int, row["id"])), str(row["url"])) for row in batch)
+                )
+            )
+
+    @staticmethod
+    def _url_host(url: str) -> str:
+        return (urlsplit(url).hostname or "").lower()
+
     def _dedupe_www_variants(self, target_id: int, hosts: list[str]) -> None:
         """Mark a www/non-www pair as one website (D22, 2026-11-18).
 
@@ -2006,3 +2179,30 @@ def _fingerprint(by_tool: dict[str, list[PortRecord]]) -> tuple[str | None, str 
     service = services.pop() if len(services) == 1 else None
     version = versions.pop() if len(versions) == 1 else None
     return service, version
+
+
+def _certificate_not_verified(exc: BaseException) -> bool:
+    """True when a probe failed because the TLS certificate did not verify.
+
+    httpx wraps the stdlib error and httpcore re-raises it implicitly, so the
+    ssl error hangs off `__context__` as often as off `__cause__`; the check walks
+    both links (with a visited guard, because a chain can revisit an error)
+    rather than matching on the message. Used only to tell
+    `urls.status_code = -2` apart from `-1` (D23); verification itself is never
+    turned off.
+    """
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, ssl.SSLCertVerificationError):
+            return True
+        pending.extend(
+            link
+            for link in (current.__cause__, current.__context__)
+            if isinstance(link, BaseException)
+        )
+    return False

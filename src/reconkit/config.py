@@ -66,6 +66,20 @@ class UrlsConfig(_StrictModel):
     subjs_max_s: int = Field(default=60, gt=0)
 
 
+class UrlProbeConfig(_StrictModel):
+    """Bounds for the engine-owned `url_probe` stage (D23, docs/09 section 5).
+
+    `max_urls` bounds one pass (a bigger list is cut and the run says so),
+    `batch_size` how many URLs are committed per transaction, `threads` the
+    concurrent requests and `timeout_s` the per-request HTTP timeout.
+    """
+
+    max_urls: int = Field(default=5000, gt=0)
+    batch_size: int = Field(default=200, gt=0)
+    threads: int = Field(default=50, gt=0)
+    timeout_s: int = Field(default=10, gt=0)
+
+
 class WildcardCheck(_StrictModel):
     enabled: bool
     probes: int = Field(ge=1)
@@ -93,6 +107,7 @@ class AppConfig(_StrictModel):
     timeouts: Timeouts
     # Defaulted so a config file written before this key existed still loads.
     urls: UrlsConfig = Field(default_factory=UrlsConfig)
+    url_probe: UrlProbeConfig = Field(default_factory=UrlProbeConfig)
     confidence: ConfidenceConfig
     wildcard_check: WildcardCheck
     install: InstallConfig

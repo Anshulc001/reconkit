@@ -374,6 +374,30 @@ line reads `N hosts (M unique after www-dedup):
 
 ---
 
+## Checking which URLs still answer (D23)
+
+`run --active` and `run --full` include a `url_probe` stage after `urls`: it
+sends one `GET` to every stored URL that has no status yet and records the
+answer (`-1` when the URL does not answer, `-2` when it answers with a
+certificate that does not verify). No adapter and no `--tools` name is
+involved.
+
+```
+$ reconkit run -d example.com --active --no-scope         # probe runs after urls
+$ reconkit run -d example.com --active --no-scope --skip-url-probe   # leave NULLs alone
+$ sqlite3 recon.db "SELECT status_code, COUNT(*) FROM urls GROUP BY status_code"
+200|1184
+301|96
+404|211
+-1|4021
+```
+
+Bounds and switches live in `config.yaml` under `url_probe:` (`max_urls` 5000,
+`batch_size` 200, `threads` 50, `timeout_s` 10). `--mock` never touches the
+network, so a mock run leaves every `status_code` at `NULL`.
+
+---
+
 ## Confirming it works
 
 ```bash

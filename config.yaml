@@ -30,6 +30,14 @@ urls:
   hakrawler_max_s: 120
   subjs_max_s: 60
 
+# URL liveness probe (D23, docs/09 section 5). One GET per stored URL that has
+# no status yet; a URL that does not answer is stored as -1 and never retried.
+url_probe:
+  max_urls: 5000      # a bigger list is cut, and the run says so
+  batch_size: 200     # URLs committed per transaction
+  threads: 50         # concurrent requests
+  timeout_s: 10       # per-request HTTP timeout
+
 confidence:
   high_min_sources: 3
   medium_min_sources: 2
