@@ -244,3 +244,46 @@ def test_doctor_json_writes_one_document(monkeypatch) -> None:
     document = json.loads(result.output)
     assert document["type"] == "doctor"
     assert document["missing"] == sum(1 for tool in document["tools"] if tool["installed"] != "yes")
+
+
+def test_chromium_row_reports_missing_when_no_browser_is_installed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """D35: an absent browser is its own doctor row, not a silent 0 screenshots."""
+    monkeypatch.setattr(doctor, "browser_state", lambda **_kwargs: MISSING)
+    report = report_for(tmp_path)
+    assert report.chromium == MISSING
+    buffer = io.StringIO()
+    render_doctor(report, stderr=buffer)
+    assert "chromium" in buffer.getvalue()
+    assert "shots will produce 0 screenshots" in buffer.getvalue()
+
+
+def test_chromium_row_reports_installed_when_a_browser_exists(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(doctor, "browser_state", lambda **_kwargs: "yes")
+    report = report_for(tmp_path)
+    buffer = io.StringIO()
+    render_doctor(report, stderr=buffer)
+    assert "chromium" in buffer.getvalue()
+    assert "shots will produce 0 screenshots" not in buffer.getvalue()
+
+
+def test_browser_state_finds_only_the_browsers_gowitness_launches() -> None:
+    """D35: gowitness execs google-chrome, so chromium alone must read missing.
+
+    Measured on this box: /usr/bin/chromium exists and gowitness still reports
+    `failed to initialize chrome context`. A row that said `yes` there would be
+    a lie, so the check asks for the names gowitness actually launches.
+    """
+    assert doctor.browser_state(which=lambda name: None) == MISSING
+    assert (
+        doctor.browser_state(which=lambda name: "/usr/bin/x" if name == "chromium" else None)
+        == MISSING
+    )
+    assert (
+        doctor.browser_state(which=lambda name: "/usr/bin/x" if name == "google-chrome" else None)
+        == "yes"
+    )
+    assert (
+        doctor.browser_state(which=lambda name: "/usr/bin/x" if name == "chrome" else None) == "yes"
+    )

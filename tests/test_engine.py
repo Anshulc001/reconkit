@@ -3925,3 +3925,25 @@ async def test_degraded_tools_never_exit_five_but_a_local_fault_does(tmp_path: P
     ).run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
     assert summary.exit_code is ExitCode.SUCCESS
     assert summary.gaps == []
+
+
+async def test_shots_without_chromium_is_a_gap_and_exit_zero(tmp_path: Path) -> None:
+    """D35: no browser -> shots is a completion gap, never exit 5."""
+    rec = Recorder()
+    specs = {"gowitness": tool("gowitness", Stage.SHOTS)}
+    adapters = {
+        "gowitness": adapter(
+            "gowitness",
+            Stage.SHOTS,
+            rec,
+            status=ToolStatus.GAP,
+            detail="no chromium; 0 screenshots",
+        )
+    }
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com", ScanOptions(stages=(Stage.SHOTS,), mock=True)
+    )
+    assert summary.exit_code is ExitCode.SUCCESS
+    assert summary.completion_status == "complete_with_gaps"
+    assert [gap.stage for gap in summary.gaps] == [Stage.SHOTS]
+    assert "no chromium; 0 screenshots" in summary.gaps[0].reason

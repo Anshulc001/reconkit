@@ -42,6 +42,20 @@ from reconkit.models import Record, RunContext, Stage, ToolResult, ToolStatus, U
 
 MANIFEST_NAME = "screenshots.jsonl"
 
+# gowitness 3.2.2 says one of these when it has no browser to drive. Matched only
+# when a run produced zero screenshots, so a stray word in a page title cannot
+# turn a working run into a gap (D35).
+NO_BROWSER_MARKERS: tuple[str, ...] = (
+    "failed to initialize chrome context",
+    "chrome context",
+    "no chrome",
+    "chrome not found",
+    "could not find chrome",
+    "browser is not installed",
+    "executable not found in $path",
+)
+NO_BROWSER_ERROR = "no chromium; 0 screenshots"
+
 
 class GowitnessAdapter(BinaryAdapter):
     name = "gowitness"
@@ -136,13 +150,27 @@ class GowitnessAdapter(BinaryAdapter):
         if lines:
             with manifest.open("a", encoding="utf-8") as handle:
                 handle.write("\n".join(lines) + "\n")
+        raw_text = "\n".join(part for part in captured if part)
+        # D35: no browser on this box is an absent dependency, not a broken tool.
+        # A gap keeps the run at exit 0 and says why in the gaps block; the old
+        # behaviour was `ok 0` with a per-host "no screenshot" note, which read
+        # like a reconkit fault.
+        if not records and _no_browser(raw_text):
+            return ToolResult(
+                tool=self.name,
+                status=ToolStatus.GAP,
+                records=records,
+                error=NO_BROWSER_ERROR,
+                duration_s=time.perf_counter() - started,
+                raw_text=raw_text,
+            )
         return ToolResult(
             tool=self.name,
             status=ToolStatus.OK,
             records=records,
             error="; ".join(failures) or None,
             duration_s=time.perf_counter() - started,
-            raw_text="\n".join(part for part in captured if part),
+            raw_text=raw_text,
         )
 
     def parse_output(self, raw: str) -> list[Record]:
@@ -154,6 +182,12 @@ class GowitnessAdapter(BinaryAdapter):
                 continue
             records.append(UrlRecord(url=text, source=self.name))
         return records
+
+
+def _no_browser(raw_text: str) -> bool:
+    """True when gowitness's own output names a missing browser."""
+    lowered = raw_text.lower()
+    return any(marker in lowered for marker in NO_BROWSER_MARKERS)
 
 
 def _new_image(directory: Path, *, since: float) -> Path | None:

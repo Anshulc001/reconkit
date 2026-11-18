@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -92,6 +93,9 @@ class DoctorReport:
     keys: tuple[KeyCheck, ...]
     missing: int
     warnings: tuple[str, ...]
+    # D35: gowitness needs a Chromium-family browser for the shots stage; doctor
+    # reports it as its own row so "shots produced 0" is never a mystery.
+    chromium: str = MISSING
 
 
 def default_status(spec: ToolSpec) -> InstallStatus:
@@ -115,6 +119,23 @@ def default_status(spec: ToolSpec) -> InstallStatus:
     if version is None:
         return InstallStatus(installed=False, path=copy)
     return InstallStatus(installed=True, version=version, path=copy)
+
+
+# gowitness 3.2.2 execs `google-chrome` itself; `chromium` alone is not enough
+# (measured on this box: /usr/bin/chromium present, gowitness still reported
+# `failed to initialize chrome context`). The row must answer "can shots work
+# here", so it asks for the names gowitness actually launches (D35).
+BROWSER_NAMES = (
+    "google-chrome",
+    "google-chrome-stable",
+    "chrome",
+)
+
+
+def browser_state(*, which: Callable[[str], str | None] | None = None) -> str:
+    """`yes`/`missing`: can gowitness launch a browser on this box (D35)?"""
+    lookup = which if which is not None else shutil.which
+    return YES if any(lookup(name) for name in BROWSER_NAMES) else MISSING
 
 
 def installed_packages(path: Path | None = None) -> frozenset[str]:
@@ -295,4 +316,5 @@ def collect_report(
         keys=keys,
         missing=missing,
         warnings=tuple(warnings),
+        chromium=browser_state(),
     )

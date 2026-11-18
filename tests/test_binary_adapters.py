@@ -2953,3 +2953,51 @@ def test_gowitness_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatc
     assert GowitnessAdapter(finder=lambda _name: "/x").check_installed().installed is True
     fake_exec(monkeypatch, outcome(stdout="screenshot-tool 1.0\n"))
     assert GowitnessAdapter(finder=lambda _name: "/x").check_installed().installed is False
+
+
+def test_gowitness_without_a_browser_is_a_gap_not_a_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D35: gowitness ran, the box has no Chromium -> gap, never exit 5.
+
+    Regression: the run answered `ok 0` with a per-host \"no screenshot\" note,
+    which read like a reconkit fault and produced no gap for the operator.
+    """
+    from reconkit.adapters.gowitness import NO_BROWSER_ERROR
+
+    adapter = GowitnessAdapter(finder=lambda _name: "/usr/bin/gowitness")
+    ctx = make_ctx(hosts=["testfire.net"])
+    monkeypatch.setattr(
+        adapter, "run_dir", lambda _ctx: tmp_path / "results" / "testfire.net" / "run1"
+    )
+
+    def fake(argv: list[str], **_kwargs: object) -> ExecResult:
+        return outcome(stderr="Error: failed to initialize chrome context: exec: no chrome\n")
+
+    # gowitness calls run_exec from its own module namespace, not base's.
+    monkeypatch.setattr(gowitness_module, "run_exec", fake)
+    result = asyncio.run(adapter.run(ctx))
+
+    assert result.status is ToolStatus.GAP
+    assert result.error == NO_BROWSER_ERROR
+    assert result.records == []
+
+
+def test_gowitness_zero_screenshots_without_a_browser_message_stays_ok(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A page that simply produced no PNG is not a missing browser (D35)."""
+    adapter = GowitnessAdapter(finder=lambda _name: "/usr/bin/gowitness")
+    ctx = make_ctx(hosts=["testfire.net"])
+    monkeypatch.setattr(
+        adapter, "run_dir", lambda _ctx: tmp_path / "results" / "testfire.net" / "run1"
+    )
+
+    def fake(argv: list[str], **_kwargs: object) -> ExecResult:
+        return outcome(stdout="scan finished: 0 screenshots\n")
+
+    monkeypatch.setattr(gowitness_module, "run_exec", fake)
+    result = asyncio.run(adapter.run(ctx))
+
+    assert result.status is ToolStatus.OK
+    assert result.error is not None and "no screenshot" in result.error

@@ -6916,3 +6916,48 @@ testfire.net: exit=5 | gap, 1 failed, 6 skipped, 0 timeout
 signatures and the "degraded" spelling; local faults and auth errors are explicitly not degraded), PROGRESS D34.
 
 Suite 909 -> 911.
+
+## 2026-11-18 (batch 2026-11-18b) B2 - the shots / chromium gap (D35)
+
+### Investigation (raw, this box)
+
+```
+$ which chromium chromium-browser google-chrome google-chrome-stable chrome
+/usr/bin/chromium
+$ gowitness scan single -u https://testfire.net -s /tmp/xx --screenshot-format png
+... have-screenshot=false ...
+Error: failed to initialize chrome context: exec: no chrome
+```
+
+`/usr/bin/chromium` exists but gowitness execs `google-chrome`, and the adapter never guesses a `--chrome-path`
+(docs/09 4a8). So "no browser" is the box's real state for gowitness, and before this change the adapter answered
+`ok 0` with `host: no screenshot (no browser available?)` - which the engine counted as success and which produced
+**no gap**, so an operator saw 0 screenshots and no explanation.
+
+### Implementation
+
+- `adapters/gowitness.py`: `NO_BROWSER_MARKERS` (one tuple) + `_no_browser()`; when a run produced no records and the
+  captured output matches, the result is `ToolStatus.GAP` with `NO_BROWSER_ERROR = "no chromium; 0 screenshots"`.
+  A zero-shot run **without** the marker keeps `ok` and the per-host note (test pins both sides).
+- `doctor.py`: `browser_state()` (one list of Chromium-family names, `shutil.which` injectable) and a `chromium`
+  field on `DoctorReport`; `ui.doctor_document()` carries `chromium`; `ui.render_doctor()` prints a one-row
+  **Browser** table: `chromium | missing | shots will produce 0 screenshots`. The row asks for the names gowitness
+  actually execs (`google-chrome`, `google-chrome-stable`, `chrome`); `/usr/bin/chromium` alone reads `missing`,
+  which is the truth on this box (verified: `reconkit doctor --json` -> `chromium = missing`).
+- No install, no `--chrome-path` guessing, no schema change.
+
+### Tests
+
+- `tests/test_doctor.py::test_chromium_row_reports_missing_when_no_browser_is_installed`
+- `tests/test_doctor.py::test_chromium_row_reports_installed_when_a_browser_exists`
+- `tests/test_doctor.py::test_browser_state_finds_any_chromium_family_binary`
+- `tests/test_binary_adapters.py::test_gowitness_without_a_browser_is_a_gap_not_a_failure`
+- `tests/test_binary_adapters.py::test_gowitness_zero_screenshots_without_a_browser_message_stays_ok`
+- `tests/test_engine.py::test_shots_without_chromium_is_a_gap_and_exit_zero` (gap + exit 0 + completion_with_gaps)
+
+### Docs
+
+`docs/09_TOOL_CONTRACTS.md` (4a8 gowitness section), `docs/02_CLI_UX.md` (doctor's Browser table and the `--json` key
+list), PROGRESS D35.
+
+Suite 915 -> 921.

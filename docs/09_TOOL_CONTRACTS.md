@@ -816,6 +816,17 @@ is installed but gowitness execs `google-chrome` and the adapter never guesses a
 reported `have-screenshot=false`, so the PNG/manifest path is proven by the
 adapter test with a stand-in binary, not by a real screenshot.
 
+**The no-browser case is a gap, not a failure (D35, 2026-11-18).** When a run
+produced zero screenshots **and** gowitness's own output names a missing browser
+(`failed to initialize chrome context`, `chrome context`, `no chrome`, `chrome
+not found`, `could not find chrome`, `browser is not installed`, `executable not
+found in $path` - one tuple, `gowitness.NO_BROWSER_MARKERS`), the adapter returns
+`ToolStatus.GAP` with `no chromium; 0 screenshots`. The run exits `0` and the
+gaps block names it; `doctor` grows a one-row **Browser** table saying `chromium
+missing` and `shots will produce 0 screenshots`. Zero PNGs **without** such a
+message stays `ok 0` with the per-host note, because the tool then did its job and
+the page simply produced nothing.
+
 Verified on this box (DiG 9.20.30, massdns 1.1.0, puredns v2.1.1,
 gowitness 3.2.2, Nikto 2.6.1):
 
