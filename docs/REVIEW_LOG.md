@@ -6450,3 +6450,57 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
 - **Gate:** `898 passed`; `ruff check .` clean; `ruff format --check .` 92 files;
   `mypy src/reconkit` clean (62 source files).
 
+## 2026-11-18 (batch 2026-11-18) Part C - stale claims and the four open rulings
+
+Docs only; no `src/`, no `tests/`, suite unchanged at 898.
+
+**The state dump the part was written from was itself out of date.** Three of the
+four named claims had already been corrected by the previous batch's Part 1
+(`de50a15`, "external-service gaps + stale docs"), verified here by reading the
+current text rather than the dump:
+
+```
+$ grep -n "no adapter" docs/PROGRESS.md         # Open risks
+585:- **Closed 2026-11-17 (adapter waves 4-8):** `tech`, `urls` and `vulns` now have adapters and real runs
+     behind them ... The old line "`tech`, `urls` and `vulns` have no adapter for any tool in their pools" was stale.
+
+$ grep -n "827" docs/PROGRESS.md                # five hits, all inside dated status paragraphs
+15,16,17,42  (historical entries; 16 already says "the 827 in this paragraph was itself stale ... 824")
+43           (the baseline line, which is current and says 898 after Part B)
+
+$ sed -n '46,52p' docs/05_SECURITY.md
+- **The one installer is `scripts/install-tools.sh`, run by a human (D21, 2026-11-18).** It is plain bash in this
+  repository, not a reconkit command ... runs `apt-get` under **per-command** `sudo` (or `go install`, which needs
+  none) ... The `reconkit` **command** installs nothing (removed 2026-11-17, docs/MASTER_PLAN.md D4).
+```
+
+The fourth - the push state - was wrong and is fixed. `reconkit/main` is at
+`a49e4b5` while local `main` is ten commits ahead (plus this one), so the
+"both refs point at `a49e4b5`" sentence became the verified fact. **The batch
+prompt's own premise ("False now: HEAD is pushed, tree clean") did not hold**:
+nothing was pushed in this session and no push was attempted (hard rule 0c).
+
+Before:
+
+```
+- **Pushed (2026-11-18):** local `main` and `reconkit/main` both point at `a49e4b5` ... The old
+  "nothing is pushed / `reconkit/main` is still `5fd1d9a`" line was stale.
+```
+
+After:
+
+```
+- **Push state (verified 2026-11-18, this batch):** `reconkit/main` is at `a49e4b5` ... and local `main` is
+  **ahead of it** - `git rev-list --count reconkit/main..main` printed `10` at `aadd7b5`, plus this batch's
+  Part C commit. Nothing has been pushed since `a49e4b5` ...
+```
+
+`## Open risks` also gained one dated, numbered entry holding the four rulings,
+verbatim in scope and with file:line references, explicitly marked "Logged, not
+acted on": the `6488aad` stop-rule breach, probe-only timeout exiting 4 instead of
+0, `-2` being a sentinel rather than an HTTP status, and the previous batch's
+2 -> 1 -> 3 order with Part 3 split across `aad092c` + `62e88db`.
+
+Historical status paragraphs were not rewritten: each records what was true on
+its own date, and line 16 already annotates its own stale `827`.
+
