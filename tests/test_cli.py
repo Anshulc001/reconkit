@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -496,6 +497,78 @@ def test_root_invocation_without_a_command_runs_the_passive_pipeline(tmp_path: P
     document = json.loads(result.stdout)
     # D10 (2026-11-17): the passive pipeline now ends with the urls stage.
     assert [stage["stage"] for stage in document["stages"]] == ["subs", "dns", "urls"]
+
+
+def test_mock_run_creates_no_rows_under_the_real_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D30: the default mock run writes to its own DB, never the real one."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    config = make_config(tmp_path)
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    raw["db_path"] = "recon.db"  # the shipped default, so D30's branch applies
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    result = CliRunner().invoke(app, scan_args(config))
+    assert result.exit_code == 0, result.stderr
+
+    assert not (tmp_path / "recon.db").exists(), "the real DB must stay untouched"
+    mock_db = tmp_path / ".reconkit" / "mock.db"
+    assert mock_db.exists()
+    conn = sqlite3.connect(mock_db)
+    try:
+        target_id = conn.execute("SELECT id FROM targets WHERE domain = 'example.com'").fetchone()[
+            0
+        ]
+        stored = conn.execute(
+            "SELECT COUNT(*) FROM subdomains WHERE target_id = ?", (target_id,)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert stored > 0
+
+
+def test_mock_run_does_not_overwrite_a_real_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D30: a mock run reports under results/mock/ and leaves a real report alone."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    config = make_config(tmp_path)
+    real_report = tmp_path / "results" / "example.com" / "report.txt"
+    real_report.parent.mkdir(parents=True)
+    real_report.write_text("real run output", encoding="utf-8")
+
+    result = CliRunner().invoke(app, scan_args(config))
+    assert result.exit_code == 0, result.stderr
+
+    assert real_report.read_text(encoding="utf-8") == "real run output"
+    (run_dir,) = (tmp_path / "results" / "mock" / "example.com").iterdir()
+    assert (run_dir / "report.txt").exists()
+    assert (run_dir / "report.json").exists()
+
+
+def test_mock_db_default_is_separate_unless_db_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D30: `--db` wins; without it the mock DB is separate from the real one."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    config = make_config(tmp_path)
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    raw["db_path"] = "recon.db"
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    assert CliRunner().invoke(app, scan_args(config)).exit_code == 0
+    assert (tmp_path / ".reconkit" / "mock.db").exists()
+    assert not (tmp_path / "recon.db").exists()
+
+    explicit = tmp_path / "chosen.db"
+    assert (
+        CliRunner().invoke(app, scan_args(config, "passive", "--db", str(explicit))).exit_code == 0
+    )
+    assert explicit.exists()
 
 
 def test_diff_and_status_after_two_mock_runs(tmp_path: Path) -> None:

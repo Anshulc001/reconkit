@@ -406,6 +406,11 @@ every batch it already committed, leaves the rest `NULL`, prints
 `url_probe: timed out after Ns (M/N URL(s) probed)`, reports a completion gap and
 still exits 0.
 
+**Probe-only runs are the exception (D28):** a run whose only stage is `url_probe`
+and which produced zero results is the ordinary "nothing usable" case and exits
+`4`, not `0`. A normal scan that includes other stages keeps exit `0` when the
+probe times out.
+
 ---
 
 ## Confirming it works

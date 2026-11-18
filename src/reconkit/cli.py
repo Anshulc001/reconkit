@@ -803,8 +803,11 @@ def _run_scan(
                 activity_sink[0](message)
 
         # D30: a mock run defaults to an isolated DB unless --db was given.
+        # `~/.reconkit` only exists once a tool has been installed, so a fresh
+        # machine failed here with "unable to open database file" (2026-11-18).
         if mock and db_path is None and config.db_path == "recon.db":
             db_path = Path.home() / ".reconkit" / "mock.db"
+            db_path.parent.mkdir(parents=True, exist_ok=True)
         engine = Engine.open(
             config,
             db_path=db_path,

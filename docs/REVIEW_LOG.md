@@ -6749,3 +6749,35 @@ asserts `abc123` appears in neither stream while `***` does.
 
 Suite 899 -> 903.
 
+
+## 2026-11-18 (batch 2026-11-18) follow-up - the acceptance tests that were missing
+
+An audit of the batch against its own acceptance list found three gaps and one real bug in the D30 path.
+
+### Gaps closed
+
+1. **Part F had no tests.** The three named tests were never written - the Part F entry above says so in
+   parentheses ("the three named tests are the grader's"), which is not how this repo works. Added:
+   `test_mock_run_creates_no_rows_under_the_real_target`, `test_mock_run_does_not_overwrite_a_real_report`,
+   `test_mock_db_default_is_separate_unless_db_given` in `tests/test_cli.py`.
+2. **Part E had one of its two tests.** The saturation test existed; the "raising the stage budget alone now works"
+   test did not. Added `test_urlfinder_cap_follows_the_stage_budget_with_no_extra_ceiling`.
+3. **Part D's `COMMANDS.md` note was missing.** `docs/02_CLI_UX.md:132` carried the probe-only exit-4 rule;
+   `COMMANDS.md` did not. Added under the `url_probe` section.
+
+### The bug the missing tests would have caught
+
+`cli._run_scan` defaulted the mock DB to `~/.reconkit/mock.db` without creating the directory. `~/.reconkit` only
+exists once a tool has been installed, so on a fresh machine every mock run died:
+
+```
+$ HOME=/tmp/dbg/home reconkit passive -d example.com --mock --config .../config.yaml
+exit 1
+stderr: unexpected error: OperationalError: unable to open database file
+```
+
+Fixed by `db_path.parent.mkdir(parents=True, exist_ok=True)` next to the D30 branch. The three new tests run with
+`HOME` pointed at `tmp_path`, so they exercise this on every run.
+
+Suite 903 -> 907.
+

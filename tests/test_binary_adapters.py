@@ -50,7 +50,7 @@ from reconkit.adapters.wafw00f import Wafw00fAdapter
 from reconkit.adapters.waybackurls import WaybackurlsAdapter
 from reconkit.adapters.webanalyze import WebanalyzeAdapter
 from reconkit.adapters.whatweb import WhatwebAdapter
-from reconkit.config import load_config
+from reconkit.config import UrlsConfig, load_config
 from reconkit.core.runner import ExecResult
 from reconkit.core.store import Store
 from reconkit.engine import Engine
@@ -1797,6 +1797,17 @@ def test_urlfinder_cap_config_override() -> None:
     assert enumeration_cap_s(10, 1800, override=300) == 300
     assert enumeration_cap_s(500, 1800, override=300) == 300
     assert enumeration_cap_s(10, 1800, override=0) == 180
+
+
+def test_urlfinder_cap_follows_the_stage_budget_with_no_extra_ceiling() -> None:
+    """D29: with urlfinder_max_s = 0, raising --phase-timeout alone raises the cap.
+
+    Before D29 the 1800 s `urls.urlfinder_max_s` ceiling was applied after the
+    formula, so `--phase-timeout 3600` on 2000 hosts still gave 1800 s.
+    """
+    assert UrlsConfig().urlfinder_max_s == 0
+    assert enumeration_cap_s(2000, 3600, ceiling=0) == 3600
+    assert enumeration_cap_s(2000, 3600, ceiling=1800) == 1800
 
 
 def test_urlfinder_partial_output_line_includes_cap_and_host_count(
