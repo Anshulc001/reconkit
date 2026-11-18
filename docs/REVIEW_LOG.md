@@ -4747,6 +4747,95 @@ Tests: `test_waybackurls_asks_once_per_root_not_once_per_host`,
 `test_waybackurls_does_not_swallow_a_lookalike_apex`. Gate after:
 `827 passed`, ruff check/format clean, mypy clean on 62 files.
 
+### 10. `scripts/install-tools.sh` - installation returns, outside the CLI (D21)
+
+Owner: "one script file which should install all tool whether its apt install or
+go install with sudo cmd ... and in end the script will verify with doctor" and
+"we are not checking whether the tool work or not ... with script ... we have
+already check that with adapter right?".
+
+Scope boundary: D4 deleted `reconkit install`/`update`/`doctor --fix` and
+`src/reconkit/installer/` for safety reasons (unverified downloads, archive and
+checksum handling). None of that comes back. What is added is one bash script a
+human runs, with **no catalogue of its own**: it reads `tools.yaml` and follows
+`source:` (`apt:` / `go install` / `pipx`), prints release-only entries as manual
+and downloads nothing itself.
+
+**No module path was guessed.** Every `go install` target the script can reach was
+checked with `go install -n` (resolves and downloads the module, builds nothing):
+
+```
+OK   assetfinder   github.com/tomnomnom/assetfinder@latest            0.8s
+OK   gau           github.com/lc/gau/v2/cmd/gau@latest               1.0s
+OK   puredns       github.com/d3mondev/puredns/v2@latest             1.0s
+OK   smap          github.com/s0md3v/smap/cmd/smap@latest            0.9s
+OK   gowitness     github.com/sensepost/gowitness@latest             2.3s
+OK   dalfox        github.com/hahwul/dalfox/v2@latest               11.9s
+OK   crlfuzz       github.com/dwisiswant0/crlfuzz/cmd/crlfuzz@latest  6.7s
+OK   cdncheck      github.com/projectdiscovery/cdncheck/cmd/cdncheck@latest   4.1s
+OK   chaos         github.com/projectdiscovery/chaos-client/cmd/chaos@latest  37.5s
+OK   httpx         github.com/projectdiscovery/httpx/cmd/httpx@latest 1.6s
+OK   katana        .../katana/cmd/katana@latest                        2.1s
+OK   naabu         .../naabu/v2/cmd/naabu@latest                       9.9s
+OK   nuclei        .../nuclei/v3/cmd/nuclei@latest                     5.6s
+OK   tlsx          .../tlsx/cmd/tlsx@latest                           1.3s
+OK   urlfinder     .../urlfinder/cmd/urlfinder@latest                21.5s
+```
+
+(the subfinder hint printed FAIL only because the checker's regex swallowed the
+closing parenthesis of the prose it sits in - `.../subfinder/v2/cmd/subfinder@latest`
+resolves.) Those nine `(or: go install ...)` hints are now in `tools.yaml`, so the
+registry stays the single list.
+
+Verification is the adapter's own probe, not a new checker: `doctor --json` +
+exit code. Real evidence on this box:
+
+```
+$ ./scripts/install-tools.sh --only gau
+Missing tools: 3. Scans will use the tools that are installed and skip the rest.
+every binary matching 'gau' is installed and identified correctly.   (exit 0)
+
+$ ./scripts/install-tools.sh --only dalfox --yes        # real go install
+== go install (1) -> /home/kali/.reconkit/bin ==
+>> github.com/hahwul/dalfox/v2@latest
+Missing tools: 2. ...
+every binary matching 'dalfox' is installed and identified correctly.  (exit 0, 13s)
+-rwxrwxr-x 1 kali kali 37563545 /home/kali/.reconkit/bin/dalfox
+
+$ ./scripts/install-tools.sh --check   # 33 have, 2 go, 3 manual
+dry-run: nothing was installed, nothing changed
+```
+
+Three defects were caught while testing and fixed before commit: the `chaos`
+module kept a trailing `;` from its prose hint; `httpx_tech` was printed as manual
+although the `httpx` row installs that binary; and `--only` scoped the install
+but not the `doctor` verdict, so a one-tool run failed on unrelated tools.
+
+The **apt path did run**, under a pty so sudo could ask for the owner's password
+(the credential cache is per-tty, so priming it from another shell is not enough):
+
+```
+$ (sleep 3; printf '<password>\n') | script -qec \
+      "./scripts/install-tools.sh --update --only nmap --yes" /dev/null
+== apt (1) ==
+sudo needs a password; asking once now
+[sudo] password for kali:
+0 upgraded, 0 newly installed, 0 to remove and 201 not upgraded.
+== verification: .../reconkit doctor ==
+every binary matching 'nmap' is installed and identified correctly.   (wall 10 s)
+```
+
+Without a terminal it stops at once with a clear message instead of hanging - the
+first attempt proved it: piped through `grep`, the same command exited 2 with
+`sudo needs a password and this shell cannot prompt for one.` That run used the
+real `sudo` and the real `apt-get` - no stub - so this is the apt branch as a user
+will meet it, and it is the reason the script refuses to run under `root`:
+`sudo` is applied per `apt-get` command, while Go must stay in the user's
+`~/.reconkit/bin`.
+
+Still not established: a *fresh* apt install (nmap was already present, so apt
+had nothing to do), and Windows. Recorded in PROGRESS "Open risks".
+
 ### Previous open question (closed)
 
 Parallelism was not the lever for the `urls` stage - the timeout semantics were.

@@ -872,6 +872,42 @@ keys a `dict`, and the schema has `UNIQUE(target_id, fqdn)` /
 distinct, 41 hosts = 41 distinct, zero duplicate groups. The report therefore
 cannot repeat a host or a URL.
 
+D21. 2026-11-18 - `scripts/install-tools.sh`: the owner reinstates installation,
+    outside the CLI.
+    Reason: "one script file which should install all tools whether its apt
+    install or go install with sudo cmd so user first run script file with sudo
+    and install every tool in kali ... and in end the script will verify with
+    doctor" (owner request, superseding the *scope* half of D4 - not its safety
+    rules). The CLI surface does not come back: there is still no
+    `reconkit install`, no `reconkit update`, no `doctor --fix`, and
+    `src/reconkit/installer/` stays deleted. What returns is a single shell
+    script a human runs deliberately.
+
+    Constraints that keep it compatible with everything already ruled:
+    (1) **`tools.yaml` stays the only tool list.** The script does not carry its
+    own catalogue; it reads every `kind: binary` entry and follows its `source:`
+    string - `apt: <pkg>`, `go install <module>@latest`, `pipx install <pkg>` -
+    and reports the rest (release-only: `findomain`, `rustscan`, `dnsreaper`) as
+    manual, with the upstream URL from the same entry. The `(or: go install
+    ...)` hints added today to the nine release-only ProjectDiscovery entries
+    were each verified with `go install -n` against the module proxy before
+    being written (REVIEW_LOG, "scripts/install-tools.sh" entry), so no module
+    path is from memory and
+    nothing is downloaded by the script itself: `go install` fetches from the
+    official proxy, exactly as the registry describes.
+    (2) **No unverified downloads.** The script never curls a GitHub release, so
+    the D4 removal of archive/checksum handling is not being quietly reversed.
+    (3) **Sudo only where needed.** It must run as the invoking user (it refuses
+    under `root`, and says why: `GOBIN` would land in `/root`); `sudo` is applied
+    per `apt-get` command only.
+    (4) **Verification is `doctor`.** The script does not grow its own checker:
+    it ends with `reconkit doctor --json` and fails when a tool it was supposed
+    to install reports `installed != yes` or `identity != ok`, which is the
+    adapter's own probe (D5/D6), so a binary that exists but is the wrong
+    program counts as a failure.
+    (5) **Windows is untouched** - bash script, Kali/Debian only, and the smoke
+    path there is still `doctor`.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

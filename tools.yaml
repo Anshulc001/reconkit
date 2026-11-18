@@ -102,7 +102,7 @@ tools:
     binary: chaos
     version_cmd: [chaos, -version]
     version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)'
-    source: "https://github.com/projectdiscovery/chaos-client/releases (the archive member is chaos-client)"
+    source: "https://github.com/projectdiscovery/chaos-client/releases (or: go install github.com/projectdiscovery/chaos-client/cmd/chaos@latest; the archive member is chaos-client)"
     keys:
       - env: PDCP_API_KEY
         url: "https://cloud.projectdiscovery.io"
@@ -122,21 +122,21 @@ tools:
 
   # ---------------- dns ----------------
   dnspython:    {stage: dns, kind: python, tier: core, mode: passive, phase: 2, notes: "A/AAAA/CNAME/NS/MX/TXT, wildcard probe, dangling CNAME check."}
-  dnsx:         {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dnsx, version_cmd: [dnsx, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/dnsx/releases"}
+  dnsx:         {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dnsx, version_cmd: [dnsx, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/dnsx/releases (or: go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest)"}
   puredns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: puredns, version_cmd: [puredns, --version], source: "go install github.com/d3mondev/puredns/v2@latest (also needs massdns)"}
   massdns:      {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: massdns, version_cmd: [dpkg-query, -W, '-f=${Version}', massdns], source: "apt: massdns"}
   dig:          {stage: dns, kind: binary, tier: core, mode: passive, phase: 3, binary: dig, version_cmd: [dig, -v], source: "apt: dnsutils (provides dig)"}
 
   # ---------------- live (active) ----------------
   pyprobe:      {stage: live, kind: python, tier: core, mode: active, phase: 2, notes: "Async HTTP/HTTPS probe, status, title, redirects. Fallback when no binary is installed."}
-  httpx:        {stage: live, kind: binary, tier: core, mode: active, phase: 2, binary: httpx, version_cmd: [httpx, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/httpx/releases (Kali's apt package is httpx-toolkit; the python 'httpx' CLI is a different program)", notes: "ProjectDiscovery httpx. Always use ~/.reconkit/bin first."}
+  httpx:        {stage: live, kind: binary, tier: core, mode: active, phase: 2, binary: httpx, version_cmd: [httpx, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/httpx/releases (or: go install github.com/projectdiscovery/httpx/cmd/httpx@latest; Kali's apt package is httpx-toolkit; the python 'httpx' CLI is a different program)", notes: "ProjectDiscovery httpx. Always use ~/.reconkit/bin first."}
   httprobe:     {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: httprobe, source: "go install github.com/tomnomnom/httprobe@latest"}
-  tlsx:         {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: tlsx, version_cmd: [tlsx, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/tlsx/releases", notes: "Certificate SANs can reveal more subdomains."}
+  tlsx:         {stage: live, kind: binary, tier: core, mode: active, phase: 3, binary: tlsx, version_cmd: [tlsx, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/tlsx/releases (or: go install github.com/projectdiscovery/tlsx/cmd/tlsx@latest)", notes: "Certificate SANs can reveal more subdomains."}
 
   # ---------------- ports ----------------
   smap:         {stage: ports, kind: binary, tier: core, mode: passive, phase: 3, binary: smap, version_cmd: [smap, -h], version_regex: 'Smap (\S+)', source: "go install github.com/s0md3v/smap/cmd/smap@latest", notes: "Passive ports from Shodan data. No packets to the target."}
   pyscan:       {stage: ports, kind: python, tier: core, mode: active, phase: 2, notes: "Async TCP connect scan (no root). Fallback and verifier."}
-  naabu:        {stage: ports, kind: binary, tier: core, mode: active, phase: 2, binary: naabu, version_cmd: [naabu, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', requires_apt: [libpcap-dev], source: "https://github.com/projectdiscovery/naabu/releases (needs libpcap-dev; use connect scan -scan-type c when not root)", notes: "Needs libpcap."}
+  naabu:        {stage: ports, kind: binary, tier: core, mode: active, phase: 2, binary: naabu, version_cmd: [naabu, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', requires_apt: [libpcap-dev], source: "https://github.com/projectdiscovery/naabu/releases (or: go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest; needs libpcap-dev; use connect scan -scan-type c when not root)", notes: "Needs libpcap."}
   nmap:         {stage: ports, kind: binary, tier: core, mode: active, phase: 3, binary: nmap, version_cmd: [nmap, --version], source: "apt: nmap", notes: "Service/version verification (-sV)."}
   rustscan:     {stage: ports, kind: binary, tier: core, mode: active, phase: 3, binary: rustscan, version_cmd: [rustscan, --version], version_regex: '^rustscan (\d+\.\d+\.\d+)$', source: "https://github.com/bee-san/RustScan/releases (2.3.0 is the newest flat zip; 2.4.1 ships a nested .tar.gz.zip)", notes: "Pick a flat asset: 2.4.1 publishes x86_64-linux-rustscan.tar.gz.zip and no recent release publishes checksums. The 2.3.0 pin in config.yaml is ignored (accepted-and-ignored, 2026-11-17)."}
   masscan:      {stage: ports, kind: binary, tier: opt_in, mode: active, phase: 3, binary: masscan, version_cmd: [masscan, --version], needs_root: true, source: "apt: masscan", notes: "Opt-in only."}
@@ -145,21 +145,21 @@ tools:
   httpx_tech:   {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: httpx, version_cmd: [httpx, -version], version_regex: 'Current Version:\s*v?([0-9]+\.[0-9]+\.[0-9]+)', waf_priority: 20, source: "https://github.com/projectdiscovery/httpx/releases (same binary as httpx; this row reuses it with -td)", notes: "httpx -td technology detection (reuses httpx). The probe is what keeps the python 'httpx' CLI from counting as installed."}
   whatweb:      {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: whatweb, version_cmd: [whatweb, --version], waf_priority: 50, source: "apt: whatweb"}
   wafw00f:      {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: wafw00f, version_cmd: [wafw00f, --version], version_regex: 'WAFW00F you have is[^\n]*?(v?\d+\.\d+\.\d+)', waf_priority: 100, source: "pipx install wafw00f"}
-  cdncheck:     {stage: tech, kind: binary, tier: core, mode: passive, phase: 3, binary: cdncheck, version_cmd: [cdncheck, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', waf_priority: 80, source: "https://github.com/projectdiscovery/cdncheck/releases", notes: "Detects CDN/WAF by IP range so a CDN block is not mistaken for a dead host."}
+  cdncheck:     {stage: tech, kind: binary, tier: core, mode: passive, phase: 3, binary: cdncheck, version_cmd: [cdncheck, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', waf_priority: 80, source: "https://github.com/projectdiscovery/cdncheck/releases (or: go install github.com/projectdiscovery/cdncheck/cmd/cdncheck@latest)", notes: "Detects CDN/WAF by IP range so a CDN block is not mistaken for a dead host."}
   webanalyze:   {stage: tech, kind: binary, tier: core, mode: active, phase: 3, binary: webanalyze, source: "go install github.com/rverton/webanalyze/cmd/webanalyze@latest", notes: "Needs `webanalyze -update` once per working directory first: it writes technologies.json (~2.1 MB) into the CWD, and a scan without it exits 1 (can not open apps file). Point -apps elsewhere to reuse one file."}
 
   # ---------------- urls ----------------
   gau:          {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: gau, version_cmd: [gau, --version], version_regex: 'gau version: (\d+\.\d+\.\d+)', source: "go install github.com/lc/gau/v2/cmd/gau@latest"}
   waybackurls:  {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: waybackurls, source: "go install github.com/tomnomnom/waybackurls@latest"}
-  katana:       {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: katana, version_cmd: [katana, -version], version_regex: 'Current version: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/katana/releases"}
+  katana:       {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: katana, version_cmd: [katana, -version], version_regex: 'Current version: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/katana/releases (or: go install github.com/projectdiscovery/katana/cmd/katana@latest)"}
   hakrawler:    {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: hakrawler, source: "go install github.com/hakluke/hakrawler@latest"}
   gospider:     {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: gospider, version_cmd: [gospider, --version], version_regex: 'Version: (\S+)', source: "go install github.com/jaeles-project/gospider@latest"}
   subjs:        {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: subjs, version_cmd: [subjs, -version], version_regex: 'subjs version: (\S+)', source: "go install github.com/lc/subjs@latest", notes: "JS file discovery."}
   unfurl:       {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: unfurl, source: "go install github.com/tomnomnom/unfurl@latest", notes: "Parameter/path extraction. Pattern sorting (xss/sqli/ssrf/lfi/redirect candidates) is done in Python, no traffic."}
-  urlfinder:    {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: urlfinder, version_cmd: [urlfinder, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/urlfinder/releases"}
+  urlfinder:    {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: urlfinder, version_cmd: [urlfinder, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/urlfinder/releases (or: go install github.com/projectdiscovery/urlfinder/cmd/urlfinder@latest)"}
 
   # ---------------- vulns (takeover, exposure) ----------------
-  nuclei:       {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: nuclei, version_cmd: [nuclei, -version], version_regex: 'Nuclei Engine Version: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/nuclei/releases", notes: "Run safe tags only (takeover, exposure, misconfig). Update templates with `nuclei -ut`."}
+  nuclei:       {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: nuclei, version_cmd: [nuclei, -version], version_regex: 'Nuclei Engine Version: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/nuclei/releases (or: go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest)", notes: "Run safe tags only (takeover, exposure, misconfig). Update templates with `nuclei -ut`."}
   subzy:        {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: subzy, source: "go install github.com/PentestPad/subzy@latest"}
   dnsreaper:    {stage: vulns, kind: binary, tier: core, mode: active, phase: 3, binary: dnsreaper, source: "https://github.com/punk-security/dnsReaper (install by hand: no setup.py/pyproject.toml and no PyPI package)", notes: "Install by hand from the repo before the phase-3 adapter lands."}
   nikto:        {stage: vulns, kind: binary, tier: opt_in, mode: active, phase: 3, binary: nikto, version_cmd: [nikto, -Version], source: "apt: nikto", notes: "Opt-in only. Very noisy."}

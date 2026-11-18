@@ -1,10 +1,16 @@
 # Tool Reference
 
-This is a reference of the tools reconkit uses. reconkit does not install any of
-them. To see which are present on your machine, run `reconkit doctor`. To get a
-missing tool, obtain it however you prefer - your distro's package manager, the
-upstream release page, your language's package ecosystem - this document does
-not tell you how.
+This is a reference of the tools reconkit uses. The `reconkit` CLI never installs
+any of them: it runs tools that already exist on your system and skips a missing
+one. To see which are present, run `reconkit doctor`.
+
+There is one optional, human-run shortcut for Kali/Debian -
+`scripts/install-tools.sh`. It is a shell script, not a CLI command, it reads
+this same registry, and it covers what the registry can install automatically
+(`apt:`, `go install`, `pipx`). Three entries have no automatic source
+(`findomain`, `rustscan`, `dnsreaper`) and it prints them with their upstream URL
+instead of downloading anything. Skip it entirely if you prefer to install tools
+yourself; nothing else in reconkit depends on it. See section 5.
 
 ## 1. What this document is
 
@@ -155,14 +161,46 @@ name and whether it is set, never its value. The `Missing tools: N` footer
 appears only when something is missing, and `--json` writes one document with
 warnings at exit code `0`.
 
-## 4. What reconkit does NOT do
+## 4. What the CLI does NOT do
 
-reconkit never downloads, installs, updates, or removes any tool. It runs tools
-that already exist on your system. If a selected tool is not present, the scan
+The `reconkit` command never downloads, installs, updates, or removes any tool.
+It runs tools that already exist on your system. If a selected tool is not present, the scan
 skips it with reason `not installed` and continues. The same rule covers the
 rest of the tool lifecycle: there is no download, no archive or checksum
 handling, no `sudo`, no package manager, no rollback, no version pin and no
 automatic template or database refresh (`nuclei -ut` and `webanalyze -update`
 are yours to run). Nothing in this repository names an official download page
 as a procedure or asks you to pipe a script into a shell; the `source:` strings
-are provenance and are never executed.
+are provenance and are never executed by the CLI.
+
+## 5. `scripts/install-tools.sh` (optional, Kali/Debian)
+
+A bash script for a fresh machine, run by a human, outside the CLI
+(docs/MASTER_PLAN.md D21). It has no tool catalogue of its own: it reads every
+`kind: binary` entry in `tools.yaml` and follows its `source:` string.
+
+| `source:` shape | what the script runs |
+|---|---|
+| `apt: <pkg>` | `sudo apt-get install -y <pkg>` |
+| `go install <module>@latest` | `GOBIN=~/.reconkit/bin go install <module>@latest` |
+| `pipx install <pkg>` | `pipx install <pkg>` |
+| anything else | nothing - the entry is printed as manual with its URL |
+
+Rules it keeps:
+
+- **Run it as your normal user, never with `sudo`.** It escalates for `apt-get`
+  itself. Run as root, Go would write to `/root/.reconkit/bin`, which no scan
+  looks in, so the script refuses with that explanation.
+- **It downloads nothing itself.** `apt-get` and `go install` fetch from their
+  own official sources; there is no `curl`, no release archive, no checksum
+  handling. The nine ProjectDiscovery release-only entries carry a verified
+  `(or: go install ...)` hint that the script uses instead.
+- **Verification is `reconkit doctor --json`**, the adapter's own probe
+  (installed / path / identity). A binary that exists but is the wrong program
+  is `identity: failed` and fails the script. Entries with no automatic source
+  are reported, not counted as failures.
+- `--dry-run` prints every command, `--check` reports only, `--update` re-runs
+  `apt`/`go`/`pipx` for every tool, `--only <pattern>` narrows to one tool.
+
+It is not tested on Windows and is not part of `pytest`; Windows users keep
+using `doctor`.
