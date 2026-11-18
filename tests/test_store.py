@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -847,6 +848,30 @@ def test_hostile_fqdn_is_stored_literally(store: Store) -> None:
 def test_redact_cases(raw: str, expected: str) -> None:
     """Regression: PIT-04 flag values and Cookie/Set-Cookie headers are masked."""
     assert redact(raw) == expected
+
+
+def test_redaction_keeps_a_jsonl_line_parseable() -> None:
+    """Regression: PIT-54 a header value must stop at an escaped line end.
+
+    nuclei prints one JSON object per line with the request/response embedded,
+    so their newlines are the two characters `\\r\\n`. Redaction used to run to
+    the next real newline, replacing the rest of the JSON line with `***` and
+    making the whole tool fail with "invalid JSON line".
+    """
+    line = json.dumps(
+        {
+            "request": "GET / HTTP/1.1\r\nCookie: JSESSIONID=abc123; x=y\r\nAccept: */*\r\n\r\n",
+            "response": "HTTP/1.1 200 OK\r\nSet-Cookie: sess=secretvalue; Path=/\r\n\r\nbody",
+            "matched-at": "https://example.com/swagger/index.html",
+        }
+    )
+    out = redact(line)
+    parsed = json.loads(out)
+    assert "abc123" not in out
+    assert "secretvalue" not in out
+    assert parsed["matched-at"] == "https://example.com/swagger/index.html"
+    assert parsed["request"].endswith("Accept: */*\r\n\r\n")
+    assert parsed["response"].endswith("\r\n\r\nbody")
 
 
 def test_redact_env_secret() -> None:

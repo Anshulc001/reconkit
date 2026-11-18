@@ -186,11 +186,17 @@ _COUNT_SQL: dict[str, str] = {
     "urls": "SELECT COUNT(*) FROM urls",
 }
 
-_AUTH_HEADER = re.compile(r"(?i)\b(authorization)\b(\s*[:=]\s*)[^\r\n,]+")
-_COOKIE_HEADER = re.compile(r"(?i)\b((?:set-)?cookie)\b(\s*[:=]\s*)[^\r\n]+")
+# A header value ends at a real line break or at the escaped `\\r`/`\\n` that a
+# JSONL tool writes inside a string; without the second rule the value swallowed
+# the rest of the JSON line, truncating it (PIT-54).
+_HEADER_VALUE = r"(?:[^\\\r\n\"]|\\(?![rn]))*"
+_AUTH_HEADER = re.compile(r"(?i)(authorization)\b(\s*[:=]\s*)(?:[^\\\r\n,\"]|\\(?![rn]))*")
+_COOKIE_HEADER = re.compile(rf"(?i)((?:set-)?cookie)\b(\s*[:=]\s*){_HEADER_VALUE}")
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
 _URL_CREDENTIALS = re.compile(r"(?i)(https?://)[^/\s:@]+:[^/\s@]+@")
-_FLAG_VALUE = re.compile(r"(?i)(?<![\w-])(-{1,2}[a-z0-9][a-z0-9_-]*)(\s+)(\"[^\"]*\"|'[^']*'|\S+)")
+_FLAG_VALUE = re.compile(
+    r"(?i)(?<![\w-])(-{1,2}[a-z0-9][a-z0-9_-]*)(\s+)(\"[^\"]*\"|'[^']*'|(?:[^\s\\]|\\(?![rn]))+)"
+)
 _SECRET_FLAG_WORDS = (
     "token",
     "secret",
@@ -202,7 +208,7 @@ _SECRET_FLAG_WORDS = (
 )
 _SECRET_PAIR = re.compile(
     r"(?i)\b(api[_-]?key|apikey|token|access[_-]?token|secret|password|passwd|cookie)"
-    r"(\s*[:=]\s*)(['\"]?)([^\s'\",;&]+)"
+    r"(\s*[:=]\s*)(['\"]?)((?:[^\\\s'\",;&]|\\(?![rn]))+)"
 )
 
 

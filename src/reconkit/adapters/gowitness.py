@@ -23,11 +23,9 @@ writes `results/<target>/<UTC stamp>/screenshots/<file>.png` plus
 change: `reconkit status` and `reconkit diff` do not show screenshots, and the
 files stay per-run artifacts.
 
-**The `shots` stage is not reachable from the CLI yet.** `Stage.SHOTS` exists in
-`models.py` and `RAW_OUTPUT_DIRS`, but it is in neither `STAGE_ORDER` nor a
-`MODE_STAGES` row, so no mode and no `--tools` name runs it; wiring it in is a
-mode-table change and needs an owner ruling. The adapter is complete and tested
-so that wiring is a one-line change.
+**The `shots` stage runs in full mode only (D19).** It is wired into
+`MODE_STAGES` for `--full`, sits outside `STAGE_ORDER` so `--active` never runs
+it, and the adapter is only selected when gowitness is installed (`opt_in`).
 """
 
 from __future__ import annotations
