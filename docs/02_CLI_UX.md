@@ -350,7 +350,9 @@ new.example.com    UNKNOWN    -       -        certspotter, hackertarget  MEDIUM
 ```
 
 - A final summary line: counts per state and tool statuses. New items are shown by `diff`, not in the stage summary.
-- A "Tools" table lists each adapter with stage, status (`ok`, `skipped`, `failed`, `timeout`), item count and a short detail.
+- A "Tools" table lists each adapter with stage, status (`ok`, `gap`, `skipped`, `failed`, `timeout`), item count and a short detail.
+
+**`gap` is a tool status, not a failure (owner ruling 2026-11-18).** An adapter whose upstream refused the request for a reason that is not about the tool - HTTP 429/rate limiting, a free-quota message, or an HTTP 5xx from the service it calls - is recorded `gap` with the service's own message in the detail column. It keeps whatever data it did return (usually none), it does **not** make the run partial (exit `5`), and it appears in the completion gaps block: the scan used every tool that was available, the third party simply did not answer. Every other non-zero outcome stays `failed`/`timeout` and still exits `5`.
 
 ### Doctor output
 
@@ -366,7 +368,9 @@ One JSON document is written to stdout; tables and progress stay on stderr. The 
 
 The `hosts` objects always carry `state`, `confidence` and `sources`; the top-level `summary` object carries the counts. `scope_mode` is the same value written to `scan_runs` (section 3.1).
 
-`completion` is always present (section 6): `status` is `complete` or `complete_with_gaps`, and `gaps` lists one object per requested stage that had no runnable tool, `{"stage": "urls", "reason": "no adapter yet (phase 3)"}`. A consumer that only cares whether the run was usable reads `status`; one that wants to explain the shortfall reads `gaps`.
+`completion` is always present (section 6): `status` is `complete` or `complete_with_gaps`, and `gaps` lists one object per incomplete stage: either a requested stage that had no runnable tool, `{"stage": "urls", "reason": "no adapter yet (phase 3)"}`, or a stage where an executed tool hit an external-service problem, `{"stage": "subs", "reason": "otx: rate limited (HTTP 429)"}`. A consumer that only cares whether the run was usable reads `status`; one that wants to explain the shortfall reads `gaps`.
+
+The `summary` object also carries `tools_gap`, the number of executed tools with the `gap` status, beside `tools_ok`/`tools_failed`/`tools_skipped`/`tools_timeout`.
 
 With a filter flag (`--only-alive`, `--only-states`, `--status-codes`) the
 `hosts` array is already filtered and a top-level `filter` object is added:
@@ -478,7 +482,7 @@ One folder per domain per run, never reused:
 | 2 | Usage error (bad flags) |
 | 3 | Scope violation when a scope file is present (target not allowed, unauthorized, or expired). A **missing** scope file is not a violation: it means unrestricted active scanning of the operator's targets (section 2) |
 | 4 | No usable tool for the stage |
-| 5 | Partial success (some tools failed or timed out, or a requested stage executed no tools because deliberate rules excluded every tool) |
+| 5 | Partial success (some tools failed or timed out, or a requested stage executed no tools because deliberate rules excluded every tool). An **external-service** outcome (429, quota, 5xx from a third party) is a completion gap, not a failure, and never produces 5 on its own |
 | 6 | Retired 2026-11-17: was "every requested tool failed to install or update" |
 | 130 | Interrupted by user (state saved, resumable) |
 
@@ -488,6 +492,7 @@ Code `6` is retired (2026-11-17, docs/MASTER_PLAN.md D4): it belonged to `instal
 
 - **Absence -> gap (exit 0).** The only reasons are `no adapter yet (phase N)` or `not installed`: the scan used every tool that was available. The run exits `0`, and two channels carry the honesty: one warning per stage, `"<stage> stage executed no tools: N tool(s) skipped (<reasons>)"`, and one gaps **block** on stderr (below).
 - **Any other cause -> still 5.** `tier not included in <mode> mode`, `tool mode not included in <mode> mode`, `exploitation tool requires explicit --tools`, or the docs/05 rule 6 block are deliberate exclusions or a scope decision, not "the tool was not there". A stage emptied that way keeps exit `5`.
+- **External-service problems -> gap (exit 0).** A tool that ran and was refused by its upstream is recorded with the `gap` status (section 5) instead of `failed`. `Engine._completion_gaps()` turns it into one gap entry naming the stage and the service's message, the same block a missing adapter gets. Retry later; there is nothing to fix on this box.
 - A stage that is a gap **and** another stage with a failed tool still exits `5`: a gap never masks a failure.
 
 The gaps block is printed by `ui.render_completion_gaps()` and is **stderr-only**, so `--json` stdout stays one clean document. It prints nothing at all when there are no gaps, which keeps every ordinary run's output byte-identical. `--silent` suppresses it like every other message; the exit code and `completion` in `--json` are unaffected.
@@ -497,11 +502,21 @@ The block below is the **format**; the counts change with every adapter wave
 usual tools installed a `--full` run has no gaps at all and prints nothing).
 
 ```text
-⚠ full scan completed with gaps — 4 stage(s) had no runnable tools
+⚠ full scan completed with gaps — 4 stage(s) incomplete
   subs: 5 tool(s) skipped (no adapter yet (phase 3))
   dns: 3 tool(s) skipped (no adapter yet (phase 3))
   ports: 4 tool(s) skipped (no adapter yet (phase 3))
   vulns: 5 tool(s) skipped (no adapter yet (phase 3))
+  run 'reconkit doctor' to see what is installed; see docs/10_TOOL_SOURCES.md for provenance.
+  this is not a failure — the scan used every tool that was available.
+```
+
+A stage where executed tools hit an external-service problem reads without a
+skip count, because nothing was skipped:
+
+```text
+⚠ active scan completed with gaps — 1 stage(s) incomplete
+  subs: otx: rate limited (HTTP 429), hackertarget: free quota exceeded, crtsh: server error (HTTP 502)
   run 'reconkit doctor' to see what is installed; see docs/10_TOOL_SOURCES.md for provenance.
   this is not a failure — the scan used every tool that was available.
 ```

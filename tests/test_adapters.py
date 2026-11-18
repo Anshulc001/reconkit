@@ -155,7 +155,6 @@ async def test_duplicate_names_are_merged() -> None:
         (OtxAdapter, "{not json"),
         (OtxAdapter, '{"passive_dns": "example.com"}'),
         (OtxAdapter, '[{"hostname": "example.com"}]'),
-        (HackertargetAdapter, "API count exceeded - Increase Quota with Membership"),
     ],
 )
 async def test_malformed_responses_fail_without_raising(cls: type[HttpAdapter], raw: str) -> None:
@@ -169,7 +168,8 @@ async def test_malformed_responses_fail_without_raising(cls: type[HttpAdapter], 
 # ---------------------------------------------------------------- HTTP failures
 
 
-async def test_429_is_failed_and_not_retried() -> None:
+async def test_429_is_a_gap_and_not_retried() -> None:
+    """Owner ruling 2026-11-18: a 429 is an external-service gap, not a failure."""
     calls: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -178,16 +178,66 @@ async def test_429_is_failed_and_not_retried() -> None:
 
     adapter = CrtshAdapter(transport=httpx.MockTransport(handler))
     result = await adapter.run(make_ctx())
-    assert result.status == ToolStatus.FAILED
+    assert result.status == ToolStatus.GAP
     assert "429" in (result.error or "")
     assert len(calls) == 1
 
 
-async def test_a_429_failure_still_reports_its_own_duration() -> None:
-    """12c: the `otx failed 0.0` gap - a refusal is work that took real time."""
-    adapter = CrtshAdapter(transport=httpx.MockTransport(lambda _r: httpx.Response(429)))
+async def test_a_5xx_from_the_upstream_is_a_gap() -> None:
+    """The real sakec.ac.in evidence: crt.sh answered 502 to every request."""
+    adapter = CrtshAdapter(transport=httpx.MockTransport(lambda _r: httpx.Response(502)))
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.GAP
+    assert "502" in (result.error or "")
+
+
+async def test_a_404_is_still_a_failure_not_a_gap() -> None:
+    """Guard: only the third-party signatures are gaps; a 404 is our mistake."""
+    adapter = CrtshAdapter(transport=httpx.MockTransport(lambda _r: httpx.Response(404)))
     result = await adapter.run(make_ctx())
     assert result.status == ToolStatus.FAILED
+
+
+async def test_hackertarget_quota_answer_is_a_gap() -> None:
+    """HTTP 200 with a quota sentence (the real free-tier shape) is a gap."""
+    body = "API count exceeded - Increase Quota with Premium purchase"
+    adapter = HackertargetAdapter(
+        transport=httpx.MockTransport(lambda _r: httpx.Response(200, text=body))
+    )
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.GAP
+    assert "quota" in (result.error or "")
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("otx: rate limited (HTTP 429)", True),
+        ("HTTP 429 Too Many Requests", True),
+        ("hackertarget: free quota exceeded", True),
+        ("crtsh: server error (HTTP 502)", True),
+        ("503 Service Unavailable", True),
+        ("504 Gateway Timeout", True),
+        ("connect ECONNREFUSED 1.2.3.4:443", False),
+        ("invalid JSON line", False),
+        ("tool is not installed", False),
+        ("", False),
+    ],
+)
+def test_classify_external_gap_matches_only_third_party_signatures(
+    text: str, expected: bool
+) -> None:
+    """docs/09 section 3: one classifier, and it never calls a local fault a gap."""
+    from reconkit.adapters.base import classify_external_gap
+
+    assert (classify_external_gap(text) is not None) is expected
+
+
+async def test_a_429_gap_still_reports_its_own_duration() -> None:
+    """12c: a refusal is work that took real time, gap or not."""
+    adapter = CrtshAdapter(transport=httpx.MockTransport(lambda _r: httpx.Response(429)))
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.GAP
     assert result.duration_s > 0
 
 
@@ -218,7 +268,8 @@ async def test_a_mock_run_duration_is_small_and_measured() -> None:
     assert 0 < result.duration_s < 5.0
 
 
-async def test_500_is_failed_and_not_retried() -> None:
+async def test_500_is_a_gap_and_not_retried() -> None:
+    """Owner ruling 2026-11-18: an upstream 5xx is an external-service gap."""
     calls: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -227,7 +278,7 @@ async def test_500_is_failed_and_not_retried() -> None:
 
     adapter = CrtshAdapter(transport=httpx.MockTransport(handler))
     result = await adapter.run(make_ctx())
-    assert result.status == ToolStatus.FAILED
+    assert result.status == ToolStatus.GAP
     assert "503" in (result.error or "")
     assert len(calls) == 1
 
@@ -354,13 +405,15 @@ async def test_declared_oversized_length_is_failed() -> None:
     assert "response too large" in (result.error or "")
 
 
-async def test_hackertarget_free_quota_is_reported() -> None:
+async def test_hackertarget_free_quota_is_a_gap() -> None:
+    """The real free-tier answer is HTTP 200 with a quota sentence."""
+
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text="API count Exceeded - Increase Quota with Membership")
 
     adapter = HackertargetAdapter(transport=httpx.MockTransport(handler))
     result = await adapter.run(make_ctx())
-    assert result.status == ToolStatus.FAILED
+    assert result.status == ToolStatus.GAP
     assert "free quota exceeded" in (result.error or "")
 
 
@@ -404,7 +457,8 @@ async def test_otx_sends_key_in_header_and_never_leaks_it() -> None:
     adapter = OtxAdapter(transport=httpx.MockTransport(handler))
     result = await adapter.run(make_ctx(env={"OTX_API_KEY": key}))
     assert seen[0].headers["X-OTX-API-KEY"] == key
-    assert result.status == ToolStatus.FAILED
+    # A 500 from the provider is a gap; the key must still never leak.
+    assert result.status == ToolStatus.GAP
     assert key not in (result.error or "")
     assert key not in result.model_dump_json()
 

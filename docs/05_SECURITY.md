@@ -42,10 +42,10 @@ Implemented in `core/scope.py`. Rules:
 
 ## 5. Tool Sources (details in docs/10_TOOL_SOURCES.md)
 
-- reconkit **installs nothing** (removed 2026-11-17, docs/MASTER_PLAN.md D4): no downloads, no checksum handling, no `sudo`, no package-manager call, no rollback. `install`, `update` and `doctor --fix` do not exist.
+- The `reconkit` **command** installs nothing (removed 2026-11-17, docs/MASTER_PLAN.md D4): no downloads, no checksum handling, no `sudo`, no package-manager call, no rollback. `install`, `update` and `doctor --fix` do not exist, and `src/reconkit/installer/` stays deleted.
 - `tools.yaml` `source:` strings are documentation for the operator. They are never executed, never parsed into a command line, and never fetched by reconkit.
-- No `curl | bash`. No running downloaded scripts - reconkit runs no installer script at all.
-- Installation is the operator's own action, outside reconkit's trust boundary. `doctor` only reads what is already on disk (lookup order and the "wrong program" rule: docs/10 sections 3-4).
+- **The one installer is `scripts/install-tools.sh`, run by a human (D21, 2026-11-18).** It is plain bash in this repository, not a reconkit command: it has no catalogue of its own, reads each binary entry's `source:` from `tools.yaml`, runs `apt-get` under **per-command** `sudo` (or `go install`, which needs none) and installs nothing else. It refuses to run as `root` (Go would target `/root`), never pipes a download into a shell, never curls a release archive or checksum, and prints release-only entries as manual with their upstream URL. It ends by running `reconkit doctor --json` and failing when a tool it was asked to install reports `installed != yes` or `identity != ok`, so a wrong-program binary cannot pass. No `curl | bash` anywhere, in the script or out of it.
+- Beyond that script, installation is the operator's own action, outside reconkit's trust boundary. `doctor` only reads what is already on disk (lookup order and the "wrong program" rule: docs/10 sections 3-4).
 
 ## 6. Secrets
 

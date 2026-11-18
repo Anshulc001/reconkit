@@ -53,6 +53,46 @@ class FetchFailed(Exception):
     """One HTTP attempt failed; adapters turn it into a failed ToolResult."""
 
 
+class ExternalServiceGap(FetchFailed):
+    """A third party refused the request: 429, quota, or an upstream 5xx.
+
+    Not a failure of the tool or of this box, so it becomes `ToolStatus.GAP`
+    (a completion gap) instead of `FAILED` (owner ruling 2026-11-18).
+    """
+
+
+# Signatures a third party produces, never a local fault. Matched against an
+# HTTP failure message or a binary's captured stdout+stderr.
+_GAP_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bhttp\s*429\b", re.IGNORECASE),
+    re.compile(r"\brate[- ]?limit(?:ed|ing)?\b", re.IGNORECASE),
+    re.compile(r"\btoo many requests\b", re.IGNORECASE),
+    re.compile(r"\bquota\b", re.IGNORECASE),
+    re.compile(r"\bapi count exceeded\b", re.IGNORECASE),
+    re.compile(
+        r"\bhttp\s*5(?:02|03|04)\b|\bserver error \(http 5\d\d\)|\bbad gateway\b|"
+        r"\bservice unavailable\b|\bgateway time-?out\b",
+        re.IGNORECASE,
+    ),
+)
+
+
+def classify_external_gap(text: str) -> str | None:
+    """Return the service message when `text` is an external-service problem.
+
+    `None` means "this is a real failure". A 429, a rate-limit/quota message, or
+    an upstream 5xx says nothing about the binary or the network here, so the
+    engine records a gap rather than a failed run (docs/09 section 3).
+    """
+    if not text:
+        return None
+    collapsed = " ".join(strip_ansi(text).split())
+    for pattern in _GAP_PATTERNS:
+        if pattern.search(collapsed):
+            return collapsed[:MAX_ERROR_CHARS]
+    return None
+
+
 RAW_STDERR_MARK = "--- stderr ---"
 
 
@@ -274,10 +314,14 @@ class BaseToolAdapter(ABC):
                             raw_text=raw_text,
                         )
                     if outcome.returncode != 0:
+                        # A third party refusing the tool (429, quota, upstream 5xx)
+                        # is a gap: the binary worked, the service did not
+                        # (owner ruling 2026-11-18).
+                        gap = classify_external_gap(capture_output(outcome.stdout, outcome.stderr))
                         return ToolResult(
                             tool=self.name,
-                            status=ToolStatus.FAILED,
-                            error=f"exit {outcome.returncode}: {detail}",
+                            status=ToolStatus.GAP if gap else ToolStatus.FAILED,
+                            error=gap or f"exit {outcome.returncode}: {detail}",
                             duration_s=duration,
                             raw_text=raw_text,
                         )
@@ -461,6 +505,16 @@ class HttpAdapter(BaseToolAdapter):
         try:
             raw_text = self._read_fixture(ctx) if ctx.mock else await self._request(ctx)
             records = self._within_target(self.parse_output(raw_text), ctx.target)
+        except ExternalServiceGap as exc:
+            # The upstream refused us; no records were read. A gap, not a
+            # failure (owner ruling 2026-11-18).
+            return ToolResult(
+                tool=self.name,
+                status=ToolStatus.GAP,
+                error=str(exc),
+                duration_s=time.perf_counter() - started,
+                raw_text=raw_text or str(exc),
+            )
         except ParseError as exc:
             # A parse failure is still work this adapter did, so it times it too.
             return ToolResult(
@@ -517,9 +571,11 @@ class HttpAdapter(BaseToolAdapter):
                 "GET", self.url(ctx), params=dict(self.params(ctx))
             ) as response:
                 if response.status_code == 429:
-                    raise FetchFailed(f"{self.name}: rate limited (HTTP 429)")
+                    raise ExternalServiceGap(f"{self.name}: rate limited (HTTP 429)")
                 if response.status_code >= 500:
-                    raise FetchFailed(f"{self.name}: server error (HTTP {response.status_code})")
+                    raise ExternalServiceGap(
+                        f"{self.name}: server error (HTTP {response.status_code})"
+                    )
                 if response.status_code >= 400:
                     raise FetchFailed(f"{self.name}: HTTP {response.status_code}")
                 declared = response.headers.get("content-length")

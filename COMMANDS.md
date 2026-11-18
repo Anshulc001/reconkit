@@ -301,7 +301,7 @@ at selection with `requires root / sudo` and the run still exits 0.
 
 | Code | Meaning |
 |---|---|
-| **0** | Success, including "completed with gaps" (a stage whose only tools are absent) |
+| **0** | Success, including "completed with gaps" (a stage whose only tools are absent, or a tool refused by an external service: 429/quota/upstream 5xx) |
 | **1** | Unexpected error; also the Phase 3 stubs (`export`, `db *`, `scope import`) |
 | **2** | Usage error (bad flags, `--active` on a passive-only command, cancelled prompt) |
 | **3** | Scope violation when a scope file is present (blocked, unauthorized, expired) |
@@ -311,8 +311,10 @@ at selection with `requires root / sudo` and the run still exits 0.
 | **130** | Interrupted by the user (state saved, resumable) |
 
 A stage with only absent tools is a **completion gap** (exit 0, warning on
-stderr, `completion` block in `--json`). A stage emptied by `--tools`,
-`--exclude`, tier rules or the exploitation block still exits 5.
+stderr, `completion` block in `--json`). A tool that ran and was refused by its
+upstream - HTTP 429, a free-quota message, an HTTP 5xx from the service it calls
+- shows status `gap` in the Tools table and counts the same way. A stage emptied
+by `--tools`, `--exclude`, tier rules or the exploitation block still exits 5.
 
 ---
 

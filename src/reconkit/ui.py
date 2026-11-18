@@ -37,6 +37,8 @@ _CONFIDENCE_STYLES: dict[Confidence, str] = {
 }
 _STATUS_STYLES: dict[ToolStatus, str] = {
     ToolStatus.OK: "green",
+    # A gap is an external service refusal (429/quota/5xx), not a failure.
+    ToolStatus.GAP: "yellow",
     ToolStatus.SKIPPED: "yellow",
     ToolStatus.FAILED: "red",
     ToolStatus.TIMEOUT: "red",
@@ -236,6 +238,9 @@ def summary_document(
             "dead": state_counts[HostState.DEAD],
             "unknown": state_counts[HostState.UNKNOWN],
             "tools_ok": tool_counts[ToolStatus.OK],
+            # docs/02 section 5: a tool refused by its upstream is a gap, not a
+            # failure (owner ruling 2026-11-18).
+            "tools_gap": tool_counts[ToolStatus.GAP],
             "tools_failed": tool_counts[ToolStatus.FAILED],
             # docs/02 section 5: selection-time skips are counted here too, so a
             # stage that built nothing cannot read as a stage that found nothing.
@@ -824,7 +829,8 @@ def render(
             f"{len(rows)} hosts: "
             + ", ".join(f"{counts[state]} {state.value}" for state in HostState)
             + " | tools: "
-            + f"{tools[ToolStatus.OK]} ok, {tools[ToolStatus.FAILED]} failed, "
+            + f"{tools[ToolStatus.OK]} ok, {tools[ToolStatus.GAP]} gap, "
+            + f"{tools[ToolStatus.FAILED]} failed, "
             + f"{tools[ToolStatus.SKIPPED] + len(summary.skipped)} skipped, "
             + f"{tools[ToolStatus.TIMEOUT]} timeout"
         )
@@ -852,12 +858,17 @@ def render_completion_gaps(
     count = len(summary.gaps)
     target.print(
         Text(
-            f"⚠ {summary.mode} scan completed with gaps — {count} stage(s) had no runnable tools",
+            f"⚠ {summary.mode} scan completed with gaps — {count} stage(s) incomplete",
             style="yellow",
         )
     )
     for gap in summary.gaps:
-        target.print(Text(f"  {gap.stage.value}: {gap.skipped} tool(s) skipped ({gap.reason})"))
+        if gap.skipped:
+            line = f"  {gap.stage.value}: {gap.skipped} tool(s) skipped ({gap.reason})"
+        else:
+            # An external-service gap: nothing was skipped, a service refused us.
+            line = f"  {gap.stage.value}: {gap.reason}"
+        target.print(Text(line))
     target.print(
         Text(
             "  run 'reconkit doctor' to see what is installed; see "

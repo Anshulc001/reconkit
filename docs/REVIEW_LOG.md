@@ -67,6 +67,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-50 | Two tools could not be driven at all: `httprobe` and `waybackurls` read their host list on **stdin**, and `run_exec` opened stdin as `DEVNULL` with no way to feed it - the only alternatives were a shell pipe or a temporary file, and AGENTS rule 1 forbids the first | `run_exec` was written for flag-driven ProjectDiscovery tools, so "input" meant argv | `run_exec(..., stdin_text=...)` feeds the child from its own daemon thread (a lazily-reading child cannot block the timeout clock, an early exit is only a broken pipe) and `None` keeps the documented EOF. The adapter hook is `stdin_text(ctx)`; nothing else changed | `test_stdin_text_reaches_the_child_and_none_keeps_stdin_closed` (`Regression: PIT-50`), `test_stdin_text_survives_a_child_that_never_reads_it`, `test_httprobe_feeds_hosts_on_stdin_and_never_uses_a_shell`, `test_waybackurls_feeds_domains_on_stdin` |
 | PIT-51 | The `tech` stage had no persistence branch at all: `_persist_stage` covered subs/dns/live/ports/urls, so every `HostStatusRecord` a tech adapter returned was dropped - webanalyze and cdncheck would have run, printed `ok N item(s)` and stored nothing | the tech stage never had an adapter, so the missing branch was invisible; `host_status_history.tech_json`/`waf` existed but only a live pass could fill them | `_persist_tech` merges `tech`/`waf` into the host's newest status row through the new `Store.update_host_extras`: no state row is appended and `state` is never touched, so `diff`/`previous_state()` are unchanged; an off-target record is dropped and a host with no status row is not annotated (D11) | `test_tech_stage_annotates_the_latest_host_row` (`Regression: PIT-51`), `test_tech_stage_drops_a_host_outside_the_target` |
 | PIT-48 | `doctor` showed junk for two installed tools (`katana` -> `__`, `nuclei` -> `[I…` plus ANSI escapes), and `update` could not call `katana` up to date, so an already-current binary would be downloaded again on every run (12j) | `installed_version()` returned `text.splitlines()[0]` for every tool, but `katana -version` prints four lines of ASCII art (the real version is on line 8, on stderr) and `nuclei -version` prints a coloured `[INF]` line first, so `_same_version()` compared a release tag against a logo | A tool may carry a top-level `version_regex` in `tools.yaml`; `installed_version()` searches the whole `version_cmd` output, returns the first capture group (or the whole match when the pattern has no group), and falls back to `splitlines()[0]` when the field is absent or nothing matches. A pattern that does not compile is a `ConfigError` at registry load, before any command runs | `test_katana_version_ignores_the_ascii_banner` (`Regression: PIT-48`), `test_nuclei_version_drops_the_ansi_log_prefix` (`Regression: PIT-48`), `test_a_regex_with_no_match_falls_back_to_the_first_line`, `test_a_version_regex_without_a_group_returns_the_match`, `test_version_regex_is_parsed_from_the_registry`, `test_a_broken_version_regex_is_a_config_error`, `test_version_regex_survives_the_plan_copy` |
+| PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
 ## Commit map
@@ -5446,3 +5447,68 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
 - **Not verified:** no intrusive/exploitation tool was run; no keyed provider; the interactive prompts were not exercised this session.
 - **Gate:** `824 passed`, `ruff check` clean, `ruff format --check` clean, `mypy` clean (62 source files).
 - **Pushed:** the owner asked for the work to go to GitHub once the live runs were clean; the branch is `main` -> `reconkit/main`.
+
+## 2026-11-18 (batch) Part 1 - external-service errors are gaps; stale docs cleanup
+
+- **Owner report:** `reconkit run -d sakec.ac.in --active --no-scope` exited `5`
+  because `otx` (429), `hackertarget` (quota) and `crtsh` (502) all failed. None
+  of those is a defect on this box, so the run looked broken when it was not.
+- **Docs first:** docs/02 (Tools-table statuses, a `gap` rule, `completion`/gaps
+  wording, the `summary.tools_gap` key, exit code 5's exception, the gaps block
+  format), docs/04 (`tool_runs` CHECK, the `gap` semantics, migration 8),
+  docs/08 (gap causes), docs/09 (ToolStatus, the one classifier, HttpAdapter),
+  COMMANDS.md (exit codes) and docs/05 section 5 (the installer script, below).
+- **Implementation:** `models.ToolStatus.GAP`; `base.ExternalServiceGap` +
+  `base.classify_external_gap()`; `HttpAdapter` 429/5xx → gap, quota body →
+  gap, every other failure unchanged; `BaseToolAdapter.run` classifies a binary's
+  non-zero exit; `Engine._completed()`/`_completion_gaps()`/`_gap_reason()`;
+  `ui` counts and renders the new status; `store._SCHEMA_V8` rebuilds `tool_runs`
+  with the five-value CHECK (SQLite cannot alter one).
+- **Real proof (network, testfire.net, in scope, one `subs` stage):**
+
+  ```
+  $ reconkit subs -d testfire.net --no-scope --no-color ; echo EXIT=$?
+  │ hackertarget      │ subs  │ gap     │ 0     │ hackertarget: free quota exceeded │
+  │ otx               │ subs  │ gap     │ 0     │ otx: rate limited (HTTP 429)      │
+  9 hosts: 0 ALIVE, ... | tools: 7 ok, 2 gap, 0 failed, 2 skipped, 0 timeout
+  ⚠ passive scan completed with gaps — 1 stage(s) incomplete
+    subs: hackertarget: free quota exceeded, otx: rate limited (HTTP 429)
+    this is not a failure — the scan used every tool that was available.
+  EXIT=0
+  $ sqlite3 recon.db "SELECT tool, status FROM tool_runs WHERE status IN ('gap','failed')"
+  hackertarget|gap
+  otx|gap
+  ```
+
+  Before the change the same two outcomes were `failed`, so that run exited `5`.
+- **Mock proof:** `reconkit run -d testfire.net --active --no-scope --mock` →
+  `tools: 31 ok, 0 gap, 0 failed, 2 skipped, 0 timeout`, exit 0, no gaps block.
+  A mock run cannot produce a 429 (fixtures are bodies, not statuses), so the
+  gap path is proven by the network run above and by the adapter/engine tests.
+- **Tests:** 824 → 840. New: `test_429_is_a_gap_and_not_retried`,
+  `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`,
+  `test_hackertarget_quota_answer_is_a_gap`,
+  `test_classify_external_gap_matches_only_third_party_signatures` (10 cases),
+  `test_a_429_gap_still_reports_its_own_duration`,
+  `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`,
+  `test_a_gap_never_masks_a_real_failure`,
+  `test_v7_database_rebuilds_tool_runs_for_the_gap_status`,
+  `test_a_gap_tool_is_shown_as_gap_and_named_in_the_block`.
+  Changed because they pinned the removed behaviour: `test_429_is_failed_and_not_retried`
+  → `test_429_is_a_gap_and_not_retried`, `test_500_is_failed_and_not_retried`
+  → `test_500_is_a_gap_and_not_retried`, `test_hackertarget_free_quota_is_reported`
+  → `test_hackertarget_free_quota_is_a_gap`, `test_otx_sends_key_in_header_and_never_leaks_it`
+  (a 500 is now a gap; the key-must-not-leak assertions are unchanged), the
+  hackertarget quota case removed from the malformed-response parametrization
+  (it is a gap now, covered above), the JSON schema test gained `tools_gap`, and
+  five migration tests moved to `SCHEMA_VERSION == 8` with a `tool_runs` table
+  added to their v1-v6 fixtures (a real database of those versions has one).
+- **Stale docs fixed in this commit:** `docs/PROGRESS.md` line 35 said "Nothing
+  is pushed" (both refs are at `a49e4b5`), the Open-risks line said `tech`,
+  `urls` and `vulns` have no adapter (waves 4-8 added 25 of them; only
+  `dnsreaper` is left), the baseline said `827 passed` (measured `824`), and
+  `docs/05` section 5 said "reconkit runs no installer script at all" while
+  `scripts/install-tools.sh` has existed since D21 - it now documents what the
+  script does (apt under per-command sudo, refuses root, verifies with
+  `doctor --json`, no curl/pipe, no archive or checksum handling).
+

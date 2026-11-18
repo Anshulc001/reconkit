@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from reconkit.adapters.base import HttpAdapter, normalize_subdomains
+from reconkit.adapters.base import ExternalServiceGap, HttpAdapter, normalize_subdomains
 from reconkit.errors import ParseError
 from reconkit.models import Record, RunContext, Stage
 
@@ -24,7 +24,8 @@ class HackertargetAdapter(HttpAdapter):
 
     def parse_output(self, raw: str) -> list[Record]:
         if "api count exceeded" in raw.lower():
-            raise ParseError("hackertarget: free quota exceeded")
+            # HTTP 200 with a quota sentence: the free tier, not a broken tool.
+            raise ExternalServiceGap("hackertarget: free quota exceeded")
         names: list[str] = []
         for line in raw.splitlines():
             if not line.strip():

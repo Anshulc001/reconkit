@@ -109,6 +109,7 @@ def adapter(
     status: ToolStatus = ToolStatus.OK,
     duration_s: float = 0.0,
     delay: float = 0.0,
+    detail: str | None = None,
 ) -> type[BaseToolAdapter]:
     class Fake(BaseToolAdapter):
         async def run(self, ctx: RunContext) -> ToolResult:
@@ -126,7 +127,9 @@ def adapter(
                 status=status,
                 records=records or [],
                 duration_s=duration_s,
-                error=None if status is ToolStatus.OK else "exit 1: boom",
+                error=detail
+                if status in (ToolStatus.OK, ToolStatus.GAP) and detail is not None
+                else (None if status is ToolStatus.OK else "exit 1: boom"),
                 raw_text=raw_text,
             )
 
@@ -1695,6 +1698,71 @@ async def test_exit_code_partial_success(tmp_path: Path) -> None:
         "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True)
     )
     assert summary.exit_code is ExitCode.PARTIAL
+
+
+async def test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps(tmp_path: Path) -> None:
+    """Owner ruling 2026-11-18: 429/quota/5xx is a gap, never exit 5.
+
+    The sakec.ac.in case: every subs source was refused by its provider, the run
+    looked broken (exit 5) although nothing on this box was wrong.
+    """
+    rec = Recorder()
+    specs = {"otx": tool("otx", Stage.SUBS), "crtsh": tool("crtsh", Stage.SUBS)}
+    adapters = {
+        "otx": adapter(
+            "otx",
+            Stage.SUBS,
+            rec,
+            status=ToolStatus.GAP,
+            detail="otx: rate limited (HTTP 429)",
+        ),
+        "crtsh": adapter(
+            "crtsh",
+            Stage.SUBS,
+            rec,
+            status=ToolStatus.GAP,
+            detail="crtsh: server error (HTTP 502)",
+        ),
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
+    assert summary.exit_code is ExitCode.SUCCESS
+    assert summary.completion_status == "complete_with_gaps"
+    assert [gap.stage for gap in summary.gaps] == [Stage.SUBS]
+    assert summary.gaps[0].skipped == 0
+    assert "otx: rate limited (HTTP 429)" in summary.gaps[0].reason
+    assert "crtsh: server error (HTTP 502)" in summary.gaps[0].reason
+
+    # The database says gap, not failed (schema 8).
+    rows = engine.store._conn.execute("SELECT tool, status FROM tool_runs ORDER BY tool").fetchall()
+    assert [(row["tool"], row["status"]) for row in rows] == [
+        ("crtsh", "gap"),
+        ("otx", "gap"),
+    ]
+    # A gap does not make the stage row partial either.
+    run = engine.store._conn.execute("SELECT status FROM scan_runs").fetchone()
+    assert run["status"] == "completed"
+
+
+async def test_a_gap_never_masks_a_real_failure(tmp_path: Path) -> None:
+    """A gap is exit 0 on its own, but it must not hide a failed tool."""
+    rec = Recorder()
+    specs = {"otx": tool("otx", Stage.SUBS), "crtsh": tool("crtsh", Stage.SUBS)}
+    adapters = {
+        "otx": adapter(
+            "otx",
+            Stage.SUBS,
+            rec,
+            status=ToolStatus.GAP,
+            detail="otx: rate limited (HTTP 429)",
+        ),
+        "crtsh": adapter("crtsh", Stage.SUBS, rec, error=RuntimeError("boom")),
+    }
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True)
+    )
+    assert summary.exit_code is ExitCode.PARTIAL
+    assert [gap.stage for gap in summary.gaps] == [Stage.SUBS]
 
 
 async def test_exit_code_tool_crash_is_partial(tmp_path: Path) -> None:

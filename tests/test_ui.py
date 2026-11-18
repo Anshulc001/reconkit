@@ -152,12 +152,16 @@ def test_json_output_is_one_valid_document_with_documented_schema() -> None:
         "dead",
         "unknown",
         "tools_ok",
+        # Added 2026-11-18: a tool refused by its upstream is a gap, not a
+        # failure (owner ruling).
+        "tools_gap",
         "tools_failed",
         "tools_skipped",
         "tools_timeout",
     }
     assert document["summary"]["hosts"] == 5
     assert document["summary"]["tools_ok"] == 1
+    assert document["summary"]["tools_gap"] == 0
     assert document["summary"]["tools_failed"] == 1
 
 
@@ -455,6 +459,34 @@ def test_the_gaps_block_goes_to_stderr_and_the_json_carries_completion() -> None
     code, _, err = render_text(summary=summary)
     assert code == 0
     assert "completed with gaps" in err
+
+
+def test_a_gap_tool_is_shown_as_gap_and_named_in_the_block() -> None:
+    """Owner ruling 2026-11-18: an external refusal reads `gap`, not `failed`."""
+    summary = sample_summary()
+    summary.stages[0].results = [
+        ToolResult(tool="crtsh", status=ToolStatus.OK, records=[]),
+        ToolResult(tool="otx", status=ToolStatus.GAP, error="otx: rate limited (HTTP 429)"),
+    ]
+    summary.gaps = [CompletionGap(Stage.SUBS, "otx: rate limited (HTTP 429)")]
+    summary.exit_code = ExitCode.SUCCESS
+
+    code, raw, err = render_text(summary=summary)
+    assert code == 0
+    assert "gap" in err
+    # The line wraps at 80 columns, so the counts are asserted one by one.
+    assert "tools: 1 ok, 1" in err
+    assert "gap, 0 failed" in err
+    assert "⚠ passive scan completed with gaps — 1 stage(s) incomplete" in err
+    # No skip count for an external gap: nothing was skipped.
+    assert "subs: otx: rate limited (HTTP 429)" in err
+    assert "tool(s) skipped (otx" not in err
+
+    _, document, _ = render_text(summary=summary, json_output=True)
+    assert json.loads(document)["summary"]["tools_gap"] == 1
+    assert json.loads(document)["completion"]["gaps"] == [
+        {"stage": "subs", "reason": "otx: rate limited (HTTP 429)"}
+    ]
 
 
 def test_a_complete_run_prints_no_gaps_block() -> None:

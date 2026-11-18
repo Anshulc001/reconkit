@@ -97,6 +97,16 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (1);
+        -- A real database of this version has tool_runs; schema 8 rebuilds it.
+        CREATE TABLE tool_runs (
+          id           INTEGER PRIMARY KEY,
+          run_id       INTEGER NOT NULL,
+          tool         TEXT NOT NULL,
+          status       TEXT NOT NULL CHECK (status IN ('ok','skipped','failed','timeout')),
+          item_count   INTEGER NOT NULL DEFAULT 0,
+          duration_s   REAL,
+          error        TEXT
+        );
         CREATE TABLE scan_runs (
           id          INTEGER PRIMARY KEY,
           target_id   INTEGER NOT NULL,
@@ -152,7 +162,7 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 7
+        assert migrated.schema_version == SCHEMA_VERSION == 8
         assert "cnames_json" in columns
         assert "dangling_cname" in columns
         assert "detail" in columns
@@ -225,6 +235,16 @@ def test_v3_database_migrates_the_additive_detail_column(tmp_path: Path) -> None
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (3);
+        -- A real database of this version has tool_runs; schema 8 rebuilds it.
+        CREATE TABLE tool_runs (
+          id           INTEGER PRIMARY KEY,
+          run_id       INTEGER NOT NULL,
+          tool         TEXT NOT NULL,
+          status       TEXT NOT NULL CHECK (status IN ('ok','skipped','failed','timeout')),
+          item_count   INTEGER NOT NULL DEFAULT 0,
+          duration_s   REAL,
+          error        TEXT
+        );
         CREATE TABLE scan_runs (
           id          INTEGER PRIMARY KEY,
           target_id   INTEGER NOT NULL,
@@ -259,7 +279,7 @@ def test_v3_database_migrates_the_additive_detail_column(tmp_path: Path) -> None
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 7
+        assert migrated.schema_version == SCHEMA_VERSION == 8
         columns = {
             str(row["name"])
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
@@ -631,6 +651,16 @@ def test_v2_database_migrates_provenance_with_backfill(tmp_path: Path) -> None:
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (2);
+        -- A real database of this version has tool_runs; schema 8 rebuilds it.
+        CREATE TABLE tool_runs (
+          id           INTEGER PRIMARY KEY,
+          run_id       INTEGER NOT NULL,
+          tool         TEXT NOT NULL,
+          status       TEXT NOT NULL CHECK (status IN ('ok','skipped','failed','timeout')),
+          item_count   INTEGER NOT NULL DEFAULT 0,
+          duration_s   REAL,
+          error        TEXT
+        );
         CREATE TABLE scan_runs (
           id          INTEGER PRIMARY KEY,
           target_id   INTEGER NOT NULL,
@@ -687,7 +717,7 @@ def test_v2_database_migrates_provenance_with_backfill(tmp_path: Path) -> None:
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(subdomains)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 7
+        assert migrated.schema_version == SCHEMA_VERSION == 8
         assert "provenance" in columns
         rows = {
             str(row["fqdn"]): str(row["provenance"])
@@ -934,6 +964,16 @@ def test_v4_database_migrates_by_removing_the_speed_column(tmp_path: Path) -> No
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (4);
+        -- A real database of this version has tool_runs; schema 8 rebuilds it.
+        CREATE TABLE tool_runs (
+          id           INTEGER PRIMARY KEY,
+          run_id       INTEGER NOT NULL,
+          tool         TEXT NOT NULL,
+          status       TEXT NOT NULL CHECK (status IN ('ok','skipped','failed','timeout')),
+          item_count   INTEGER NOT NULL DEFAULT 0,
+          duration_s   REAL,
+          error        TEXT
+        );
         CREATE TABLE scan_runs (
           id          INTEGER PRIMARY KEY,
           target_id   INTEGER NOT NULL,
@@ -961,7 +1001,7 @@ def test_v4_database_migrates_by_removing_the_speed_column(tmp_path: Path) -> No
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 7
+        assert migrated.schema_version == SCHEMA_VERSION == 8
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(scan_runs)")
         }
@@ -971,6 +1011,72 @@ def test_v4_database_migrates_by_removing_the_speed_column(tmp_path: Path) -> No
         ).fetchone()
         assert (row["id"], row["stage"], row["status"]) == (7, "subs", "completed")
         assert row["params_json"] == '{"scan_key":"k"}'
+    finally:
+        migrated.close()
+
+
+def test_v7_database_rebuilds_tool_runs_for_the_gap_status(tmp_path: Path) -> None:
+    """Schema 8 accepts `gap`: an external service refusal is not a failure.
+
+    SQLite cannot alter a CHECK constraint, so the migration rebuilds the table;
+    every existing row must survive unchanged.
+    """
+    db_path = tmp_path / "v7.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE schema_version (version INTEGER NOT NULL);
+        INSERT INTO schema_version (version) VALUES (7);
+        CREATE TABLE scan_runs (
+          id          INTEGER PRIMARY KEY,
+          target_id   INTEGER NOT NULL,
+          stage       TEXT NOT NULL,
+          status      TEXT NOT NULL,
+          started_at  TEXT NOT NULL,
+          finished_at TEXT,
+          params_json TEXT NOT NULL DEFAULT '{}',
+          scope_mode  TEXT NOT NULL DEFAULT 'enforced'
+        );
+        INSERT INTO scan_runs (id, target_id, stage, status, started_at, params_json)
+          VALUES (1, 1, 'subs', 'completed', '2026-11-18T10:00:00Z', '{}');
+        CREATE TABLE tool_runs (
+          id           INTEGER PRIMARY KEY,
+          run_id       INTEGER NOT NULL,
+          tool         TEXT NOT NULL,
+          status       TEXT NOT NULL CHECK (status IN ('ok','skipped','failed','timeout')),
+          item_count   INTEGER NOT NULL DEFAULT 0,
+          duration_s   REAL,
+          error        TEXT
+        );
+        INSERT INTO tool_runs (id, run_id, tool, status, item_count, duration_s, error)
+          VALUES (3, 1, 'crtsh', 'failed', 0, 1.5, 'crtsh: server error (HTTP 502)');
+        """
+    )
+    conn.close()
+
+    migrated = Store(db_path)
+    try:
+        assert migrated.schema_version == SCHEMA_VERSION == 8
+        row = migrated._conn.execute(
+            "SELECT id, run_id, tool, status, item_count, duration_s, error FROM tool_runs"
+        ).fetchone()
+        assert (row["id"], row["run_id"], row["tool"], row["status"]) == (
+            3,
+            1,
+            "crtsh",
+            "failed",
+        )
+        assert row["item_count"] == 0
+        assert row["duration_s"] == 1.5
+        assert row["error"] == "crtsh: server error (HTTP 502)"
+        # The rebuilt table accepts the new value, and still rejects a typo.
+        migrated.record_tool_run(1, "otx", "gap", error="otx: rate limited (HTTP 429)")
+        stored = migrated._conn.execute(
+            "SELECT status FROM tool_runs WHERE tool = 'otx'"
+        ).fetchone()
+        assert stored["status"] == "gap"
+        with pytest.raises(sqlite3.IntegrityError):
+            migrated.record_tool_run(1, "otx", "nonsense")
     finally:
         migrated.close()
 
@@ -990,6 +1096,25 @@ def test_v6_database_migrates_the_waf_priority_column(tmp_path: Path) -> None:
         """
         CREATE TABLE schema_version (version INTEGER NOT NULL);
         INSERT INTO schema_version (version) VALUES (6);
+        CREATE TABLE scan_runs (
+          id          INTEGER PRIMARY KEY,
+          target_id   INTEGER NOT NULL,
+          stage       TEXT NOT NULL,
+          status      TEXT NOT NULL,
+          started_at  TEXT NOT NULL,
+          finished_at TEXT,
+          params_json TEXT NOT NULL DEFAULT '{}'
+        );
+        -- A real database of this version has tool_runs; schema 8 rebuilds it.
+        CREATE TABLE tool_runs (
+          id           INTEGER PRIMARY KEY,
+          run_id       INTEGER NOT NULL,
+          tool         TEXT NOT NULL,
+          status       TEXT NOT NULL CHECK (status IN ('ok','skipped','failed','timeout')),
+          item_count   INTEGER NOT NULL DEFAULT 0,
+          duration_s   REAL,
+          error        TEXT
+        );
         CREATE TABLE host_status_history (
           id           INTEGER PRIMARY KEY,
           subdomain_id INTEGER NOT NULL,
@@ -1006,7 +1131,7 @@ def test_v6_database_migrates_the_waf_priority_column(tmp_path: Path) -> None:
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 7
+        assert migrated.schema_version == SCHEMA_VERSION == 8
         columns = {
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")

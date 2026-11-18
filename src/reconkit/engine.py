@@ -144,6 +144,11 @@ Resolve = Callable[[str], Awaitable[list[str]]]
 InstalledCheck = Callable[[type[BaseToolAdapter]], bool]
 
 
+def _completed(status: ToolStatus) -> bool:
+    """True for a tool that did all it could: `ok`, or a `gap` from its upstream."""
+    return status in (ToolStatus.OK, ToolStatus.GAP)
+
+
 def allow_all_ip(_ip: str) -> bool:
     """The docs/05 rule 6 predicate when there is no scope file (2026-11-17).
 
@@ -815,10 +820,12 @@ class Engine:
                 raise
 
             selected_total += len(selected)
-            failed_total += sum(1 for result in results if result.status is not ToolStatus.OK)
+            # A gap is an external service refusing the tool, not a failure of the
+            # run (owner ruling 2026-11-18); it never reaches exit 5.
+            failed_total += sum(1 for result in results if not _completed(result.status))
             failed_total += len(selected) - len(results)
             all_ok = len(results) == len(selected) and all(
-                result.status is ToolStatus.OK for result in results
+                _completed(result.status) for result in results
             )
             self.store.finish_scan_run(
                 run_id, "completed" if all_ok else "partial", finished_at=self._now()
@@ -876,25 +883,50 @@ class Engine:
         return ExitCode.SUCCESS
 
     @staticmethod
+    def _gap_reason(result: ToolResult) -> str:
+        """`<tool>: <service message>`, without naming the tool twice.
+
+        Every HTTP adapter already prefixes its own name (`otx: rate limited`),
+        a binary's generic `exit N: ...` does not, so only the latter is labelled.
+        """
+        message = result.error or "external service problem"
+        if message.startswith(f"{result.tool}:"):
+            return message
+        return f"{result.tool}: {message}"
+
+    @staticmethod
     def _is_gap_reason(reason: str) -> bool:
         """The two absence-only skip reasons (docs/02 section 6)."""
         return reason.startswith("no adapter") or reason == "not installed"
 
     def _completion_gaps(self, summary: ScanSummary) -> list[CompletionGap]:
-        """Zero-tool stages whose only cause was an absent tool, one per stage.
+        """The stages that fell short for a reason that is nobody's fault here.
 
-        A stage emptied by `--tools`, `--exclude`, a tier/tool-mode rule, the
-        exploitation rule or the scope gate is *not* a gap: those are deliberate
-        exclusions, and the scope case is exit 3 anyway.
+        Two causes are gaps: a stage whose only skips were an absent tool, and a
+        stage where an executed tool was refused by an external service (429,
+        quota, upstream 5xx - owner ruling 2026-11-18). A stage emptied by
+        `--tools`, `--exclude`, a tier/tool-mode rule, the exploitation rule or
+        the scope gate is *not* a gap: those are deliberate exclusions, and the
+        scope case is exit 3 anyway.
         """
         gaps: list[CompletionGap] = []
         for outcome in summary.stages:
-            if outcome.resumed or outcome.results:
+            if outcome.resumed:
                 continue
-            absent = [skip for skip in outcome.skipped if self._is_gap_reason(skip.reason)]
+            # An absent tool only matters when it left the stage with nothing to
+            # run; a stage that ran other tools is not short because of it.
+            absent = (
+                []
+                if outcome.results
+                else [skip for skip in outcome.skipped if self._is_gap_reason(skip.reason)]
+            )
+            external = [result for result in outcome.results if result.status is ToolStatus.GAP]
             if absent:
                 reasons = ", ".join(sorted({skip.reason for skip in absent}))
                 gaps.append(CompletionGap(outcome.stage, reasons, len(absent)))
+            elif external:
+                reasons = ", ".join(sorted(self._gap_reason(result) for result in external))
+                gaps.append(CompletionGap(outcome.stage, reasons, 0))
         return gaps
 
     @staticmethod

@@ -49,6 +49,9 @@ class Confidence(StrEnum):
 
 class ToolStatus(StrEnum):
     OK = "ok"
+    # The tool ran and an external service refused it (429, quota, upstream 5xx).
+    # A completion gap, never a failure (owner ruling 2026-11-18, docs/02 s5-6).
+    GAP = "gap"
     SKIPPED = "skipped"
     FAILED = "failed"
     TIMEOUT = "timeout"
