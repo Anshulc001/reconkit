@@ -925,9 +925,21 @@ Tools table, because there is no external program to run.
 | Input | `urls` rows of the current target whose `status_code` is `NULL` |
 | Write | `urls.status_code` = the HTTP status, `-1` when unreachable, `-2` when its certificate did not verify |
 | Transport | one `GET` per URL through httpx, honest `reconkit/<version>` UA, no retries |
-| Bounds | `config.yaml` `url_probe:` - `max_urls` 5000, `batch_size` 200, `threads` 50, `timeout_s` 10 |
-| Off switch | `--skip-url-probe` |
+| Bounds | `config.yaml` `url_probe:` - `max_urls` 5000, `batch_size` 200, `threads` 100, `timeout_s` 10 |
+| Off switch | `--skip-url-probe`; `--reprobe-urls` probes every stored URL, not only the `NULL` ones |
 | Mock | sends nothing, leaves `status_code` `NULL`, says so on stderr |
+
+**Transport: Python httpx, not the PD `httpx` binary (D24, 2026-11-18).** The
+owner asked for a faster probe and suggested `httpx -l file -threads 100`. That
+was measured and rejected: PD httpx v1.12.0 has **no `-insecure` flag** and skips
+TLS verification by default (`https://testfire.net/`, whose certificate is issued
+for `www.testfire.net`, returns `200`), it emits **no JSON line at all** for a URL
+that fails (so "cert failed" and "never answered" are the same absence), and its
+default User-Agent is a random browser string, which docs/05 rule 8 forbids. On
+the same 158 stored URLs it took **9.19 s** and called the 58 certificate-invalid
+URLs `200`, while the Python transport took **3.44 s** with `-2` for all 58. The
+probe therefore keeps the Python client, reuses one client per pass and raises
+`threads` from 50 to 100.
 
 `-1` and `-2` are *stored answers* ("no answer" and "answered with a certificate that does not verify"), so neither is retried;
 `NULL` keeps its single meaning of "not probed yet". The probe runs through the

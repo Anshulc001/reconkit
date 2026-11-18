@@ -49,6 +49,7 @@ DOCUMENTED_OPTIONS = {
     "--ffuf-wordlist",
     "--resolvers",
     "--skip-url-probe",
+    "--reprobe-urls",
     "--no-keys",
     "--resume",
     "--no-color",
@@ -865,6 +866,37 @@ def test_skip_url_probe_drops_the_stage_from_an_active_run(
     stages = [stage["stage"] for stage in json.loads(result.stdout)["stages"]]
     assert "url_probe" not in stages
     assert "urls" in stages
+
+
+def test_reprobe_urls_reaches_the_engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """D24: `--reprobe-urls` is accepted on a run and recorded on the probe run."""
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        app,
+        [
+            *scan_args(config, "run", "--active", "--json"),
+            "--reprobe-urls",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    document = json.loads(result.stdout)
+    assert "url_probe" in [stage["stage"] for stage in document["stages"]]
+
+
+def test_reprobe_urls_with_skip_url_probe_warns_instead_of_contradicting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both flags together: the stage stays out and stderr says why (D24)."""
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(
+        app,
+        [*scan_args(config, "run", "--active", "--json"), "--reprobe-urls", "--skip-url-probe"],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "url_probe" not in [stage["stage"] for stage in json.loads(result.stdout)["stages"]]
+    assert "--reprobe-urls has no effect with --skip-url-probe" in result.stderr
 
 
 def test_active_run_requests_the_url_probe_stage(

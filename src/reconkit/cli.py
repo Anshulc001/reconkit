@@ -132,6 +132,10 @@ _SKIP_URL_PROBE_HELP = (
     "Skip the url_probe stage: leave every stored URL without an HTTP status "
     "(D23). It runs after urls in --active and --full."
 )
+_REPROBE_URLS_HELP = (
+    "Probe every stored URL again, not only the ones with no status yet, so a "
+    "URL that has since gone dead is found (D24). It needs the url_probe stage."
+)
 _REDACT_HELP = "Hide header values in JSON and UI output (default on)."
 _SHOW_HEADERS_HELP = "Reveal header values in JSON output (overrides --redact-headers)."
 _HEADER_NAME = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
@@ -700,6 +704,7 @@ def _run_scan(
     ffuf_wordlist: Path | None = None,
     resolvers: Path | None = None,
     skip_url_probe: bool = False,
+    reprobe_urls: bool = False,
 ) -> int:
     engine: Engine | None = None
     try:
@@ -743,6 +748,13 @@ def _run_scan(
             # D23: the flag only narrows this run; a stage command never has the
             # stage to begin with, so it is a no-op there (docs/02 section 3).
             stages = tuple(stage for stage in stages if stage is not Stage.URL_PROBE)
+            if reprobe_urls:
+                # Two flags that cancel each other: say so instead of running a
+                # probe that cannot happen (D24).
+                render_message(
+                    "warning: --reprobe-urls has no effect with --skip-url-probe; continuing",
+                    console=make_console(no_color=no_color),
+                )
         progress_console = make_console(no_color=no_color)
         if no_scope and not is_active:
             render_message(
@@ -830,6 +842,7 @@ def _run_scan(
                                 redact_headers=redact_headers,
                                 ffuf_wordlist=ffuf_wordlist,
                                 skip_url_probe=skip_url_probe,
+                                reprobe_urls=reprobe_urls,
                             ),
                         )
                     )
@@ -1021,6 +1034,7 @@ def _scan_command(
     skip_url_probe: Annotated[
         bool, typer.Option("--skip-url-probe", help=_SKIP_URL_PROBE_HELP)
     ] = False,
+    reprobe_urls: Annotated[bool, typer.Option("--reprobe-urls", help=_REPROBE_URLS_HELP)] = False,
     no_keys: Annotated[bool, typer.Option("--no-keys", help="Force free mode.")] = False,
     resume: Annotated[
         bool, typer.Option("--resume", help="Continue the latest unfinished run.")
@@ -1060,6 +1074,7 @@ def _scan_command(
             ffuf_wordlist=ffuf_wordlist,
             resolvers=resolvers,
             skip_url_probe=skip_url_probe,
+            reprobe_urls=reprobe_urls,
             no_keys=no_keys,
             resume=resume,
             no_color=no_color,
@@ -1131,6 +1146,7 @@ def main(
     skip_url_probe: Annotated[
         bool, typer.Option("--skip-url-probe", help=_SKIP_URL_PROBE_HELP)
     ] = False,
+    reprobe_urls: Annotated[bool, typer.Option("--reprobe-urls", help=_REPROBE_URLS_HELP)] = False,
     no_keys: Annotated[bool, typer.Option("--no-keys", help="Force free mode.")] = False,
     resume: Annotated[
         bool, typer.Option("--resume", help="Continue the latest unfinished run.")
@@ -1172,6 +1188,7 @@ def main(
             user_agent=user_agent,
             redact_headers=redact_headers,
             skip_url_probe=skip_url_probe,
+            reprobe_urls=reprobe_urls,
             no_keys=no_keys,
             resume=resume,
             no_color=no_color,

@@ -115,9 +115,12 @@ dead URL. It is engine-owned: there is no adapter and no `tools.yaml` entry, so 
 never appears in the Tools table, and it sends the honest `reconkit/<version>`
 User-Agent (docs/05 rule 8). Bounds come from the `url_probe:` block in
 `config.yaml`: `max_urls` (5000, the probe stops after that many and warns).
-`batch_size` (200), `threads` (50) and `timeout_s` (10) shape how it works.
-`--mock` never sends traffic, so a mock run leaves every `status_code` at
-`NULL` and says so; `--skip-url-probe` does the same deliberately.
+`batch_size` (200), `threads` (100) and `timeout_s` (10) shape how it works, and
+one HTTP client is reused for the whole pass (D24). `--mock` never sends traffic,
+so a mock run leaves every `status_code` at `NULL` and says so;
+`--skip-url-probe` does the same deliberately. `--reprobe-urls` probes **every**
+stored URL again instead of only the `NULL` ones, which is how a URL that has
+since gone dead is found; it overwrites the stored answer in place.
 
 ### Workflows
 | Command | Pipeline |
@@ -301,6 +304,7 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | `--user-agent STR` | Override the default User-Agent for `httpx` and `pyprobe` |
 | `--ffuf-wordlist PATH` | Wordlist for `ffuf` content discovery, replacing the packaged `common.txt` (about 110 paths, D13). The file must exist and be readable; a missing file is a failed `ffuf` result, never a silent fallback |
 | `--skip-url-probe` | Skip the `url_probe` stage for this run (D23): the archived URLs keep `status_code = NULL`, exactly as they were before the stage existed. Use it when the target's URL list is huge or the operator only wants discovery. The stage command `urls` never probes (it has no probe stage), so the flag is accepted and has nothing to skip |
+| `--reprobe-urls` | Probe every stored URL again, not only the ones with `status_code = NULL` (D24), so a URL that answered once and has since gone dead is found. It overwrites `urls.status_code` in place and keeps the usual `max_urls` cut and warning. With `--skip-url-probe` it has no stage to act on, so that combination prints `warning: --reprobe-urls has no effect with --skip-url-probe` and the run continues |
 | `--resolvers PATH` | Resolver list for `massdns` and `puredns`, replacing the packaged `src/reconkit/data/resolvers.txt` (16 public resolvers, D16). The file must exist and be readable; a missing file is a failed `massdns`/`puredns` result, never a silent fallback to the system resolver |
 | `--redact-headers` / `--show-headers` | Hide (default) or reveal header values in JSON and UI output |
 | `--min-sources N` | Hide results confirmed by fewer than N tools |

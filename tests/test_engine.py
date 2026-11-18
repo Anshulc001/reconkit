@@ -3613,6 +3613,45 @@ async def test_url_probe_never_reprobes_a_stored_answer(tmp_path: Path) -> None:
     assert calls == ["https://www.example.com/a"]
 
 
+async def test_reprobe_urls_probes_urls_that_already_carry_an_answer(tmp_path: Path) -> None:
+    """D24: `--reprobe-urls` sends every stored URL again, default sends only NULLs."""
+    calls: list[str] = []
+    transport = _probe_transport(
+        {"https://www.example.com/a": 200, "https://www.example.com/b": 404}, calls
+    )
+    engine = _probe_engine(
+        tmp_path,
+        ["https://www.example.com/a", "https://www.example.com/b"],
+        transport=transport,
+        scope_text=None,
+    )
+    await engine.run("example.com", ScanOptions(active=True))
+    assert sorted(calls) == ["https://www.example.com/a", "https://www.example.com/b"]
+    # Nothing is NULL any more, so the default second run sends nothing.
+    calls.clear()
+    await engine.run("example.com", ScanOptions(active=True))
+    assert calls == []
+    # --reprobe-urls asks again, which is how a URL that went dead is found.
+    await engine.run("example.com", ScanOptions(active=True, reprobe_urls=True))
+    assert sorted(calls) == ["https://www.example.com/a", "https://www.example.com/b"]
+
+
+async def test_url_probe_records_the_reprobe_flag_on_the_run(tmp_path: Path) -> None:
+    """The probe run records `reprobe` so the pass is auditable afterwards."""
+    transport = _probe_transport({}, [])
+    engine = _probe_engine(
+        tmp_path, ["https://www.example.com/a"], transport=transport, scope_text=None
+    )
+    await engine.run("example.com", ScanOptions(active=True, reprobe_urls=True))
+    params = [
+        json.loads(str(row["params_json"]))
+        for row in rows(
+            engine.store, "SELECT params_json FROM scan_runs WHERE stage = 'url_probe' ORDER BY id"
+        )
+    ]
+    assert [item["reprobe"] for item in params] == [True]
+
+
 async def test_url_probe_uses_the_url_probe_config_bounds(tmp_path: Path) -> None:
     """The `url_probe:` block bounds one pass and the run says what it skipped."""
     calls: list[str] = []

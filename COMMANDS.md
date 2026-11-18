@@ -385,6 +385,7 @@ involved.
 ```
 $ reconkit run -d example.com --active --no-scope         # probe runs after urls
 $ reconkit run -d example.com --active --no-scope --skip-url-probe   # leave NULLs alone
+$ reconkit run -d example.com --active --no-scope --reprobe-urls     # ask again, even answered URLs
 $ sqlite3 recon.db "SELECT status_code, COUNT(*) FROM urls GROUP BY status_code"
 200|1184
 301|96
@@ -393,8 +394,11 @@ $ sqlite3 recon.db "SELECT status_code, COUNT(*) FROM urls GROUP BY status_code"
 ```
 
 Bounds and switches live in `config.yaml` under `url_probe:` (`max_urls` 5000,
-`batch_size` 200, `threads` 50, `timeout_s` 10). `--mock` never touches the
-network, so a mock run leaves every `status_code` at `NULL`.
+`batch_size` 200, `threads` 100, `timeout_s` 10), and one HTTP client is reused
+for the whole pass (D24). `--mock` never touches the network, so a mock run
+leaves every `status_code` at `NULL`. `--reprobe-urls` overwrites the stored
+answer in place, which is how a URL that has since gone dead is found; adding
+`--skip-url-probe` makes it a no-op and the run says so.
 
 ---
 

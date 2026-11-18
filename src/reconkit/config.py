@@ -76,7 +76,7 @@ class UrlProbeConfig(_StrictModel):
 
     max_urls: int = Field(default=5000, gt=0)
     batch_size: int = Field(default=200, gt=0)
-    threads: int = Field(default=50, gt=0)
+    threads: int = Field(default=100, gt=0)
     timeout_s: int = Field(default=10, gt=0)
 
 

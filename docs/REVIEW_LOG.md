@@ -71,6 +71,7 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-59 | The results table counted one website twice: `sakec.ac.in` (301) and `www.sakec.ac.in` (200) were two ALIVE hosts, and the same for `admission`, `iprc`, `research`, `portal`, so 39 "ALIVE" rows suggested 39 sites | Nothing in the pipeline related a `www.` name to its bare name: DNS resolves both, the live pass probes both, and neither `subdomains` nor `host_status_history` had anywhere to say they are the same site | A post-`live` pass (`Engine._dedupe_www_variants`) writes **metadata only** (`duplicate_of`, `www_note`, schema 9) on the newest status row: 3xx+2xx marks the 3xx name, two 2xx marks neither, same non-2xx plus a shared IP marks `www.X`, a dead variant and an unknown IP set mark nothing. Host state, confidence and every count query are untouched. The table gains a Notes column (only when a row has a note) and the summary line a unique count (only when a duplicate exists) | `test_www_redirect_to_bare_is_marked_duplicate` (`Regression: PIT-59`), `test_bare_redirect_to_www_is_marked_duplicate`, `test_both_200_independent_servers_not_marked_duplicate`, `test_same_status_on_one_server_marks_the_www_variant`, `test_same_status_on_different_servers_is_only_a_note`, `test_www_dead_is_not_marked_duplicate`, `test_single_variant_not_touched`, `test_www_dedup_never_changes_host_state_or_confidence`, `test_set_host_duplicate_updates_in_place_and_keeps_state`, `test_www_duplicate_rows_get_notes_and_the_summary_counts_unique` |
 | PIT-60 | Nothing said whether a stored URL still answers: the urls stage kept 11,785 rows from the archives and the crawler, so a 2019 `/admin` and a page that answered today were the same evidence | `urls` had no status column and no stage sent a request per URL, so the whole archive looked equally alive | `Stage.URL_PROBE` runs after `urls` in `active`/`full` (engine-owned, no adapter) and writes `urls.status_code`: the HTTP status, `-1` for no answer, `-2` when the server answered with a certificate that does not verify. `NULL` alone means "not probed", and a stored answer is never retried. `--skip-url-probe` turns it off; `--mock` leaves NULLs and says so. Host state, confidence, `diff` and counts are untouched | `test_url_probe_stores_status_codes_and_marks_unreachable` (`Regression: PIT-60`), `test_url_probe_never_reprobes_a_stored_answer`, `test_url_probe_marks_an_unverified_certificate_apart_from_unreachable`, `test_url_probe_sends_only_in_scope_urls`, `test_url_probe_is_skipped_in_mock_mode` |
 | PIT-61 | The www-dedup pass marked `www.X` as `duplicate_of X` when **neither** name had an HTTP status: both rows ALIVE with `status_code = NULL` and a shared IP. Seen in verification (`www.testfire.net.duplicate_of = testfire.net`, both codes NULL) | The shared-IP branch compared the two codes with `==`, so `NULL == NULL` read as "same status"; the documented rule is "same **non-2xx** status", and `NULL` means "no status observed" | The branch now requires both codes present and equal (`www_status is not None and bare_status is not None`). A no-status pair gets no `duplicate_of` and no note; the 3xx/2xx, both-2xx and different-IP branches are unchanged, and no state, confidence or count changes | `test_www_both_null_status_not_marked_duplicate` (`Regression: PIT-61`), `test_same_status_on_one_server_marks_the_www_variant`, `test_both_200_independent_servers_not_marked_duplicate` |
+| PIT-62 | PD `httpx` v1.12.0 looks like the faster probe transport but is not usable for liveness: it has **no `-insecure` flag** and skips TLS verification by default, so `https://testfire.net/` (certificate issued for `www.testfire.net`) returns `200`; a URL that fails produces **no JSON line at all**; and its default UA is a random browser string | The option list has `-probe`, `-tls-grab`, `-ztls` but no verification switch, and failures are simply absent from JSONL instead of being reported with an error field | The `url_probe` stage keeps the Python httpx transport (D24) - only it can distinguish "answered, certificate did not verify" (`-2`) from "no answer" (`-1`) with verification on. PD `httpx` remains the `httpx`/`httpx_tech` adapter, where a `200` and a technology list are all that is needed | `test_url_probe_marks_an_unverified_certificate_apart_from_unreachable`, `test_url_probe_sees_a_certificate_error_in_the_context_chain` |
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
@@ -5798,4 +5799,48 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
   equal-code pair still marks and a real 2xx pair still only notes.
 - **Gate:** `883 passed`; `ruff check .` "All checks passed!"; `ruff format --check .` "92 files
   already formatted"; `mypy src/reconkit` "Success: no issues found in 62 source files".
+
+## 2026-11-18 (verification follow-up) Part 1 - faster `url_probe` and `--reprobe-urls` (D24)
+
+- **Owner request:** the probe's worst case is `max_urls x timeout_s / threads`, and the suggestion
+  was to replace the Python transport with the PD `httpx` binary (`-l file -threads 100`).
+- **Docs first:** docs/02 (`--reprobe-urls` row, the stage paragraph), docs/09 (bounds, off-switch
+  row, the transport decision), docs/04 (semantics unchanged), COMMANDS.md, MASTER_PLAN D24.
+- **What the real binary does (evidence in D24 and PIT-62):**
+  `~/.reconkit/bin/httpx -h` lists `-l`, `-threads`, `-silent`, `-json`, `-status-code`,
+  `-follow-redirects`, `-timeout`, `-no-stdin`, `-duc`, `-nfs`, `-H` - and **no `-insecure`**.
+  `httpx -l file -insecure` exits `flag provided but not defined: -insecure`. A three-URL file
+  (`http://testfire.net/`, `https://testfire.net/`, `https://does-not-exist.testfire.net/`) produced
+  exactly **two** JSON lines: both `https://testfire.net/` (certificate issued for
+  `www.testfire.net`) as `status_code: 200`, and **nothing** for the name that does not resolve -
+  no `tls_error`, no `error`, no `failed: true`. A local UA-logging server showed the default
+  request carries `Mozilla/5.0 (Windows NT 10.0; ...) Edge/18.18363`, while
+  `-H "User-Agent: reconkit/0.1"` sends `reconkit/0.1`.
+- **Speed, same 158 stored testfire URLs (both passes <= 200, no sakec.ac.in traffic):**
+  `PD httpx (threads 100): WALL=9.190335087 s`, 157 lines, `{200: 122, 302: 3, 404: 32}` - the 58
+  certificate-invalid URLs came back `200`. `Python httpx (threads 50): WALL=4.59 s`,
+  `{-2: 58, -1: 1, 200: 66, 302: 2, 400: 1, 404: 30}`. After the change (`threads 100`, one client):
+  **`WALL=3.44 s`** with the identical distribution. Decision: keep Python, disclose that the
+  1.33x win is modest and that the binary was slower here.
+- **Code:** `_url_probe_client(settings)` builds the one `AsyncClient` a pass uses;
+  `_probe_url_batch(client, batch, settings)` takes it (was: built a client per 200-URL batch);
+  `ScanOptions.reprobe_urls`; `Store.probe_candidates(target_id, *, limit, reprobe=False)` (renamed
+  from `unprobed_urls`, because with `reprobe=True` the old name would lie); the probe run records
+  `"reprobe": opts.reprobe_urls` in `params_json`. `threads` 50 -> 100 in `config.yaml` and
+  `UrlProbeConfig`.
+- **`--reprobe-urls` behaviour:** every stored URL is probed, the answer overwrites
+  `urls.status_code` in place, `max_urls` still truncates with the same warning, and
+  `--reprobe-urls --skip-url-probe` prints `warning: --reprobe-urls has no effect with
+  --skip-url-probe; continuing` instead of silently doing nothing.
+- **Not done:** no PD httpx subprocess, no `-insecure`-style verification switch (the `-2` value
+  would lose its meaning), no change to the per-request `timeout_s`. The stage deadline is Part 3.
+- **Tests:** 883 -> 888. New: `test_probe_candidates_reprobe_returns_answered_rows`,
+  `test_reprobe_urls_probes_urls_that_already_carry_an_answer`,
+  `test_url_probe_records_the_reprobe_flag_on_the_run`, `test_reprobe_urls_reaches_the_engine`,
+  `test_reprobe_urls_with_skip_url_probe_warns_instead_of_contradicting`. Changed: the three
+  `unprobed_urls` store tests became `probe_candidates`, and `DOCUMENTED_OPTIONS` in
+  `tests/test_cli.py` gained `--reprobe-urls`.
+- **Gate:** `888 passed`; `ruff check .` "All checks passed!" (the first version used an f-string
+  SQL and was fixed to two static statements rather than adding an S608 suppression);
+  `ruff format --check .` "92 files already formatted"; `mypy src/reconkit` clean.
 

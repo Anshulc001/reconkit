@@ -423,6 +423,9 @@ class ScanOptions:
     resolvers: Path | None = None
     # `--skip-url-probe` (D23): leave every `urls.status_code` at NULL.
     skip_url_probe: bool = False
+    # `--reprobe-urls`: probe every stored URL, not only the ones with no answer
+    # yet, so a URL that has since gone dead is found (D24).
+    reprobe_urls: bool = False
 
     @property
     def mode(self) -> str:
@@ -1714,7 +1717,9 @@ class Engine:
         goes through (docs/05 rule 2).
         """
         settings = self.config.url_probe
-        rows = self.store.unprobed_urls(target_id, limit=settings.max_urls + 1)
+        rows = self.store.probe_candidates(
+            target_id, limit=settings.max_urls + 1, reprobe=opts.reprobe_urls
+        )
         if len(rows) > settings.max_urls:
             rows = rows[: settings.max_urls]
             note = (
@@ -1733,6 +1738,7 @@ class Engine:
                     "tools": [],
                     "mock": opts.mock,
                     "active": opts.active,
+                    "reprobe": opts.reprobe_urls,
                     "no_keys": opts.no_keys,
                     "min_sources": opts.min_sources,
                 }
@@ -1772,9 +1778,12 @@ class Engine:
 
         self._progress(f"url_probe: probing {len(pending)} URL(s)")
         done = 0
-        for start in range(0, len(pending), settings.batch_size):
-            batch = pending[start : start + settings.batch_size]
-            answers = await self._probe_url_batch(batch, settings)
+        # One client for the whole pass: a fresh connection pool per batch paid
+        # its TLS setup again for every 200 URLs (D24).
+        async with self._url_probe_client(settings) as client:
+            for start in range(0, len(pending), settings.batch_size):
+                batch = pending[start : start + settings.batch_size]
+                answers = await self._probe_url_batch(client, batch, settings)
             with self.store.transaction():
                 for url_id, status in answers:
                     self.store.set_url_status(url_id, status)
@@ -1785,41 +1794,49 @@ class Engine:
         self.store.finish_scan_run(run_id, "completed", finished_at=self._now())
         return outcome, None
 
-    async def _probe_url_batch(
-        self, batch: list[dict[str, object]], settings: UrlProbeConfig
-    ) -> list[tuple[int, int]]:
-        """One GET per URL, bounded by `threads`; `UNREACHABLE` on any failure."""
-        semaphore = asyncio.Semaphore(settings.threads)
-        limits = httpx.Limits(
-            max_connections=settings.threads,
-            max_keepalive_connections=settings.threads,
-        )
-        async with httpx.AsyncClient(
-            limits=limits,
+    def _url_probe_client(self, settings: UrlProbeConfig) -> httpx.AsyncClient:
+        """The one HTTP client a `url_probe` pass uses (D24).
+
+        Default certificate verification stays on: a certificate that does not
+        match the URL is an answer about that URL, and it is recorded as
+        `UNTRUSTED` rather than hidden by turning verification off (which is
+        also what PD httpx does by default - see docs/09 section 5).
+        """
+        return httpx.AsyncClient(
+            limits=httpx.Limits(
+                max_connections=settings.threads,
+                max_keepalive_connections=settings.threads,
+            ),
             timeout=httpx.Timeout(float(settings.timeout_s)),
-            # Default certificate verification: a certificate that does not
-            # match the URL is an answer about that URL, and it is reported the
-            # same way any other failure is (`UNREACHABLE`).
             follow_redirects=False,
             headers={"User-Agent": USER_AGENT},
             transport=self._url_probe_transport,
-        ) as client:
+        )
 
-            async def one(url_id: int, url: str) -> tuple[int, int]:
-                async with semaphore:
-                    try:
-                        response = await client.get(url)
-                    except (httpx.HTTPError, OSError, ValueError) as exc:
-                        if _certificate_not_verified(exc):
-                            return (url_id, UNTRUSTED)
-                        return (url_id, UNREACHABLE)
-                    return (url_id, int(response.status_code))
+    async def _probe_url_batch(
+        self,
+        client: httpx.AsyncClient,
+        batch: list[dict[str, object]],
+        settings: UrlProbeConfig,
+    ) -> list[tuple[int, int]]:
+        """One GET per URL, bounded by `threads`; an answer code per URL."""
+        semaphore = asyncio.Semaphore(settings.threads)
 
-            return list(
-                await asyncio.gather(
-                    *(one(int(cast(int, row["id"])), str(row["url"])) for row in batch)
-                )
+        async def one(url_id: int, url: str) -> tuple[int, int]:
+            async with semaphore:
+                try:
+                    response = await client.get(url)
+                except (httpx.HTTPError, OSError, ValueError) as exc:
+                    if _certificate_not_verified(exc):
+                        return (url_id, UNTRUSTED)
+                    return (url_id, UNREACHABLE)
+                return (url_id, int(response.status_code))
+
+        return list(
+            await asyncio.gather(
+                *(one(int(cast(int, row["id"])), str(row["url"])) for row in batch)
             )
+        )
 
     @staticmethod
     def _url_host(url: str) -> str:

@@ -992,6 +992,39 @@ D25. 2026-11-18 - www dedup requires a known, equal status (verification gap 2).
     both-2xx branches already required real codes and are unchanged, as is the
     "different known IPs" note. No schema change, no state or confidence change.
 
+D24. 2026-11-18 - Faster `url_probe`, and `--reprobe-urls` (owner-requested batch).
+
+    Goal: the probe's worst case was `max_urls x timeout_s / threads` (5000 x 10
+    / 50 = 1000 s), and the owner asked to replace the Python httpx transport with
+    the PD `httpx` binary (`-l file -threads 100`) to cut that down.
+
+    Measured and rejected: PD httpx v1.12.0 has **no `-insecure` flag**
+    (`flag provided but not defined: -insecure`) and **skips TLS verification by
+    default** - `https://testfire.net/`, whose certificate is issued for
+    `www.testfire.net`, comes back `200`. It also emits **no JSON line at all**
+    for a URL that fails, so "answered with a bad certificate" and "never
+    answered" are the same absence, and its default User-Agent is a random
+    browser string (docs/05 rule 8 forbids that). On the same 158 stored URLs:
+    **PD httpx 9.19 s** and 58 certificate-invalid URLs reported as `200`;
+    **Python httpx 4.59 s** with `-2` for all 58. The premise that the binary is
+    faster did not hold on this box, and swapping transports would have silently
+    erased the `-2` semantics added in D23.
+
+    Kept: the Python transport. Changed: **one `AsyncClient` per pass** instead of
+    one per 200-URL batch (each batch paid its own pool/TLS setup), and `threads`
+    **50 -> 100**. Same 158 URLs: **3.44 s** with an unchanged answer
+    distribution (`-2 58, -1 1, 200 66, 302 2, 400 1, 404 30`). The pass is still
+    bounded by `max_urls` and per-request `timeout_s`; D26 adds the stage
+    deadline.
+
+    `--reprobe-urls` (new flag, owner-requested): probes **every** stored URL
+    again, not only the `NULL` ones, so a URL that has since gone dead is found.
+    `Store.probe_candidates(..., reprobe=True)` backs it, the answer overwrites
+    `urls.status_code` in place, `scan_runs.params_json` records
+    `"reprobe": true`, and the usual `max_urls` cut and warning still apply. With
+    `--skip-url-probe` the flag has no stage to act on, so the run prints a
+    warning and continues.
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

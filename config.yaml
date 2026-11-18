@@ -35,7 +35,7 @@ urls:
 url_probe:
   max_urls: 5000      # a bigger list is cut, and the run says so
   batch_size: 200     # URLs committed per transaction
-  threads: 50         # concurrent requests
+  threads: 100        # concurrent requests (raised from 50 on 2026-11-18, D24)
   timeout_s: 10       # per-request HTTP timeout
 
 confidence:

@@ -830,17 +830,24 @@ class Store:
         ).fetchone()
         return int(row["id"])
 
-    def unprobed_urls(self, target_id: int, *, limit: int) -> list[dict[str, object]]:
-        """The target's URLs that have no liveness answer yet (D23).
+    def probe_candidates(
+        self, target_id: int, *, limit: int, reprobe: bool = False
+    ) -> list[dict[str, object]]:
+        """The target's URLs the `url_probe` stage should send a request to (D23).
 
         `NULL` is the only "not probed" value: a URL that did not answer is
-        stored as `-1`, so it is never handed back here.
+        stored as `-1`, so by default it is never handed back here. `reprobe`
+        (`--reprobe-urls`, D24) returns every URL, including ones that already
+        carry an answer, so a live URL that has since gone dead can be found.
         """
-        rows = self._conn.execute(
-            "SELECT id, url FROM urls WHERE target_id = ? AND status_code IS NULL"
-            " ORDER BY id LIMIT ?",
-            (target_id, limit),
-        ).fetchall()
+        if reprobe:
+            sql = "SELECT id, url FROM urls WHERE target_id = ? ORDER BY id LIMIT ?"
+        else:
+            sql = (
+                "SELECT id, url FROM urls WHERE target_id = ? AND status_code IS NULL"
+                " ORDER BY id LIMIT ?"
+            )
+        rows = self._conn.execute(sql, (target_id, limit)).fetchall()
         return [{"id": int(row["id"]), "url": str(row["url"])} for row in rows]
 
     def set_url_status(self, url_id: int, status_code: int) -> None:
