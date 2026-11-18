@@ -43,7 +43,7 @@ MAX_ENUMERATION_S = 1800
 # D27: the cap scales with the size of the input list. Four seconds per host,
 # never below the 180 s `testfire.net` was tuned at, never past the stage
 # deadline. 43 hosts -> 180 s (unchanged), 100 -> 400 s, 500 -> 2000 s clipped
-# to `timeouts.urls` (1800 s).
+# to the stage budget (and, only when non-zero, to urls.urlfinder_max_s).
 ENUMERATION_PER_HOST_S = 4
 
 
@@ -56,11 +56,12 @@ def enumeration_cap_s(
 ) -> float:
     """The whole-enumeration cap for one run (D27, docs/09 section 4a2b).
 
-    `min(stage_budget, max(180, 4 * host_count))`, clipped to `ceiling` when one
-    is configured. A positive `override` (`urlfinder.max_enumeration_s`) replaces
-    the formula outright, for debugging and CI. Pure: the host count and the
-    stage budget are handed in by the engine, which is the only place that knows
-    them; the adapter never reads `config.yaml`.
+    `min(stage_budget, max(180, 4 * host_count))`, then additionally clipped by
+    `urls.urlfinder_max_s` only when that value is non-zero. A positive `override`
+    (`urlfinder.max_enumeration_s`) replaces the formula outright, for debugging
+    and CI. Pure: the host count and the stage budget are handed in by the
+    engine, which is the only place that knows them; the adapter never reads
+    `config.yaml`.
     """
     if override > 0:
         cap = float(override)
@@ -121,8 +122,13 @@ class UrlfinderAdapter(BinaryAdapter):
         ]
 
     def cap_suffix(self, ctx: RunContext) -> str:
-        """Name the input size on the `capped at ...s` detail line (D27)."""
-        return f" (hosts={len(self._hosts(ctx))})"
+        """Name the input size (and any saturation reason) on the capped line."""
+        hosts = len(self._hosts(ctx))
+        limits = ctx.limits.get(self.name)
+        note = (limits.note if limits is not None else "") or ""
+        if note:
+            return f" (hosts={hosts}; {note})"
+        return f" (hosts={hosts})"
 
     def stdin_text(self, ctx: RunContext) -> str | None:
         hosts = self._hosts(ctx)

@@ -1112,6 +1112,25 @@ D28. 2026-11-18 - url_probe batch close-out rulings (owner rulings, docs only).
        config files missing timeouts.url_probe.
 
 
+D29. 2026-11-18 - urlfinder cap: stage budget is the only ceiling by default; saturation is logged.
+
+    `urls.urlfinder_max_s` default 1800 -> 0. `0` already meant "no extra ceiling" in
+    `enumeration_cap_s` (ceiling is applied as `min(cap, ceiling)` only when > 0), so
+    defaults are behaviour-identical (stage budget 1800 is still the bound) but one knob
+    now controls the bound: raising `--phase-timeout` alone now raises the cap for large
+    targets. The misleading docstring/comment in `adapters/urlfinder.py` ("500 -> 2000 s
+    clipped to `timeouts.urls`") is corrected to state the final cap is
+    `min(stage_budget, max(180, 4*hosts))`, then clipped by `urls.urlfinder_max_s` only
+    when non-zero.
+
+    Saturation logging: `ToolLimits` gained `note: str = ""`. The engine fills it with
+    `formula {scaled}s clipped to {stage budget|urls.urlfinder_max_s} {n}s` when the
+    formula wanted more than the final cap; `urlfinder.cap_suffix` appends it inside the
+    parentheses, so a saturated run reads
+    `capped at 1800s (hosts=2000; formula 8000s clipped to stage budget 1800s); kept
+    partial output`. No note when nothing was clipped (or in override mode).
+
+
 =====================================================
 LATER BUG FIXES (any session)
 =====================================================

@@ -30,7 +30,7 @@ from reconkit.adapters import ADAPTERS
 from reconkit.adapters.base import USER_AGENT, BaseToolAdapter, running_as_root
 from reconkit.adapters.pyscan import default_resolve
 from reconkit.adapters.registry import ToolSpec, load_tools
-from reconkit.adapters.urlfinder import enumeration_cap_s
+from reconkit.adapters.urlfinder import ENUMERATION_PER_HOST_S, enumeration_cap_s
 from reconkit.config import AppConfig, UrlProbeConfig
 from reconkit.core.runner import validate_host, validate_target
 from reconkit.core.scope import load_scope, passive_warning, require_active, scope_present
@@ -1365,12 +1365,32 @@ class Engine:
         # D27: urlfinder's whole-enumeration cap scales with the size of the list
         # it was given (the stdin rows), inside the stage deadline that is already
         # in force. `max_enumeration_s` replaces the formula when non-zero.
+        urlfinder_host_count = len(tool_hosts.get("urlfinder", hosts))
+        urlfinder_override = float(self.config.urlfinder.max_enumeration_s)
+        urlfinder_ceiling = float(urls_config.urlfinder_max_s)
         urlfinder_cap = enumeration_cap_s(
-            len(tool_hosts.get("urlfinder", hosts)),
+            urlfinder_host_count,
             stage_budget,
-            override=float(self.config.urlfinder.max_enumeration_s),
-            ceiling=float(urls_config.urlfinder_max_s),
+            override=urlfinder_override,
+            ceiling=urlfinder_ceiling,
         )
+        # Saturation note for the capped detail line (D29): only when the formula
+        # wanted more than the final cap. Override mode replaces the formula, so
+        # it never produces a "formula ... clipped" note.
+        urlfinder_note = ""
+        scaled = ENUMERATION_PER_HOST_S * max(0, urlfinder_host_count)
+        if urlfinder_override <= 0 and scaled > urlfinder_cap:
+            if (
+                urlfinder_ceiling > 0
+                and urlfinder_cap == urlfinder_ceiling
+                and urlfinder_ceiling < min(float(stage_budget), float(max(180, scaled)))
+            ):
+                clip = f"urls.urlfinder_max_s {urlfinder_ceiling:g}s"
+            elif float(stage_budget) < float(max(180, scaled)):
+                clip = f"stage budget {stage_budget:g}s"
+            else:
+                clip = f"urls.urlfinder_max_s {urlfinder_ceiling:g}s"
+            urlfinder_note = f"formula {scaled}s clipped to {clip}"
         ctx = RunContext(
             target=target,
             hosts=hosts,
@@ -1391,6 +1411,7 @@ class Engine:
                     idle_s=float(urls_config.urlfinder_idle_s),
                     # The inactivity floor cannot outlive the cap itself.
                     min_s=min(float(urls_config.urlfinder_min_s), urlfinder_cap),
+                    note=urlfinder_note,
                 ),
                 "hakrawler": ToolLimits(max_s=float(urls_config.hakrawler_max_s)),
                 "subjs": ToolLimits(max_s=float(urls_config.subjs_max_s)),

@@ -142,6 +142,7 @@ class ToolLimits(BaseModel):
     max_s: float | None = None
     idle_s: float | None = None
     min_s: float | None = None
+    note: str = ""
 
 
 class RunContext(BaseModel):

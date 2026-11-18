@@ -1818,6 +1818,33 @@ def test_urlfinder_partial_output_line_includes_cap_and_host_count(
     assert [record.url for record in result.records] == ["https://testfire.net/login.jsp"]
 
 
+def test_urlfinder_cap_saturation_is_logged_with_the_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D29: a saturated run names why the formula was clipped."""
+    adapter = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder")
+    ctx = make_ctx(hosts=[f"h{index}.testfire.net" for index in range(2000)])
+    ctx.timeout = 1800.0
+    ctx.limits = {
+        "urlfinder": ToolLimits(
+            max_s=1800.0,
+            idle_s=60.0,
+            min_s=180.0,
+            note="formula 8000s clipped to stage budget 1800s",
+        )
+    }
+    fake_exec(
+        monkeypatch,
+        outcome(stdout="https://testfire.net/login.jsp\n", timed_out=True),
+    )
+    result = asyncio.run(adapter.run(ctx))
+
+    assert result.error == (
+        "capped at 1800s (hosts=2000; formula 8000s clipped to stage budget 1800s); "
+        "kept partial output"
+    )
+
+
 def test_urlfinder_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_exec(monkeypatch, outcome("[INF] Current Version: v0.0.3\n", stderr="some other tool\n"))
     status = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder").check_installed()

@@ -26,7 +26,7 @@ timeouts:
 # stdout, and never held past max. A capped run keeps the URLs it already found.
 urls:
   urlfinder_min_s: 180
-  urlfinder_max_s: 1800    # the stage-budget default
+  urlfinder_max_s: 0       # 0 = no extra ceiling; stage budget (timeouts.urls / --phase-timeout) is the only bound
   urlfinder_idle_s: 60
   hakrawler_max_s: 120
   subjs_max_s: 60

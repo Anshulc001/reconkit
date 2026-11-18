@@ -305,10 +305,16 @@ cap_s = min(stage_budget, max(180, 4 * host_count))
   `testfire.net` was tuned at; 100 hosts -> 400 s; 500 hosts -> 2000 s, clipped
   to the 1800 s stage budget.
 - `urlfinder.max_enumeration_s` (default `0`) replaces the formula with one fixed
-  value when it is non-zero, for debugging and CI. `urls.urlfinder_max_s` stays a
-  hard ceiling on top of either.
+  value when it is non-zero, for debugging and CI.
+- `urls.urlfinder_max_s` (default `0`) is an **optional second ceiling** applied
+  on top of the formula; `0` means "no extra ceiling", so by default the stage
+  budget (`timeouts.urls` / `--phase-timeout`) is the only bound. Raising
+  `--phase-timeout` alone now raises the cap for large targets.
 - The floor stays 180 s, a capped run keeps its partial stdout, and the detail
-  line names both numbers: `capped at 180s (hosts=43); kept partial output`.
+  line names the host count and, when the formula was clipped, why:
+  `capped at 180s (hosts=43); kept partial output` normally, and
+  `capped at 1800s (hosts=2000; formula 8000s clipped to stage budget 1800s); kept partial output`
+  when saturation occurs.
 
 `nikto` has the same shape: one process per host, each with its share of the
 remaining stage budget, and the tool's own `-maxtime <share>s` so it stops

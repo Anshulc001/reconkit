@@ -6579,3 +6579,49 @@ deliberately deferred to Part E, which fixes it together with the code.
 `docs/PROGRESS.md` push-state bullet is now count-free: "`reconkit/main` is at `a49e4b5` ...; local `main` is ahead
 of it; nothing has been pushed since." No fixed count to rot.
 
+
+## 2026-11-18 (batch 2026-11-18) Part E - D27 double-ceiling cleanup (D29)
+
+### Raw, pasted first
+
+`enumeration_cap_s` calls (after the change):
+
+```
+enumeration_cap_s(2000, 3600, ceiling=0)    = 3600.0
+enumeration_cap_s(2000, 3600, ceiling=1800) = 1800.0
+enumeration_cap_s(43, 1800, ceiling=0)      = 180.0
+enumeration_cap_s(500, 1800, ceiling=0)    = 1800.0
+enumeration_cap_s(2000, 1800, ceiling=0)   = 1800.0
+```
+
+`grep -n 'urlfinder_max_s' config.yaml src/reconkit/config.py` before/after:
+
+```
+# before
+config.yaml:29:  urlfinder_max_s: 1800    # the stage-budget default
+src/reconkit/config.py:64:    urlfinder_max_s: int = Field(default=1800, gt=0)
+
+# after
+config.yaml:29:  urlfinder_max_s: 0       # 0 = no extra ceiling; stage budget (timeouts.urls / --phase-timeout) is the only bound
+src/reconkit/config.py:64:    urlfinder_max_s: int = Field(default=0, ge=0)
+```
+
+Saturation log line (fixture run, 2000 hosts, stage budget 1800, capped): the adapter-level test pins
+`capped at 1800s (hosts=2000; formula 8000s clipped to stage budget 1800s); kept partial output`.
+
+### Changes
+
+- `src/reconkit/config.py`: `UrlsConfig.urlfinder_max_s` default `1800` -> `0`, `gt=0` -> `ge=0`.
+- `config.yaml`: `urlfinder_max_s: 1800` -> `0` with updated comment.
+- `src/reconkit/models.py`: `ToolLimits` gained `note: str = ""`.
+- `src/reconkit/engine.py`: imports `ENUMERATION_PER_HOST_S`; computes `urlfinder_note` when the formula wanted more than the final cap; passes `note=` into the urlfinder `ToolLimits`.
+- `src/reconkit/adapters/urlfinder.py`: corrected the comment and `enumeration_cap_s` docstring; `cap_suffix` appends `; {note}` when present.
+- `docs/09_TOOL_CONTRACTS.md`: D27 section updated (default 0 = no extra ceiling; saturation line example).
+- `docs/MASTER_PLAN.md`: D29 block; `docs/PROGRESS.md`: D29 deviation + status.
+- `tests/test_config.py`: `test_the_urls_runtime_bounds_load_and_default` updated to `== 0`.
+- `tests/test_binary_adapters.py`: added `test_urlfinder_cap_saturation_is_logged_with_the_reason`.
+
+### Stop rule
+
+No ripple: `ToolLimits` is constructed in a handful of places and the new field has a default, so no equality-pinning test broke. No stop triggered.
+

@@ -24,7 +24,7 @@ def test_the_urls_runtime_bounds_load_and_default(tmp_path: Path) -> None:
     """2026-11-18 (2.2/2.3): the per-tool caps live in config.yaml `urls:`."""
     config = load_config(CONFIG)
     assert config.urls.urlfinder_min_s == 180
-    assert config.urls.urlfinder_max_s == 1800
+    assert config.urls.urlfinder_max_s == 0
     assert config.urls.urlfinder_idle_s == 60
     assert config.urls.hakrawler_max_s == 120
     assert config.urls.subjs_max_s == 60

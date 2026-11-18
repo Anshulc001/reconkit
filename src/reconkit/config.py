@@ -61,7 +61,7 @@ class UrlsConfig(_StrictModel):
     """
 
     urlfinder_min_s: int = Field(default=180, gt=0)
-    urlfinder_max_s: int = Field(default=1800, gt=0)
+    urlfinder_max_s: int = Field(default=0, ge=0)
     urlfinder_idle_s: int = Field(default=60, gt=0)
     hakrawler_max_s: int = Field(default=120, gt=0)
     subjs_max_s: int = Field(default=60, gt=0)
