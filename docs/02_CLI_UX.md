@@ -423,7 +423,7 @@ The `hosts` objects always carry `state`, `confidence` and `sources`; the top-le
 
 `completion` is always present (section 6): `status` is `complete` or `complete_with_gaps`, and `gaps` lists one object per incomplete stage: either a requested stage that had no runnable tool, `{"stage": "urls", "reason": "no adapter yet (phase 3)"}`, or a stage where an executed tool hit an external-service problem, `{"stage": "subs", "reason": "otx: rate limited (HTTP 429)"}`. A consumer that only cares whether the run was usable reads `status`; one that wants to explain the shortfall reads `gaps`.
 
-The `summary` object also carries `tools_gap`, the number of executed tools with the `gap` status, beside `tools_ok`/`tools_failed`/`tools_skipped`/`tools_timeout`.
+The `summary` object also carries `tools_gap`, the number of executed tools with the `gap` status, beside `tools_ok`/`tools_failed`/`tools_skipped`/`tools_timeout`. `tools_timeout` counts the tools the phase deadline killed (`--phase-timeout`, D38), which is why it can be non-zero even when `records` are empty.
 
 With a filter flag (`--only-alive`, `--only-states`, `--status-codes`) the
 `hosts` array is already filtered and a top-level `filter` object is added:

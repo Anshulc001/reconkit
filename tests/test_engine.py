@@ -680,7 +680,14 @@ async def test_phase_timeout_records_a_timeout_row(tmp_path: Path) -> None:
         "example.com",
         ScanOptions(stages=(Stage.SUBS,), mock=True, phase_timeout=0.02),
     )
-    assert summary.stages[0].results == []
+    # The stage's result list now carries the timeout too, so the summary line
+    # and `--json` cannot say "0 timeout" while the run exits 5 (Part M).
+    assert [(result.tool, result.status) for result in summary.stages[0].results] == [
+        ("slow", ToolStatus.TIMEOUT)
+    ]
+    # Every selected tool timed out, so this is "nothing usable" (4), not 5 -
+    # the documented all-failed boundary (D34).
+    assert summary.exit_code is ExitCode.NO_TOOL
     row = engine.store._conn.execute("SELECT status, error FROM tool_runs").fetchone()
     assert (row["status"], row["error"]) == ("timeout", "phase timeout")
 

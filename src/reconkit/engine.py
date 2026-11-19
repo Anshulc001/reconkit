@@ -872,6 +872,17 @@ class Engine:
                     if spec.name not in done:
                         self._record(run_id, spec.name, ToolStatus.TIMEOUT, error="phase timeout")
                         done.add(spec.name)
+                        # The DB row alone is not enough: the summary counters and
+                        # `--json` are built from `results`, so a tool killed by
+                        # the phase deadline used to leave `0 timeout` on screen
+                        # while the run exited 5 (real testfire.net run, Part M).
+                        results.append(
+                            ToolResult(
+                                tool=spec.name,
+                                status=ToolStatus.TIMEOUT,
+                                error="phase timeout",
+                            )
+                        )
             except asyncio.CancelledError:
                 self.store.finish_scan_run(run_id, "interrupted", finished_at=self._now())
                 raise

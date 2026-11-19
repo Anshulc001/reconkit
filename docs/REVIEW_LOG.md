@@ -7054,3 +7054,86 @@ The engine executes adapters through `asyncio.to_thread`, so a Ctrl+C lands in t
 registry, which is outside this ruling. Recorded in PROGRESS D37 and "Open risks".
 
 Suite 925 -> 928.
+
+## 2026-11-18 (batch 2026-11-18b) Part M finding - the phase timeout was invisible in the summary (D38)
+
+Part M's first real run (`reconkit run -d testfire.net --active --phase-timeout 120 --no-color`) printed:
+
+```
+37 hosts: 8 ALIVE, 0 DNS_ONLY, 0 SHUT_DOWN, 25 DEAD, 4 UNKNOWN | tools: 23 ok, 2
+gap, 0 failed, 3 skipped, 0 timeout
+```
+
+yet exited **5** and the DB said otherwise:
+
+```
+$ sqlite3 /tmp/mscan/recon.db "SELECT tool,status,error FROM tool_runs WHERE status!='ok'"
+gau          | timeout | phase timeout
+gospider     | timeout | phase timeout
+hakrawler    | timeout | phase timeout
+katana       | timeout | phase timeout
+urlfinder    | timeout | phase timeout
+```
+
+Cause: `Engine._run` writes the timeout row with `_record()` but kept no `ToolResult`, and every counter (`ui` summary,
+`--json` `summary.tools_timeout`) is built from `summary.results`. Fix: the timeout branch appends
+`ToolResult(tool=..., status=TIMEOUT, error="phase timeout")` for each killed tool, so the row, the counters, the JSON
+and the exit code now describe the same run. Exit semantics unchanged (a mixed run stays 5; a run where every tool
+timed out stays 4 by the documented boundary).
+
+Test: `tests/test_engine.py::test_phase_timeout_records_a_timeout_row` now asserts the result list carries the timeout
+and that the all-timed-out case is `ExitCode.NO_TOOL`.
+
+Suite stays 928 (one test strengthened, none added).
+
+## 2026-11-18 (batch 2026-11-18b) Part M - one real testfire.net active scan
+
+Bounded command (repo root, venv active):
+
+```bash
+reconkit run -d testfire.net --active --phase-timeout 120 --no-color --config /tmp/mscan/config.yaml
+```
+
+The temp config only changed `db_path=/tmp/mscan/recon.db`, `workspace_dir=/tmp/mscan/workspaces` and
+`url_probe.max_urls=20`; `--full` was not used, so `shots` stayed out (D19).
+
+Raw tail:
+
+```
+37 hosts: 8 ALIVE, 0 DNS_ONLY, 0 SHUT_DOWN, 25 DEAD, 4 UNKNOWN | tools: 23 ok, 2
+gap, 0 failed, 3 skipped, 0 timeout
+warning: url_probe: probed the first 20 URL(s) only; re-run to probe the rest
+active scan completed with gaps - 1 stage(s) incomplete
+  subs: hackertarget: free quota exceeded, otx: rate limited (HTTP 429)
+report: results/testfire.net/20261118T234015Z/report.txt and .../report.json
+EXIT=5
+```
+
+`scan_runs` rows (all `scope_mode='enforced'`):
+
+```
+1 subs      completed 23:33:59Z -> 23:34:24Z
+2 dns       completed 23:34:24Z -> 23:34:35Z
+3 live      completed 23:34:35Z -> 23:34:42Z
+4 tech      completed 23:34:43Z -> 23:36:32Z
+5 urls      partial   23:36:32Z -> 23:39:37Z
+6 url_probe completed 23:39:38Z -> 23:39:42Z
+```
+
+Non-ok `tool_runs`: `hackertarget gap` (free quota exceeded), `otx gap` (HTTP 429), `amass skipped` (not installed),
+`chaos skipped` (requires PDCP_API_KEY), `github_subdomains skipped` (requires GITHUB_TOKEN), and `gau`, `gospider`,
+`hakrawler`, `katana`, `urlfinder` all `timeout` / `phase timeout`.
+
+### Finding (fixed, D38)
+
+Exit 5 was correct - five tools were killed by the `urls` 120 s deadline - but the printed line said `0 timeout`,
+because the timeout handler wrote `tool_runs` rows without adding anything to `StageOutcome.results`, and both the
+printed counters and `--json` read `results`. The handler now appends a `ToolStatus.TIMEOUT` result per unfinished tool.
+`tests/test_engine.py::test_phase_timeout_records_a_timeout_row` asserts the result list and that an all-timed-out
+stage is `NO_TOOL` (4), not 5. Suite stays 928 (one existing test extended).
+
+### Observations for the owner
+
+- Real-world `urls` tools are the slow stage: `unfurl` produced 74 URLs while katana/gospider/hakrawler/urlfinder were
+  still working at 120 s. The default stage timeout, not the tool set, decides whether `urls` completes.
+- Both free subdomain APIs (`hackertarget`, `otx`) refused this run; `subs` still completed on crtsh/subfinder.
