@@ -912,6 +912,33 @@ class Store:
                 break
         return ProbeCandidates(rows=found, skipped_unreachable=skipped)
 
+    def url_only_hosts(self, target_id: int) -> list[str]:
+        """Hostnames this target's URLs name that have no `subdomains` row (D58).
+
+        A `urls` pass stores URLs, never hosts, so an archive can name a host no
+        subdomain source reported and nothing downstream ever sees it. The
+        comparison is the same `_url_host()` parser the D55 filter uses, so a
+        URL with a port or no scheme is read identically in both places; a URL
+        whose host cannot be parsed contributes nothing. Case is normalised, so
+        `WWW.Example.com` and `www.example.com` are one candidate. Returns sorted
+        names and never touches the network or another table.
+        """
+        rows = self._conn.execute(
+            "SELECT url FROM urls WHERE target_id = ?", (target_id,)
+        ).fetchall()
+        known = {
+            str(row["fqdn"])
+            for row in self._conn.execute(
+                "SELECT fqdn FROM subdomains WHERE target_id = ?", (target_id,)
+            )
+        }
+        unknown: set[str] = set()
+        for row in rows:
+            host = _url_host(str(row["url"]))
+            if host and host not in known:
+                unknown.add(host)
+        return sorted(unknown)
+
     def _unreachable_fqdns(self, target_id: int) -> set[str]:
         """Hosts the latest state pass recorded as `DEAD` or `DNS_ONLY` (D54, D55)."""
         rows = self._conn.execute(

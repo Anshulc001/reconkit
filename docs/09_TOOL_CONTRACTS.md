@@ -1077,6 +1077,41 @@ only when some row has a note, so an ordinary table keeps its six columns), the
 `N hosts (M unique after www-dedup)` summary and the `duplicate_of` field plus
 `www_dedup` block in `--json` (docs/02 section 5).
 
+### URL-derived hosts: one bounded resolve after `urls` (D58, 2026-11-19)
+
+The `urls` stage stores URLs, not hosts. A name that only an archive reported -
+no `subs` tool and no `dns` answer - therefore had no `subdomains` row, no state
+and no line in `report.json`, and in passive mode nothing ever read its URL back
+(measured 2026-11-19: 3 such hosts, 43 URLs, on `slice.bank.in`). After `urls`
+completes, the engine runs exactly one extra pass for the hosts in that run's
+URL rows that have no `subdomains` row (`Store.url_only_hosts()`):
+
+| Mode | What the pass does | Log line |
+|---|---|---|
+| passive | `dnspython` resolves the hosts; `_persist_dns()` applies the normal state rule | `urls: N host(s) found only in URLs; resolved` |
+| active / full | the same resolve, then `pyprobe` probes the in-scope ones through `_persist_live()` | `urls: N host(s) found only in URLs; resolved, M now ALIVE` |
+
+Rules that keep it bounded and honest:
+
+- **One pass, no iteration.** Candidates are read once before any DNS work and
+  are never re-extracted, so a host that shows up during the pass cannot start a
+  second round. The pass is not a stage: no `scan_runs` row, no `tool_runs` row,
+  and the hosts it writes record `first_seen_run` as the `urls` run that named
+  them.
+- **Passive does not contact.** Resolution is DNS, which the `dns` stage already
+  does in passive; the live probe runs only when `--active`/`--full` is set.
+- **The gate applies.** The active live check calls `require_active()` for the
+  new hosts first; a dropped host is reported and never probed.
+- **No new config key.** The pass runs under a stage budget - `urls` for passive,
+  `url_probe` for active/full - and a budget that fires leaves rows untouched
+  and says so; it never fails the run.
+- **Origin label.** Rows keep `provenance = 'dns'` and carry one
+  `subdomain_sources` entry whose tool is the sentinel `url-derived` (not a
+  `tools.yaml` tool), so `report.json` sources show where the name came from.
+- **Mock.** Both steps use the existing adapters in mock form: fixtures, no
+  network, no subprocess. A missing fixture means no records and the found count
+  is still reported.
+
 ### URL liveness probe (D23, 2026-11-18)
 
 The `urls` stage records what the archives and the crawler returned; it never

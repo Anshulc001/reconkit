@@ -73,6 +73,9 @@ from reconkit.models import (
 #                 (testfire.net is one). Verification is never disabled.
 UNREACHABLE = -1
 UNTRUSTED = -2
+# D58: the `subdomain_sources` sentinel for a host first named by the URL pool.
+# It is a source label, not a tool in `tools.yaml`, and it never runs on its own.
+URL_DERIVED = "url-derived"
 
 STAGE_ORDER: tuple[Stage, ...] = (
     Stage.SUBS,
@@ -1022,6 +1025,13 @@ class Engine:
             )
             if not results:
                 self._note_empty_stage(stage, skipped)
+            # D58: one bounded pass for names only the URL pool found. It runs
+            # after `urls` and before `url_probe` (the next stage in
+            # STAGE_ORDER), so an active run's probe sees a real host state.
+            if stage is Stage.URLS:
+                await self._second_resolve(
+                    target, target_id, opts, run_id, discovered, alive, workspace.directory
+                )
 
         summary.gaps = self._completion_gaps(summary)
         summary.exit_code = self._exit_code(
@@ -1954,6 +1964,168 @@ class Engine:
             if len(tools) < opts.min_sources:
                 continue
             self.store.upsert_url(target_id, url, run_id=run_id, source_count=len(tools))
+
+    # ------------------------------------------------------- D58 second resolve
+
+    async def _second_resolve(
+        self,
+        target: str,
+        target_id: int,
+        opts: ScanOptions,
+        run_id: int,
+        discovered: set[str],
+        alive: set[str],
+        workspace: Path,
+    ) -> None:
+        """One bounded pass for hostnames only the URL pool revealed (D58).
+
+        A `urls` pass writes URLs, never hosts: a name an archive mentions but no
+        subdomain source reports has no `subdomains` row, no state and no report
+        line (measured 2026-11-19: 3 hosts carrying 43 URLs on slice.bank.in).
+        This runs once, immediately after `urls`, and never re-extracts - the
+        candidates come from the URL rows already stored, so its own output can
+        never feed a second round.
+
+        Passive resolves and stops: DNS queries already happen in a passive
+        run's `dns` stage, while HTTP contact does not. Active/full additionally
+        probes the new hosts, so `url_probe` finds their URLs on a host that has
+        a real state instead of one nothing ever resolved.
+
+        Bounds: no new config key. The pass inherits a stage budget - `urls` in
+        passive, `url_probe` in active/full, because that is the stage whose
+        input the new state exists to serve. A pass that hits it leaves the rows
+        as they were and says so; it never fails the run.
+        """
+        # The store is thread-bound (docs/03 section 11), so this read stays on
+        # the loop like every other query, not in a worker thread.
+        candidates = self._clean_hosts(self.store.url_only_hosts(target_id), target)
+        hosts = list(dict.fromkeys(candidates))
+        if not hosts:
+            self._progress("urls: 0 host(s) found only in URLs; resolved")
+            return
+        live = opts.active
+        budget = self._stage_timeout(Stage.URL_PROBE if live else Stage.URLS)
+        try:
+            now_alive = await asyncio.wait_for(
+                self._second_resolve_pass(
+                    target,
+                    target_id,
+                    opts,
+                    run_id,
+                    hosts,
+                    discovered,
+                    alive,
+                    workspace,
+                    live=live,
+                    budget=budget,
+                ),
+                timeout=budget,
+            )
+        except TimeoutError:
+            self._progress(
+                f"urls: second resolve timed out after {budget:g}s; "
+                f"{len(hosts)} host(s) left as they were"
+            )
+            return
+        if live:
+            self._progress(
+                f"urls: {len(hosts)} host(s) found only in URLs; resolved, {now_alive} now ALIVE"
+            )
+        else:
+            self._progress(f"urls: {len(hosts)} host(s) found only in URLs; resolved")
+
+    async def _second_resolve_pass(
+        self,
+        target: str,
+        target_id: int,
+        opts: ScanOptions,
+        run_id: int,
+        hosts: list[str],
+        discovered: set[str],
+        alive: set[str],
+        workspace: Path,
+        *,
+        live: bool,
+        budget: float,
+    ) -> int:
+        """Resolve the candidates, label where they came from, optionally probe.
+
+        Both steps call the adapters the `dns` and `live` stages already use
+        (`dnspython`, `pyprobe`), through their normal `run(ctx)` - so `--mock`
+        reads fixtures exactly like every other stage and no resolver is
+        duplicated here. Missing adapters (a test that injects none) mean the
+        pass does nothing rather than crash: 0 models available, 0 writes.
+        """
+        ctx = RunContext(
+            target=target,
+            hosts=hosts,
+            ports=list(opts.ports),
+            timeout=max(1.0, budget),
+            workspace=workspace,
+            mock=opts.mock,
+            headers=dict(opts.headers),
+            user_agent=opts.user_agent,
+            results_dir=Path(self.config.results_dir),
+        )
+        dns_results = await self._second_resolve_dns(ctx)
+        self._label_url_derived(target_id, run_id, hosts)
+        with self.store.transaction():
+            self._persist_dns(target_id, run_id, dns_results, target, defer=live)
+        discovered.update(hosts)
+        if not live:
+            return 0
+        # Active contact needs the same gate as every other active stage, and
+        # only for the hosts this pass would touch.
+        allowed, _dropped, scope_error = await asyncio.to_thread(
+            self._active_hosts, target, hosts, opts
+        )
+        if scope_error is not None:
+            self._progress(
+                f"urls: live check of URL-only hosts refused by the scope gate ({scope_error})"
+            )
+            return 0
+        if not allowed:
+            return 0
+        live_results = await self._second_resolve_live(ctx, allowed)
+        with self.store.transaction():
+            self._persist_live(
+                target_id, run_id, live_results, dns_results, target, allowed, opts, alive
+            )
+        self._update_discovered(Stage.LIVE, live_results, target, discovered, alive)
+        return sum(1 for host in allowed if host in alive)
+
+    async def _second_resolve_dns(self, ctx: RunContext) -> list[ToolResult]:
+        """The `dns` stage's own Python adapter, on this pass's ctx only."""
+        adapter = self.adapters.get("dnspython")
+        if adapter is None:
+            return []
+        return [await adapter().run(ctx)]
+
+    async def _second_resolve_live(self, ctx: RunContext, hosts: list[str]) -> list[ToolResult]:
+        """The `live` stage's Python probe, one adapter rather than the pool.
+
+        One binary-free probe keeps the pass bounded (the pool would need four
+        `tool_runs` rows under the `urls` run id) while `_persist_live` applies
+        the same ALIVE/DNS_ONLY/UNKNOWN state rule the stage applies.
+        """
+        adapter = self.adapters.get("pyprobe")
+        if adapter is None:
+            return []
+        probe_ctx = ctx.model_copy(update={"hosts": list(hosts)})
+        return [await adapter().run(probe_ctx)]
+
+    def _label_url_derived(self, target_id: int, run_id: int, hosts: list[str]) -> None:
+        """Create the missing rows and name the URL pool as what found them.
+
+        `provenance` stays `dns` - a DNS pass did create the row - and the one
+        `subdomain_sources` entry carries the sentinel `url-derived`, so the
+        report's sources column says where the name came from instead of
+        showing a host with no origin. `source_count` follows the same rule as
+        every other row: one distinct source in this run (docs/04 section 5).
+        """
+        for host in hosts:
+            sub_id = self.store.upsert_subdomain(target_id, host, run_id=run_id, source_count=1)
+            self.store.add_subdomain_source(sub_id, run_id, URL_DERIVED)
 
     def _dns_facts(
         self, results: list[ToolResult], target: str

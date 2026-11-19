@@ -4,6 +4,15 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-19, D58): **a host only the URL pool names now gets a row, a state and a report line.** One bounded
+  pass runs right after `urls`: `Store.url_only_hosts()` (distinct URL hostnames with no `subdomains` row), the `dns`
+  stage's `dnspython` adapter resolves them through the normal `_persist_dns()` state rule, and in `active`/`full` the
+  `live` stage's `pyprobe` probes them through `_persist_live()` after `require_active()` drops any out-of-scope name.
+  Passive resolves and stops - DNS already happens in passive, HTTP does not. Bounded: candidates are read once, never
+  re-extracted, no new config key, and the pass runs under a stage budget (`urls` passive, `url_probe` active) that
+  never fails the run. Rows keep `provenance = 'dns'` plus one `subdomain_sources` sentinel `url-derived`. Suite
+  974 -> 978, `ruff`/`format`/`mypy` clean, `scope.yaml` byte-identical, no scan run. On `slice.bank.in` the count is the
+  3 hosts / 43 URLs the analysis found. See D58 and the D58 entry in REVIEW_LOG.
 - Analysis (2026-11-19, no code): **a passive run stores URLs and never reads them back** - nothing in-run consumes them, so the 3 hosts that only the `slice.bank.in` archives revealed (`nb.slice.bank.in` 40 URLs, `api.slice.bank.in` 2, `assets.slice.bank.in` 1) have no row, no state and no report line; `url_probe` is its own stage after `urls`, absent from `MODE_STAGES["passive"]`. Liveness of a prepared hostname list works today via `reconkit live -l hosts.txt --active --scope ...` (each line is its own target; URLs are rejected by `validate_target`), while `export`, `db list` and `db export` are Part-8 stubs. Four stage-order options and a recommendation (Option 4 now, Option 2 as a separate dated decision) are in REVIEW_LOG and await an owner ruling; no flag, order or code changed.
 
 - Status (2026-11-19, D57): **a timeout from an external API is a gap, so one slow third party no longer exits 5.**
@@ -289,6 +298,28 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   `subs: quiet killed 0 item(s)`, Tools row `quiet | subs | killed | 0 | 0.6s | 0s ago | killed after 0.3s idle at
   stage 0.3s, 0 partial`, summary `..., 1 killed, 0 timeout`, the `⚠ 1 tool(s) stopped early — partial output kept`
   block, **exit 0**. A run where every tool is stopped is still a completed run; only the budget (`timeout`) exits 5.
+
+- **D58 (2026-11-19): a bounded second resolve after `urls` gives URL-only hosts a row (owner's Option 2).** The
+  prior analysis showed a passive run stores URLs and never reads them back, leaving 3 hosts and 43 URLs on
+  `slice.bank.in` with no row, no state and no report line because `_persist_urls()` writes only `urls`. One pass now
+  runs immediately after the `urls` stage and before `url_probe`: `Store.url_only_hosts()` returns the distinct
+  hostnames in this target's URL rows that have no `subdomains` row, the `dns` stage's own `dnspython` adapter resolves
+  them and `_persist_dns()` applies the normal state rule (including the two-NXDOMAIN rule, so one miss never becomes
+  DEAD); in `active`/`full` the `live` stage's `pyprobe` adapter probes them and `_persist_live()` sets the state, after
+  `require_active()` has filtered the list, so an out-of-scope URL-only host is reported and never contacted. Passive
+  resolves and stops: DNS queries already happen in passive's `dns` stage, while HTTP contact does not. Bounded by
+  construction - the candidate list is read once before any DNS work and never re-extracted, so the pass's own output
+  cannot start a second round - and by budget: no new config key, the pass inherits `urls`' budget in passive and
+  `url_probe`'s in active/full, and a budget that fires leaves the rows as they were without failing the run. Not a
+  stage: no `scan_runs` row, no `tool_runs` row, and `first_seen_run` is the `urls` run that named the host. Origin:
+  the row keeps `provenance = 'dns'` (a DNS pass created it) and carries one `subdomain_sources` entry whose tool is the
+  sentinel `url-derived`, which is the label the report shows; docs/04 section 5 records that sentinel and its
+  source_count of 1, and `diff_new()` still filters on `provenance = 'subs'`, so these rows never appear as "new" in a
+  diff. `--mock` runs both adapters in their mock form (fixtures, no network, no subprocess). Docs first in the same
+  batch: docs/03 stage section, docs/09 section 5, docs/04 section 5. Suite 974 -> 978, four tests
+  (`test_second_resolve_adds_url_only_hosts_in_passive`, `..._live_checks_new_hosts_in_active`,
+  `..._does_not_duplicate_existing_hosts`, `..._is_one_pass`). No scan re-run; the slice.bank.in numbers are the
+  analysis counts, not a new measurement.
 
 - **D57 (2026-11-19): a timeout from an external API is a gap, so one slow third party stops exiting 5.** The final
   run's exit 5 came from exactly one row, `crtsh: request timed out` after 30.71 s, while the other 25 executed tools

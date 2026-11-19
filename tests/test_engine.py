@@ -4427,3 +4427,184 @@ async def test_heartbeat_stops_when_the_tool_exits(
     )
     await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), active=True, mock=True))
     assert [line for line in lines if "running (" in line] == []
+
+
+# ------------------------------------------------- D58 bounded second resolve
+
+
+def _seed_known_host(engine: Engine, fqdn: str) -> int:
+    """Give the run a host that a discovery pass already found."""
+    target_id = engine.store.create_target("example.com")
+    run_id = engine.store.create_scan_run(target_id, "subs")
+    engine.store.upsert_subdomain(target_id, fqdn, run_id=run_id, provenance="subs")
+    engine.store.finish_scan_run(run_id, "completed")
+    return target_id
+
+
+def _url_records(*hosts: str) -> list[Record]:
+    return [UrlRecord(url=f"https://{host}/page", source="fake") for host in hosts]
+
+
+async def test_second_resolve_adds_url_only_hosts_in_passive(tmp_path: Path) -> None:
+    """D58: a name only the URL pool found gets a row, stateless no longer."""
+    rec = Recorder()
+    lines: list[str] = []
+    specs = {"urls-fake": tool("urls-fake", Stage.URLS)}
+    adapters = {
+        "urls-fake": adapter(
+            "urls-fake",
+            Stage.URLS,
+            rec,
+            records=_url_records("known.example.com", "new1.example.com", "new2.example.com"),
+        ),
+        "dnspython": adapter(
+            "dnspython",
+            Stage.DNS,
+            rec,
+            records=[sub("new1.example.com"), sub("new2.example.com")],
+        ),
+    }
+    engine = make_engine(tmp_path, specs, adapters, progress=lines.append)
+    _seed_known_host(engine, "known.example.com")
+
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), mock=True))
+
+    # The URL pool is the only thing that ran as a stage, then one DNS adapter.
+    assert rec.names == ["urls-fake", "dnspython"]
+    assert rec.hosts[-1] == ["new1.example.com", "new2.example.com"]
+    assert "urls: 2 host(s) found only in URLs; resolved" in lines
+    assert summary.exit_code is ExitCode.SUCCESS
+    rows = {
+        str(row["fqdn"]): row
+        for row in engine.store._conn.execute(
+            "SELECT fqdn, state, source_count, provenance FROM subdomains"
+        )
+    }
+    assert set(rows) == {"known.example.com", "new1.example.com", "new2.example.com"}
+    for host in ("new1.example.com", "new2.example.com"):
+        assert rows[host]["state"] == HostState.DNS_ONLY.value
+        # D58: provenance stays `dns` (a DNS pass made the row) and one source
+        # names the URL pool, so the report shows where the name came from.
+        assert rows[host]["provenance"] == "dns"
+        assert rows[host]["source_count"] == 1
+        sources = [
+            str(row["tool"])
+            for row in engine.store._conn.execute(
+                "SELECT x.tool FROM subdomain_sources x"
+                " JOIN subdomains s ON s.id = x.subdomain_id WHERE s.fqdn = ?",
+                (host,),
+            )
+        ]
+        assert sources == ["url-derived"]
+
+
+async def test_second_resolve_live_checks_new_hosts_in_active(tmp_path: Path) -> None:
+    """D58: active/full probes the new hosts, so `url_probe` sees a state."""
+    rec = Recorder()
+    lines: list[str] = []
+    specs = {"urls-fake": tool("urls-fake", Stage.URLS)}
+    adapters = {
+        "urls-fake": adapter(
+            "urls-fake",
+            Stage.URLS,
+            rec,
+            records=_url_records("new1.example.com", "new2.example.com"),
+        ),
+        "dnspython": adapter(
+            "dnspython",
+            Stage.DNS,
+            rec,
+            records=[sub("new1.example.com"), sub("new2.example.com")],
+        ),
+        "pyprobe": adapter(
+            "pyprobe",
+            Stage.LIVE,
+            rec,
+            records=[alive("new1.example.com"), alive("new2.example.com")],
+        ),
+    }
+    engine = make_engine(tmp_path, specs, adapters, progress=lines.append)
+
+    await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), active=True, mock=True))
+
+    assert rec.names == ["urls-fake", "dnspython", "pyprobe"]
+    assert rec.hosts[-1] == ["new1.example.com", "new2.example.com"]
+    assert "urls: 2 host(s) found only in URLs; resolved, 2 now ALIVE" in lines
+    states = {
+        str(row["fqdn"]): str(row["state"])
+        for row in engine.store._conn.execute("SELECT fqdn, state FROM subdomains")
+    }
+    assert states == {"new1.example.com": "ALIVE", "new2.example.com": "ALIVE"}
+
+
+async def test_second_resolve_does_not_duplicate_existing_hosts(tmp_path: Path) -> None:
+    """D58: every URL host already known means no resolve and no new row."""
+    rec = Recorder()
+    lines: list[str] = []
+    specs = {"urls-fake": tool("urls-fake", Stage.URLS)}
+    adapters = {
+        "urls-fake": adapter(
+            "urls-fake", Stage.URLS, rec, records=_url_records("known.example.com")
+        ),
+        "dnspython": adapter("dnspython", Stage.DNS, rec, records=[]),
+        "pyprobe": adapter("pyprobe", Stage.LIVE, rec, records=[]),
+    }
+    engine = make_engine(tmp_path, specs, adapters, progress=lines.append, scope_text=SCOPE)
+    _seed_known_host(engine, "known.example.com")
+
+    await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), mock=True))
+
+    assert rec.names == ["urls-fake"]
+    assert "urls: 0 host(s) found only in URLs; resolved" in lines
+    assert engine.store._conn.execute("SELECT COUNT(*) FROM subdomains").fetchone()[0] == 1
+
+
+async def test_second_resolve_is_one_pass(tmp_path: Path) -> None:
+    """D58: a URL stored during the pass is not resolved by the same run.
+
+    The candidates are read once, before any DNS work. This adapter writes a
+    new URL row while it is running, which is the only way to prove the pass
+    never re-extracts: a second extraction would have found `late.example.com`
+    and resolved it too.
+    """
+    rec = Recorder()
+    box: dict[str, object] = {}
+
+    class LateUrlDns(BaseToolAdapter):
+        name = "dnspython"
+        stage = Stage.DNS
+
+        async def run(self, ctx: RunContext) -> ToolResult:
+            rec.names.append(self.name)
+            rec.hosts.append(list(ctx.hosts))
+            store = box["store"]
+            latest = store._conn.execute("SELECT MAX(id) FROM scan_runs").fetchone()[0]
+            store.upsert_url(int(box["target_id"]), "https://late.example.com/x", run_id=latest)
+            return ToolResult(
+                tool=self.name,
+                status=ToolStatus.OK,
+                records=[sub("new1.example.com")],
+            )
+
+        def parse_output(self, raw: str) -> list[object]:
+            return []
+
+    specs = {"urls-fake": tool("urls-fake", Stage.URLS)}
+    adapters = {
+        "urls-fake": adapter(
+            "urls-fake", Stage.URLS, rec, records=_url_records("new1.example.com")
+        ),
+        "dnspython": LateUrlDns,
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+    box["store"] = engine.store
+    box["target_id"] = engine.store.create_target("example.com")
+
+    await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), mock=True))
+
+    assert rec.names.count("dnspython") == 1
+    # The first entry is the urls adapter's own input (the target); the DNS
+    # pass saw exactly the hosts extracted before it ran, once.
+    assert rec.hosts[-1] == ["new1.example.com"]
+    names = {str(row["fqdn"]) for row in engine.store._conn.execute("SELECT fqdn FROM subdomains")}
+    assert names == {"new1.example.com"}

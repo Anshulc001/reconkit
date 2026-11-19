@@ -76,6 +76,108 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
+## 2026-11-19 (D58) - a bounded second resolve gives URL-only hosts a row
+
+Owner ruled Option 2 from the analysis above. One pass runs immediately after `urls` and before `url_probe`: it takes
+the distinct hostnames in this target's URL rows that have no `subdomains` row, resolves them with the `dns` stage's
+`dnspython` adapter through the normal `_persist_dns()` state rule, and - in `active`/`full` only - probes them with the
+`live` stage's `pyprobe` adapter through `_persist_live()` after `require_active()` has filtered the list.
+
+Files: `src/reconkit/core/store.py` (`Store.url_only_hosts()`), `src/reconkit/engine.py` (`URL_DERIVED` sentinel,
+`Engine._second_resolve()`, `_second_resolve_pass()`, `_second_resolve_dns()`, `_second_resolve_live()`,
+`_label_url_derived()`, and the hook in the stage loop after the `urls` stage), `tests/test_engine.py` (four tests),
+`docs/03` (stage section), `docs/09` section 5, `docs/04` section 5.
+
+Decisions and disclosures called out by the batch:
+
+- **Source label `url-derived`, not a migration.** `subdomains.provenance` has `CHECK (provenance IN ('subs','dns'))`, so
+  an invented provenance value would have been schema v9. The row keeps `provenance = 'dns'` (a DNS pass did create it)
+  and carries one `subdomain_sources` entry whose tool is the sentinel `url-derived`; `source_count` follows the
+  documented rule (distinct sources in the run) and is 1. docs/04 section 5 records the sentinel and its exception to
+  "a `dns` row has no sources". `diff_new()` still filters `provenance = 'subs'`, so these rows never show as NEW.
+- **`www.` is not stripped**, as instructed: `www.x` and `x` are two candidates, exactly like the rest of the code.
+- **Live check is `pyprobe` only, not the live pool.** Running the whole pool would need four more `tool_runs` rows
+  under the `urls` stage's `scan_runs` id, which would make that row claim tools it never ran; one binary-free adapter
+  plus the shared `_persist_live()` state rule keeps the evidence honest and the pass bounded.
+- **Not a stage.** No `scan_runs` row and no `tool_runs` row are created; `first_seen_run`/`last_seen_run` on the new
+  hosts record the `urls` run that named them. `summary.stages` is unchanged, so resume plans and the UI are unaffected.
+- **Budget:** no new config key. The pass runs under `timeout = timeouts.urls` in passive and `timeouts.url_probe` in
+  active/full, wrapped in `asyncio.wait_for`; on expiry the rows stay as they were and one progress line says so - the
+  run never fails because of it.
+- **Store reads stay on the loop.** The first draft used `asyncio.to_thread` and 26 engine tests failed with
+  `sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that same thread` - the connection
+  is thread-bound by design (docs/03 section 11). `url_only_hosts()` is a plain sync call, like every other query.
+- **`RunContext` is a Pydantic model, not a dataclass:** the probe's ctx is copied with `model_copy(update=...)`.
+
+Raw evidence - passive, real engine run (`mock=True`, injected adapters, same code path as the tests; the CLI's mock
+fixtures happen to have no URL-only host, so the CLI shows the zero case):
+
+```
+urls: running 1 tool(s)
+urls: urls-fake ok 4 item(s)
+urls: finished 1/1 tool(s), 4 item(s)
+urls: 2 host(s) found only in URLs; resolved
+--- subdomains rows ---
+{'fqdn': 'api.example.com', 'state': 'DNS_ONLY', 'source_count': 1, 'provenance': 'dns', 'sources': 'url-derived'}
+{'fqdn': 'known.example.com', 'state': 'UNKNOWN', 'source_count': 0, 'provenance': 'subs', 'sources': ''}
+{'fqdn': 'nb.example.com', 'state': 'DNS_ONLY', 'source_count': 1, 'provenance': 'dns', 'sources': 'url-derived'}
+```
+
+Raw evidence - active, same setup with `pyprobe` answering ALIVE for both new hosts (the fixture scope file lists
+`api.example.com` under `out_of_scope`, so the gate drops it - which is itself the proof that the new live check is
+gated):
+
+```
+urls: running 1 tool(s)
+urls: urls-fake ok 4 item(s)
+urls: finished 1/1 tool(s), 4 item(s)
+urls: 2 host(s) found only in URLs; resolved, 1 now ALIVE
+--- subdomains rows ---
+{'fqdn': 'api.example.com', 'state': 'UNKNOWN', 'source_count': 1, 'provenance': 'dns', 'sources': 'url-derived'}
+{'fqdn': 'known.example.com', 'state': 'UNKNOWN', 'source_count': 0, 'provenance': 'subs', 'sources': ''}
+{'fqdn': 'nb.example.com', 'state': 'ALIVE', 'source_count': 1, 'provenance': 'dns', 'sources': 'url-derived'}
+```
+
+Raw evidence - the real CLI in mock mode, where every URL host is already known (the zero case, proving the hook runs
+in the shipped path):
+
+```
+$ reconkit run -d testfire.net --mock --no-color --db /tmp/d58.db | grep "only in URLs"
+25:urls: 0 host(s) found only in URLs; resolved
+```
+
+The four tests, raw:
+
+```
+pytest -q tests/test_engine.py -k second_resolve
+4 passed, 159 deselected in 0.18s
+```
+
+- `test_second_resolve_adds_url_only_hosts_in_passive` - 3 URL hosts, 1 known, 2 not: 2 new rows with
+  `provenance='dns'`, `source_count=1`, `sources='url-derived'`, state `DNS_ONLY`, and no live adapter ran.
+- `test_second_resolve_live_checks_new_hosts_in_active` - same setup, active: both hosts probed and stored `ALIVE`, log
+  line `resolved, 2 now ALIVE`.
+- `test_second_resolve_does_not_duplicate_existing_hosts` - every URL host already known: no resolver call at all,
+  one row in the table, log line `0 host(s) found only in URLs; resolved`.
+- `test_second_resolve_is_one_pass` - the DNS adapter writes a new URL row for `late.example.com` while it runs; after
+  the run that host has no `subdomains` row and the resolver was called once with exactly the pre-extracted hosts, so a
+  second extraction cannot happen.
+
+Gate:
+
+```
+pytest -q
+978 passed in 29.19s
+ruff check .            All checks passed!
+ruff format --check .   96 files already formatted
+mypy src/reconkit       Success: no issues found in 62 source files
+```
+
+Not verified: a real run of the pass against a live third party (no scan was run and no request was sent); `--resume`
+after a run whose `urls` stage completed (the hook does not re-run for a completed stage - this is by construction, not
+measured); and the pass under a firing budget (the `wait_for` path is code-reviewed, not exercised). The slice.bank.in
+figures (3 hosts / 43 URLs) are the earlier analysis counts, not a new measurement.
+
 ## 2026-11-19 (analysis) - what consumes URLs in a passive run, and four stage-order options
 
 Investigation only. No `src/`/`tests/` change, no stage reordering, no new flag, no scan, no network request to
