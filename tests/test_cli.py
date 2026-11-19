@@ -34,6 +34,7 @@ DOCUMENTED_OPTIONS = {
     "--min-sources",
     "--tools",
     "--exclude",
+    "--include",
     "--include-noisy",
     "--phase-timeout",
     "--mock",
@@ -1394,3 +1395,112 @@ def test_ctrl_c_in_a_stage_kills_the_child_and_exits_130(
     while runner_module.live_processes() and time.monotonic() < deadline:
         time.sleep(0.01)
     assert runner_module.live_processes() == ()
+
+
+# ---------------------- (D63) --exclude namespaces and --include forcing
+
+
+def _isolated_config(tmp_path: Path) -> Path:
+    """A config whose reports land under tmp_path, not the repo's results/."""
+    config = make_config(tmp_path)
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    raw["results_dir"] = str(tmp_path / "results")
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return config
+
+
+def _reports(tmp_path: Path, target: str = "example.com") -> list[Path]:
+    return sorted((tmp_path / "results" / "mock" / target).glob("*"))
+
+
+def test_exclude_stage_skips_it_and_hides_its_section(tmp_path: Path) -> None:
+    """D63: `--exclude urls` skips the stage and hides its report section."""
+    config = _isolated_config(tmp_path)
+    db = str(tmp_path / "recon.db")
+    first = CliRunner().invoke(app, scan_args(config, "run", "--active", "--no-scope", "--db", db))
+    assert first.exit_code == 0, first.stderr
+    assert "urls: running" in first.stderr
+    second = CliRunner().invoke(
+        app, scan_args(config, "run", "--active", "--no-scope", "--db", db, "--exclude", "urls")
+    )
+    assert second.exit_code == 0, second.stderr
+    assert "urls: running" not in second.stderr
+    assert "--exclude urls: stage skipped, report section hidden" in second.stderr
+    # The URLs are still stored from the first run, so their absence from the
+    # report is the section being hidden, not the data being empty.
+    document = json.loads((_reports(tmp_path)[-1] / "report.json").read_text(encoding="utf-8"))
+    assert document["urls_total"] > 0
+    assert "urls_by_host" not in document
+    text = (_reports(tmp_path)[-1] / "report.txt").read_text(encoding="utf-8")
+    assert "=== URLs by host ===" not in text
+    assert "=== Domains ===" in text
+
+
+def test_exclude_adapter_still_works(tmp_path: Path) -> None:
+    """D63: an adapter name keeps its old meaning."""
+    config = _isolated_config(tmp_path)
+    result = CliRunner().invoke(
+        app, scan_args(config, "run", "--active", "--no-scope", "--exclude", "pyprobe")
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "pyprobe" not in result.stdout
+    assert "--exclude pyprobe: adapter skipped" in result.stderr
+
+
+def test_exclude_unknown_value_warns_but_runs(tmp_path: Path) -> None:
+    """A typo is a warning, never an aborted scan (D63)."""
+    config = _isolated_config(tmp_path)
+    result = CliRunner().invoke(
+        app, scan_args(config, "run", "--active", "--no-scope", "--exclude", "nonsense")
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "unknown name 'nonsense'" in result.stderr
+    assert "--exclude nonsense:" not in result.stderr
+
+
+def test_include_stage_runs_it_in_a_mode_that_would_skip_it(tmp_path: Path) -> None:
+    """D63: `--active --include ports` runs the ports stage active mode omits."""
+    config = _isolated_config(tmp_path)
+    plain = CliRunner().invoke(app, scan_args(config, "run", "--active", "--no-scope"))
+    assert plain.exit_code == 0, plain.stderr
+    assert "ports: running" not in plain.stderr
+    forced = CliRunner().invoke(
+        app, scan_args(config, "run", "--active", "--no-scope", "--include", "ports")
+    )
+    assert forced.exit_code == 0, forced.stderr
+    assert "ports: running" in forced.stderr
+    assert "--include ports: stage added" in forced.stderr
+    assert "⚠ --include ports forces target contact; this is no longer an active scan." in (
+        forced.stderr
+    )
+
+
+def test_include_live_under_passive_prints_banner_and_relabels_mode(tmp_path: Path) -> None:
+    """D63: a passive run forced to contact the target says so, in both artifacts."""
+    config = _isolated_config(tmp_path)
+    result = CliRunner().invoke(
+        app, scan_args(config, "passive", "--no-scope", "--include", "live")
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "live: running" in result.stderr
+    assert "⚠ --include live forces target contact; this is no longer a passive scan." in (
+        result.stderr
+    )
+    report = _reports(tmp_path)[-1]
+    document = json.loads((report / "report.json").read_text(encoding="utf-8"))
+    assert document["mode"] == "active (forced by --include)"
+    text = (report / "report.txt").read_text(encoding="utf-8")
+    assert "mode: active (forced by --include)" in text
+
+
+def test_include_and_exclude_same_value_is_an_error(tmp_path: Path) -> None:
+    """D63: naming one thing on both sides is a contradiction, not a guess."""
+    config = _isolated_config(tmp_path)
+    result = CliRunner().invoke(
+        app,
+        scan_args(
+            config, "run", "--active", "--no-scope", "--include", "urls", "--exclude", "urls"
+        ),
+    )
+    assert result.exit_code == 2
+    assert "contradictory: --include and --exclude both name urls" in result.stderr

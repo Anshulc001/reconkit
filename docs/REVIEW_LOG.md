@@ -76,6 +76,99 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
+## 2026-11-19 (D63) - `--exclude` reaches stages and sections; `--include` forces one in
+
+Before: `--exclude` was `frozenset(_csv(exclude))` compared in one place
+(`Engine._select`, `if name in opts.exclude`), i.e. against **adapter names
+only**. `--exclude urls` matched no adapter (`urls` is a stage) and was silently
+ignored. There was no `--include`: `grep -rn '"--include' src/reconkit/cli.py`
+returned only `--include-noisy`.
+
+After, one resolver (`_name_namespaces` in `cli.py`) reads every value
+case-insensitively in **stage -> adapter -> report section** order and keeps all
+matches, so the documented `urls` case does both:
+
+```
+$ reconkit run -d example.com --mock --active --no-scope --db /tmp/d63d.db --no-color --exclude urls
+--exclude urls: stage skipped, report section hidden
+```
+
+and the artifact proves the section was hidden rather than absent - the 24 URLs
+from the first run are still stored:
+
+```
+=== URLs by host ===  occurrences: 0
+=== Domains ===       occurrences: 1
+urls_total: 24 urls_by_host present: False
+```
+
+Unknown names warn and continue (a typo must not abort a scan), and naming one
+value on both sides is exit 2 `contradictory: --include and --exclude both name
+urls`. Both are pinned by a test.
+
+`--include` adds the stage to the run's tuple (at its `STAGE_ORDER` position)
+and, for an adapter, that adapter's stage plus its name in the new
+`ScanOptions.include_tools`, which is the only new bypass of the tier and
+tool-mode gates (the exploitation rule is untouched). Raw, mock runs:
+
+```
+$ reconkit run -d testfire.net --active --include ports --mock --no-scope ...
+⚠ --include ports forces target contact; this is no longer an active scan.
+--include ports: stage added
+ports: running 5 tool(s)
+ports: smap ok 3 item(s)
+ports: pyscan ok 2 item(s)
+ports: naabu ok 3 item(s)
+ports: nmap ok 3 item(s)
+ports: rustscan ok 3 item(s)
+ports: finished 5/5 tool(s), 14 item(s)
+
+$ reconkit run -d testfire.net --include live --mock --no-scope ...
+⚠ --include live forces target contact; this is no longer a passive scan.
+--include live: stage added
+live: running 4 tool(s)
+live: pyprobe ok 2 item(s)
+live: httpx ok 2 item(s)
+live: httprobe ok 2 item(s)
+live: tlsx ok 4 item(s)
+live: finished 4/4 tool(s), 10 item(s)
+```
+
+and the forced run says so in both artifacts:
+
+```
+$ grep -n '^mode:' results/mock/testfire.net/<run>/report.txt
+5:mode: active (forced by --include)
+$ python -c "print(d['mode'])"
+active (forced by --include)
+```
+
+Safety: `forced_contact` is what makes the four `_active_hosts()` gate sites run
+for a forced stage, so `--include live` on a passive run is gated by
+`scope.yaml` exactly like `--active`; the requested mode's tool pool is
+otherwise untouched, so forcing one stage cannot enable more tools elsewhere.
+No `--passive` flag exists on `run` (passive is the default), so the documented
+`--passive --include live` case is `reconkit run -d X --include live` or the
+`passive` command; both are covered.
+
+Six tests (`pytest -q tests/test_cli.py -k "exclude or include"` -> `8 passed`,
+the two pre-existing ones included):
+
+- `test_exclude_stage_skips_it_and_hides_its_section`
+- `test_exclude_adapter_still_works`
+- `test_exclude_unknown_value_warns_but_runs`
+- `test_include_stage_runs_it_in_a_mode_that_would_skip_it`
+- `test_include_live_under_passive_prints_banner_and_relabels_mode`
+- `test_include_and_exclude_same_value_is_an_error`
+
+`test_scan_has_no_undocumented_options` gained `--include`, because every scan
+command shares one option group and the flag is on all of them (the batch
+allowed "the stage subcommands if they share the option group"). The bare
+`reconkit -d X ...` shorthand (`main`) does not carry it; `run` does.
+
+Gate: `990 passed`, `ruff check .` clean, `ruff format --check .` 96 files,
+`mypy src/reconkit` clean (62 source files). No scan was run.
+
 ## 2026-11-19 (D62) - a saved report carries a domain tree and its URLs
 
 Before: `report.json` had 7 top-level keys (`type`, `target`, `generated_at`,

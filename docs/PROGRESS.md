@@ -4,6 +4,15 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-19, D63): **`--exclude` names stages and report sections too, and `--include` forces a stage in.**
+  Both are resolved case-insensitively in stage -> adapter -> section order; a value matching a stage and a section
+  (`urls`) does both and prints one line (`--exclude urls: stage skipped, report section hidden`); an unknown value
+  warns and the run continues; naming one value on both sides is exit-2 `contradictory: --include and --exclude both
+  name X`. `--include` adds the stage (or the adapter's stage plus the adapter) at its documented position, prints
+  `⚠ --include <name> forces target contact; this is no longer a <mode> scan.`, promotes the CLI to active gating so
+  the scope file still decides, and both artifacts record `mode: active (forced by --include)`. `ScanOptions` gained
+  `include_tools` and `forced_contact`; no stage order, tool pool or exploitation rule changed. Suite 984 -> 990,
+  gate clean, `scope.yaml` unchanged, no scan run. See D63 and its REVIEW_LOG entry.
 - Status (2026-11-19, D62): **a saved report now carries a domain tree and its URLs, grouped by host.**
   `report.json` keeps `hosts` byte-for-byte and adds `roots` (one entry: target, subdomains, host_count),
   `urls_by_host` (`url` / `status_code` / `host_state`, omitted when the run stored no URL), `urls_total`,

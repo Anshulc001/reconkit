@@ -27,9 +27,16 @@ from reconkit.core.scope import (
 )
 from reconkit.core.store import configure_redaction, redact
 from reconkit.doctor import collect_report
-from reconkit.engine import MODE_STAGES, STAGE_ORDER, Engine, ExitCode, ScanOptions
+from reconkit.engine import (
+    MODE_STAGES,
+    STAGE_ORDER,
+    Engine,
+    ExitCode,
+    ScanOptions,
+    registry_tool_index,
+)
 from reconkit.errors import ConfigError, ScopeError
-from reconkit.models import HostState, Stage
+from reconkit.models import HostState, Mode, Stage
 from reconkit.ui import (
     REPORT_FIELDS,
     HostRow,
@@ -174,6 +181,68 @@ def _csv(value: str | None) -> tuple[str, ...]:
     if value is None:
         return ()
     return tuple(part.strip() for part in value.split(",") if part.strip())
+
+
+# D63: `--exclude`/`--include` name one of three namespaces. A stage is matched
+# by its enum value plus the two documented singular aliases; an adapter keeps
+# its tools.yaml name; a report section is one of these four.
+_STAGE_BY_NAME: dict[str, Stage] = {stage.value: stage for stage in Stage}
+_STAGE_BY_NAME["url"] = Stage.URLS
+_STAGE_BY_NAME["port"] = Stage.PORTS
+_REPORT_SECTIONS = frozenset({"hosts", "domains", "urls", "tools"})
+
+
+@dataclass(frozen=True)
+class _Names:
+    """One `--exclude`/`--include` value list, resolved per namespace (D63)."""
+
+    stages: tuple[Stage, ...]
+    tools: tuple[str, ...]
+    sections: tuple[str, ...]
+    lines: tuple[str, ...]
+    unknown: tuple[str, ...]
+
+
+def _name_namespaces(
+    values: tuple[str, ...],
+    *,
+    index: dict[str, tuple[Stage, Mode]],
+    flag: str,
+    sections: bool,
+) -> _Names:
+    """Resolve every value in stage, then adapter, then section order.
+
+    A value that names a stage *and* a section (the documented `urls` case) does
+    both, and says so on one line. A value that names nothing is returned as
+    unknown: the caller warns and continues, because a typo must not abort a
+    scan.
+    """
+
+    stages: list[Stage] = []
+    tools: list[str] = []
+    hidden: list[str] = []
+    lines: list[str] = []
+    unknown: list[str] = []
+    for value in values:
+        name = value.lower()
+        stage = _STAGE_BY_NAME.get(name)
+        tool = name if name in index else None
+        section = name if sections and name in _REPORT_SECTIONS else None
+        if stage is None and tool is None and section is None:
+            unknown.append(value)
+            continue
+        parts: list[str] = []
+        if stage is not None and stage not in stages:
+            stages.append(stage)
+            parts.append("stage skipped" if flag == "--exclude" else "stage added")
+        if tool is not None and tool not in tools:
+            tools.append(tool)
+            parts.append("adapter skipped" if flag == "--exclude" else "adapter added")
+        if section is not None and section not in hidden:
+            hidden.append(section)
+            parts.append("report section hidden")
+        lines.append(f"{flag} {value}: " + ", ".join(parts))
+    return _Names(tuple(stages), tuple(tools), tuple(hidden), tuple(lines), tuple(unknown))
 
 
 def _stages(command: str, active: bool, full: bool = False) -> tuple[Stage, ...]:
@@ -681,7 +750,8 @@ def _run_scan(
     min_sources: int,
     tools: str | None,
     exclude: str | None,
-    include_noisy: bool,
+    include: str | None = None,
+    include_noisy: bool = False,
     phase_timeout: float | None,
     mock: bool,
     active: bool,
@@ -732,6 +802,22 @@ def _run_scan(
             include_noisy = True
         targets = _targets(domain, list_file)
         config: AppConfig = load_config(config_path)
+        # D63: both flags name a stage, an adapter or a report section. Resolved
+        # once, before anything reads the stage list.
+        tool_index = registry_tool_index()
+        included = _name_namespaces(
+            _csv(include), index=tool_index, flag="--include", sections=False
+        )
+        excluded = _name_namespaces(
+            _csv(exclude), index=tool_index, flag="--exclude", sections=True
+        )
+        contradictions = sorted(
+            {value.lower() for value in _csv(include)} & {value.lower() for value in _csv(exclude)}
+        )
+        if contradictions:
+            raise ConfigError(
+                f"contradictory: --include and --exclude both name {contradictions[0]}"
+            )
         is_active = active if plan is None else (plan.active or active)
         if command in _ACTIVE_ONLY and not is_active:
             raise ConfigError(f"{command} requires --active")
@@ -755,7 +841,48 @@ def _run_scan(
                     "warning: --reprobe-urls has no effect with --skip-url-probe; continuing",
                     console=make_console(no_color=no_color),
                 )
+        # D63: apply the stage exclusions and the forced additions to the mode's
+        # own list. `--include <adapter>` also brings that adapter's stage in,
+        # otherwise there would be nothing for it to run in.
+        stages = tuple(stage for stage in stages if stage not in excluded.stages)
+        added = [stage for stage in included.stages if stage not in stages]
+        added.extend(
+            stage
+            for stage in (tool_index[name][0] for name in included.tools)
+            if stage not in stages and stage not in added
+        )
+        if added:
+            stages = tuple(sorted({*stages, *added}, key=STAGE_ORDER.index))
+        requested_mode = "full" if full else ("active" if active else "passive")
+        forced_tools = [
+            name
+            for name in included.tools
+            if tool_index[name][1] is Mode.ACTIVE and requested_mode == "passive"
+        ]
+        forced_contact = bool(added) or bool(forced_tools)
         progress_console = make_console(no_color=no_color)
+        if forced_contact:
+            # The owner accepted the banner: `--include` is the explicit request
+            # for traffic the mode would not send, and the scope gate below
+            # still decides whether the target may be touched at all.
+            forced_names = ", ".join([stage.value for stage in added] + forced_tools)
+            article = "an" if requested_mode == "active" else "a"
+            render_message(
+                f"⚠ --include {forced_names} forces target contact; "
+                f"this is no longer {article} {requested_mode} scan.",
+                console=progress_console,
+                no_color=no_color,
+            )
+            is_active = True
+        for line in (*excluded.lines, *included.lines):
+            render_message(line, console=progress_console, no_color=no_color)
+        for value in (*excluded.unknown, *included.unknown):
+            render_message(
+                f"warning: --exclude/--include: unknown name {value!r} "
+                "(no stage, adapter or report section); ignored",
+                console=progress_console,
+                no_color=no_color,
+            )
         if no_scope and not is_active:
             render_message(
                 "warning: --no-scope has no effect on a passive run; continuing",
@@ -831,7 +958,9 @@ def _run_scan(
                             ScanOptions(
                                 stages=stages,
                                 tools=_csv(tools),
-                                exclude=frozenset(_csv(exclude)),
+                                exclude=frozenset(excluded.tools),
+                                include_tools=frozenset(included.tools),
+                                forced_contact=forced_contact,
                                 include_noisy=include_noisy,
                                 active=is_active,
                                 full=full,
@@ -928,6 +1057,7 @@ def _run_scan(
                 no_color=no_color,
                 filter_info=filter_info,
                 injections=injections,
+                hidden=frozenset(excluded.sections),
             )
             # Every scan saves its report, interactive or not (docs/02 section 5).
             # The questions only choose the columns; a `-d`/`-l` run has no
@@ -955,6 +1085,9 @@ def _run_scan(
                 # come from the same rows as the hosts table.
                 urls=engine.url_rows(summary.target_id),
                 urls_max=config.report.urls_max,
+                # D63: the artifact records the mode the run actually used.
+                mode="active (forced by --include)" if forced_contact else None,
+                hidden=frozenset(excluded.sections),
             )
             render_progress(
                 f"report: {report_text_path} and {report_json_path}",
@@ -1018,7 +1151,16 @@ def _scan_command(
         str | None, typer.Option("--tools", help="Comma-separated adapters to run.")
     ] = None,
     exclude: Annotated[
-        str | None, typer.Option("--exclude", help="Comma-separated adapters to skip.")
+        str | None,
+        typer.Option(
+            "--exclude", help="Comma-separated stages, adapters or report sections to skip."
+        ),
+    ] = None,
+    include: Annotated[
+        str | None,
+        typer.Option(
+            "--include", help="Comma-separated stages or adapters to force in, past the mode."
+        ),
     ] = None,
     include_noisy: Annotated[
         bool, typer.Option("--include-noisy", help="Allow opt_in tier tools.")
@@ -1080,6 +1222,7 @@ def _scan_command(
             min_sources=min_sources,
             tools=tools,
             exclude=exclude,
+            include=include,
             include_noisy=include_noisy,
             phase_timeout=phase_timeout,
             mock=mock,

@@ -471,6 +471,14 @@ class ScanOptions:
     stages: tuple[Stage, ...] = STAGE_ORDER
     tools: tuple[str, ...] = ()
     exclude: frozenset[str] = frozenset()
+    # D63: names the operator forced in with `--include`. They bypass the tier
+    # gate and the tool-mode gate, and nothing else - exploitation tools still
+    # need an explicit `--tools` name (AGENTS hard rule 6).
+    include_tools: frozenset[str] = frozenset()
+    # D63: `--include` forced a stage the requested mode would not run, so the
+    # run contacts the target. It widens the scope gate (the D1 promise stays)
+    # and never changes which tools a mode allows.
+    forced_contact: bool = False
     include_noisy: bool = False
     active: bool = False
     full: bool = False
@@ -595,6 +603,17 @@ class HostSnapshot:
     # duplicate, and the informational sibling note otherwise.
     duplicate_of: str | None = None
     www_note: str | None = None
+
+
+def registry_tool_index() -> dict[str, tuple[Stage, Mode]]:
+    """tools.yaml as `name -> (stage, tool mode)` for the CLI's D63 namespaces.
+
+    `--include`/`--exclude` accept a stage name or an adapter name, so the CLI
+    needs the registry's own names and each tool's stage. The CLI never imports
+    `reconkit.adapters` (docs/03 section 9), so it asks the engine instead.
+    """
+
+    return {name: (spec.stage, spec.mode) for name, spec in load_tools().items()}
 
 
 @dataclass(frozen=True)
@@ -835,7 +854,7 @@ class Engine:
         self._url_probe_outcome = None
         self._url_probe_progress = (0, 0)
         self._url_probe_timeout = None
-        if not opts.active or opts.no_scope:
+        if opts.no_scope or not (opts.active or opts.forced_contact):
             self._note_passive_warning(target, opts)
         cidr_warnings = await asyncio.to_thread(self._cidr_scope_warnings, opts)
 
@@ -891,7 +910,9 @@ class Engine:
 
             dropped: list[str] = []
             ip_allowed: Callable[[str], bool] | None = None
-            if opts.active and any(spec.mode is Mode.ACTIVE for spec, _ in selected):
+            if (opts.active or opts.forced_contact) and any(
+                spec.mode is Mode.ACTIVE for spec, _ in selected
+            ):
                 hosts, dropped, scope_error = await asyncio.to_thread(
                     self._active_hosts, target, hosts, opts
                 )
@@ -1478,10 +1499,12 @@ class Engine:
             if spec.exploitation and name not in opts.tools:
                 skipped.append((spec, "exploitation tool requires explicit --tools"))
                 continue
-            if spec.tier not in tiers and name not in opts.tools:
+            if spec.tier not in tiers and name not in opts.tools and name not in opts.include_tools:
                 skipped.append((spec, f"tier not included in {mode} mode"))
                 continue
-            if spec.mode not in tool_modes:
+            # D63: `--include <adapter>` is the explicit override for this gate;
+            # nothing else may put an active tool into a passive run.
+            if spec.mode not in tool_modes and name not in opts.include_tools:
                 skipped.append((spec, f"tool mode not included in {mode} mode"))
                 continue
             adapter = self.adapters.get(name)
@@ -2319,7 +2342,7 @@ class Engine:
 
         hosts = self._clean_hosts([self._url_host(str(row["url"])) for row in rows], target)
         allowed = set(hosts)
-        if opts.active:
+        if opts.active or opts.forced_contact:
             kept, _dropped, scope_error = await asyncio.to_thread(
                 self._active_hosts, target, hosts, opts
             )

@@ -129,7 +129,10 @@ and `dns`, because those commands run no active stage.
 
 ```bash
 --tools <a,b>                  # only these adapters (bypasses the tier gate)
---exclude <a,b>                # skip these adapters
+--exclude <list>               # skip a stage (urls, live, ...), an adapter, or a
+                               # report section (hosts, domains, urls, tools)
+--include <list>               # force a stage or adapter in, past the mode; prints the
+                               # "no longer a passive scan" banner; scope still applies
 --include-noisy                # allow opt_in tier (nikto, masscan, ffuf, gowitness)
 ```
 

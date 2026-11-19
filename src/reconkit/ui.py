@@ -591,6 +591,8 @@ def report_document(
     scope_warnings: Sequence[str] = (),
     urls: Sequence[UrlSnapshot] = (),
     urls_max: int = 200,
+    mode: str | None = None,
+    hidden: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     """Build the report's JSON document from stored values only."""
 
@@ -603,24 +605,34 @@ def report_document(
         # D56: the same warning stderr showed at run start, so a reader of the
         # artifact learns the exclusion was partial.
         "scope_warnings": list(scope_warnings),
+        "fields": [field.key for field in fields],
+        # D63: `--exclude hosts` is the operator asking for no host list, so the
+        # key stays (shape unchanged) and the list is what disappears.
+        "hosts": (
+            []
+            if "hosts" in hidden
+            else [{field.key: field_value(row, field) for field in fields} for row in rows]
+        ),
+        "urls_total": len(urls),
+        "urls_shown": shown,
+        "urls_truncated": len(urls) > shown,
+    }
+    if mode is not None:
+        # D63: a run whose mode `--include` changed says so in the artifact.
+        document["mode"] = mode
+    if "domains" not in hidden:
         # D62: one root per report, because one report covers one target
         # (docs/02 section 5); the hosts table itself is unchanged.
-        "roots": [
+        document["roots"] = [
             {
                 "domain": target,
                 "subdomains": [row.fqdn for row in rows],
                 "host_count": len(rows),
             }
-        ],
-        "fields": [field.key for field in fields],
-        "hosts": [{field.key: field_value(row, field) for field in fields} for row in rows],
-        "urls_total": len(urls),
-        "urls_shown": shown,
-        "urls_truncated": len(urls) > shown,
-    }
+        ]
     # docs/02 section 5: a report with no URLs has no URL block at all, rather
     # than an empty one a reader has to interpret.
-    if grouped:
+    if grouped and "urls" not in hidden:
         document["urls_by_host"] = grouped
     return document
 
@@ -647,6 +659,8 @@ def report_text(
     scope_warnings: Sequence[str] = (),
     urls: Sequence[UrlSnapshot] = (),
     urls_max: int = 200,
+    mode: str | None = None,
+    hidden: frozenset[str] = frozenset(),
 ) -> str:
     """Build the report's plain-text table from stored values only."""
 
@@ -660,6 +674,7 @@ def report_text(
         f"target: {target}",
         f"generated: {run_at.astimezone(UTC).isoformat(timespec='seconds')}",
         f"hosts: {len(rows)}",
+        *([f"mode: {mode}"] if mode is not None else []),
         *([selection.as_line()] if selection is not None else []),
         *(
             ["scope warnings:", *(f"  - {note}" for note in scope_warnings)]
@@ -669,11 +684,14 @@ def report_text(
         "",
         "  ".join(label.ljust(width) for label, width in zip(header, widths, strict=True)),
     ]
+    if "hosts" in hidden:
+        lines[-1] = "(hosts hidden by --exclude hosts)"
+        table = []
     for line in table:
         lines.append("  ".join(cell.ljust(width) for cell, width in zip(line, widths, strict=True)))
-    if not table:
+    if not table and "hosts" not in hidden:
         lines.append("(no hosts)")
-    lines.extend(_report_tree_sections(target, rows, urls, urls_max))
+    lines.extend(_report_tree_sections(target, rows, urls, urls_max, hidden))
     return "\n".join(lines) + "\n"
 
 
@@ -687,26 +705,30 @@ def _report_tree_sections(
     rows: Sequence[HostSnapshot],
     urls: Sequence[UrlSnapshot],
     urls_max: int,
+    hidden: frozenset[str] = frozenset(),
 ) -> list[str]:
-    """The two D62 sections, or nothing when the report has no URLs."""
+    """The two D62 sections, minus any D63-hidden one, or nothing without URLs."""
 
-    if not urls:
+    if not urls or {"domains", "urls"} <= hidden:
         return []
-    lines = ["", "=== Domains ===", f"{target}  -  {len(rows)} host(s)"]
-    if len(rows) > _TREE_LIST_MAX:
-        lines.append(f"  {len(rows)} subdomains, see hosts table")
-    else:
-        for row in rows:
-            lines.append(f"  {row.fqdn}   {row.state.value}  {row.confidence.value}")
-    grouped, shown = report_urls(urls, urls_max)
-    lines.extend(["", "=== URLs by host ==="])
-    if shown < len(urls):
-        lines.append(f"urls: {shown} of {len(urls)} shown (report.urls_max {urls_max})")
-    for host, items in grouped.items():
-        lines.append(f"{host}  ({items[0]['host_state']})")
-        for item in items:
-            status = "null" if item["status_code"] is None else str(item["status_code"])
-            lines.append(f"  {item['url']}  {status}")
+    lines: list[str] = []
+    if "domains" not in hidden:
+        lines = ["", "=== Domains ===", f"{target}  -  {len(rows)} host(s)"]
+        if len(rows) > _TREE_LIST_MAX:
+            lines.append(f"  {len(rows)} subdomains, see hosts table")
+        else:
+            for row in rows:
+                lines.append(f"  {row.fqdn}   {row.state.value}  {row.confidence.value}")
+    if "urls" not in hidden:
+        grouped, shown = report_urls(urls, urls_max)
+        lines.extend(["", "=== URLs by host ==="])
+        if shown < len(urls):
+            lines.append(f"urls: {shown} of {len(urls)} shown (report.urls_max {urls_max})")
+        for host, items in grouped.items():
+            lines.append(f"{host}  ({items[0]['host_state']})")
+            for item in items:
+                status = "null" if item["status_code"] is None else str(item["status_code"])
+                lines.append(f"  {item['url']}  {status}")
     return lines
 
 
@@ -721,6 +743,8 @@ def write_field_report(
     scope_warnings: Sequence[str] = (),
     urls: Sequence[UrlSnapshot] = (),
     urls_max: int = 200,
+    mode: str | None = None,
+    hidden: frozenset[str] = frozenset(),
 ) -> tuple[Path, Path]:
     """Write `report.txt` and `report.json` into this run's folder.
 
@@ -740,6 +764,8 @@ def write_field_report(
         scope_warnings=scope_warnings,
         urls=urls,
         urls_max=urls_max,
+        mode=mode,
+        hidden=hidden,
     )
     _write_atomically(json_path, json.dumps(document, indent=2, sort_keys=False) + "\n")
     _write_atomically(
@@ -753,6 +779,8 @@ def write_field_report(
             scope_warnings=scope_warnings,
             urls=urls,
             urls_max=urls_max,
+            mode=mode,
+            hidden=hidden,
         ),
     )
     return text_path, json_path
@@ -983,6 +1011,7 @@ def render(
     console: Console | None = None,
     filter_info: dict[str, object] | None = None,
     injections: dict[str, object] | None = None,
+    hidden: frozenset[str] = frozenset(),
 ) -> int:
     """Render a scan result and return the documented exit code."""
 
@@ -1008,7 +1037,9 @@ def render(
     if not rows and not summary.results and not summary.skipped:
         render_empty([], console=target)
     else:
-        if rows:
+        if "hosts" in hidden:
+            pass
+        elif rows:
             target.print(_host_table(rows))
         elif filter_info is not None and filter_info.get("only_states"):
             states = filter_info.get("only_states")
@@ -1024,7 +1055,7 @@ def render(
             )
         else:
             target.print(Text("No hosts found.", style="yellow"))
-        if summary.results or summary.skipped:
+        if (summary.results or summary.skipped) and "tools" not in hidden:
             target.print(_tool_table(summary))
         counts: Counter[HostState] = Counter(row.state for row in rows)
         tools: Counter[ToolStatus] = Counter(result.status for result in summary.results)
