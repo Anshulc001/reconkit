@@ -257,6 +257,16 @@ which proves the default `*.<line>/*` query already covers them - feeding it all
 The adapter now feeds the apex once and passes through any host that is not under
 it (a scope file can name several domains), so nothing is lost.
 
+**2026-11-19: the `ok 0` on sakec.ac.in is the tool's, not the adapter's.** The
+adapter's argv is `[<binary>]` with the host on stdin and no flags; the binary
+exited **0** with **0 bytes** and empty stderr for `sakec.ac.in`,
+`www.sakec.ac.in` and `http://www.sakec.ac.in`, so the parser never saw a line.
+The CDX endpoint it builds answered **503 "Internet Archive: Temporarily
+Offline"** on one call and **200** with real rows on the next, and `gau`
+returned 4 917 URLs from the same archive in the same stage. waybackurls has no
+error surface, so a refused archive and an empty archive are the same output;
+the finding is recorded under Open risks in PROGRESS, not fixed here.
+
 Both values are capped by the run budget (`min(...)`), so a small
 `--phase-timeout` still wins, and `urlfinder -max-time` is the budget rounded up
 to minutes (600 s -> 10, its own default). Through the real engine:

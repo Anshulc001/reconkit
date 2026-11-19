@@ -76,6 +76,61 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
+## 2026-11-19 (Part W) - waybackurls returns 0 on sakec.ac.in: upstream, deferred
+
+Adapter path (`src/reconkit/adapters/waybackurls.py`): `build_command` returns `[self.binary_path() or self.binary]`
+and nothing else, `stdin_text` returns `_query_roots(...)` - the apex once, because the 2026-11-18 rule collapsed the
+per-host wildcard queries - and `parse_output` accepts one URL per line, raising only on a line that is not a URL.
+Nothing in the adapter can turn real output into zero: a parse error is a `failed` row, never `ok 0`.
+
+Manual runs, one archive.org query each, 60 s cap, the same binary the adapter resolves
+(`/home/kali/.reconkit/bin/waybackurls`, 9 948 804 bytes, `-h` markers `-no-subs` / `don't include subdomains`):
+
+```
+$ printf 'sakec.ac.in\n'           | timeout 60 ~/.reconkit/bin/waybackurls
+input=sakec.ac.in          exit=0 stdout_lines=0 stdout_bytes=0 stderr_bytes=0
+$ printf 'www.sakec.ac.in\n'       | timeout 60 ~/.reconkit/bin/waybackurls
+input=www.sakec.ac.in      exit=0 stdout_lines=0 stdout_bytes=0 stderr_bytes=0
+$ printf 'http://www.sakec.ac.in\n' | timeout 60 ~/.reconkit/bin/waybackurls
+input=http://www.sakec.ac.in exit=0 stdout_lines=0 stdout_bytes=0 stderr_bytes=0
+```
+
+`gau` proved the archive has the data - its raw file from the same stage and run is 487 360 bytes / 4 919 JSON lines:
+
+```
+$ grep -m5 'sakec' workspaces/sakec.ac.in/urls/168-gau.txt
+{"url":"https://autodiscover.student.sakec.ac.in/autodiscover/autodiscover.xml"}
+{"url":"https://www.sakec.ac.in/.well-known/ai-plugin.json"}
+{"url":"https://www.sakec.ac.in/.well-known/assetlinks.json"}
+{"url":"https://www.sakec.ac.in/.well-known/dnt-policy.txt"}
+{"url":"https://www.sakec.ac.in/.well-known/gpc.json"}
+```
+
+Endpoints baked into the binary (`strings ... | grep archive.org`), i.e. the same CDX host `gau` reads:
+
+```
+http://web.archive.org/cdx/search/cdx?url=%s&output=json
+http://web.archive.org/cdx/search/cdx?url=%s%s/*&output=json&collapse=urlkey
+http://web.archive.org/web/%sif_/%s
+http://index.commoncrawl.org/CC-MAIN-2018-22-index?url=%s%s/*&output=json
+```
+
+That CDX shape answers intermittently, and the tool reports neither answer:
+
+```
+$ curl -sL 'https://web.archive.org/cdx/search/cdx?url=sakec.ac.in/*&output=json&collapse=urlkey&limit=3'
+attempt1 status=503 bytes=11832   <title>Internet Archive: Temporarily Offline</title>
+attempt2 status=200 bytes=553     [["urlkey","timestamp",...],["in,ac,sakec)/","20170624141040","http://acm@sakec.ac.in/",...]]
+$ curl -sL 'https://web.archive.org/cdx/search/cdx?url=http://www.sakec.ac.in/&output=json&limit=3'
+status=200 bytes=443
+```
+
+Classification: **tool broken / API changed - not an adapter bug, not archive.org rate-limiting reconkit.**
+waybackurls has no error surface: a 503 and an empty archive both print nothing and exit 0, so the adapter correctly
+stores `ok 0` and nothing can be reclassified as a gap without inventing a signal the tool does not emit. The
+upstream status the 2026-11-19 14:53Z run actually saw is not recoverable (the tool discards it). Nothing was fixed,
+per the batch rule for this class; the finding is in PROGRESS under Open risks with no D number.
+
 ## 2026-11-19 (Part V) - url_probe skips URLs whose host is DEAD (D54)
 
 Measurement first (V.1), against `recon.db` read-only, target_id 6 (`sakec.ac.in`), done in Python because the URL

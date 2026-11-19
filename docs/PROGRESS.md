@@ -849,6 +849,15 @@ returned 4 917 archive URLs from the same stage - the adapter asks the apex once
 and `gau` was handed every host, but a 0-byte answer from a live CDX query is unexplained and no failure is reported.
 Nothing was changed for either.
 
+**2026-11-19 (Part W): the `waybackurls` zero is upstream, not ours - deferred, no D number.** Raw: the adapter's
+argv is `[<binary>]` with the host on stdin, no flags and no env, and the binary exits **0** with **0 bytes** and
+**no stderr** for `sakec.ac.in`, for `www.sakec.ac.in` and for `http://www.sakec.ac.in` - the parser is never
+reached. The CDX endpoint it builds answered **503 "Internet Archive: Temporarily Offline"** on one call and **200**
+with real rows on the next, `url=http://www.sakec.ac.in/` returned 200 with rows, and `gau` pulled 4 917 URLs from
+the same archive in the same stage (raw file 487 360 bytes). waybackurls has no error surface, so "the archive
+refused me" and "no URLs" are the same empty success - which is why `tool_runs` stores `ok 0`. Fixing it means a
+different archive reader (scope creep) or classifying a silence the tool cannot signal. Recorded, not fixed.
+
 **Part C's follow-up (no D number yet).** `live` cannot seed `urls` because `HostStatusRecord` carries no URL and its
 `status_code` is `None` for `httprobe` rows; the fix is `url` on the model plus three adapters plus the engine write
 (five files, four tests), recorded in REVIEW_LOG "C". Nothing was invented in this batch.
