@@ -116,6 +116,9 @@ class ReportConfig(_StrictModel):
     urls_max: int = Field(default=0, ge=0)
     per_host_folders: bool = True
     emit_lists: bool = True
+    # D72: extra query parameters that rank a URL down. The built-in list in
+    # `ui.NOISE_PARAMS` always applies; this one only adds to it.
+    noise_params: list[str] = Field(default_factory=list)
 
 
 class WildcardCheck(_StrictModel):

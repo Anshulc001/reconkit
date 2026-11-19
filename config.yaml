@@ -47,6 +47,7 @@ report:
   urls_max: 0                  # 0 = no cap; one report lists every stored URL
   emit_lists: true             # subdomains/alive/dns_resolved/host-info files
   per_host_folders: true       # hosts/<hostname>/{urls.txt,info.json}
+  noise_params: []             # extra marketing params to rank down (adds to the built-in list)
 
 confidence:
   high_min_sources: 3

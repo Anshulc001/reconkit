@@ -77,6 +77,27 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 | PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `slice.bank.in` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.slice.bank.in/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
 
+## 2026-11-19 (D72) - a referral URL ranks last, and is still reported
+
+Before, `/product?utm_source=x` sorted by the depth of its path and its status,
+so a campaign link could outrank a real page. `_url_rank` gained one key after
+the interesting-path key: `1` when the query matches `NOISE_PARAM_RE`, `0`
+otherwise. So:
+
+```
+/admin (404)                                  -> interesting
+/about (404)                                  -> clean
+/product?utm_source=newsletter (200)          -> noisy, below both
+/admin?utm_source=mail (404)                  -> interesting, then noisy (still first)
+```
+
+The four tests assert exactly those orders, that a noisy URL is still counted
+and present, and that `report.noise_params=["campaign"]` adds a name while
+`gclid` (built-in) still demotes. `report_urls(urls, 0, noise_params)` is the
+one entry point; both `report.txt`/`report.json` and `hosts/<name>/urls.txt`
+sort through it, so a per-host list cannot disagree with the main report.
+Suite 1006 -> 1010.
+
 ## 2026-11-19 (D71) - a report folder carries lists, per-host folders, and every URL
 
 **Before.** A report folder held `report.txt` + `report.json`, the URL block was

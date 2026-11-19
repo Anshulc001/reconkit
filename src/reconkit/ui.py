@@ -546,16 +546,60 @@ _INTERESTING_PATH = re.compile(
 )
 
 
-def _url_rank(item: UrlSnapshot) -> tuple[int, int, int, str, str]:
-    """docs/02 section 5: interesting path, then a query, then a live status.
+# D72: query parameters that say where a visitor came from, not what the URL is.
+# They are a ranking tiebreaker, never a filter: the URL is still reported.
+NOISE_PARAMS: tuple[str, ...] = (
+    "rc",
+    "ic",
+    "_branch_match_id",
+    "_branch_referrer",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "utm_term",
+    "af_xp",
+    "pid",
+    "deep_link_value",
+    "deep_link_sub1",
+    "gclid",
+    "fbclid",
+)
 
-    Ascending, so the most useful URL sorts first; `host`/`url` make the order
+NOISE_PARAM_RE = re.compile(
+    r"(^|&)(" + "|".join(NOISE_PARAMS) + r")=",
+    re.IGNORECASE,
+)
+
+
+def _noise_re(extra: Sequence[str]) -> re.Pattern[str] | None:
+    """One regex for the config's extra names, or None when it adds none."""
+
+    names = [name for name in extra if name]
+    if not names:
+        return None
+    return re.compile(r"(^|&)(" + "|".join(re.escape(name) for name in names) + r")=", re.I)
+
+
+def _url_rank(
+    item: UrlSnapshot, extra_noise: re.Pattern[str] | None = None
+) -> tuple[int, int, int, int, str, str]:
+    """docs/02 section 5: path, then noise, then query, then a live status.
+
+    Ascending, so the most useful URL sorts first. A marketing/referral
+    parameter (D72) sorts below every clean URL that is not interesting on its
+    path, but an interesting path keeps its rank: noise is a tiebreaker, not a
+    veto, and no URL is dropped for carrying one. `host`/`url` make the order
     total, which is what keeps two runs byte-identical.
     """
 
     parsed = urlsplit(item.url)
+    noisy = bool(NOISE_PARAM_RE.search(parsed.query)) or (
+        extra_noise is not None and bool(extra_noise.search(parsed.query))
+    )
     return (
         0 if _INTERESTING_PATH.search(parsed.path) else 1,
+        1 if noisy else 0,
         0 if parsed.query else 1,
         0 if item.status_code in (200, 301, 302) else 1,
         item.host,
@@ -564,16 +608,18 @@ def _url_rank(item: UrlSnapshot) -> tuple[int, int, int, str, str]:
 
 
 def report_urls(
-    urls: Sequence[UrlSnapshot], urls_max: int
+    urls: Sequence[UrlSnapshot], urls_max: int, noise_params: Sequence[str] = ()
 ) -> tuple[dict[str, list[dict[str, object]]], int]:
     """Group the report's URLs by host, best first, capped across the report.
 
     `urls_max` is the whole report's budget, not a per-host one; `0` means no
-    cap. Returns the groups (hosts that lost every URL to the cap are absent)
-    and how many URLs were kept, which is what `urls_shown` reports.
+    cap. `noise_params` extends the built-in D72 list, it never replaces it.
+    Returns the groups (hosts that lost every URL to the cap are absent) and how
+    many URLs were kept, which is what `urls_shown` reports.
     """
 
-    ordered = sorted(urls, key=_url_rank)
+    extra = _noise_re(noise_params)
+    ordered = sorted(urls, key=lambda item: _url_rank(item, extra))
     if urls_max > 0:
         ordered = ordered[:urls_max]
     grouped: dict[str, list[dict[str, object]]] = {}
@@ -598,13 +644,14 @@ def report_document(
     scope_warnings: Sequence[str] = (),
     urls: Sequence[UrlSnapshot] = (),
     urls_max: int = 0,
+    noise_params: Sequence[str] = (),
     mode: str | None = None,
     scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     """Build the report's JSON document from stored values only."""
 
-    grouped, shown = report_urls(urls, urls_max)
+    grouped, shown = report_urls(urls, urls_max, noise_params)
     document: dict[str, object] = {
         "type": "report",
         "target": target,
@@ -673,6 +720,7 @@ def report_text(
     scope_warnings: Sequence[str] = (),
     urls: Sequence[UrlSnapshot] = (),
     urls_max: int = 0,
+    noise_params: Sequence[str] = (),
     mode: str | None = None,
     scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
@@ -707,7 +755,7 @@ def report_text(
         lines.append("  ".join(cell.ljust(width) for cell, width in zip(line, widths, strict=True)))
     if not table and "hosts" not in hidden:
         lines.append("(no hosts)")
-    lines.extend(_report_tree_sections(target, rows, urls, urls_max, hidden))
+    lines.extend(_report_tree_sections(target, rows, urls, urls_max, hidden, noise_params))
     return "\n".join(lines) + "\n"
 
 
@@ -722,6 +770,7 @@ def _report_tree_sections(
     urls: Sequence[UrlSnapshot],
     urls_max: int,
     hidden: frozenset[str] = frozenset(),
+    noise_params: Sequence[str] = (),
 ) -> list[str]:
     """The two D62 sections, minus any D63-hidden one, or nothing without URLs."""
 
@@ -736,7 +785,7 @@ def _report_tree_sections(
             for row in rows:
                 lines.append(f"  {row.fqdn}   {row.state.value}  {row.confidence.value}")
     if "urls" not in hidden:
-        grouped, shown = report_urls(urls, urls_max)
+        grouped, shown = report_urls(urls, urls_max, noise_params)
         lines.extend(["", "=== URLs by host ==="])
         if shown < len(urls):
             lines.append(f"urls: {shown} of {len(urls)} shown (report.urls_max {urls_max})")
@@ -808,7 +857,10 @@ def _write_report_lists(directory: Path, rows: Sequence[HostSnapshot]) -> None:
 
 
 def _write_per_host_folders(
-    directory: Path, rows: Sequence[HostSnapshot], urls: Sequence[UrlSnapshot]
+    directory: Path,
+    rows: Sequence[HostSnapshot],
+    urls: Sequence[UrlSnapshot],
+    noise_params: Sequence[str] = (),
 ) -> None:
     """`hosts/<hostname>/{urls.txt,info.json}` for hosts that have URLs (D71).
 
@@ -827,9 +879,10 @@ def _write_per_host_folders(
             continue
         folder = directory / "hosts" / host
         folder.mkdir(parents=True, exist_ok=True)
+        extra = _noise_re(noise_params)
         lines = [
             item.url if item.status_code is None else f"{item.url}\t{item.status_code}"
-            for item in sorted(items, key=_url_rank)
+            for item in sorted(items, key=lambda item: _url_rank(item, extra))
         ]
         _write_atomically(folder / "urls.txt", "".join(f"{line}\n" for line in lines))
         entry = info.get(
@@ -850,6 +903,7 @@ def write_field_report(
     scope_warnings: Sequence[str] = (),
     urls: Sequence[UrlSnapshot] = (),
     urls_max: int = 0,
+    noise_params: Sequence[str] = (),
     mode: str | None = None,
     scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
@@ -876,6 +930,7 @@ def write_field_report(
         scope_warnings=scope_warnings,
         urls=urls,
         urls_max=urls_max,
+        noise_params=noise_params,
         mode=mode,
         scope_limited=scope_limited,
         hidden=hidden,
@@ -892,6 +947,7 @@ def write_field_report(
             scope_warnings=scope_warnings,
             urls=urls,
             urls_max=urls_max,
+            noise_params=noise_params,
             mode=mode,
             scope_limited=scope_limited,
             hidden=hidden,
@@ -903,7 +959,7 @@ def write_field_report(
     if emit_lists:
         _write_report_lists(directory, rows)
     if per_host_folders:
-        _write_per_host_folders(directory, rows, urls)
+        _write_per_host_folders(directory, rows, urls, noise_params)
     return text_path, json_path
 
 

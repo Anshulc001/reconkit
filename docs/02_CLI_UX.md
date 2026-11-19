@@ -613,11 +613,18 @@ script can tell "the run found nothing" from "the run did not write this file".
   "host_count": 69}]` - plus `urls_by_host` (`{"<host>": [{"url": ...,
   "status_code": 200|null, "host_state": "ALIVE"}]}`, only for hosts with at
   least one URL), `urls_total`, `urls_shown` and `urls_truncated`.
-- **Which URLs a report lists, and how many.** Inside each host the order is
-  (1) an interesting path (`admin`, `login`, `api`, `.git`, `.env`, `backup`,
-  `config`, `upload`, `debug`, `phpinfo`, `swagger`, `graphql`, `.sql`, `.zip`,
-  `.bak`, `dashboard`, `panel`, `test`, `dev`), (2) a URL with a query string,
-  (3) a URL that answered `200`/`301`/`302`, (4) everything else. The cap is the
+- **Which URLs a report lists, and how many.** Inside each host the sort keys
+  are, in order: (1) an interesting path (`admin`, `login`, `api`, `.git`,
+  `.env`, `backup`, `config`, `upload`, `debug`, `phpinfo`, `swagger`,
+  `graphql`, `.sql`, `.zip`, `.bak`, `dashboard`, `panel`, `test`, `dev`);
+  (2) the URL carries **no** marketing/referral parameter (`utm_*`, `fbclid`,
+  `gclid`, `rc`, `ic`, `_branch_match_id`, `_branch_referrer`, `af_xp`, `pid`,
+  `deep_link_value`, `deep_link_sub1`); (3) it has a query string; (4) it
+  answered `200`/`301`/`302`; then host and URL to make the order total. Noise
+  is a tiebreaker, not a filter: a referral URL is still listed, and an
+  interesting path keeps key 1 even when it carries one. `config.yaml`
+  `report.noise_params` **adds** names to the built-in list; it never replaces
+  it. The cap is the
   `config.yaml` key `report.urls_max` (default `0` = no cap, changed 2026-11-19)
   and it applies to the **whole report**, not per host. With `0` every stored URL
   is listed and `urls_truncated` stays `false`; with a cap, `urls_shown` and

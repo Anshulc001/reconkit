@@ -934,3 +934,60 @@ def test_urls_max_still_respected_when_set(tmp_path: Path) -> None:
     assert document["urls_truncated"] is True
     text = (directory / "report.txt").read_text(encoding="utf-8")
     assert "urls: 100 of 500 shown (report.urls_max 100)" in text
+
+
+# ------------------------------- (D72) marketing/referral params rank last
+
+
+def test_referral_urls_rank_below_interesting_urls() -> None:
+    """D72: a referral parameter sorts below every clean, non-interesting URL."""
+    urls = [
+        _url("https://example.com/product?utm_source=newsletter&utm_medium=email", 200),
+        _url("https://example.com/about", 404),
+        _url("https://example.com/admin", 404),
+    ]
+    grouped, _shown = ui.report_urls(urls, 0)
+    assert [item["url"] for item in grouped["example.com"]] == [
+        "https://example.com/admin",
+        "https://example.com/about",
+        "https://example.com/product?utm_source=newsletter&utm_medium=email",
+    ]
+
+
+def test_referral_urls_are_not_dropped() -> None:
+    """D72: noise is a tiebreaker, never a filter - the URL still appears."""
+    urls = [_url("https://example.com/product?fbclid=abc", 200)]
+    grouped, shown = ui.report_urls(urls, 0)
+    assert shown == 1
+    assert grouped["example.com"] == [
+        {"url": "https://example.com/product?fbclid=abc", "status_code": 200, "host_state": "ALIVE"}
+    ]
+
+
+def test_referral_param_on_interesting_path_keeps_interesting_rank() -> None:
+    """D72: an interesting path is not demoted for carrying a noise parameter."""
+    urls = [
+        _url("https://example.com/about", 404),
+        _url("https://example.com/admin?utm_source=mail", 404),
+    ]
+    grouped, _shown = ui.report_urls(urls, 0)
+    assert [item["url"] for item in grouped["example.com"]] == [
+        "https://example.com/admin?utm_source=mail",
+        "https://example.com/about",
+    ]
+
+
+def test_noise_params_config_extends_builtin() -> None:
+    """D72: `report.noise_params` adds names; the built-in list still applies."""
+    urls = [
+        _url("https://example.com/a?campaign=spring", 404),
+        _url("https://example.com/a?gclid=x", 404),
+        _url("https://example.com/a", 404),
+    ]
+    grouped, shown = ui.report_urls(urls, 0, ["campaign"])
+    assert shown == 3
+    assert [item["url"] for item in grouped["example.com"]] == [
+        "https://example.com/a",
+        "https://example.com/a?campaign=spring",
+        "https://example.com/a?gclid=x",
+    ]

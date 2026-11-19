@@ -1087,6 +1087,7 @@ def _run_scan(
                 # come from the same rows as the hosts table.
                 urls=engine.url_rows(summary.target_id),
                 urls_max=config.report.urls_max,
+                noise_params=config.report.noise_params,
                 # D63: the artifact records the mode the run actually used.
                 mode="active (forced by --include)" if forced_contact else None,
                 # D64: a requested active run whose active stages the scope gate
@@ -1520,6 +1521,7 @@ def report_command(
             run_at=stored.started_at,
             urls=stored.urls,
             urls_max=config.report.urls_max,
+            noise_params=config.report.noise_params,
             emit_lists=config.report.emit_lists,
             per_host_folders=config.report.per_host_folders,
         )

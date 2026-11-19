@@ -4,6 +4,11 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-19, D72): **marketing/referral URLs rank below clean ones, and are never dropped.**
+  `ui.NOISE_PARAM_RE` (utm_*, fbclid, gclid, rc, ic, _branch_*, af_xp, pid, deep_link_*) is the
+  second sort key after "interesting path", so `/admin?utm_source=x` keeps tier 1 while `/product?utm_source=x`
+  falls below `/about`. `report.noise_params` (config, default `[]`) adds names without replacing the built-in
+  list. Suite 1006 -> 1010. See D72 in REVIEW_LOG.
 - Status (2026-11-19, D71): **a report folder now carries the host lists, per-host folders, and every URL.**
   `report.txt`/`report.json` are unchanged except that `report.urls_max` defaults to `0` (no cap);
   `subdomains.txt`, `alive.txt`, `dns_resolved.txt` (ALIVE + DNS_ONLY), `host-info.txt`, `host-info.json`
