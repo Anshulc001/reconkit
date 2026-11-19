@@ -7434,3 +7434,50 @@ runs adapters through `asyncio.to_thread`, so the interrupt is raised in the **m
 **Closed.** The engine path is now covered by an end-to-end CLI test, not only by a unit test: the registry exists *and*
 the CLI uses it. What is still not exercised is a literal SIGINT delivered to the process during a real scan - the test
 raises `KeyboardInterrupt` in the same place SIGINT would, which is the only observable difference.
+
+## 2026-11-19 (close-out) N.6 - the capstone scan
+
+```bash
+reconkit run -d testfire.net --active --phase-timeout 300 --no-color --config /tmp/cap/config.yaml
+# temp config: db_path=/tmp/cap/recon.db, workspace_dir=/tmp/cap/workspaces, url_probe.max_urls=20; no --full
+```
+
+Raw tail:
+
+```
+│ urlfinder         │ urls  │ ok      │ 932   │ idle for 60s; kept partial     │
+│                   │       │         │       │ output                         │
+│ gau               │ urls  │ timeout │ 0     │ phase timeout                  │
+36 hosts: 8 ALIVE, 0 DNS_ONLY, 0 SHUT_DOWN, 26 DEAD, 2 UNKNOWN | tools: 29 ok, 1
+gap, 0 failed, 2 skipped, 1 timeout
+warning: url_probe: probed the first 20 URL(s) only; re-run to probe the rest
+active scan completed with gaps - 1 stage(s) incomplete
+  subs: otx: rate limited (HTTP 429)
+report: results/testfire.net/20261119T110355Z/report.txt and .../report.json
+EXIT=5
+```
+
+`scan_runs`: `subs completed`, `dns completed`, `live completed`, `tech completed`, `urls partial`, `url_probe completed`.
+
+Non-ok `tool_runs`:
+
+```
+otx                  gap      otx: rate limited (HTTP 429)
+chaos                skipped  requires PDCP_API_KEY
+github_subdomains    skipped  requires GITHUB_TOKEN
+gau                  timeout  phase timeout
+```
+
+### Why it exited 5
+
+Exactly one hard failure: **`gau` was still running when the `urls` stage hit its 300 s deadline**. That is case (b) of
+the batch's three: *a timeout a larger `--phase-timeout` would avoid*, not a genuine tool defect (gau answers in ~31 s
+when archive.org is healthy, D20 measured 345 items in 31 s) and not a rule gap (a timeout is a hard failure by
+docs/02 section 6, and R10 deliberately does not launder one). It was **not** re-run with a longer timeout to chase a
+zero.
+
+What R10 changed in this run: `tech` and `urls` executed their tools at all (8 ALIVE hosts were found), so nothing was
+skipped for lack of input; the two skips are the key-gated subs tools, exactly as designed.
+
+Everything else behaved as the rulings say: `otx` 429 -> `gap` -> excluded from the failure total (D34/B1), and the
+`urls` stage's own result is `partial`, which is what the exit code reads.
