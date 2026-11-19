@@ -76,6 +76,201 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
+## 2026-11-19 (Part U) - the first sakec.ac.in engine run, made once
+
+Part T (`b6df719`) made per-request timeouts adapter constants (D53). This is the one engine run that followed, on the
+target the owner named. It was **not repeated**; everything below comes from that single run.
+
+Two deviations from the batch's literal command are disclosed in PROGRESS (D53 addendum): `--no-scope` (sakec.ac.in
+is not in `scope.yaml`, which was left byte-identical, so the gate would have exited 3 with no scan;
+`scan_runs.scope_mode` reads `unrestricted_flag`) and `--json` (U.3 asks for the JSON summary block; without the flag
+that block would have needed a second run, which the batch forbids). The temp config was
+`/tmp/reconkit-sakec-config.yaml`, a byte-identical copy of `config.yaml` (`diff -q` clean; `url_probe.max_urls: 5000`,
+config line 38).
+
+```
+$ time reconkit run -d sakec.ac.in --active --phase-timeout 600 --no-color --no-scope --json \
+    --config /tmp/reconkit-sakec-config.yaml
+wall 1060.685 s
+exit=0
+```
+
+stderr, 99 lines, verbatim:
+
+```
+⚠ --no-scope given: active stages will run WITHOUT scope enforcement.
+  target(s): sakec.ac.in
+  no scope file is being read, checked, or enforced.
+  a scan_runs record will be written with scope_mode = "unrestricted_flag".
+subs: running 9 tool(s)
+subs: otx gap 0 item(s)
+subs: urlscan ok 1 item(s)
+subs: hackertarget gap 0 item(s)
+subs: certspotter ok 27 item(s)
+subs: crtsh ok 37 item(s)
+subs: assetfinder ok 37 item(s)
+subs: amass running (20s)
+subs: findomain running (20s)
+subs: subfinder running (20s)
+subs: findomain ok 67 item(s)
+subs: subfinder ok 39 item(s)
+subs: amass ok 14 item(s)
+subs: finished 9/9 tool(s), 222 item(s)
+dns: running 5 tool(s)
+dns: dnsx ok 39 item(s)
+dns: dig ok 46 item(s)
+dns: massdns ok 39 item(s)
+dns: dnspython ok 55 item(s)
+dns: puredns ok 39 item(s)
+dns: finished 5/5 tool(s), 218 item(s)
+live: running 4 tool(s)
+live: pyprobe running (10s)
+live: httprobe running (20s)
+live: httpx running (20s)
+live: tlsx running (20s)
+live: tlsx ok 21 item(s)
+live: httpx ok 12 item(s)
+live: httprobe ok 12 item(s)
+live: pyprobe ok 12 item(s)
+live: finished 4/4 tool(s), 57 item(s)
+tech: running 5 tool(s)
+tech: httpx_tech ok 12 item(s)
+tech: cdncheck ok 2 item(s)
+tech: webanalyze ok 6 item(s)
+tech: whatweb running (10s)
+tech: wafw00f running (20s)
+tech: whatweb ok 12 item(s)
+tech: wafw00f ok 2 item(s)
+tech: finished 5/5 tool(s), 34 item(s)
+urls: running 8 tool(s)
+urls: unfurl ok 138 item(s)
+urls: waybackurls ok 0 item(s)
+urls: gau running (10s)
+urls: subjs ok 100 item(s)
+urls: gospider running (20s)
+urls: hakrawler running (20s)
+urls: katana running (20s)
+urls: urlfinder running (20s)
+urls: katana ok 356 item(s)
+urls: hakrawler killed 62 item(s)
+urls: gau ok 4917 item(s)
+urls: gospider killed 402 item(s)
+urls: urlfinder killed 6367 item(s)
+urls: finished 8/8 tool(s), 12342 item(s)
+url_probe: probing 5000 URL(s)
+url_probe: 200/5000 URL(s) probed
+url_probe: 400/5000 URL(s) probed
+url_probe: 600/5000 URL(s) probed
+url_probe: 800/5000 URL(s) probed
+url_probe: 1000/5000 URL(s) probed
+url_probe: 1200/5000 URL(s) probed
+url_probe: 1400/5000 URL(s) probed
+url_probe: 1600/5000 URL(s) probed
+url_probe: 1800/5000 URL(s) probed
+url_probe: 2000/5000 URL(s) probed
+url_probe: 2200/5000 URL(s) probed
+url_probe: 2400/5000 URL(s) probed
+url_probe: 2600/5000 URL(s) probed
+url_probe: 2800/5000 URL(s) probed
+url_probe: 3000/5000 URL(s) probed
+url_probe: 3200/5000 URL(s) probed
+url_probe: 3400/5000 URL(s) probed
+url_probe: 3600/5000 URL(s) probed
+url_probe: 3800/5000 URL(s) probed
+url_probe: 4000/5000 URL(s) probed
+url_probe: 4200/5000 URL(s) probed
+url_probe: 4400/5000 URL(s) probed
+url_probe: 4600/5000 URL(s) probed
+url_probe: 4800/5000 URL(s) probed
+url_probe: finished 5000 URL(s)
+⚠ 3 tool(s) stopped early — partial output kept
+  hakrawler: killed after 60s idle at stage 60.1s, 62 partial
+  gospider: killed after 60s idle at stage 128.6s, 402 partial; skipped unusable
+line '[aws-s3] - vaave.s3.amazonaws.com'; skipped unusable line '[aws-s3] - 
+vaave.s3.amazonaws.com'
+  urlfinder: killed after 180s idle at stage 193.5s, 6367 partial
+  raise that class's window under runtime_idle: in config.yaml, or the stage 
+budget with --phase-timeout.
+⚠ active scan completed with gaps — 1 stage(s) incomplete
+  subs: hackertarget: free quota exceeded, otx: rate limited (HTTP 429)
+  run 'reconkit doctor' to see what is installed; see docs/10_TOOL_SOURCES.md 
+for provenance.
+  this is not a failure — the scan used every tool that was available.
+report: results/sakec.ac.in/20261119T150646Z/report.txt and results/sakec.ac.in/20261119T150646Z/report.json
+```
+
+`--json` document (stdout, 1 473 078 bytes) - the scalars and the `summary` block:
+
+```
+target: "sakec.ac.in"  type: "summary"  exit_code: 0
+scope_mode: "unrestricted_flag"  scope_denied: false  resumed: false
+completion: {"status": "complete_with_gaps", "gaps": [{"stage": "subs", "reason": "hackertarget: free quota exceeded, otx: rate limited (HTTP 429)"}]}
+www_dedup: {"applied": false, "pairs": []}
+warnings: ["DNS/probe inconclusive; kept previous state",
+           "url_probe: probed the first 5000 URL(s) only; re-run to probe the rest"]
+summary: {
+  "hosts": 69, "alive": 12, "dns_only": 27, "shut_down": 0, "dead": 29, "unknown": 1,
+  "tools_ok": 26, "tools_gap": 2, "tools_failed": 0, "tools_skipped": 2,
+  "tools_timeout": 0, "tools_killed": 3
+}
+```
+
+`scan_runs` (all six `completed`; `scope_mode` `unrestricted_flag` on each):
+
+| id | stage | started | finished | duration |
+|---|---|---|---|---|
+| 164 | subs | 14:49:06Z | 14:50:45Z | 99 s |
+| 165 | dns | 14:50:45Z | 14:50:59Z | 14 s |
+| 166 | live | 14:50:59Z | 14:52:06Z | 67 s |
+| 167 | tech | 14:52:07Z | 14:53:55Z | 108 s |
+| 168 | urls | 14:53:55Z | 14:57:30Z | 215 s |
+| 169 | url_probe | 14:57:30Z | 15:06:46Z | 556 s |
+
+`tool_runs`: 33 rows for 164-169 - `26 ok, 2 gap, 0 failed, 2 skipped, 0 timeout, 3 killed`. Every non-ok row:
+
+```
+971  164  chaos              skipped  0     None    requires PDCP_API_KEY
+972  164  github_subdomains  skipped  0     None    requires GITHUB_TOKEN
+973  164  otx                gap      0     0.47s   otx: rate limited (HTTP 429)
+975  164  hackertarget       gap      0     0.83s   hackertarget: free quota exceeded
+1000 168  hakrawler          killed   62    60.06s  killed after 60s idle at stage 60.1s, 62 partial
+1002 168  gospider           killed   402   128.62s killed after 60s idle at stage 128.6s, 402 partial; skipped unusable line '[aws-s3] - vaave.s3.amazonaws.com'; skipped unusable line '[aws-s3] - vaave.s3.amazonaws.com'
+1003 168  urlfinder          killed   6367  193.43s killed after 180s idle at stage 193.5s, 6367 partial
+```
+
+One more zero-item row, but `ok`: `waybackurls ok 0` in 0.62 s. Its raw file
+(`workspaces/sakec.ac.in/urls/168-waybackurls.txt`) is **0 bytes**, and the 2026-11-18 run's file (`163-waybackurls.txt`)
+is 0 bytes too, while `gau`'s file from the same stage is 487 360 bytes / 4 919 lines. The adapter asks the apex once
+(`_query_roots`: `sakec.ac.in`, covered by `*.<target>/*`); `gau` was handed every host. Nothing failed - 0 rows is
+`ok` - so this is recorded as a new edge, not a defect and not fixed here (PROGRESS, Open risks).
+
+Item counts asked for, against the 2026-11-18 six-tool capture: `gau` 4 917 (70.23 s) vs 6 227; `katana` 356 (52.05 s)
+vs 1; `subfinder` 39 (33.81 s) vs 67; `httprobe` 12 (33.30 s) vs 18. Crawlers: `hakrawler` 62, `gospider` 402,
+`urlfinder` 6 367, `subjs` 100, `unfurl` 138, `waybackurls` 0.
+
+### Classification (U.4)
+
+| Row | Class | Why |
+|---|---|---|
+| `chaos`, `github_subdomains` skipped | expected | selection skips, no API key (`PDCP_API_KEY`, `GITHUB_TOKEN`) |
+| `otx` gap, HTTP 429 | known since PIT-55 (2026-11-18) | provider rate limit, already classified `gap` |
+| `hackertarget` gap, free quota | known since PIT-55 (2026-11-18) | provider quota, already classified `gap` |
+| `hakrawler` killed | expected, D52 idle | crawler window 60 s, last output at 0.001 s, 62 partial kept |
+| `gospider` killed | expected, D52 idle | crawler window 60 s, last output at 0.0007 s, 402 partial kept; the two `[aws-s3]` lines are skipped per PIT-58 |
+| `urlfinder` killed | expected, D52 idle | archive window 180 s, last output at 0.0045 s, 6 367 partial kept |
+| `waybackurls` ok 0 items | **new edge, recorded, not fixed** | 0 bytes raw, reproducible from the 2026-11-18 run, while `gau` returned 4 917 archive URLs |
+
+Four one-line answers:
+
+1. **Idle kill?** Yes - three, all from the idle windows, none from a per-request timeout: `hakrawler` (60 s crawler),
+   `gospider` (60 s crawler), `urlfinder` (180 s archive), partial output kept in all three.
+2. **Stage-budget timeout?** No. `tools_timeout: 0`, no `ToolStatus.TIMEOUT` row, and the longest stage (`url_probe`,
+   556 s) finished below its 600 s ceiling.
+3. **Exit 0 or 5?** 0. `completion.status` is `complete_with_gaps` with one gap, and both its members are `gap`, not
+   `failed`, so the failure total is 0 (PIT-55).
+4. **Wall clock vs the ~2m40s capture?** 1 060.685 s vs 160 s. The capture replayed six tools; this run is six stages,
+   and `url_probe` alone is 556 s (52%) probing 5 000 URLs at ~9/s. Without it the run would have been ~505 s.
+
 ## 2026-11-18 (audit close-out) - raw proofs for the url_probe/httpx batch
 
 The follow-up batch (6488aad, 4b97928, aad092c, 62e88db) reported five findings

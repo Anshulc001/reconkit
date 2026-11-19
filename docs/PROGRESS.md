@@ -4,11 +4,15 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status: **D53 done at HEAD: per-request timeouts are adapter constants; `ctx.timeout` is the stage budget and the
-  hard wall only.** 961 tests, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical
-  (`d45a3c90...eeee8b`). Part U (the first sakec.ac.in engine run) follows in this batch. D51 does not exist;
-  R13/R14/R15 and the Part C dedup question are still open exactly as recorded. See D53 below and 4a2d in
-  `docs/09` for the constants. Previous status: **D52 done at `41387e0`: the per-tool runtime caps are deleted, runtime is idle-only.** 950 tests,
+- Status: **Parts T and U done (`b6df719` plus this docs commit): per-request timeouts are adapter constants (D53),
+  and the first sakec.ac.in engine run is recorded (D53 addendum).** 961 tests, `ruff`/`format`/`mypy` clean, tree
+  clean, `scope.yaml` byte-identical (`d45a3c90...eeee8b`). The run, made **once**, exited **0** in 1 060.685 s:
+  `69 hosts: 12 ALIVE, 27 DNS_ONLY, 0 SHUT_DOWN, 29 DEAD, 1 UNKNOWN | tools: 26 ok, 2 gap, 0 failed, 2 skipped,
+  0 timeout, 3 killed`; the one gap is the known `hackertarget`/`otx` pair and the three kills are idle windows
+  (`hakrawler` 60 s, `gospider` 60 s, `urlfinder` 180 s) with partial output kept. Two new observations are recorded
+  under Open risks (`url_probe` used 556 s of 600; `waybackurls` returned 0 items where `gau` returned 4 917), neither
+  fixed. D51 does not exist; R13/R14/R15 and the Part C dedup question are still open exactly as recorded. See D53
+  and its addendum below and 4a2d in `docs/09`. Previous status: **D52 done at `41387e0`: the per-tool runtime caps are deleted, runtime is idle-only.** 950 tests,
   `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (sha256 `d45a3c90...eeee8b`). D48 and its
   addendum are superseded by D52 (the classes stay, every cap goes); D51 does not exist. R13/R14/R15 and the Part C
   dedup question are still open exactly as recorded. See D52 and its addendum below for the model, the scale numbers
@@ -272,6 +276,21 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   (`httprobe` 600 000 ms per probe) - and D52 would have scaled it to the stage budget (`vulns` 7200 s). No new config
   field: per-tool tuning would be a `tools.yaml` entry, which was not added. Suite 950 -> 961 (one six-case
   parametrized test plus five named tests).
+
+- **D53 addendum / Part U (2026-11-19): the first sakec.ac.in engine run, made once at `b6df719`.** One run, never
+  repeated; wall **1 060.685 s (17m41s)**, exit **0**, `completion: complete_with_gaps` whose only gap is
+  `subs: hackertarget: free quota exceeded, otx: rate limited (HTTP 429)` (both known since PIT-55). Summary
+  `69 hosts: 12 ALIVE, 27 DNS_ONLY, 0 SHUT_DOWN, 29 DEAD, 1 UNKNOWN | tools: 26 ok, 2 gap, 0 failed, 2 skipped,
+  0 timeout, 3 killed`; all six `scan_runs` rows `completed`, 33 `tool_runs` rows. The three killed rows are the first
+  production evidence for D52's idle windows, and all three keep their partial output: `hakrawler` 60.1 s / 62,
+  `gospider` 128.6 s / 402, `urlfinder` 193.5 s / 6 367. No tool timed out and no stage reached `--phase-timeout`.
+  Item counts: `gau` 4 917, `katana` 356, `subfinder` 39, `httprobe` 12 (the 2026-11-18 six-tool capture had
+  6 227 / 1 / 67 / 18). **Two disclosed deviations from the batch's literal command:** `--no-scope` (sakec.ac.in is
+  not in `scope.yaml`, which was left byte-identical, so the gate would have exited 3 with no scan; `scan_runs`
+  records `scope_mode = 'unrestricted_flag'` under the D1 amendment) and `--json` (U.3 asks for the JSON summary
+  block, which would otherwise have needed a second run - forbidden by the batch). The config was a byte-identical
+  copy of `config.yaml` in `/tmp`, so `url_probe.max_urls` stayed 5000 and nothing in the repo changed. Full raw
+  evidence: REVIEW_LOG "2026-11-19 (Part U)".
 
 - **D50 (2026-11-19): a running tool says so, once, on stderr.** The stage spinner was the only sign of life and it
   needs a terminal; a piped stderr saw nothing between "running N tool(s)" and the first finished-tool line. Now every
@@ -802,9 +821,20 @@ Three owner decisions. Nothing here is a code defect waiting to be found.
 no host-count ceiling), resuming a run interrupted mid-stage (Ctrl+C itself is tested), CDN IP collapse changing a
 verdict (no test), IDN/unicode and 10 KB URLs (rejected or unlimited by code, no test either way), and a stalled tool
 other than `urlfinder` (since D52 every classed tool has an idle kill, but only the mock all-silent run proves one end
-to end, with a 0.3 s window; no real tool has been caught by a production window yet). `gau`, `katana`, `gospider`
+to end, with a 0.3 s window; **updated 2026-11-19:** the sakec.ac.in engine run caught three in the production
+windows - `hakrawler` 60 s, `gospider` 60 s, `urlfinder` 180 s, 62/402/6 367 partial items kept). `gau`, `katana`, `gospider`
 and `nikto` were the tools whose caps D52 deleted; the idle-kill evidence is the `_limits`/watchdog tests and the
 all-silent run in REVIEW_LOG "D52 addendum".
+
+**New 2026-11-19 (Part U): two observations, recorded and not fixed.** (a) `url_probe` spent **556 s of its 600 s
+budget** on a 5 000-URL list (`scan_runs` 169, `14:57:30Z` -> `15:06:46Z`, 52% of the whole run) and finished at
+~9 URLs/s. It completed (`url_probe: finished 5000 URL(s)`), but a slower network reaches `timeouts.url_probe: 600`:
+the pass is then recorded `partial`, the finished batches stay committed and the run still exits 0 (D26). Whether
+600 s per 5 000 URLs is the right ceiling is a `config.yaml` value, not a code defect. (b) `waybackurls` returned
+**0 items** (`ok`, raw file 0 bytes) in this run and in the 2026-11-18 run (`163-waybackurls.txt`), while `gau`
+returned 4 917 archive URLs from the same stage - the adapter asks the apex once (`sakec.ac.in`, i.e. `*.<target>/*`)
+and `gau` was handed every host, but a 0-byte answer from a live CDX query is unexplained and no failure is reported.
+Nothing was changed for either.
 
 **Part C's follow-up (no D number yet).** `live` cannot seed `urls` because `HostStatusRecord` carries no URL and its
 `status_code` is `None` for `httprobe` rows; the fix is `url` on the model plus three adapters plus the engine write
@@ -849,6 +879,10 @@ was asked; nothing in it is open.
 **For the reviewer:** tree clean at `41387e0` plus this docs commit, **45 commits ahead of `reconkit/main`**,
 **950 tests**, `scope.yaml` byte-identical (`d45a3c90...eeee8b`). The first sakec.ac.in engine run was **not
 performed**: its pre-flight stopped the batch over `ctx.timeout` semantics (entry above).
+
+**Superseded 2026-11-19 (Part U):** that run **was** performed, once, after D53; the paragraph above is the record of
+the batch that stopped at its pre-flight. Result: exit 0, 1 060.685 s, 3 idle kills, 0 timeouts - see the D53
+addendum in "Deviations and assumptions" and REVIEW_LOG "2026-11-19 (Part U)".
 
 ## Three questions for the owner (2026-11-19)
 
