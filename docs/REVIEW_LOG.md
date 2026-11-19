@@ -7481,3 +7481,20 @@ skipped for lack of input; the two skips are the key-gated subs tools, exactly a
 
 Everything else behaved as the rulings say: `otx` 429 -> `gap` -> excluded from the failure total (D34/B1), and the
 `urls` stage's own result is `partial`, which is what the exit code reads.
+
+## 2026-11-19 (close-out) N.7 - project state declared, open risks pruned
+
+`docs/PROGRESS.md`: the RESUME status line is the capstone's real result (exit 5, one reason: `gau` hit the 300 s `urls`
+deadline), the Open risks list is pruned to five current items, and a "Three questions for the owner" table holds B5,
+B6 and B7 as questions rather than work items.
+
+### Process mistake, disclosed
+
+The first edit of this part (`5c770da`) used a slice that started at `## Open risks` and ended at the next heading, but
+the anchor matched earlier than intended and the replacement swallowed the historical RESUME lines (the file went from
+717 to 77 lines). It was caught immediately by reading the commit's diff, the file was restored from `9dfbeec` and the
+two intended edits re-applied line-precisely, and this follow-up commit carries the repair. The damaged tree was never
+the state of any claim in the report - no check was ever run against it - but the commit history keeps the mistake
+visible instead of rewriting it.
+
+Suite unchanged (935).
