@@ -36,6 +36,11 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
   no code, tie by tool name. `tech` was already innocent (`update_host_extras` never
   writes `status_code`) and now has a guard test. Suite 996 -> 999. Historical rows
   are not rewritten; a later live pass fills them. See D69 in REVIEW_LOG.
+- Status (2026-11-19, loop retry): **`live --urls-file` still deferred, now blocked from both sides.**
+The standalone route fails because `live` is the shared `_scan_command` (a flag would appear on every scan
+command) and because running the pool from `cli.py` bypasses `tool_runs`/budgets and violates the CLI
+layering test. Enabler unchanged: an explicit host list the engine accepts, plus an owner ruling for the
+flag. See docs/02 section 1 and the REVIEW_LOG retry entry.
 - Status (2026-11-19, loop): **`live --urls-file` deferred.** Needs explicit host-list plumbing in
 `ScanOptions`/engine (live hosts are `[target] + stored subdomains`), which is outside a
 cli+tests change; docs/02 section 1 names the gap and the enabler. **urlfinder idle stays 180s**:

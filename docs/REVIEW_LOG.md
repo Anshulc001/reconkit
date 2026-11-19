@@ -77,6 +77,32 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 | PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `slice.bank.in` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.slice.bank.in/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
 
+## 2026-11-19 - loop retry: `live --urls-file` still stops at the same wall
+
+Second attempt, this time as a standalone command path rather than a scan mode.
+The route was: read the file, `urlsplit` each line, dedupe hosts, drop anything
+not http(s), apply the same scope gate `-l` uses, run the live pool
+(`pyprobe`, `httpx`, `httprobe`, `tlsx`), print the table/`--json`, no
+`scan_runs` row.
+
+Two facts stop it inside `cli.py`:
+
+1. `live` is not its own function. `for _name in _SCAN_COMMANDS:
+   app.command(_name)(_scan_command)` registers one shared Typer command for
+   `run`, `subs`, `dns`, `live`, ... so `--urls-file` on that function would
+   appear on every scan command, including the passive ones where it makes no
+   sense. Splitting `live` out means duplicating the whole option list.
+2. Running adapters directly from the CLI breaks two documented rules: a live
+   run without a stage has no `scan_runs`/`tool_runs` row (no `doctor`,
+   `status` or `diff` visibility, no idle/budget kill), and
+   `test_cli_imports_only_the_allowed_layers` forbids `reconkit.adapters` in
+   `cli.py`. The engine is the only layer allowed to build and run adapters.
+
+Either fix is engine work (an explicit host list the engine accepts, which is
+`ScanOptions.hosts` by another name), and the item's stop rule says not to
+re-attempt that. **Skipped, blocker unchanged and now recorded from both
+sides; docs/02 section 1 carries the retry.**
+
 ## 2026-11-19 (D73) - a repeat scan says how much of the URL list was already answered
 
 `url_probe` stores one answer per URL and never re-checks it (D23), so a second

@@ -192,7 +192,14 @@ ruling, so this build does not have it. There is a second piece beyond the flag:
 `Stage.LIVE`'s input is `[target] + that target's stored subdomains`, and
 `engine.run()` takes one root target, so a file with no common root also needs
 a way to hand the engine an explicit host list (REVIEW_LOG, 2026-11-19 loop
-notes).
+notes). A second attempt on 2026-11-19 tried the standalone route - parse the
+file, dedupe hosts, apply the scope gate, run the live pool directly - and hit
+the same wall from the other side: `live` is registered from the one shared
+`_scan_command` (so a flag there appears on `run`, `subs`, `dns`, ... too), and
+running adapters from the CLI would bypass `tool_runs`, the stage budget and
+the CLI's layering rule (`tests/test_cli.py` asserts only `engine`, `ui`,
+`config`, `core.*` are imported). The enabler is unchanged: an explicit host
+list the engine accepts, plus an owner ruling for the flag.
 
 **Getting the list out of a previous run.** `reconkit report --target <domain>`
 rebuilds the saved report from the database (D65, section 5). `export`, `db
