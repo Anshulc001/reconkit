@@ -1130,6 +1130,48 @@ Questions, not work items. Each one blocks something that cannot be decided from
 | 2 | **masscan/smap on a real large range (B6).** Is a real-network test against a large range authorized, and against which block? | An explicit written authorization naming the range, because nothing in `scope.yaml` can express one today (see 1). testfire.net cannot answer this honestly. |
 | 3 | **Interactive pty re-exercise (B7).** Is a scripted pty session (pexpect/`script`) with a canned `y` answer enough evidence for the `[a]` scope-write prompt, or does that flow need a human at a real terminal once more? | Yes/no on the evidence standard; the automation itself is small. |
 
+## Open risks
+
+Both entries below are **awaiting owner ruling**. Neither is implemented; the
+code and docs reflect the deferred state described next to each.
+
+### Awaiting owner ruling: `live --urls-file`
+
+`--urls-file` was attempted twice (D74; the second time as a standalone command
+path). Both times the stop rule fired: `_scan_command` is shared across every
+scan name (`for _name in _SCAN_COMMANDS: app.command(_name)(_scan_command)`), so
+a `--urls-file` option would appear on `run`, `subs`, `dns`, `live`, ..., and
+the CLI is forbidden from importing `reconkit.adapters`
+(`test_cli_imports_only_the_allowed_layers`). Running the live pool outside a
+stage would also leave no `scan_runs`/`tool_runs` row for `doctor`, `status` or
+`diff`.
+
+Fixing it needs `ScanOptions.hosts: list[str]` accepted by `engine.run()` (or an
+equivalent explicit-host entry point), plus the flag on a command that owns it.
+**Decision needed:** authorize the engine work (one small batch) or close the
+scenario with `reconkit live -l hosts.txt` (hostnames only, works today).
+
+### Awaiting owner ruling: tech + crawl in the same run (D70)
+
+D70 documented but did not implement "URL-derived hosts get tech + crawl in the
+same run". The blocker: `tech` and `urls` run before the second resolve, so a
+URL-derived host is always one step behind. D75 makes the next-run path work for
+tech (a URL-derived host with no `tech_json` is probed and tech-scanned by the
+following active run); crawl is still absent because a second `urls` execution
+would repeat the archive pool and needs its own stage row.
+
+**Decision needed:** authorize the second tech + crawler pass after resolve
+(stage machinery, ~3-4 files) or accept the multi-run workflow that D75 now
+supports.
+
+### Owner verification path: D69 on a real run
+
+Historical NULL statuses (run 203, 9 ALIVE hosts) need one real `--active` live
+pass to fill; the D69 fix only applies to runs after it landed. Run
+`reconkit run -d <target> --active --no-scope` once against an authorized target
+and check that `report.txt` shows real `HTTP status code` values (not `-`) for
+ALIVE hosts. This is the owner's step: no scan was run in this batch.
+
 ## Notes for later tasks
 
 - Where things live (the detailed per-function map is in the `REVIEW_LOG` archive): `errors.py` exceptions + exit codes; `models.py` enums and records; `config.py` strict loader; `core/runner.py` the only `subprocess` user (`run_exec`, `validate_target`, `validate_host`); `core/scope.py` the gate; `core/store.py` the only `sqlite3` user (schema/migrations, writes, diff reads, `redact`); `core/pacing.py` the `Pacer`/`RateLimiter` (removed 2026-11-17, MASTER_PLAN D3 - no such module now); `core/workspace.py` raw files; `core/wildcard.py`; `adapters/` one module per tool plus `base.py`/`registry.py`; `engine.py` the pipeline, state rule and consensus; `ui.py` rendering; `cli.py` Typer wiring; `doctor.py`; `core/toolcheck.py` the installed-copy/version probe (the installer was deleted 2026-11-17, MASTER_PLAN D4 - no such package now).
