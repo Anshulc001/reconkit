@@ -4,8 +4,14 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status: **PROJECT CODE WORK COMPLETE at `6a6d47b` after Part T (2026-11-19).** 941 tests, `ruff`/`format`/`mypy` clean,
-  tree clean, 39 commits ahead of `reconkit/main`, `scope.yaml` byte-identical (sha256 `d45a3c90...eeee8b`). Final capstone
+- Status: **Queued code work complete at `3d79524`; scalability phase open - see D48-D50.** 951 tests,
+  `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (sha256 `d45a3c90...eeee8b`). This batch added
+  D48 (per-tool caps from a tools.yaml `class:`), the D48 addendum (the D47 `external_api` ClassVar moved into
+  `external: true`), D50 (per-tool heartbeat) and stopped Part C by its own rule (no D49; the live record has no
+  answering URL). One measured consequence the owner should tune before the sakec.ac.in batch: the crawler floor of
+  90 s caps `gau` at 466 URLs where the uncapped runs returned 1042-1508 - `runtime_caps.crawler.floor` is one config
+  line, no code. Previous status: **PROJECT CODE WORK COMPLETE at `6a6d47b` after Part T (2026-11-19).** 941 tests,
+  `ruff`/`format`/`mypy` clean, tree clean, 39 commits ahead of `reconkit/main` at that point. Final capstone
   (`reconkit run -d testfire.net --active --phase-timeout 600`, temp config with `url_probe.max_urls: 20`):
   `9 hosts: 8 ALIVE, 1 DEAD | tools: 30 ok, 1 gap, 0 failed, 2 skipped, 0 timeout`, exit **0**. The only non-ok row is
   the known `otx: rate limited (HTTP 429)` gap; `crtsh` ran `ok 1 item(s)` and never returned a 404 in this run, and the
@@ -729,8 +735,18 @@ Three owner decisions. Nothing here is a code defect waiting to be found.
 - **R13 - a slow upstream exits 5, and that is correct.** Not a defect: a stage killed at `--phase-timeout` is a real
   signal, and the operator raises the deadline for a slow target.
 
-**For the reviewer:** tree clean at `6a6d47b` (code) / this docs commit, **39 commits ahead of `reconkit/main`**,
-**941 tests**, `scope.yaml` byte-identical.
+**Untested edge cases after the A.2 audit** (list, not work): a target with thousands of hosts (no test above 43 and
+no host-count ceiling), resuming a run interrupted mid-stage (Ctrl+C itself is tested), CDN IP collapse changing a
+verdict (no test), IDN/unicode and 10 KB URLs (rejected or unlimited by code, no test either way), and a stalled tool
+other than `urlfinder` (only `urlfinder` has an idle kill; the others rely on their cap). `gau`, `katana`, `gospider`
+and `nikto` now have caps but no end-to-end test of a capped run; the unit-level `_limits` tests are the evidence.
+
+**Part C's follow-up (no D number yet).** `live` cannot seed `urls` because `HostStatusRecord` carries no URL and its
+`status_code` is `None` for `httprobe` rows; the fix is `url` on the model plus three adapters plus the engine write
+(five files, four tests), recorded in REVIEW_LOG "C". Nothing was invented in this batch.
+
+**For the reviewer:** tree clean at `a0eac33` (code) / this docs commit, **43 commits ahead of `reconkit/main`**,
+**951 tests**, `scope.yaml` byte-identical.
 
 ## Three questions for the owner (2026-11-19)
 
