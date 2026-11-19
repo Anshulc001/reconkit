@@ -4,6 +4,17 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D80): **README, COMMANDS.md and docs/02 match the CLI as
+  shipped through D78.** Checked against raw `reconkit --help`, `run --help` and
+  `report --help`: `report` was missing from both command tables, the `active`
+  stage list still stopped at `live`, and README had no report-folder shape.
+  COMMANDS.md now dates its flag check 2026-11-20 and documents `report` flags;
+  README lists `report` and the `results/<target>/<stamp>/` tree including
+  `external_urls.txt` and `hosts/`; docs/02 corrects `--active` to
+  subs/dns/live/tech/urls/url_probe and adds `report` to State and output. The
+  report section already carried `urls_max: 0` (no cap) and the per-host
+  folders, so it was verified, not rewritten. Docs only; suite stays 1023.
+  See D80 in REVIEW_LOG.
 - Status (2026-11-20, D79): **no real target names remain in the repo.** The two
   targets used for real verification (`sakec.ac.in`, `slice.bank.in`) and the mock
   name `slice.test` leaked into comments, fixtures, scripts and docs: 219 matching

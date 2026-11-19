@@ -77,6 +77,45 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 | PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `target.com` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.target.com/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
 
+## 2026-11-20 (D80) - README, COMMANDS and CLI docs synced with the tool
+
+**What was stale.** Compared against the raw help of the shipped CLI:
+
+- `report` (D65) existed only in a COMMANDS.md recipe and nowhere in README;
+  neither command table listed it.
+- COMMANDS.md's `active` mode row stopped at `urls`, missing `url_probe`; its
+  header still claimed a 2026-11-17 flag check.
+- README's `run` row also omitted `url_probe`, had no `report` row, and had no
+  report-folder shape at all.
+- docs/02's `--active` flag row still said `subs`, `dns`, `live`, while the
+  mode table 30 lines above already said `subs`, `dns`, `live`, `tech`, `urls`,
+  `url_probe`.
+
+**What was already right** (verified, not rewritten): COMMANDS.md already
+spelled `--exclude` as stages/adapters/report sections and `--include` with the
+forced-contact banner. docs/02 section 5 already documented `report.urls_max`
+default `0` (no cap, D71), the per-host `hosts/<hostname>/` folders, and
+`external_urls.txt` (D76). `config.yaml` independently shows
+`report.urls_max: 0`.
+
+**Fix.** Docs only:
+
+- COMMANDS.md: 2026-11-20 help-check date; `report` in Commands at a glance and
+  Management commands (flags `--target/--run/--out/--db/--config/--no-color`,
+  read-only, exit 2 on a foreign run id); `url_probe` added to the active mode
+  row and the stage-output table.
+- README.md: `report` in the Status paragraph and command table; active stages
+  now include `url_probe`; new "What a report folder contains" block with the
+  full `results/<target>/<stamp>/` tree (`report.txt`, `report.json`,
+  `subdomains.txt`, `alive.txt`, `dns_resolved.txt`, `host-info.txt`,
+  `host-info.json`, `external_urls.txt`, `hosts/<hostname>/`) and the `0 = no
+  cap` rule.
+- docs/02_CLI_UX.md: corrected `--active` stages; added `report` to the State
+  and output table.
+
+**Verification.** Raw help pasted in the batch report; suite 1023 (unchanged),
+ruff/format/mypy clean, `scope.yaml` unchanged, no network.
+
 ## 2026-11-20 (D79) - real target names scrubbed from the repo
 
 **Symptom.** The two authorized targets used for the real verification runs

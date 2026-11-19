@@ -13,7 +13,7 @@ A command-line reconnaissance orchestrator for **authorized** security testing. 
 
 ## Status
 
-Phase 2 (working core) is complete: passive discovery (`subs`, `dns`), `live`, `ports`, `diff`, `status` and `doctor` are implemented on Linux and covered by the test suite. `install`, `update` and `doctor --fix` were removed on 2026-11-17: reconkit no longer installs tools, it only reports what you have. Phase 3 adapters and workflows are being added one at a time. These commands exist but are **Phase 3 stubs** in this build and exit `1` with a "not wired" message: `db list`, `db export`, `export`, `scope import`.
+Phase 2 (working core) is complete: passive discovery (`subs`, `dns`), `live`, `ports`, `diff`, `status` and `doctor` are implemented on Linux and covered by the test suite. `install`, `update` and `doctor --fix` were removed on 2026-11-17: reconkit no longer installs tools, it only reports what you have. Phase 3 adapters and workflows are being added one at a time. These commands exist but are **Phase 3 stubs** in this build and exit `1` with a "not wired" message: `db list`, `db export`, `export`, `scope import`. `reconkit report --target <domain>` is implemented (D65): it rebuilds a saved report from the database without scanning.
 
 ## Requirements
 
@@ -49,9 +49,10 @@ reconkit diff -d <authorized-domain>
 | `live` | ALIVE / DNS_ONLY / SHUT_DOWN / DEAD; needs `--active` (uses any present scope file) |
 | `ports` | Port scan over each adapter's default port set (`--ports` overrides); needs `--active` |
 | `tech`, `urls`, `vulns` | Stage commands whose adapters are Phase 3; may report no usable tool |
-| `run` | `passive` (subs+dns+urls) by default; `--active` = subs+dns+live+tech+urls; `--full` = all eight stages (`shots` included) with `opt_in` enabled. The mode table is in [docs/02_CLI_UX.md](docs/02_CLI_UX.md) |
+| `run` | `passive` (subs+dns+urls) by default; `--active` = subs+dns+live+tech+urls+url_probe; `--full` = all eight stages (`shots` included) with `opt_in` enabled. The mode table is in [docs/02_CLI_UX.md](docs/02_CLI_UX.md) |
 | `diff` | New, gone, state-changed and port-changed items vs the previous run |
 | `status` | Recent scans (`--json` for scripts) |
+| `report` | Rebuild `report.txt`/`report.json` from stored rows (`--target`, `--run`, `--out`); read-only, no network |
 | `doctor` | Tool, version, path, per-stage coverage, system packages, key names |
 | `scope check -d X` | Show whether a target is allowed by `scope.yaml` |
 | `db list`, `db export` | **Phase 3 stub**: exits `1`; no data is read |
@@ -73,6 +74,33 @@ A second identical run followed by `reconkit diff -d example.com` prints:
 ```
 No changes since run #1.
 ```
+
+### What a report folder contains
+
+Every run writes `results/<target>/<stamp>/` (a mock run writes under
+`results/mock/<target>/<stamp>/`):
+
+```text
+results/<target>/<stamp>/
+  report.txt
+  report.json
+  subdomains.txt
+  alive.txt
+  dns_resolved.txt
+  host-info.txt
+  host-info.json
+  external_urls.txt
+  hosts/
+    <hostname>/
+      urls.txt
+      info.json
+```
+
+`external_urls.txt` holds URLs whose host is outside the target (D76); they
+never create a `hosts/` folder. A `hosts/<hostname>/` folder exists only for an
+in-scope host that has at least one stored URL. `report.urls_max` is `0` in
+`config.yaml`, so every stored URL is listed (`0` = no cap); set a number to
+cap the whole report.
 
 ## Documentation
 

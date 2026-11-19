@@ -161,6 +161,7 @@ The `--active` `--help` text says this in one sentence: `A scope.yaml, when pres
 |---|---|
 | `diff -d X` | New / changed / gone items since the previous run; `GONE` needs two consecutive misses |
 | `status [--json]` | Progress of running or finished scans |
+| `report --target X [--run ID] [--out DIR]` | Rebuild a saved `report.txt`/`report.json` from stored rows; read-only connection, no network, no adapter (D65, section 5) |
 | `db list\|export -d X [--new-only]` | **Phase 3 stub** in this build: exits 1 with a clear message; no data is read |
 | `export -d X --format json\|md\|html` | **Phase 3 stub** in this build: exits 1 with a clear message; no report is written |
 
@@ -350,7 +351,7 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | Flag | Meaning |
 |---|---|
 | `-d, --domain` / `-l, --list` | Target or file of targets. Omitting both on a scan command starts the interactive mode (section 2b); that is the only trigger and it adds no flag |
-| `--active` | Run active stages: `subs`, `dns`, `live`. Passive stages still run. Uses passive and active tools; no intrusive/aggressive tools. A `scope.yaml`, when present, is enforced; with no scope file, active scanning is unrestricted. Full rule: section 2 |
+| `--active` | Run active stages: `subs`, `dns`, `live`, `tech`, `urls`, `url_probe`. Passive stages still run. Uses passive and active tools; no intrusive/aggressive tools. A `scope.yaml`, when present, is enforced; with no scope file, active scanning is unrestricted. Full rule: section 2 |
 | `--full` | Run a full scan: all stages (`subs`, `dns`, `live`, `ports`, `tech`, `urls`, `shots`, `vulns`), using passive, active and intrusive-tier tools (exploitation-class tools still need `--tools`). Implies `--active` and `--include-noisy`, so `opt_in` tools run, `shots`/`gowitness` included. `shots` is full-only: no other mode and no stage command requests it |
 | `--no-scope` | Ignore any scope file and behave as if none existed: active stages run unrestricted, a loud warning is printed, the run records `scope_mode = unrestricted_flag`, and scope.yaml is never modified. If `--scope PATH` is also given, `--no-scope` wins and a warning says `--scope PATH` was ignored. On a passive run it only warns and continues. Section 3.1 |
 | `--tools a,b` | Run only these adapters. A named tool bypasses tier gating but not the mode gate |

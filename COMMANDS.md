@@ -1,8 +1,9 @@
 # reconkit — Command Reference
 
 Everything reconkit can do in this build, with one line per command. Every flag
-below was checked against `reconkit <cmd> --help` on 2026-11-17; the authoritative
-text stays in `docs/02_CLI_UX.md`.
+below was checked against `reconkit --help`, `reconkit run --help` and
+`reconkit report --help` on 2026-11-20; the authoritative text stays in
+`docs/02_CLI_UX.md`.
 
 ---
 
@@ -28,6 +29,7 @@ reconkit run -d example.com     # passive scan, no prompts
 | `run` | the only command that accepts `--active`/`--full` |
 | `doctor` | tool inventory (installed, version, path, identity) |
 | `status` | recent runs from the DB |
+| `report -d X` | rebuild a saved report from the DB; no network, no adapter |
 | `diff -d X` | new/gone/changed items vs the previous run |
 | `scope check -d X` | is this target allowed by `scope.yaml`? |
 | `scope import` | **not in this build** (Phase 3, exits 1) |
@@ -61,7 +63,7 @@ and the run. Results go to `results/<domain>/<timestamp>/` as `report.txt` and
 | Mode | Stages that run | Tool modes | Tiers |
 |---|---|---|---|
 | **passive** (default) | subs, dns, urls | passive | core, opt_in* |
-| **active** (`--active`) | subs, dns, live, tech, urls | passive + active | core, opt_in* |
+| **active** (`--active`) | subs, dns, live, tech, urls, url_probe | passive + active | core, opt_in* |
 | **full** (`--full`) | all 8: subs, dns, live, ports, tech, urls, shots, vulns | passive + active | core, opt_in, intrusive |
 
 `*` `opt_in` needs `--include-noisy` unless the mode is `full` (which implies it).
@@ -203,6 +205,18 @@ reconkit diff -d <domain> --json
 `diff` compares the two latest completed discovery runs; `gone` needs two
 consecutive misses before a host is declared gone (`pending_gone` is the
 one-miss list). There are no `--from`/`--to` flags.
+
+```bash
+reconkit report --target <domain>              # latest run's report, rebuilt from the DB
+reconkit report --target <domain> --run 187    # a specific run id
+reconkit report --target <domain> --out /tmp/r --db other.db
+```
+
+`report` takes `--target` (required), `--run`, `--out`, `--db`, `--config` and
+`--no-color` only - no scan flag. It opens the database read-only, writes
+`report.txt` and `report.json` in the current report shape, and never contacts
+the target. A run id that does not belong to the target is exit `2` and writes
+nothing.
 
 ```bash
 reconkit scope check -d <domain> [--scope PATH]   # exit 0 allowed, 3 blocked
@@ -366,6 +380,7 @@ A tool that cannot run without its key is a **selection skip** with the reason
 | **ports** | ALIVE hosts | open ports, service, version | `ports`, `port_sources` |
 | **tech** | ALIVE hosts | technologies, WAF, CDN | `host_status_history.tech_json`, `.waf` |
 | **urls** | ALIVE hosts | discovered URLs + patterns | `urls` |
+| **url_probe** | stored in-scope URLs | HTTP status (`-1` no answer, `-2` unverified certificate) | `urls.status_code` |
 | **shots** | ALIVE hosts | screenshots + `screenshots.jsonl` | `results/<domain>/<ts>/screenshots/` (files, no rows — D17) |
 | **vulns** | ALIVE hosts | findings | raw output files and `--json` only (not persisted) |
 
