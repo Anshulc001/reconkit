@@ -4,7 +4,13 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status (2026-11-19, final run): **the complete build ran `sakec.ac.in` in 488.0 s (was 1 060.685 s) and `url_probe`
+- Status (2026-11-19, D57): **a timeout from an external API is a gap, so one slow third party no longer exits 5.**
+  The final run's only failure was `crtsh: request timed out` (30.71 s); `HttpAdapter._request` now raises
+  `ExternalServiceGap` for a timeout when the adapter is `external: true`, and keeps `FetchFailed` otherwise. A refused
+  connection after its one retry stays a failure, and local binaries are untouched (`classify_external_gap` has no
+  timeout rule). Suite 973 -> 974, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical
+  (`d45a3c90...eeee8b`), no re-run of sakec.ac.in. See D57 and the D57 entry in REVIEW_LOG.
+- Previous status (2026-11-19, final run): **the complete build ran `sakec.ac.in` in 488.0 s (was 1 060.685 s) and `url_probe`
   in **39 s** (was 556 s) - the D54/D55 filter is the whole delta.** 973 tests, gate clean, tree clean, `scope.yaml`
   byte-identical. Exit **5** for one new upstream failure (`crtsh: request timed out`, 30.7 s); 69 hosts (12 ALIVE,
   27 DNS_ONLY, 29 DEAD, 1 UNKNOWN); `url_probe: skipping 1444 URL(s) whose host is unreachable`, 906 probed; the
@@ -281,6 +287,24 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   `subs: quiet killed 0 item(s)`, Tools row `quiet | subs | killed | 0 | 0.6s | 0s ago | killed after 0.3s idle at
   stage 0.3s, 0 partial`, summary `..., 1 killed, 0 timeout`, the `⚠ 1 tool(s) stopped early — partial output kept`
   block, **exit 0**. A run where every tool is stopped is still a completed run; only the budget (`timeout`) exits 5.
+
+- **D57 (2026-11-19): a timeout from an external API is a gap, so one slow third party stops exiting 5.** The final
+  run's exit 5 came from exactly one row, `crtsh: request timed out` after 30.71 s, while the other 25 executed tools
+  were ok, gap, skipped or killed: a good run read as broken because a free third party was slow. A timeout is the same
+  class of "upstream is slow" as that service's 502, so `HttpAdapter._request` now raises through one helper,
+  `_timeout_failure()` - `ExternalServiceGap(f"{name}: request timed out")` when `_is_external_api()` (`external: true`
+  in `tools.yaml`), `FetchFailed` otherwise - at both timeout sites, including the second attempt after a connection
+  retry, and it is still never retried for a timeout. The boundary is deliberate and narrow: a `ConnectError` that
+  survives its one retry stays `failed` (a refused connection can be this box's network), 400/401/403 and `response too
+  large` are unchanged, and local binaries never reach this path - `BaseToolAdapter.run` classifies their captured
+  output with `classify_external_gap`, whose pattern list has no timeout rule, so a binary stopped by the stage budget
+  keeps `timeout`/`failed` and exit 5. Every `kind: http` adapter today is `external: true` (`crtsh`, `certspotter`,
+  `otx`, `hackertarget`, `urlscan`), so the rule covers all five; the guard is what keeps a future direct-scan HTTP
+  adapter a failure. No new status, no schema change, no flag, no config key. Docs first in the same commit: docs/02
+  sections 5-6, docs/03 tool-status semantics, docs/09 sections 3 and 9. Suite 973 -> 974 (the old
+  `test_timeout_is_failed` became `test_external_timeout_is_a_gap` plus
+  `test_timeout_from_a_local_http_adapter_is_still_a_failure`). Not re-run against sakec.ac.in: the measured 488 s /
+  39 s / 1 444-skip numbers do not depend on crtsh's status.
 
 - **D56 (2026-11-19): `scope.yaml` can exclude CIDRs; the gate refuses them and the run says where the exclusion is
   partial (R14).** As ruled: `exclude_cidrs` is a new list beside `in_scope_cidrs`, and exclusion beats inclusion -

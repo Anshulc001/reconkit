@@ -76,6 +76,71 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
+## 2026-11-19 (D57) - a timeout from an external API is a gap, not a failure
+
+Owner ruling after the final run: the 488 s `sakec.ac.in` run exited 5 over exactly one row,
+`crtsh: request timed out` after 30.71 s, while the other 25 executed tools were ok, gap, skipped or killed. One slow
+free third party made a healthy run look broken. A timeout is the same class of "upstream is slow" as that service's
+502, so it becomes a gap - with the boundary drawn where this box can actually be at fault.
+
+What changed, in one place (`src/reconkit/adapters/base.py`):
+
+```python
+def _timeout_failure(self) -> FetchFailed:
+    message = f"{self.name}: request timed out"
+    if self._is_external_api():
+        return ExternalServiceGap(message)
+    return FetchFailed(message)
+```
+
+and the two `raise FetchFailed(f"{self.name}: request timed out")` sites in `_request` now `raise
+self._timeout_failure()`. The second one is the attempt after a connection retry, so a service that ignores us twice
+is a gap too; nothing is retried *because* of a timeout, as before.
+
+| outcome | before | after |
+|---|---|---|
+| timeout, adapter `external: true` | `failed`, exit 5 | **`gap`**, exit 0 + one gaps line |
+| timeout, adapter not external | `failed` | `failed` (unchanged) |
+| `ConnectError` after its one retry | `failed` | `failed` - a refused connection can be this box's network |
+| 400 / 401 / 403 / body too large | `failed` | unchanged |
+| 429 / 5xx / external 404 / quota body | `gap` | unchanged |
+| binary stopped at the stage budget | `timeout` / `failed` | unchanged - `classify_external_gap` has no timeout rule |
+
+All five `kind: http` adapters carry `external: true` today (`crtsh`, `certspotter`, `otx`, `hackertarget`, `urlscan`),
+so the rule covers all of them; `_is_external_api()` is what keeps a future direct-scan HTTP adapter a failure instead of
+silently inheriting the lenient path. No new `ToolStatus`, no schema change, no flag, no config key.
+
+Evidence:
+
+```
+pytest -q tests/test_adapters.py -k "timeout or external or local_http or 404"
+21 passed, 48 deselected in 0.29s
+
+pytest -q
+974 passed in 33.27s
+ruff check .            All checks passed!
+ruff format --check .   96 files already formatted
+mypy src/reconkit       Success: no issues found in 62 source files
+```
+
+The two tests:
+
+- `test_external_timeout_is_a_gap` - real `CrtshAdapter` over a `MockTransport` that raises `httpx.ReadTimeout`:
+  `status == GAP`, `error == "crtsh: request timed out"`, exactly one call, and the injected `sleep` asserts instead of
+  recording, so a timeout cannot start retrying.
+- `test_timeout_from_a_local_http_adapter_is_still_a_failure` - the same transport on a `name = "localhttp"` subclass
+  (not in `tools.yaml`): `_is_external_api() is False`, `status == FAILED`, `error == "localhttp: request timed out"`.
+
+Mock run of the changed command (`reconkit run -d testfire.net --mock --no-color --json`): `exit_code 0`, 16 hosts,
+`tools: 15 ok, 0 gap, 3 failed, 6 skipped, 0 timeout`, report at
+`results/mock/testfire.net/20261119T172327Z/report.{txt,json}`. The three failures are `otx`, `hackertarget` and
+`dnspython` answering `no fixture for testfire.net` - a missing-fixture artifact of this mock target, present before
+this change and unrelated to it (the mock path reads a fixture and never reaches `_request`).
+
+Not re-run: the measured run stands untouched. The 488 s wall, the 39 s `url_probe`, the 1 444 skipped URLs and the
+tool counts do not depend on crtsh's status; only the exit code of a future run would differ, and only when a third
+party times out. `scope.yaml` sha256 still `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b`.
+
 ## 2026-11-19 (final run) - sakec.ac.in on the complete build: 488 s wall, `url_probe` 39 s
 
 One pass, no re-run, real limits - `reconkit run -d sakec.ac.in --active --phase-timeout 600 --no-color --json

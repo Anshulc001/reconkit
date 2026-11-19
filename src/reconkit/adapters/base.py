@@ -654,6 +654,26 @@ class HttpAdapter(BaseToolAdapter):
             raw_text=raw_text,
         )
 
+    def _timeout_failure(self) -> FetchFailed:
+        """The exception a request that never answered should raise (D57).
+
+        An external API that does not answer in time is the same class of
+        "upstream is slow" as its 502: a gap, so the run exits 0 and the gaps
+        block names the service instead of the whole run looking broken
+        (measured 2026-11-19: crtsh timed out after 30.7 s and was the only
+        failure in a 488 s run). A refused connection stays a failure - that
+        can be this box's network and says nothing about the service.
+
+        Local binaries never reach this path: `BaseToolAdapter.run` classifies
+        their captured output with `classify_external_gap`, whose pattern list
+        has no timeout rule, so a binary that hangs at the stage budget keeps
+        its `timeout`/`failed` result.
+        """
+        message = f"{self.name}: request timed out"
+        if self._is_external_api():
+            return ExternalServiceGap(message)
+        return FetchFailed(message)
+
     async def _request(self, ctx: RunContext) -> str:
         try:
             return await self._attempt(ctx)
@@ -664,11 +684,11 @@ class HttpAdapter(BaseToolAdapter):
             except httpx.ConnectError:
                 raise FetchFailed(f"{self.name}: connection failed after one retry") from None
             except httpx.TimeoutException:
-                raise FetchFailed(f"{self.name}: request timed out") from None
+                raise self._timeout_failure() from None
             except httpx.HTTPError as exc:
                 raise FetchFailed(f"{self.name}: {type(exc).__name__}") from None
         except httpx.TimeoutException:
-            raise FetchFailed(f"{self.name}: request timed out") from None
+            raise self._timeout_failure() from None
         except httpx.HTTPError as exc:
             raise FetchFailed(f"{self.name}: {type(exc).__name__}") from None
 

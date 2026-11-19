@@ -356,14 +356,54 @@ async def test_500_is_a_gap_and_not_retried() -> None:
     assert len(calls) == 1
 
 
-async def test_timeout_is_failed() -> None:
+async def test_external_timeout_is_a_gap() -> None:
+    """D57: an API that does not answer in time is the upstream, not this box.
+
+    Measured 2026-11-19: crtsh timed out after 30.71 s and was the only failure
+    in a 488 s sakec.ac.in run, so one slow third party made the whole run exit
+    5. A timeout is the same class of "upstream is slow" as that service's 502.
+    """
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        raise httpx.ReadTimeout("slow", request=request)
+
+    async def no_sleep(_seconds: float) -> None:
+        raise AssertionError("a timeout must not be retried")
+
+    adapter = CrtshAdapter(transport=httpx.MockTransport(handler), sleep=no_sleep)
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.GAP
+    assert result.error == "crtsh: request timed out"
+    assert len(calls) == 1
+
+
+async def test_timeout_from_a_local_http_adapter_is_still_a_failure() -> None:
+    """D57 is scoped to `external: true`; with no third party behind it, it fails.
+
+    Nothing on this box can be blamed on an upstream when there is no upstream,
+    so the result keeps the exit-5 meaning. Local binaries never reach this
+    path at all (`classify_external_gap` has no timeout rule).
+    """
+
+    class LocalTimeoutAdapter(HttpAdapter):
+        name = "localhttp"
+
+        def url(self, ctx: RunContext) -> str:
+            return "http://127.0.0.1/"
+
+        def parse_output(self, raw: str) -> list[object]:
+            return []
+
     def handler(_request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("slow")
 
-    adapter = CrtshAdapter(transport=httpx.MockTransport(handler))
+    adapter = LocalTimeoutAdapter(transport=httpx.MockTransport(handler))
+    assert adapter._is_external_api() is False
     result = await adapter.run(make_ctx())
     assert result.status == ToolStatus.FAILED
-    assert "timed out" in (result.error or "")
+    assert result.error == "localhttp: request timed out"
 
 
 async def test_connection_error_retries_once_with_injected_sleep() -> None:
