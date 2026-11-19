@@ -410,6 +410,27 @@ The non-interactive exit-3 message is:
 `active scan refused: example.com not in scope.yaml. Re-run with --no-scope or add example.com to scope.yaml.`
 The interactive equivalent offers `[a]`/`[b]`/`[c]`/`[d]` (section 2b point 9).
 
+**A scope-limited run says so twice (D64, 2026-11-19).** The pre-flight block
+above tells the operator what *will* be skipped; after the run, one more line
+states what the run turned out to be, and the saved artifacts carry the same
+sentence:
+
+```
+⚠ ACTIVE STAGES SKIPPED BY SCOPE — this run is passive-only; the report says so.
+```
+
+`report.json` adds `"scope_limited": true` and
+`"scope_limited_reason": "active stages skipped by scope gate"`, and `report.txt`
+puts the banner directly under its `hosts:` line. Keys are added only when the
+gate refused something, so an ordinary report does not change shape.
+
+**The exit code stays `3`.** A scope-limited run did not do what it was asked
+(active stages were refused), and code `3` is the documented scope-refusal
+signal (section 6, docs/05 rule 2). It is deliberately *not* `0` - passive
+results exist, but a pipeline that reads `0` as "the scan I asked for ran"
+would be misled. The annotation, not the exit code, carries "there are partial
+results you can read".
+
 ## 4. Speed Modes (removed 2026-11-17)
 
 The `slow`/`normal`/`fast` presets, `--speed`, `--delay`, the pacer (delays, host/port shuffling, parallel limits, request rate limiting), the `-rl`/`-rate` flags passed to tools and the typed `I AM AUTHORIZED` confirmation for `fast` were all removed at the owner's request (docs/MASTER_PLAN.md D3, reason: "user-requested removal, no throttling desired"). Every tool starts together and runs at its own natural pace. This heading keeps its number so the existing "section 5", "section 6" references elsewhere stay valid. A `scope.yaml` that still carries `max_speed` loads unchanged; the field is accepted and ignored, because there is no speed left to cap.

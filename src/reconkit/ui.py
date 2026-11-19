@@ -532,6 +532,13 @@ class ReportSelection:
 
 # D62: the paths an operator opens first. Matched against `urlsplit(url).path`
 # only, so a hit is about the resource and not about a hostname or a token.
+# D64: the one sentence a scope-limited run says, on stderr at run end and as the
+# first line of the saved report, so the two never drift apart.
+SCOPE_LIMITED_BANNER = (
+    "⚠ ACTIVE STAGES SKIPPED BY SCOPE — this run is passive-only; the report says so."
+)
+SCOPE_LIMITED_REASON = "active stages skipped by scope gate"
+
 _INTERESTING_PATH = re.compile(
     r"(admin|login|api|\.git|\.env|backup|config|upload|debug|phpinfo|swagger"
     r"|graphql|\.sql|\.zip|\.bak|dashboard|panel|test|dev)",
@@ -592,6 +599,7 @@ def report_document(
     urls: Sequence[UrlSnapshot] = (),
     urls_max: int = 200,
     mode: str | None = None,
+    scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     """Build the report's JSON document from stored values only."""
@@ -620,6 +628,12 @@ def report_document(
     if mode is not None:
         # D63: a run whose mode `--include` changed says so in the artifact.
         document["mode"] = mode
+    if scope_limited:
+        # D64: a requested active run whose active stages the scope gate refused
+        # still produces passive results. The artifact says so, once, so it
+        # cannot be read as a normal scan later.
+        document["scope_limited"] = True
+        document["scope_limited_reason"] = SCOPE_LIMITED_REASON
     if "domains" not in hidden:
         # D62: one root per report, because one report covers one target
         # (docs/02 section 5); the hosts table itself is unchanged.
@@ -660,6 +674,7 @@ def report_text(
     urls: Sequence[UrlSnapshot] = (),
     urls_max: int = 200,
     mode: str | None = None,
+    scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
 ) -> str:
     """Build the report's plain-text table from stored values only."""
@@ -674,6 +689,7 @@ def report_text(
         f"target: {target}",
         f"generated: {run_at.astimezone(UTC).isoformat(timespec='seconds')}",
         f"hosts: {len(rows)}",
+        *([SCOPE_LIMITED_BANNER] if scope_limited else []),
         *([f"mode: {mode}"] if mode is not None else []),
         *([selection.as_line()] if selection is not None else []),
         *(
@@ -744,6 +760,7 @@ def write_field_report(
     urls: Sequence[UrlSnapshot] = (),
     urls_max: int = 200,
     mode: str | None = None,
+    scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
 ) -> tuple[Path, Path]:
     """Write `report.txt` and `report.json` into this run's folder.
@@ -765,6 +782,7 @@ def write_field_report(
         urls=urls,
         urls_max=urls_max,
         mode=mode,
+        scope_limited=scope_limited,
         hidden=hidden,
     )
     _write_atomically(json_path, json.dumps(document, indent=2, sort_keys=False) + "\n")
@@ -780,6 +798,7 @@ def write_field_report(
             urls=urls,
             urls_max=urls_max,
             mode=mode,
+            scope_limited=scope_limited,
             hidden=hidden,
         ),
     )

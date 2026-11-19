@@ -169,6 +169,60 @@ allowed "the stage subcommands if they share the option group"). The bare
 Gate: `990 passed`, `ruff check .` clean, `ruff format --check .` 96 files,
 `mypy src/reconkit` clean (62 source files). No scan was run.
 
+## 2026-11-19 (D64) - a scope-limited run says so in banner and report
+
+Before, `reconkit run -d not-in-scope.example --active --mock` (scope file
+present) printed the pre-flight block and exited `3`, but the saved report was
+indistinguishable from a normal passive scan:
+
+```
+$ reconkit run -d not-in-scope.example --active --mock --no-color --db /tmp/d61.db --json
+exit=3
+⚠ scope gate would block active stages for: not-in-scope.example
+  active stages will be SKIPPED for this target.
+...
+$ head -5 results/mock/not-in-scope.example/<run>/report.txt
+reconkit report
+target: not-in-scope.example
+generated: 2026-11-19T19:39:15+00:00
+hosts: 16
+$ jq '.scope_warnings' report.json
+[]
+```
+
+So D61 was **partially landed**: the exit code and pre-flight block existed, the
+artifact annotation did not. After:
+
+```
+$ reconkit run -d example.com --active --mock --scope <denying> --db /tmp/d64.db
+...
+⚠ ACTIVE STAGES SKIPPED BY SCOPE — this run is passive-only; the report says so.
+report: results/mock/example.com/20261119T194127Z/report.txt and .../report.json
+
+$ head -6 report.txt
+reconkit report
+target: example.com
+generated: 2026-11-19T19:41:27+00:00
+hosts: 21
+⚠ ACTIVE STAGES SKIPPED BY SCOPE — this run is passive-only; the report says so.
+
+$ jq '.scope_limited, .scope_limited_reason' report.json
+true
+"active stages skipped by scope gate"
+```
+
+**Exit code stays 3 (deviation from the batch text).** The batch asked for `0`.
+docs/02 section 6 and docs/05 rule 2 define `3` as the scope-refusal signal, and
+`_exit_code()` puts scope first for exactly that reason; `0` would tell a
+pipeline the requested active scan ran. The partial results are announced by the
+banner and the two `report.json` keys instead. Both new keys are added only when
+the gate refused something, so no existing report changes shape.
+
+Tests (2): `test_scope_limited_run_marks_the_report`,
+`test_scope_limited_banner_prints_once` (the second also proves a run with an
+allowing scope file prints no banner). Gate: `992 passed`, ruff/format/mypy
+clean.
+
 ## 2026-11-19 - state check: `api`/`assets.slice.bank.in` never held DNS_ONLY
 
 Reported as a DNS_ONLY -> UNKNOWN regression between the 18:36 passive run and

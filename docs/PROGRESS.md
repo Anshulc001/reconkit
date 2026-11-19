@@ -4,6 +4,12 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-19, D64): **a scope-refused active run labels its passive results.** The refusal already
+exited `3` and printed the pre-flight block, but the saved report looked like a normal scan. The run now ends
+with `⚠ ACTIVE STAGES SKIPPED BY SCOPE — this run is passive-only; the report says so.`, `report.json` adds
+`scope_limited: true` + `scope_limited_reason`, and `report.txt` carries the same line under `hosts:`. Exit stays
+`3` (deviation from the batch's exit-0 clause: docs/02 section 6 and docs/05 rule 2 define code 3 for a scope
+refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992.
 - Status (2026-11-19, D63): **`--exclude` names stages and report sections too, and `--include` forces a stage in.**
   Both are resolved case-insensitively in stage -> adapter -> section order; a value matching a stage and a section
   (`urls`) does both and prints one line (`--exclude urls: stage skipped, report section hidden`); an unknown value

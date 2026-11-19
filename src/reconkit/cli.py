@@ -39,6 +39,7 @@ from reconkit.errors import ConfigError, ScopeError
 from reconkit.models import HostState, Mode, Stage
 from reconkit.ui import (
     REPORT_FIELDS,
+    SCOPE_LIMITED_BANNER,
     HostRow,
     ReportField,
     ReportSelection,
@@ -1087,8 +1088,19 @@ def _run_scan(
                 urls_max=config.report.urls_max,
                 # D63: the artifact records the mode the run actually used.
                 mode="active (forced by --include)" if forced_contact else None,
+                # D64: a requested active run whose active stages the scope gate
+                # refused still saves passive results; the artifact says so.
+                scope_limited=summary.scope_denied,
                 hidden=frozenset(excluded.sections),
             )
+            if summary.scope_denied:
+                # D64: one line at run end. The pre-flight block says what will
+                # be skipped; this says what the run turned out to be.
+                render_progress(
+                    SCOPE_LIMITED_BANNER,
+                    console=progress_console,
+                    silent=silent,
+                )
             render_progress(
                 f"report: {report_text_path} and {report_json_path}",
                 console=progress_console,

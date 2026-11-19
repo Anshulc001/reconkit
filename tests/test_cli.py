@@ -1504,3 +1504,55 @@ def test_include_and_exclude_same_value_is_an_error(tmp_path: Path) -> None:
     )
     assert result.exit_code == 2
     assert "contradictory: --include and --exclude both name urls" in result.stderr
+
+
+# ------------------------------------ (D64) a scope-limited run says so
+
+
+def _denying_scope(tmp_path: Path) -> Path:
+    """A valid scope file whose `in_scope` does not contain example.com."""
+    path = tmp_path / "scope.yaml"
+    path.write_text(DENYING_SCOPE_TEXT, encoding="utf-8")
+    return path
+
+
+def test_scope_limited_run_marks_the_report(tmp_path: Path) -> None:
+    """D64: passive results from a refused active run are labelled, not implied.
+
+    The exit code stays 3: docs/05 rule 2 and docs/02 section 6 make a scope
+    refusal code 3, and this run did refuse the active stages it was asked for.
+    """
+    config = _isolated_config(tmp_path)
+    scope = _denying_scope(tmp_path)
+    result = CliRunner().invoke(app, scan_args(config, "run", "--active", "--scope", str(scope)))
+    assert result.exit_code == 3, result.stderr
+    report = _reports(tmp_path)[-1]
+    document = json.loads((report / "report.json").read_text(encoding="utf-8"))
+    assert document["scope_limited"] is True
+    assert document["scope_limited_reason"] == "active stages skipped by scope gate"
+    text = (report / "report.txt").read_text(encoding="utf-8")
+    assert "⚠ ACTIVE STAGES SKIPPED BY SCOPE — this run is passive-only; the report says so." in (
+        text
+    )
+
+
+def test_scope_limited_banner_prints_once(tmp_path: Path) -> None:
+    """D64: the end-of-run banner is one line, and only when scope denied."""
+    config = _isolated_config(tmp_path)
+    scope = _denying_scope(tmp_path)
+    result = CliRunner().invoke(app, scan_args(config, "run", "--active", "--scope", str(scope)))
+    assert result.stderr.count("ACTIVE STAGES SKIPPED BY SCOPE") == 1
+    # The pre-flight block still explains what will be skipped, so the two
+    # lines cannot be confused for each other.
+    assert "active stages will be SKIPPED" in result.stderr
+    # No scope file is not the control: a bare `run` still reads ./scope.yaml.
+    permitting = tmp_path / "allowing.yaml"
+    permitting.write_text(
+        'authorization: "engagement"\nin_scope:\n  - example.com\nallow_active: true\n',
+        encoding="utf-8",
+    )
+    allowed = CliRunner().invoke(
+        app, scan_args(config, "run", "--active", "--scope", str(permitting))
+    )
+    assert allowed.exit_code == 0, allowed.stderr
+    assert "ACTIVE STAGES SKIPPED BY SCOPE" not in allowed.stderr
