@@ -147,6 +147,40 @@ def run_exec(
             duration_s=time.monotonic() - started,
         )
 
+    with _LIVE_LOCK:
+        _LIVE_PROCESSES.add(process)
+    try:
+        return _collect(
+            process,
+            argv=argv,
+            child_env=child_env,
+            started=started,
+            stdin_text=stdin_text,
+            timeout=timeout,
+            max_output_bytes=max_output_bytes,
+            idle_timeout=idle_timeout,
+            min_runtime=min_runtime,
+        )
+    finally:
+        # Registered only while the child can still run, so an interrupt cannot
+        # kill a pid that has been reaped and reused (D44).
+        with _LIVE_LOCK:
+            _LIVE_PROCESSES.discard(process)
+
+
+def _collect(
+    process: subprocess.Popen[bytes],
+    *,
+    argv: list[str],
+    child_env: dict[str, str],
+    started: float,
+    stdin_text: str | None,
+    timeout: float,
+    max_output_bytes: int,
+    idle_timeout: float | None,
+    min_runtime: float,
+) -> ExecResult:
+    """Drain the child's pipes and wait for it (the body of `run_exec`)."""
     stdout_pipe = process.stdout
     stderr_pipe = process.stderr
     if stdout_pipe is None or stderr_pipe is None:
@@ -254,6 +288,34 @@ def _validate_argv(argv: list[str]) -> None:
         raise TypeError("argv must contain only strings")
     if not argv[0]:
         raise ValueError("argv[0] must not be empty")
+
+
+# D44 (2026-11-19): every child alive right now, so an interrupt that lands in
+# another thread can still reach it. The engine runs adapters through
+# `asyncio.to_thread`, so a terminal Ctrl+C raises KeyboardInterrupt in the main
+# thread while `run_exec` sits in a worker; without this set the child survived.
+_LIVE_PROCESSES: set[subprocess.Popen[bytes]] = set()
+_LIVE_LOCK = threading.Lock()
+
+
+def live_processes() -> tuple[subprocess.Popen[bytes], ...]:
+    """A snapshot of the children currently running (D44)."""
+    with _LIVE_LOCK:
+        return tuple(_LIVE_PROCESSES)
+
+
+def terminate_all_live(*, wait_timeout: float = 5.0) -> int:
+    """Kill every registered child group; returns how many were running.
+
+    Called from the CLI's `KeyboardInterrupt` handler before it reports 130. The
+    worker thread that owns the child is not interrupted by this (it is waiting
+    on a pipe that closes), so the child is gone even though its thread is
+    abandoned by the interrupted run.
+    """
+    processes = live_processes()
+    for process in processes:
+        terminate_tree(process, wait_timeout=wait_timeout)
+    return len(processes)
 
 
 def _kill_tree(process: subprocess.Popen[bytes]) -> None:

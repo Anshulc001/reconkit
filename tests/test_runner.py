@@ -426,3 +426,59 @@ def test_a_real_sigint_reaches_run_exec_and_leaves_no_orphan(
         for process in spawned:
             if process.poll() is None:  # pragma: no cover - only on a failure
                 process.kill()
+
+
+def test_terminate_all_live_kills_a_child_owned_by_another_thread() -> None:
+    """D44: the engine's pattern - `run_exec` in a worker, the interrupt in main.
+
+    `asyncio.to_thread` puts the child in another thread, so `run_exec`'s own
+    KeyboardInterrupt handler never sees a terminal Ctrl+C. The registry is what
+    the CLI's handler uses instead.
+    """
+    child: list[subprocess.Popen[bytes]] = []
+    real_popen = subprocess.Popen
+
+    def tracking_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)
+        child.append(process)
+        return process
+
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            run_exec([sys.executable, "-c", "import time; time.sleep(60)"], timeout=30.0)
+        except BaseException as exc:  # pragma: no cover - the child is killed
+            errors.append(exc)
+
+    original = subprocess.Popen
+    subprocess.Popen = tracking_popen  # type: ignore[assignment]
+    try:
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        deadline = time.monotonic() + 5.0
+        while not child and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert child, "the worker never spawned a child"
+        assert runner_module.live_processes() == (child[0],)
+
+        started = time.monotonic()
+        assert runner_module.terminate_all_live() == 1
+        thread.join(timeout=5.0)
+        assert time.monotonic() - started < 2.0
+        assert not thread.is_alive()
+        assert child[0].poll() is not None
+        assert runner_module.live_processes() == ()
+        assert errors == []
+    finally:
+        subprocess.Popen = original  # type: ignore[assignment]
+        for process in child:
+            if process.poll() is None:  # pragma: no cover - only on a failure
+                process.kill()
+
+
+def test_a_finished_child_leaves_the_registry() -> None:
+    """D44: a reaped pid is never kept, so a reused pid cannot be killed later."""
+    result = run_exec([sys.executable, "-c", "print('done')"], timeout=30.0)
+    assert result.returncode == 0
+    assert runner_module.live_processes() == ()

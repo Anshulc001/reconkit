@@ -16,7 +16,7 @@ import typer
 from dotenv import dotenv_values
 
 from reconkit.config import AppConfig, load_config
-from reconkit.core.runner import validate_target
+from reconkit.core.runner import terminate_all_live, validate_target
 from reconkit.core.scope import (
     check_target,
     preflight_warning,
@@ -961,6 +961,9 @@ def _run_scan(
     except ValueError as exc:
         return _report_error(str(exc), int(ExitCode.USAGE), no_color=no_color)
     except KeyboardInterrupt:
+        # D44: the engine runs adapters in worker threads, so this handler is the
+        # only place a terminal Ctrl+C can reach a tool that is still running.
+        terminate_all_live()
         return _report_error(
             "interrupted; state is saved and the run is resumable", 130, no_color=no_color
         )

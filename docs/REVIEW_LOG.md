@@ -7399,3 +7399,38 @@ the probe instead of asserting on a skipped stage. No assertion in them changed.
 
 `docs/02_CLI_UX.md` section 6 gains the "no input -> skipped -> gap (exit 0)" bullet, `docs/03_ARCHITECTURE.md` the
 status-semantics paragraph, `docs/PROGRESS.md` D43.
+
+## 2026-11-19 (close-out) N.5 - R12: engine-stage Ctrl+C reaches the child (D44)
+
+### The gap being closed (F8, from the 2026-11-18b report)
+
+D37 taught `run_exec` to kill the child's process group when a `KeyboardInterrupt` lands in its own thread. The engine
+runs adapters through `asyncio.to_thread`, so the interrupt is raised in the **main** thread while the worker sits in
+`run_exec` - the handler never fires and the tool outlived the scan.
+
+### The change
+
+- `core/runner.py`: `_LIVE_PROCESSES` (set) + `_LIVE_LOCK`; `run_exec` registers a child immediately after `Popen` and
+  discards it in a `finally` that wraps the new `_collect()` body, so the set only ever holds children that can still
+  run (never a reaped, reusable pid). New public `live_processes()` and `terminate_all_live()`, the latter killing every
+  registered group through the same `terminate_tree()` the timeout path uses.
+- `cli.py`: the `KeyboardInterrupt` handler calls `terminate_all_live()` before printing
+  `interrupted; state is saved and the run is resumable` and returning 130.
+
+### Tests (932 -> 935)
+
+- `tests/test_runner.py::test_terminate_all_live_kills_a_child_owned_by_another_thread` - a real `sleep 60` spawned by a
+  worker thread (the engine's exact shape) is dead in under 2 s after `terminate_all_live()`; the registry is empty
+  afterwards; the worker returns without an exception.
+- `tests/test_runner.py::test_a_finished_child_leaves_the_registry` - a completed child is never left registered.
+- `tests/test_cli.py::test_ctrl_c_in_a_stage_kills_the_child_and_exits_130` - the integration case: `Engine.run` is
+  replaced with a coroutine that starts a real child through `run_exec` in a thread and then raises `KeyboardInterrupt`
+  (what a terminal Ctrl+C produces). The CLI exits **130**, prints the resumable message, the child's `poll()` is not
+  `None` (it was killed with signal 9), and the registry drains. One attempt, not flaky; no fallback to unit-test-only
+  was needed.
+
+### F8 status
+
+**Closed.** The engine path is now covered by an end-to-end CLI test, not only by a unit test: the registry exists *and*
+the CLI uses it. What is still not exercised is a literal SIGINT delivered to the process during a real scan - the test
+raises `KeyboardInterrupt` in the same place SIGINT would, which is the only observable difference.

@@ -1335,3 +1335,62 @@ def test_mock_active_reports_status_200_from_the_live_fixture(
     assert hosts["www.testfire.net"]["state"] == "ALIVE"
     assert hosts["www.testfire.net"]["status_code"] == 200
     assert hosts["testfire.net"]["status_code"] == 200
+
+
+def test_ctrl_c_in_a_stage_kills_the_child_and_exits_130(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D44: the engine runs tools in threads, so the CLI handler must kill them.
+
+    `Engine.run` is replaced by a coroutine that starts a real long child the way
+    an adapter would (`run_exec` in a worker thread) and then raises
+    KeyboardInterrupt, which is what a terminal Ctrl+C produces in the main
+    thread. Before D44 the handler only printed the message: the child survived.
+    """
+    import subprocess
+    import sys
+    import threading
+    import time
+
+    from reconkit.core import runner as runner_module
+
+    config = make_config(tmp_path)
+    spawned: list[subprocess.Popen[bytes]] = []
+    real_popen = subprocess.Popen
+
+    def tracking_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)
+        spawned.append(process)
+        return process
+
+    async def fake_run(self: Engine, target: str, opts: ScanOptions) -> ScanSummary:
+        def worker() -> None:
+            runner_module.run_exec(
+                [sys.executable, "-c", "import time; time.sleep(60)"], timeout=30.0
+            )
+
+        threading.Thread(target=worker, daemon=True).start()
+        deadline = time.monotonic() + 5.0
+        while not spawned and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if not spawned:  # pragma: no cover - only if the worker never started
+            raise AssertionError("the fake adapter never spawned a child")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(subprocess, "Popen", tracking_popen)
+    monkeypatch.setattr(Engine, "run", fake_run)
+
+    started = time.monotonic()
+    result = CliRunner().invoke(app, scan_args(config))
+    elapsed = time.monotonic() - started
+
+    assert result.exit_code == 130
+    assert "interrupted; state is saved and the run is resumable" in result.stderr
+    assert spawned and all(process.poll() is not None for process in spawned)
+    assert elapsed < 10.0
+    # The abandoned worker unregisters the child once its pipes close; the pid is
+    # already dead above, the registry is bookkeeping.
+    deadline = time.monotonic() + 2.0
+    while runner_module.live_processes() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert runner_module.live_processes() == ()
