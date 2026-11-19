@@ -8071,3 +8071,60 @@ into minutes. (3) `RunContext.timeout` now carries the stage budget instead of `
 adapter's budget therefore changes from a per-tool default to the stage's remaining time (the intended shape: the
 stage budget is the only hard wall). (4) A stage-budget stop keeps `TIMEOUT` and exit 5: R13/D45 are open, so this
 batch did not touch their meaning.
+
+### D52 addendum (S3): re-verification at scale, same box and fixtures
+
+**Bench, S1 (before the refactor) -> S3 (after it), one run each:**
+
+```
+bench/scale_20k.db: 20000 hosts, 200000 URLs (158000 NULL), store 23.7 MB
+  probe_candidates          159.61 ms   (158000 row(s))      before: 162.59 ms (160000 row(s))
+  1000 set_url_status       315.41 ms   (1000 row(s))        before: 333.36 ms
+  limits (per pass)           0.00 ms   (14 row(s))          before: 0.01 ms
+  stage loop (4 tools)        2.78 ms   (20000 row(s))       before: 2.89 ms
+  stage loop                 0.003 s    (peak RSS 121.0 MB)  before: 0.003 s / 122.0 MB
+
+bench/scale_50k.db: 50000 hosts, 500000 URLs (399000 NULL), store 59.7 MB
+  probe_candidates          444.87 ms   (399000 row(s))      before: 456.71 ms (400000 row(s))
+  1000 set_url_status       311.46 ms   (1000 row(s))        before: 336.76 ms
+  limits (per pass)           0.00 ms   (14 row(s))          before: 0.01 ms
+  stage loop (4 tools)        4.77 ms   (50000 row(s))       before: 4.40 ms
+  stage loop                 0.005 s    (peak RSS 224.2 MB)  before: 0.004 s / 224.9 MB
+```
+
+No speedup is claimed: the diff touches no query or write path, and the deltas are run-to-run noise. The NULL
+counts differ from the S1 record (158 000 vs 160 000 and 399 000 vs 400 000) because the S1 bench ran against an
+earlier copy of the generated fixture; the store sizes are identical, and both runs are the same script on the
+same files that exist now.
+
+**Sakec replay, 10x (mock transport, nothing scanned):**
+
+```
+gau: 6227 -> 62270 URLs; katana: 1 -> 10
+replay list: 62280 unique URLs, padded to 200000
+200000 URL(s) in the DB, 200000 probed: 16.27 s wall clock, 12,289 URL/s, peak RSS 153.2 MB
+db 28.6 MB (temporary, deleted)
+```
+
+S1 was `16.36 s`, `12,227 URL/s`, `153.2 MB`. The capture itself was taken once by `scripts/capture_sakec.sh`
+(2m40s, six tools, written to the gitignored `captures/sakec/`) and is never re-taken here.
+
+**All-silent run, exit 0** (real `Engine`, `mock=True`, one classed tool that waits forever, 0.3 s window):
+
+```
+progress lines:
+  subs: running 1 tool(s)
+  subs: quiet killed 0 item(s)
+  subs: finished 1/1 tool(s), 0 item(s)
+exit code: 0
+```
+
+```
+│ quiet │ subs  │ killed │ 0 │ 0.6s │ 0s ago │ killed after 0.3s idle at stage 0.3s, 0 partial │
+0 hosts: 0 ALIVE, 0 DNS_ONLY, 0 SHUT_DOWN, 0 DEAD, 0 UNKNOWN | tools: 0 ok, 0 gap, 0 failed, 0 skipped, 1 killed, 0 timeout
+⚠ 1 tool(s) stopped early — partial output kept
+  quiet: killed after 0.3s idle at stage 0.3s, 0 partial
+```
+
+**Gate on the docs commit:** `950 passed`, `ruff check .` clean, `96 files already formatted`,
+`mypy src/reconkit` clean; `scope.yaml` sha256 unchanged.

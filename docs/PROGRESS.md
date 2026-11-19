@@ -241,6 +241,21 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   only way to keep a 60 s early stop without a cap - and `urlfinder` lost `-max-time` entirely (the binary never enforced
   it; measured still running at 5m52s with `-max-time 3`). S1/S3 measurements are in the D52 addendum.
 
+- **D52 addendum (2026-11-19, S3): re-verified at scale after the caps were deleted.** Same box, same fixtures, same
+  commands as S1, run once more on the refactored build. **Bench, before -> after:** 20k (20 000 hosts / 200 000 URLs,
+  23.7 MB) `probe_candidates` 162.59 -> **159.61 ms**, `1000 set_url_status` 333.36 -> **315.41 ms**, `limits` 0.01 ->
+  **0.00 ms**, `stage loop (4 tools)` 2.89 -> **2.78 ms**, peak RSS 122.0 -> **121.0 MB**; 50k (50 000 hosts /
+  500 000 URLs, 59.7 MB) 456.71 -> **444.87 ms**, 336.76 -> **311.46 ms**, 0.01 -> **0.00 ms**, 4.40 -> **4.77 ms**,
+  peak RSS 224.9 -> **224.2 MB**. Nothing here is a speedup claim - the refactor touched no query or write path, and the
+  deltas are run-to-run noise on the same fixture. **Sakec replay, 10x:** 6 227 gau + 1 katana rows -> 62 280 unique,
+  padded to 200 000 -> `200 000 probed: 16.27 s, 12 289 URL/s, peak RSS 153.2 MB` (S1: 16.36 s, 12 227 URL/s). The
+  capture was taken once (2m40s), is stored under the gitignored `captures/sakec/`, and the engine never scanned the
+  domain - the replay feeds the stored rows through the mock-transport probe pass only. **All-silent run (the model's
+  hard case):** one classed tool that never prints, real engine, `mock=True`, 0.3 s crawler window ->
+  `subs: quiet killed 0 item(s)`, Tools row `quiet | subs | killed | 0 | 0.6s | 0s ago | killed after 0.3s idle at
+  stage 0.3s, 0 partial`, summary `..., 1 killed, 0 timeout`, the `⚠ 1 tool(s) stopped early — partial output kept`
+  block, **exit 0**. A run where every tool is stopped is still a completed run; only the budget (`timeout`) exits 5.
+
 - **D50 (2026-11-19): a running tool says so, once, on stderr.** The stage spinner was the only sign of life and it
   needs a terminal; a piped stderr saw nothing between "running N tool(s)" and the first finished-tool line. Now every
   tool still running after `HEARTBEAT_AFTER_S` (10 s) gets one durable line, `<stage>: <tool> running (<n>s)`, emitted
