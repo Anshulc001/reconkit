@@ -1138,6 +1138,39 @@ Rules that keep it bounded and honest:
   network, no subprocess. A missing fixture means no records and the found count
   is still reported.
 
+#### Known gap: a URL-derived host is not tech-scanned or crawled (D70, 2026-11-19)
+
+Measured on `slice.bank.in` (`/tmp/item1.db`, loop item 2): the two URL-derived
+rows (`api.slice.bank.in`, `assets.slice.bank.in`) are `UNKNOWN`, have no
+`host_status_history` row, no `status_code` and an empty `tech_json`.
+
+The stage order is `subs, dns, live, ports, tech, urls, url_probe, ...`, and the
+D58 pass runs **after** `urls` - the last stage that could annotate a host
+already ran. So for a URL-derived host:
+
+| Mode | DNS | `pyprobe` | `tech` pool | crawlers (`katana`, `hakrawler`, `gospider`, `subjs`) |
+|---|---|---|---|---|
+| passive | yes | no | no | no |
+| active / full | yes | yes | no | no |
+
+It is not fixed inside the pass because a tech or crawl run needs its own
+`scan_runs`/`tool_runs` rows, its own budget and a scope decision per host -
+the same machinery as a stage - and a second `urls` execution in one scan would
+re-run the archive pool too. That is a stage-level change, not a bounded pass.
+
+**A plain follow-up run does not pick the host up either.** `discovered` starts
+empty on a fresh run (`Engine._seed_from_store` runs only for `--resume`), and
+`Store.url_only_hosts()` skips a host that already has a `subdomains` row. The
+name is therefore invisible to that run's `subs`/`dns`/`live`/`tech` stages and
+to the D58 pass, until a `subs` tool reports it again or the run resumes. The
+stored row and its URLs remain correct and appear in the report; only the tech
+and crawl evidence is missing.
+
+Enabler, if it is ever wanted: seed `discovered`/`alive` from `subdomains` at
+the start of every run (not only `--resume`), or give the D58 pass a `tech`
+step that writes its own stage row. Both are ordinary changes to review on
+their own, with docs first.
+
 ### What a saved report reads back (D62, 2026-11-19)
 
 A report never asks a tool for anything. The domain tree and the URL block are

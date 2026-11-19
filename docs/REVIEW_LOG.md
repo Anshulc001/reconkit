@@ -77,6 +77,56 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 | PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `slice.bank.in` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.slice.bank.in/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
 
+## 2026-11-19 (D70) - a URL-derived host gets DNS and a live check, never tech or crawl
+
+**Question.** D58 adds URL-only hosts to `subdomains` after `urls`. `tech` and
+the crawlers run before that, so do those hosts ever get tech or a crawl?
+
+**Stage order and where the hook sits.**
+
+```
+STAGE_ORDER = (SUBS, DNS, LIVE, PORTS, TECH, URLS, URL_PROBE, SHOTS, VULNS)
+# run loop, after the URLS stage's results are persisted:
+if stage is Stage.URLS:
+    await self._second_resolve(target, target_id, opts, run_id, discovered, alive, ...)
+```
+
+`_second_resolve` -> `_second_resolve_pass`:
+
+1. `_second_resolve_dns` - `dnspython` on the candidates;
+2. `_label_url_derived` - create the row, `subdomain_sources.tool = 'url-derived'`;
+3. `_persist_dns(..., defer=live)`;
+4. only when `opts.active`: `_active_hosts` (scope gate), then
+   `_second_resolve_live` - `pyprobe` only, not the live pool - then `_persist_live`.
+
+No `_run_tools`, no `self._select(Stage.TECH, ...)`, no crawler. Measured on the
+DB copy:
+
+```
+$ sqlite3 /tmp/item1.db "SELECT s.fqdn, s.state, h.status_code, h.tech_json, h.run_id
+  FROM subdomains s LEFT JOIN host_status_history h ON h.id=(SELECT max(id) ...)
+  WHERE s.fqdn IN (SELECT ... subdomain_sources.tool='url-derived')"
+api.slice.bank.in     UNKNOWN  NULL  NULL  (no status row)
+assets.slice.bank.in  UNKNOWN  NULL  NULL  (no status row)
+```
+
+**Answer.** Passive: DNS only. Active/full: DNS plus a `pyprobe` live check.
+Neither mode gets the `tech` pool or any crawler.
+
+**Decision: not implemented, documented as a gap (D70).** A tech/crawl step
+inside the pass needs its own `scan_runs`/`tool_runs` rows, budget and per-host
+scope decision - stage machinery, not a bounded pass - and a second `urls`
+execution would repeat the archive pool. Files would stay under three, but the
+change is not the "small extension" the item allowed for. docs/09's D58 section
+now carries the table and the enabler.
+
+**A follow-up run does not pick the host up either** (new finding): `discovered`
+starts empty unless `--resume` (`_seed_from_store` is guarded by `resumed`), and
+`Store.url_only_hosts()` skips a host that already has a row. So the name is
+invisible to that run's `tech` stage and to the pass. The stored row and its
+URLs stay correct and appear in the report; only tech/crawl evidence is missing.
+That is the state of `api`/`assets.slice.bank.in` today.
+
 ## 2026-11-19 (D69) - an ALIVE host keeps the HTTP status the live pool observed
 
 **Symptom (owner report).** `results/slice.bank.in/20261119T200322Z/report.txt`

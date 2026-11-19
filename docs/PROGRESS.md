@@ -4,6 +4,13 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-19, D70): **a URL-derived host gets DNS and (in active) a live check - never tech, never a crawl.**
+  The D58 pass runs after `urls`, so the last annotating stage has already finished; measured
+  `api`/`assets.slice.bank.in` as UNKNOWN with no status row and empty tech. Not implemented: a tech/crawl
+  step needs stage machinery (its own `scan_runs`/`tool_runs`, budget, per-host scope). New finding: a
+  plain follow-up run cannot pick the host up either - `discovered` is seeded from the store only for
+  `--resume`, and `url_only_hosts()` skips an existing row. Documented as a gap in docs/09 with the
+  enabler. Suite 999 (no code change).
 - Status (2026-11-19, D69): **an ALIVE host keeps the HTTP status the live pool saw.**
   `_persist_live` used to hand `_write_host` the first ALIVE `HostStatusRecord` in
   completion order, and `httprobe`/`tlsx` carry no status, so `slice.bank.in` run 203
