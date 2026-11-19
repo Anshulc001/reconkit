@@ -16,6 +16,7 @@ from typing import Annotated
 import typer
 from dotenv import dotenv_values
 
+from reconkit import __version__
 from reconkit.config import AppConfig, load_config
 from reconkit.core.runner import terminate_all_live, validate_target
 from reconkit.core.scope import (
@@ -1337,9 +1338,25 @@ for _name in _SCAN_COMMANDS:
     app.command(_name)(_scan_command)
 
 
+def _version_callback(value: bool) -> None:
+    """Print the package version for `reconkit --version` and exit 0."""
+    if value:
+        typer.echo(f"reconkit v{__version__}")
+        raise typer.Exit()
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_version_callback,
+            is_eager=True,
+            help="Show reconkit's version and exit.",
+        ),
+    ] = False,
     domain: Annotated[
         str | None, typer.Option("-d", "--domain", help="Root domain to scan.")
     ] = None,

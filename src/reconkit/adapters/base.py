@@ -21,6 +21,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from reconkit import __version__
 from reconkit.core.runner import run_exec, validate_host
 from reconkit.errors import ParseError, ToolFailed
 from reconkit.models import (
@@ -33,7 +34,7 @@ from reconkit.models import (
     ToolStatus,
 )
 
-USER_AGENT = "reconkit/0.1"
+USER_AGENT = f"reconkit/{__version__}"
 RETRY_DELAY = 1.0
 MAX_BODY_BYTES = 10 * 1024 * 1024
 MAX_ERROR_CHARS = 200

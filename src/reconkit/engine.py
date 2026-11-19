@@ -29,6 +29,7 @@ from urllib.parse import urlsplit
 import httpx
 from dotenv import dotenv_values
 
+from reconkit import __version__
 from reconkit.adapters import ADAPTERS
 from reconkit.adapters.base import USER_AGENT, BaseToolAdapter, running_as_root
 from reconkit.adapters.pyscan import default_resolve
@@ -1734,7 +1735,7 @@ class Engine:
             mock=opts.mock,
             ip_allowed=ip_allowed,
             headers=dict(opts.headers),
-            user_agent=opts.user_agent,
+            user_agent=self._user_agent(opts.user_agent),
             ffuf_wordlist=opts.ffuf_wordlist,
             resolvers=opts.resolvers,
             results_dir=Path(self.config.results_dir),
@@ -1934,6 +1935,11 @@ class Engine:
                 continue
             limits[spec.name] = ToolLimits(idle_s=idle)
         return limits
+
+    def _user_agent(self, override: str | None) -> str:
+        """The effective User-Agent: flag, else config, with {version} filled."""
+        value = override if override else self.config.user_agent
+        return value.replace("{version}", __version__)
 
     async def _run_one(
         self,
@@ -2322,7 +2328,7 @@ class Engine:
             workspace=workspace,
             mock=opts.mock,
             headers=dict(opts.headers),
-            user_agent=opts.user_agent,
+            user_agent=self._user_agent(opts.user_agent),
             results_dir=Path(self.config.results_dir),
         )
         dns_results: list[ToolResult] = []

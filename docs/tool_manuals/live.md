@@ -42,7 +42,7 @@ import socket, ssl
 ctx = ssl._create_unverified_context()
 with socket.create_connection(("testfire.net", 443), timeout=10) as s:
     with ctx.wrap_socket(s, server_hostname="testfire.net") as t:
-        t.sendall(b"HEAD / HTTP/1.1\r\nHost: testfire.net\r\nUser-Agent: reconkit/0.1.0\r\nConnection: close\r\n\r\n")
+        t.sendall(b"HEAD / HTTP/1.1\r\nHost: testfire.net\r\nUser-Agent: reconkit/1.0.0\r\nConnection: close\r\n\r\n")
         print(t.recv(200).split(b"\r\n")[0].decode())
 EOF
 ```

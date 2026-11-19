@@ -4,6 +4,14 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D84): **version and User-Agent now have one source of
+  truth.** `pyproject.toml` and `reconkit.__version__` are both `1.0.0`; the
+  root CLI prints `reconkit v1.0.0` for `--version` and exits 0; `adapters.base`
+  builds `USER_AGENT` from `__version__`; and `Engine` now builds every
+  `RunContext.user_agent` from `--user-agent`, else `config.user_agent` with
+  `{version}` replaced. Tests 1032 -> 1036 (CLI version, package/pyproject
+  consistency, config default, flag override). Gate clean. See D84 in
+  REVIEW_LOG.
 - Status (2026-11-20, D83): **the repo now has an MIT LICENSE and matching
   package metadata.** Copyright 2026 Anshul. `pyproject.toml` carries
   `license = {text = "MIT"}`, `authors = [{name = "Anshul"}]` and classifiers

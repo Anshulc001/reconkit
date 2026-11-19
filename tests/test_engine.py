@@ -107,6 +107,7 @@ class Recorder:
         self.hosts: list[list[str]] = []
         self.envs: list[dict[str, str]] = []
         self.built: list[str] = []
+        self.user_agents: list[str | None] = []
 
 
 def adapter(
@@ -128,6 +129,7 @@ def adapter(
             rec.names.append(name)
             rec.hosts.append(list(ctx.hosts))
             rec.envs.append(dict(ctx.env))
+            rec.user_agents.append(ctx.user_agent)
             if error is not None:
                 raise error
             if wait:
@@ -205,11 +207,14 @@ def make_engine(
     now: Callable[[], str] | None = None,
     installed: Callable[[type[BaseToolAdapter]], bool] | None = None,
     resolve: Callable[[str], object] | None = None,
+    user_agent: str | None = None,
     activity: Callable[[str], None] | None = None,
     progress: Callable[[str], None] | None = None,
     url_probe_transport: object | None = None,
 ) -> Engine:
     config = load_config(CONFIG)
+    if user_agent is not None:
+        config.user_agent = user_agent
     tmp_path.mkdir(parents=True, exist_ok=True)
     store = store if store is not None else Store(tmp_path / "recon.db")
     scope = tmp_path / "scope.yaml"
@@ -4995,3 +5000,30 @@ async def test_unique_count_is_zero_for_all_duplicate_tool(tmp_path: Path) -> No
     second = await engine.run("example.com", ScanOptions(stages=(Stage.URLS,)))
     assert second.stages[0].results[0].unique_count == 0
     assert len(rows(engine.store, "SELECT url FROM urls")) == 1
+
+
+async def test_user_agent_defaults_to_config_value(tmp_path: Path) -> None:
+    """D84: config.user_agent is read, and {version} is filled from __version__."""
+    from reconkit import __version__
+
+    rec = Recorder()
+    specs = {"subs-fake": tool("subs-fake", Stage.SUBS)}
+    adapters = {"subs-fake": adapter("subs-fake", Stage.SUBS, rec, records=[])}
+    engine = make_engine(
+        tmp_path, specs, adapters, scope_text=None, user_agent="configured/{version}"
+    )
+    await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
+    assert rec.user_agents == [f"configured/{__version__}"]
+
+
+async def test_user_agent_flag_overrides_config(tmp_path: Path) -> None:
+    """D84: a --user-agent value wins over config.user_agent."""
+    rec = Recorder()
+    specs = {"subs-fake": tool("subs-fake", Stage.SUBS)}
+    adapters = {"subs-fake": adapter("subs-fake", Stage.SUBS, rec, records=[])}
+    engine = make_engine(tmp_path, specs, adapters, scope_text=None, user_agent="config-agent")
+    await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.SUBS,), mock=True, user_agent="flag-agent"),
+    )
+    assert rec.user_agents == ["flag-agent"]

@@ -107,6 +107,15 @@ def scan_args(config: Path, command: str = "passive", *extra: str) -> list[str]:
     ]
 
 
+def test_cli_version_flag_prints_current_version() -> None:
+    """D84: the root CLI can say which version it is."""
+    from reconkit import __version__
+
+    result = CliRunner().invoke(app, ["--version"])
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.strip() == f"reconkit v{__version__}"
+
+
 def test_cli_imports_only_the_allowed_layers() -> None:
     tree = ast.parse(CLI.read_text(encoding="utf-8"))
     imported: set[str] = set()
