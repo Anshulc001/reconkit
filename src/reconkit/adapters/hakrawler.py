@@ -34,7 +34,7 @@ CRAWL_DEPTH = 2
 # D53: `-timeout` is seconds per URL, so it is a request-level constant, never
 # `ctx.timeout` (the stage budget). Before D53 this adapter passed 600 s per URL.
 REQUEST_TIMEOUT_S = 10
-# On the sakec.ac.in scan hakrawler hit the phase budget with 0 items and owned
+# On the example.com scan hakrawler hit the phase budget with 0 items and owned
 # the whole urls stage. D52: no hard cap - it carries `class: crawler`, so a
 # 60 s silence ends it and a productive crawl keeps going until it exits or the
 # stage budget fires.

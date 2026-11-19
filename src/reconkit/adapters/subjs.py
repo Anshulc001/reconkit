@@ -30,7 +30,7 @@ WORKERS = 10
 # D53: `-t` is the HTTP timeout in seconds, one request at a time, so it is a
 # request-level constant and never `ctx.timeout` (the stage budget).
 REQUEST_TIMEOUT_S = 10
-# subjs fetches a handful of pages and prints script URLs; on the sakec.ac.in
+# subjs fetches a handful of pages and prints script URLs; on the example.com
 # scan it hit the phase budget with 0 items (2.2). D52: no hard cap - it carries
 # `class: crawler`, so one minute of silence means it is stuck and a productive
 # run is never cut short.

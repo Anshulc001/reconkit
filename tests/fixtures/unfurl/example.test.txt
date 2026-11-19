@@ -1,2 +1,2 @@
-https://slice.test/admin
+https://example.test/admin
 https://fonts.googleapis.com/css

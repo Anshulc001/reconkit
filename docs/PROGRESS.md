@@ -4,6 +4,17 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D79): **no real target names remain in the repo.** The two
+  targets used for real verification (`sakec.ac.in`, `slice.bank.in`) and the mock
+  name `slice.test` leaked into comments, fixtures, scripts and docs: 219 matching
+  lines in 22 files. All are now `example.com` / `target.com` / `example.test`
+  (subdomains keep their label: `b.target.com`, `www.example.com`). The six
+  `slice.test.*` fixtures are `example.test.*`, `scripts/capture_sakec.sh` is
+  `scripts/capture_example.sh`, and the fixture title is `Example Bank`. No code
+  logic changed; suite stays 1023. The batch named a
+  `tests/fixtures/pyprobe/sakec.ac.in.synthetic.json` that does not exist - the
+  pyprobe fixture was `slice.test.json`, now `example.test.json`. See D79 in
+  REVIEW_LOG.
 - Status (2026-11-20, D76-D78): **third-party URLs no longer make hosts, folders or
   URL groups.** `Engine._within_scope()` decides target or `*.target`;
   `_persist_urls` tags every other URL `urls.source = 'external'` (schema 12), and
@@ -12,9 +23,9 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
   The URL header now reads `N total, M probed this run, K already probed (use
   --reprobe-urls)` and the run ends with the same `ℹ` note when K > 0;
   `report.json` carries `urls_probed_this_run` and `urls_skipped_already_probed`
-  (both in-scope only). Suite 1016 -> 1023. Acceptances: a `slice.test` mock run
+  (both in-scope only). Suite 1016 -> 1023. Acceptances: a `example.test` mock run
   wrote four third-party URLs to `external_urls.txt` and only
-  `hosts/slice.test/`; a repeat run over seeded statuses printed
+  `hosts/example.test/`; a repeat run over seeded statuses printed
   `ℹ 3 URL(s) were skipped because they already had a status code; use
   --reprobe-urls to re-check them.` See D76-D78 in REVIEW_LOG.
 - Status (2026-11-20, post-D75): all queued code work closed. Two rulings closed by accepting the current
@@ -33,7 +44,7 @@ written authorization); waybackurls CDX (upstream); urlfinder idle (deferred by 
 - Status (2026-11-19, D73): **a repeat scan says how many URL answers came from earlier runs.**
   `url_probe` never re-checks a stored answer, so the report now carries `urls_already_probed` (JSON) and
   `urls: N total, M shown (K already probed in earlier runs; use --reprobe-urls to re-check)` (text).
-  `K` is counted once before any stage runs; `K = 0` writes neither. Verified on a mock run over a slice DB
+  `K` is counted once before any stage runs; `K = 0` writes neither. Verified on a mock run over a target DB
   copy: K = 2856, matching the stored non-NULL count. Suite 1010 -> 1012. See D73 in REVIEW_LOG.
 - Status (2026-11-19, D72): **marketing/referral URLs rank below clean ones, and are never dropped.**
   `ui.NOISE_PARAM_RE` (utm_*, fbclid, gclid, rc, ic, _branch_*, af_xp, pid, deep_link_*) is the
@@ -49,15 +60,15 @@ written authorization); waybackurls CDX (upstream); urlfinder idle (deferred by 
   Five non-doc files changed, exactly the item's limit. See D71 in REVIEW_LOG.
 - Status (2026-11-19, D70): **a URL-derived host gets DNS and (in active) a live check - never tech, never a crawl.**
   The D58 pass runs after `urls`, so the last annotating stage has already finished; measured
-  `api`/`assets.slice.bank.in` as UNKNOWN with no status row and empty tech. Not implemented: a tech/crawl
+  `api`/`assets.target.com` as UNKNOWN with no status row and empty tech. Not implemented: a tech/crawl
   step needs stage machinery (its own `scan_runs`/`tool_runs`, budget, per-host scope). New finding: a
   plain follow-up run cannot pick the host up either - `discovered` is seeded from the store only for
   `--resume`, and `url_only_hosts()` skips an existing row. Documented as a gap in docs/09 with the
   enabler. Suite 999 (no code change).
 - Status (2026-11-19, D69): **an ALIVE host keeps the HTTP status the live pool saw.**
   `_persist_live` used to hand `_write_host` the first ALIVE `HostStatusRecord` in
-  completion order, and `httprobe`/`tlsx` carry no status, so `slice.bank.in` run 203
-  stored NULL for all 9 ALIVE hosts while `url_probe` had 200 for `b.slice.bank.in`.
+  completion order, and `httprobe`/`tlsx` carry no status, so `target.com` run 203
+  stored NULL for all 9 ALIVE hosts while `url_probe` had 200 for `b.target.com`.
   `_best_live_record()` now ranks records: ALIVE, then 2xx < 3xx < other known code <
   no code, tie by tool name. `tech` was already innocent (`update_host_extras` never
   writes `status_code`) and now has a guard test. Suite 996 -> 999. Historical rows
@@ -77,7 +88,7 @@ inside urlfinder's own provider behaviour; a longer window would not add data.
 network and no adapter. `Store.open_readonly` + `engine.load_stored_report` are the read-only
 entry points; `host_snapshots`/`url_snapshots` are shared with the scan's own report so the two
 cannot drift. Non-existent run -> exit 2, nothing written. Suite 992 -> 996. Regenerated the
-sakec DB copy: 69 hosts, 7,421 stored URLs, 200 shown. The `export`/`db list`/`db export`
+example DB copy: 69 hosts, 7,421 stored URLs, 200 shown. The `export`/`db list`/`db export`
 stubs are left in place and documented as superseded for the host list.
 - Status (2026-11-19, D64): **a scope-refused active run labels its passive results.** The refusal already
 exited `3` and printed the pre-flight block, but the saved report looked like a normal scan. The run now ends
@@ -117,21 +128,21 @@ refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992
   Passive resolves and stops - DNS already happens in passive, HTTP does not. Bounded: candidates are read once, never
   re-extracted, no new config key, and the pass runs under a stage budget (`urls` passive, `url_probe` active) that
   never fails the run. Rows keep `provenance = 'dns'` plus one `subdomain_sources` sentinel `url-derived`. Suite
-  974 -> 978, `ruff`/`format`/`mypy` clean, `scope.yaml` byte-identical, no scan run. On `slice.bank.in` the count is the
+  974 -> 978, `ruff`/`format`/`mypy` clean, `scope.yaml` byte-identical, no scan run. On `target.com` the count is the
   3 hosts / 43 URLs the analysis found. See D58 and the D58 entry in REVIEW_LOG.
-- Analysis (2026-11-19, no code): **a passive run stores URLs and never reads them back** - nothing in-run consumes them, so the 3 hosts that only the `slice.bank.in` archives revealed (`nb.slice.bank.in` 40 URLs, `api.slice.bank.in` 2, `assets.slice.bank.in` 1) have no row, no state and no report line; `url_probe` is its own stage after `urls`, absent from `MODE_STAGES["passive"]`. Liveness of a prepared hostname list works today via `reconkit live -l hosts.txt --active --scope ...` (each line is its own target; URLs are rejected by `validate_target`), while `export`, `db list` and `db export` are Part-8 stubs. Four stage-order options and a recommendation (Option 4 now, Option 2 as a separate dated decision) are in REVIEW_LOG and await an owner ruling; no flag, order or code changed.
+- Analysis (2026-11-19, no code): **a passive run stores URLs and never reads them back** - nothing in-run consumes them, so the 3 hosts that only the `target.com` archives revealed (`nb.target.com` 40 URLs, `api.target.com` 2, `assets.target.com` 1) have no row, no state and no report line; `url_probe` is its own stage after `urls`, absent from `MODE_STAGES["passive"]`. Liveness of a prepared hostname list works today via `reconkit live -l hosts.txt --active --scope ...` (each line is its own target; URLs are rejected by `validate_target`), while `export`, `db list` and `db export` are Part-8 stubs. Four stage-order options and a recommendation (Option 4 now, Option 2 as a separate dated decision) are in REVIEW_LOG and await an owner ruling; no flag, order or code changed.
 
 - Status (2026-11-19, D57): **a timeout from an external API is a gap, so one slow third party no longer exits 5.**
   The final run's only failure was `crtsh: request timed out` (30.71 s); `HttpAdapter._request` now raises
   `ExternalServiceGap` for a timeout when the adapter is `external: true`, and keeps `FetchFailed` otherwise. A refused
   connection after its one retry stays a failure, and local binaries are untouched (`classify_external_gap` has no
   timeout rule). Suite 973 -> 974, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical
-  (`d45a3c90...eeee8b`), no re-run of sakec.ac.in. See D57 and the D57 entry in REVIEW_LOG.
-- Previous status (2026-11-19, final run): **the complete build ran `sakec.ac.in` in 488.0 s (was 1 060.685 s) and `url_probe`
+  (`d45a3c90...eeee8b`), no re-run of example.com. See D57 and the D57 entry in REVIEW_LOG.
+- Previous status (2026-11-19, final run): **the complete build ran `example.com` in 488.0 s (was 1 060.685 s) and `url_probe`
   in **39 s** (was 556 s) - the D54/D55 filter is the whole delta.** 973 tests, gate clean, tree clean, `scope.yaml`
   byte-identical. Exit **5** for one new upstream failure (`crtsh: request timed out`, 30.7 s); 69 hosts (12 ALIVE,
   27 DNS_ONLY, 29 DEAD, 1 UNKNOWN); `url_probe: skipping 1444 URL(s) whose host is unreachable`, 906 probed; the
-  1 371 newly discovered `www.sakec.ac.in` URLs are left `NULL` (skipped, proven), `gau` 4 918, `katana` 543,
+  1 371 newly discovered `www.example.com` URLs are left `NULL` (skipped, proven), `gau` 4 918, `katana` 543,
   `urlfinder` 6 367, `waybackurls` 0. No code changed, nothing re-run. See the final-run entry in REVIEW_LOG.
 - Previous status (2026-11-19, D56): **R14 closed - `scope.yaml` can exclude CIDRs, and the run reports where it cannot enforce
   them.** 973 tests, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (`d45a3c90...eeee8b`).
@@ -141,12 +152,12 @@ refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992
   `--strict-cidr` is a future decision, recorded under Open risks. See D56 and the Part R14 entry in REVIEW_LOG.
 - Previous status (2026-11-19, D55): **the url_probe's 4 982 `-1` answers are DNS_ONLY hosts, not a probe bug - the unreachable
   filter now covers DNS_ONLY too.** 966 tests, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical
-  (`d45a3c90...eeee8b`). On the sakec.ac.in DB 4 916 of the 4 982 `-1` rows (98.7%) sit on DNS_ONLY hosts - 4 861 on
-  `www.sakec.ac.in` alone - and 0 of the 20 sampled rows is "ALIVE host, wrong scheme"; the change takes unprobed
+  (`d45a3c90...eeee8b`). On the example.com DB 4 916 of the 4 982 `-1` rows (98.7%) sit on DNS_ONLY hosts - 4 861 on
+  `www.example.com` alone - and 0 of the 20 sampled rows is "ALIVE host, wrong scheme"; the change takes unprobed
   candidates 2 147 -> **707** (-67%) and `--reprobe-urls` 5 001 -> 733. `waybackurls` stays deferred (W). See D55 and
   the Part X-Y entry in REVIEW_LOG.
 - Previous status: **Parts T and U done (`b6df719` plus this docs commit): per-request timeouts are adapter constants (D53),
-  and the first sakec.ac.in engine run is recorded (D53 addendum).** 961 tests, `ruff`/`format`/`mypy` clean, tree
+  and the first example.com engine run is recorded (D53 addendum).** 961 tests, `ruff`/`format`/`mypy` clean, tree
   clean, `scope.yaml` byte-identical (`d45a3c90...eeee8b`). The run, made **once**, exited **0** in 1 060.685 s:
   `69 hosts: 12 ALIVE, 27 DNS_ONLY, 0 SHUT_DOWN, 29 DEAD, 1 UNKNOWN | tools: 26 ok, 2 gap, 0 failed, 2 skipped,
   0 timeout, 3 killed`; the one gap is the known `hackertarget`/`otx` pair and the three kills are idle windows
@@ -157,11 +168,11 @@ refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992
   `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (sha256 `d45a3c90...eeee8b`). D48 and its
   addendum are superseded by D52 (the classes stay, every cap goes); D51 does not exist. R13/R14/R15 and the Part C
   dedup question are still open exactly as recorded. See D52 and its addendum below for the model, the scale numbers
-  and the sakec.ac.in replay. Previous status: **Queued code work complete at `3d79524`; scalability phase open - see D48-D50.** 951 tests,
+  and the example.com replay. Previous status: **Queued code work complete at `3d79524`; scalability phase open - see D48-D50.** 951 tests,
   `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (sha256 `d45a3c90...eeee8b`). This batch added
   D48 (per-tool caps from a tools.yaml `class:`), the D48 addendum (the D47 `external_api` ClassVar moved into
   `external: true`), D50 (per-tool heartbeat) and stopped Part C by its own rule (no D49; the live record has no
-  answering URL). One measured consequence the owner should tune before the sakec.ac.in batch: the crawler floor of
+  answering URL). One measured consequence the owner should tune before the example.com batch: the crawler floor of
   90 s caps `gau` at 466 URLs where the uncapped runs returned 1042-1508 - `runtime_caps.crawler.floor` is one config
   line, no code. Previous status: **PROJECT CODE WORK COMPLETE at `6a6d47b` after Part T (2026-11-19).** 941 tests,
   `ruff`/`format`/`mypy` clean, tree clean, 39 commits ahead of `reconkit/main` at that point. Final capstone
@@ -185,8 +196,8 @@ refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992
 - Previous status: **VERIFICATION FOLLOW-UP, PART 2 DONE (www dedup requires a known status, D25).** Verification of the four-part batch found `_dedupe_www_variants` comparing `status_code` with `==`, so `NULL == NULL` counted as "same status": a pair of ALIVE names with no HTTP status on either side but a shared IP was marked `duplicate_of` from DNS evidence alone (seen in a mock run: `www.testfire.net.duplicate_of = testfire.net` with both statuses `NULL`). The shared-IP branch now requires both codes present and equal; a no-status pair is left alone (no `duplicate_of`, no note). The 3xx/2xx, both-2xx and different-IP branches are unchanged; no schema, state or confidence change. Suite 882 -> 883. D25, PIT-61. **Part 1 of this follow-up (PD httpx batch probe) is BLOCKED on an owner ruling:** PD httpx v1.12.0 has no `-insecure` flag, skips TLS verification silently (a `www.-only` certificate on `https://testfire.net/` returns 200), emits **no JSON line at all** for a failed URL (no `tls_error`, no error field), and sends a random browser User-Agent by default; measured on 158 URLs it took 9.19 s against Python httpx's 4.59 s, so the speed premise did not hold on this box, and swapping transports would erase the `-2` distinction added in Part 4. Part 3 (url_probe phase timeout) waits with Part 1 because its shape depends on the transport decision. Next action: owner ruling on the probe transport; then Part 3.
 - Previous status: **BATCH 2026-11-18 PART 4 DONE (url_probe stage, D23) - batch complete.** The urls stage records what the archives and the crawler returned and never said which URLs still answer, so a 2019 `/admin` and a page that answered today were the same evidence. `Stage.URL_PROBE` now runs after `urls` in `active` and `full` (never `passive`: it sends HTTP) and is **engine-owned** - no adapter, no `tools.yaml` entry, no Tools-table row - through `Engine._run_url_probe()`: one httpx `GET` per stored URL with the honest `reconkit/0.1` UA, `threads`/`batch_size`/`timeout_s`/`max_urls` from the new `config.yaml` `url_probe:` block (5000/200/50/10 s), no retries, and the same `_active_hosts()` scope gate as every active stage. Results go to **`urls.status_code` (schema 9 -> 10, additive)**: the HTTP status, `-1` for no answer (refused, timeout, DNS failure), **`-2` when the server answered with a certificate that does not verify** (hostname mismatch or untrusted chain) - a case the first real testfire.net run exposed, where every URL stored `-1` and a live site looked dead because its certificate is issued for `www.testfire.net`; verification is never disabled, so the fact is recorded as itself. `NULL` alone means "not probed yet", a stored answer (`-1`/`-2`/status) is never retried, and `--skip-url-probe` removes the stage; `--mock` sends nothing, leaves NULLs and warns. `_empty_stages()` excludes it, so a tool-less probe cannot make a complete run exit 5. Host state, confidence, `diff` and every count query are untouched. Real proof (testfire.net, `max_urls: 20`, `--tools pyprobe,katana,gau`): `url_probe: finished 20 URL(s)`, `-2|40` and `|365` NULL in the DB, exit 0; three direct requests gave `http://testfire.net/` **200**, `https://www.testfire.net/` **-2**, `https://does-not-exist.testfire.net/` **-1**. Suite 869 -> 882, PIT-60. Next action: none - the four-part batch is closed; report and stop.
 - Previous status: **BATCH 2026-11-18 PART 3 DONE (www/non-www deduplication, D22).** `www.X` and `X` are one website: a post-`live` pass `Engine._dedupe_www_variants()` reads the rows the live stage just wrote (plus the current run's host set) and writes **metadata only** on the newest status row - new columns `host_status_history.duplicate_of` and `.www_note`, **schema 8 -> 9** (`_SCHEMA_V9`, additive, both `NULL` on every existing row; disclosed deviation: the brief said 7 -> 8, but 8 was already spent on Part 1's `tool_runs` rebuild). Rules: one 3xx and one 2xx -> the 3xx name is `duplicate_of` the 2xx name; both 2xx -> neither is marked, both get `has www sibling at <other>`; same non-2xx status and a shared IP -> `www.X` is `duplicate_of X`; same status, different **known** IPs -> neither marked, both get `www variant on a different server`; one alive one dead/DNS-only, or an unknown IP set -> nothing. `Store.set_host_duplicate()` updates the newest row and never appends one, so `state`, `status_code`, `confidence`, the confidence formula, `diff` and every count query are untouched. Display: a **Notes** column (added only when some row has a note, so an ordinary table keeps six columns) shows `-> redirects to <host>` / `-> duplicate of <host>` / `canonical` / the two sibling notes; the summary line gains `N hosts (M unique after www-dedup)` only when a duplicate exists; `--json` carries `hosts[].duplicate_of`, `hosts[].www_note` and a top-level `www_dedup` object. Mock proof (`run -d www-pair.test --active --no-scope --mock`, new synthetic fixtures `tests/fixtures/{dnspython,pyprobe}/www-pair.test.synthetic.json`): bare 301 -> `www.www-pair.test` 200 becomes `canonical`, bare row `-> redirects to www.www-pair.test`, `17 hosts (16 unique after www-dedup)`, `www_dedup.applied=true`; real testfire.net run (`--tools assetfinder,dnspython,pyprobe`) showed the other branch - both 200, so both got `has www sibling at ...` and nothing was marked. Suite 855 -> 869. Next action: Part 4 (url_probe stage).
-- Previous status: **BATCH 2026-11-18 PART 2 DONE (katana JSON skip, hakrawler/subjs caps, urlfinder inactivity kill).** Three defects from the sakec.ac.in scan. (1) **`katana: invalid JSON line` threw away a whole crawl**: the parser now skips a line it cannot use (non-JSON, or JSON that is not an object) and keeps the rest; `hakrawler`, `gospider` and `subjs` got the same rule for a line with no usable URL. Skipped lines reach the Tools detail as one message per line up to 10, then `skipped N unusable line(s); last: ...`, and the status stays `ok`. `urlfinder` keeps its stricter archive rule. (2) **`hakrawler`/`subjs` owned the whole urls stage** (timeout, 0 items): they get `runtime_cap_s` 120 s and 60 s, keep their partial stdout and report `ok N` with `capped at <n>s; kept partial output` instead of `timeout` - a capped run with 0 items is also `ok`, because the tool worked and we stopped it. (3) **`urlfinder`'s flat 180 s cap is gone**: `urls.urlfinder_min_s/max_s/idle_s` (180/1800/60) give a floor, an inactivity kill and a ceiling in the new config block; the runner gained `idle_timeout`/`min_runtime` and `ExecResult.idle_killed`, and the engine hands the values down as `RunContext.limits`. Real: `katana ok 58`, `hakrawler ok 66`, `subjs ok 0`, then `urlfinder ok 933 in 18.1 s` and `gau ok 345`, all exit 0. Suite 840 -> 855. PIT-58. Next action: Part 3 (www/non-www deduplication).
-- Previous status: **BATCH 2026-11-18 PART 1 DONE (external-service gaps + stale docs).** A real `run -d sakec.ac.in --active --no-scope` exited `5` although every failing tool had been *refused by its provider* (`otx` 429, `hackertarget` free quota, `crtsh` 502). Those are now the new tool status `gap` (owner ruling, no D number): one classifier `base.classify_external_gap()` (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx) feeds `ToolStatus.GAP` from `HttpAdapter` (status code), from a parser (quota body) and from `BaseToolAdapter.run` (binary stderr/exit). A gap is excluded from the failure total, becomes a completion gap (exit `0`, `completion.gaps`, the stderr block) and is stored as `tool_runs.status='gap'`, which is **schema 8** (`_SCHEMA_V8` rebuilds `tool_runs` because SQLite cannot alter a CHECK). A 404, a refused connection, a TLS error and a parse error stay `failed`. Real evidence on testfire.net: `subs` exited **0** with `tools: 7 ok, 2 gap, 0 failed` and the block naming both services; the same run exited 5 before. Same commit: the four stale statements from the state dump ("Nothing is pushed" - both refs are at `a49e4b5`; the `tech`/`urls`/`vulns` "no adapter" Open risk - waves 4-8 closed it; "Suite 827" - actually 824; `docs/05` "reconkit runs no installer script" - `scripts/install-tools.sh` exists since D21). Suite 824 -> 840. PIT-55. Next action: Part 2 of the same batch.
+- Previous status: **BATCH 2026-11-18 PART 2 DONE (katana JSON skip, hakrawler/subjs caps, urlfinder inactivity kill).** Three defects from the example.com scan. (1) **`katana: invalid JSON line` threw away a whole crawl**: the parser now skips a line it cannot use (non-JSON, or JSON that is not an object) and keeps the rest; `hakrawler`, `gospider` and `subjs` got the same rule for a line with no usable URL. Skipped lines reach the Tools detail as one message per line up to 10, then `skipped N unusable line(s); last: ...`, and the status stays `ok`. `urlfinder` keeps its stricter archive rule. (2) **`hakrawler`/`subjs` owned the whole urls stage** (timeout, 0 items): they get `runtime_cap_s` 120 s and 60 s, keep their partial stdout and report `ok N` with `capped at <n>s; kept partial output` instead of `timeout` - a capped run with 0 items is also `ok`, because the tool worked and we stopped it. (3) **`urlfinder`'s flat 180 s cap is gone**: `urls.urlfinder_min_s/max_s/idle_s` (180/1800/60) give a floor, an inactivity kill and a ceiling in the new config block; the runner gained `idle_timeout`/`min_runtime` and `ExecResult.idle_killed`, and the engine hands the values down as `RunContext.limits`. Real: `katana ok 58`, `hakrawler ok 66`, `subjs ok 0`, then `urlfinder ok 933 in 18.1 s` and `gau ok 345`, all exit 0. Suite 840 -> 855. PIT-58. Next action: Part 3 (www/non-www deduplication).
+- Previous status: **BATCH 2026-11-18 PART 1 DONE (external-service gaps + stale docs).** A real `run -d example.com --active --no-scope` exited `5` although every failing tool had been *refused by its provider* (`otx` 429, `hackertarget` free quota, `crtsh` 502). Those are now the new tool status `gap` (owner ruling, no D number): one classifier `base.classify_external_gap()` (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx) feeds `ToolStatus.GAP` from `HttpAdapter` (status code), from a parser (quota body) and from `BaseToolAdapter.run` (binary stderr/exit). A gap is excluded from the failure total, becomes a completion gap (exit `0`, `completion.gaps`, the stderr block) and is stored as `tool_runs.status='gap'`, which is **schema 8** (`_SCHEMA_V8` rebuilds `tool_runs` because SQLite cannot alter a CHECK). A 404, a refused connection, a TLS error and a parse error stay `failed`. Real evidence on testfire.net: `subs` exited **0** with `tools: 7 ok, 2 gap, 0 failed` and the block naming both services; the same run exited 5 before. Same commit: the four stale statements from the state dump ("Nothing is pushed" - both refs are at `a49e4b5`; the `tech`/`urls`/`vulns` "no adapter" Open risk - waves 4-8 closed it; "Suite 827" - actually 824; `docs/05` "reconkit runs no installer script" - `scripts/install-tools.sh` exists since D21). Suite 824 -> 840. PIT-55. Next action: Part 2 of the same batch.
 - Previous status: **LINUX ONLY AND NUCLEI REDACTION FIXED (2026-11-18).** (1) **Linux only, no other platform anywhere** (owner decision): the OS-specific branches in `runner.py`/`workspace.py`/`subfinder.py`/`base.py`, the reserved-device-name rejection and the other-platform venv fallback are deleted, and every doc, log entry, script and gate instruction names Linux only; the docs commit is `6b904eb`. Suite 827 -> 821 because the reserved-name cases went with the behaviour they pinned (the "827" in this paragraph was itself stale: the verified count on this checkout is **824**, see the baseline line below). (2) **A real `--full` run on testfire.net found a real defect:** `nuclei` failed with `invalid JSON line`. Cause: the redaction patterns for `Cookie`/`Set-Cookie`/`Authorization` and the secret pairs ran to the next *real* newline, while a JSONL tool escapes its newlines, so every matching line had its remaining fields replaced by `***` (PIT-54). The value patterns now also stop at an escaped line end, the line stays valid JSON, and the cookie value is still masked. Regression: `test_redaction_keeps_a_jsonl_line_parseable`. (3) **Predictable runtimes** (owner request): `urlfinder` is killed at 180 s by a new `runtime_cap_s` and its partial stdout is parsed (its own `-max-time` is not enforced: measured still running at 5m52s with `-max-time 3`; before this a timeout discarded every URL found); `nikto` passes its own `-maxtime <share>s` per host so it stops cleanly and writes JSON instead of being killed at 600 s with 0 findings; `nuclei` gets `-or`, because the unused request/response pair pushed a real run past the 1 MB stdout cap and truncated the last JSON line (`invalid JSON line`). (4) Live evidence for this batch is recorded in REVIEW_LOG; every run used `testfire.net` from `scope.yaml`. The final `--full` run took **1466 s with 0 timeouts** (38 ok, 2 failed from upstream quotas): `nuclei ok 112`, `urlfinder ok 933 (capped)`, `nikto ok 8`, against 2027 s for the same command before the caps.
 - Previous status: **REPORTS IN BOTH MODES, LIVE SPINNER, AMASS FIXED (2026-11-18, D20).** Owner batch after a real `reconkit run -d testfire.net --active --no-scope --only-alive` run. Three changes, each with docs first: (1) **every scan now writes its report** - the writer was gated on the interactive plan, so a `-d`/`-l` run printed tables and saved nothing; it now writes `results/<domain>/<UTC stamp>/report.txt` + `report.json` on both paths, and a flagged run gets every `REPORT_FIELDS` key (the questions only choose columns). (2) **a live status line** - the durable progress lines only appear when a tool *finishes*, so a 600 s `gau` looked like a hang; a new transient `activity` channel carries `<stage>: <done>/<total> tool(s) done, <n>s elapsed - running: <tools>` to a Rich spinner on stderr, drawn only when stderr is a terminal and never on stdout. (3) **amass was broken** - v5.1.3 `enum` is a thin client for its own engine and prints only the `Session Scope` header, so the adapter harvested the target from that header and always reported exactly 1 item; findings are now read back with `amass subs -d DOMAIN -names` through a new documented `post_command` hook (real read-back for testfire.net: the same 8 hosts the table showed). **Two owner premises did not hold, and were reported instead of re-implemented:** stage tools were already concurrent (`asyncio.gather`, weights in REVIEW_LOG: urls did 1581 s of tool time in a 664 s stage), and no duplicates pass between stages (`discovered` is a `set`, `urls` is a `dict`, DB has `UNIQUE(target_id, fqdn)` / `UNIQUE(target_id, url)`; measured 1655 stored URLs = 1655 distinct, 41 hosts = 41 distinct, 0 duplicate groups). Then, with the owner's "do whatever is good, speed is only for the passive recon tools": (4) **the report follows the display filters** and records them (`selection: 8 of 42 hosts (ALIVE)`), so a `--only-alive` artifact matches the table without ever looking like a complete scan; the DB still keeps every host. (5) **the passive tools got their real timeout semantics back** - `gau --timeout` and `urlfinder -timeout` are *per-request HTTP timeouts*, and both adapters were passing the 600 s per-tool budget, so one slow archive source could block the whole stage; measured `gau` 0 items/600 s -> **345 items/31 s**, `urlfinder` 932/554 s -> **996 items/15 s**, and through the engine `reconkit urls -d testfire.net --active --no-scope --tools gau,urlfinder` finished the stage in **15 s wall clock** with `gau ok 345`, `urlfinder ok 933`. Active tools were not touched. (6) **waybackurls was asking one question 42 times** - the adapter fed every discovered host on stdin, but the tool asks `*.<line>/*` and its own `-no-subs` help proves one apex already covers its subdomains; it now gets the apex once (plus any host outside it, for multi-domain scopes) and does the same job in **2.4 s instead of 302 s**; the remaining 0 items are archive.org answering **503 Temporarily Offline** to wildcard CDX queries, not a reconkit defect (`gau` still returns 345 URLs from the same archive). Also verified the owner's question directly: `waybackurls`/`urlfinder`/`unfurl` are installed in `~/.reconkit/bin` and `reconkit doctor` shows `Installed yes / Identity ok` with the path - a bare `command -v` misses them only because that directory is on the child PATH. Suite 816 -> 827. Next action: none.
 - Previous status: **SHOTS STAGE WIRED (2026-11-17, D19).** `Stage.SHOTS` is no longer orphaned: it now sits in `STAGE_ORDER` between `urls` and `vulns` and therefore in `MODE_STAGES["full"]`; `passive` and `active` still do not request it and there is no `shots` stage command. `gowitness` is therefore runnable: `reconkit run -d testfire.net --full --no-scope --include-noisy --mock --tools pyprobe,httpx,tlsx,gowitness` prints `gowitness shots ok 2` and exit 0, while `--active` shows no shots stage at all (raw output in REVIEW_LOG). One gowitness fix was needed for that proof: `--mock` now takes the base fixture path before the empty-host early return, so a mock run reports the fixture's URLs instead of 0 items. `_persist_stage` deliberately has no `shots` branch - screenshots stay files plus `screenshots.jsonl` (D17). **Disclosed conflict:** the batch expected `gowitness` to be tier-skipped in `--full` without `--include-noisy`; it is not, because `--full` sets `include_noisy = True` in the CLI and `--tools` bypasses the tier gate by design. No stage-specific gate was invented; `test_full_runs_gowitness_without_the_noisy_flag_because_full_implies_it` pins the real behaviour and D19 records the ruling question. Suite 811 -> 816. Next action: none; ask the owner only if screenshots must stay behind an explicit flag in full mode.
@@ -396,9 +407,9 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   **0.00 ms**, `stage loop (4 tools)` 2.89 -> **2.78 ms**, peak RSS 122.0 -> **121.0 MB**; 50k (50 000 hosts /
   500 000 URLs, 59.7 MB) 456.71 -> **444.87 ms**, 336.76 -> **311.46 ms**, 0.01 -> **0.00 ms**, 4.40 -> **4.77 ms**,
   peak RSS 224.9 -> **224.2 MB**. Nothing here is a speedup claim - the refactor touched no query or write path, and the
-  deltas are run-to-run noise on the same fixture. **Sakec replay, 10x:** 6 227 gau + 1 katana rows -> 62 280 unique,
+  deltas are run-to-run noise on the same fixture. **example replay, 10x:** 6 227 gau + 1 katana rows -> 62 280 unique,
   padded to 200 000 -> `200 000 probed: 16.27 s, 12 289 URL/s, peak RSS 153.2 MB` (S1: 16.36 s, 12 227 URL/s). The
-  capture was taken once (2m40s), is stored under the gitignored `captures/sakec/`, and the engine never scanned the
+  capture was taken once (2m40s), is stored under the gitignored `captures/example/`, and the engine never scanned the
   domain - the replay feeds the stored rows through the mock-transport probe pass only. **All-silent run (the model's
   hard case):** one classed tool that never prints, real engine, `mock=True`, 0.3 s crawler window ->
   `subs: quiet killed 0 item(s)`, Tools row `quiet | subs | killed | 0 | 0.6s | 0s ago | killed after 0.3s idle at
@@ -407,7 +418,7 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
 
 - **D58 (2026-11-19): a bounded second resolve after `urls` gives URL-only hosts a row (owner's Option 2).** The
   prior analysis showed a passive run stores URLs and never reads them back, leaving 3 hosts and 43 URLs on
-  `slice.bank.in` with no row, no state and no report line because `_persist_urls()` writes only `urls`. One pass now
+  `target.com` with no row, no state and no report line because `_persist_urls()` writes only `urls`. One pass now
   runs immediately after the `urls` stage and before `url_probe`: `Store.url_only_hosts()` returns the distinct
   hostnames in this target's URL rows that have no `subdomains` row, the `dns` stage's own `dnspython` adapter resolves
   them and `_persist_dns()` applies the normal state rule (including the two-NXDOMAIN rule, so one miss never becomes
@@ -424,7 +435,7 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   diff. `--mock` runs both adapters in their mock form (fixtures, no network, no subprocess). Docs first in the same
   batch: docs/03 stage section, docs/09 section 5, docs/04 section 5. Suite 974 -> 978, four tests
   (`test_second_resolve_adds_url_only_hosts_in_passive`, `..._live_checks_new_hosts_in_active`,
-  `..._does_not_duplicate_existing_hosts`, `..._is_one_pass`). No scan re-run; the slice.bank.in numbers are the
+  `..._does_not_duplicate_existing_hosts`, `..._is_one_pass`). No scan re-run; the target.com numbers are the
   analysis counts, not a new measurement.
 
 - **D57 (2026-11-19): a timeout from an external API is a gap, so one slow third party stops exiting 5.** The final
@@ -442,7 +453,7 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   adapter a failure. No new status, no schema change, no flag, no config key. Docs first in the same commit: docs/02
   sections 5-6, docs/03 tool-status semantics, docs/09 sections 3 and 9. Suite 973 -> 974 (the old
   `test_timeout_is_failed` became `test_external_timeout_is_a_gap` plus
-  `test_timeout_from_a_local_http_adapter_is_still_a_failure`). Not re-run against sakec.ac.in: the measured 488 s /
+  `test_timeout_from_a_local_http_adapter_is_still_a_failure`). Not re-run against example.com: the measured 488 s /
   39 s / 1 444-skip numbers do not depend on crtsh's status.
 
 - **D56 (2026-11-19): `scope.yaml` can exclude CIDRs; the gate refuses them and the run says where the exclusion is
@@ -460,12 +471,12 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   Suite 966 -> 973 (+7: 4 scope, 2 engine, 1 pyscan; `test_ui`'s exact-shape assertion got stricter, not weaker).
 
 - **D55 (2026-11-19): the url_probe also skips DNS_ONLY hosts; the filter is now "unreachable".** The 4 982 `-1`
-  answers on the sakec.ac.in DB were investigated (Part X) and **4 916 of them (98.7%) sit on DNS_ONLY hosts** - 4 861 on
-  `www.sakec.ac.in` alone, a host that resolves and then times out (20/20 sampled rows: `000` after 5 s, curl exit 28);
+  answers on the example.com DB were investigated (Part X) and **4 916 of them (98.7%) sit on DNS_ONLY hosts** - 4 861 on
+  `www.example.com` alone, a host that resolves and then times out (20/20 sampled rows: `000` after 5 s, curl exit 28);
   the 6 ALIVE-host `-1` rows are dead paths (timeout / reset by peer, not a scheme mismatch), 58 are on DEAD hosts and 2
   on a host that does not resolve. A DNS_ONLY host never served HTTP, so its URLs cannot answer: `_dead_fqdns` became
   `_unreachable_fqdns` (`state IN ('DEAD', 'DNS_ONLY')`), `ProbeCandidates.skipped_dead` became `skipped_unreachable`,
-  and the line is `url_probe: skipping N URL(s) whose host is unreachable`. Measured on the sakec.ac.in DB: unprobed
+  and the line is `url_probe: skipping N URL(s) whose host is unreachable`. Measured on the example.com DB: unprobed
   candidates **2 147 -> 707** (1 440 skipped, -67%), `--reprobe-urls` 5 001 -> 733 (6 414 skipped of 7 147). ALIVE,
   SHUT_DOWN, UNKNOWN and unrecorded hosts are still probed - two known facts, not a heuristic. Suite 965 -> 966.
 
@@ -476,7 +487,7 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   ALIVE/DNS_ONLY/SHUT_DOWN/UNKNOWN, and a URL with no parseable host - the only rule is "known DEAD". The engine
   prints `url_probe: skipping N URL(s) whose host is DEAD` only when the count is non-zero (D55 widened the filter to
   DNS_ONLY and renamed the line to `...whose host is unreachable`). **Measured against the
-  one sakec.ac.in run, and the filter is not the bottleneck:** of the 2 147 URLs still `NULL`, **0 point at a DEAD
+  one example.com run, and the filter is not the bottleneck:** of the 2 147 URLs still `NULL`, **0 point at a DEAD
   host** (1 440 DNS_ONLY, 658 ALIVE, 49 on hosts with no row), so candidates stay 2 147 -> **2 147** with
   `skipped_dead = 0`; under `--reprobe-urls` the same DB skips **58 of 5 001**. The real cost is in the answers: of
   the 5 000 probed, **4 982 came back `-1`** (no answer) and 18 answered. Per the batch's stop rule nothing else was
@@ -496,7 +507,7 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   field: per-tool tuning would be a `tools.yaml` entry, which was not added. Suite 950 -> 961 (one six-case
   parametrized test plus five named tests).
 
-- **D53 addendum / Part U (2026-11-19): the first sakec.ac.in engine run, made once at `b6df719`.** One run, never
+- **D53 addendum / Part U (2026-11-19): the first example.com engine run, made once at `b6df719`.** One run, never
   repeated; wall **1 060.685 s (17m41s)**, exit **0**, `completion: complete_with_gaps` whose only gap is
   `subs: hackertarget: free quota exceeded, otx: rate limited (HTTP 429)` (both known since PIT-55). Summary
   `69 hosts: 12 ALIVE, 27 DNS_ONLY, 0 SHUT_DOWN, 29 DEAD, 1 UNKNOWN | tools: 26 ok, 2 gap, 0 failed, 2 skipped,
@@ -504,7 +515,7 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   production evidence for D52's idle windows, and all three keep their partial output: `hakrawler` 60.1 s / 62,
   `gospider` 128.6 s / 402, `urlfinder` 193.5 s / 6 367. No tool timed out and no stage reached `--phase-timeout`.
   Item counts: `gau` 4 917, `katana` 356, `subfinder` 39, `httprobe` 12 (the 2026-11-18 six-tool capture had
-  6 227 / 1 / 67 / 18). **Two disclosed deviations from the batch's literal command:** `--no-scope` (sakec.ac.in is
+  6 227 / 1 / 67 / 18). **Two disclosed deviations from the batch's literal command:** `--no-scope` (example.com is
   not in `scope.yaml`, which was left byte-identical, so the gate would have exited 3 with no scan; `scan_runs`
   records `scope_mode = 'unrestricted_flag'` under the D1 amendment) and `--json` (U.3 asks for the JSON summary
   block, which would otherwise have needed a second run - forbidden by the batch). The config was a byte-identical
@@ -1078,7 +1089,7 @@ the run (`invalid domain label: 'https://nb'`). The smallest enabler is a new op
 through `validate_host()` and probes them like `url_probe` - a new flag, so it needs an owner ruling and is not built.
 Both items are recorded here, not fixed, and docs/02 now says so in the user-facing workflow.
 
-**2026-11-19 (final `sakec.ac.in` run): `crtsh` failed with `request timed out` after 30.7 s, so the run exited 5.** Raw
+**2026-11-19 (final `example.com` run): `crtsh` failed with `request timed out` after 30.7 s, so the run exited 5.** Raw
 row from the run's `--json`: `{"stage": "subs", "tool": "crtsh", "status": "failed", "items": 0, "duration_s":
 30.713192408002215, "error": "crtsh: request timed out"}`, while the other seven `subs` tools answered (`subfinder`
 67, `assetfinder` 37, `findomain` 38, `amass` 14, `certspotter` 27, `urlscan` 1) and the two gaps were the known `otx`
@@ -1102,7 +1113,7 @@ endpoint was simply slow that minute (crt.sh was already recorded as intermitten
 no host-count ceiling), resuming a run interrupted mid-stage (Ctrl+C itself is tested), CDN IP collapse changing a
 verdict (no test), IDN/unicode and 10 KB URLs (rejected or unlimited by code, no test either way), and a stalled tool
 other than `urlfinder` (since D52 every classed tool has an idle kill, but only the mock all-silent run proves one end
-to end, with a 0.3 s window; **updated 2026-11-19:** the sakec.ac.in engine run caught three in the production
+to end, with a 0.3 s window; **updated 2026-11-19:** the example.com engine run caught three in the production
 windows - `hakrawler` 60 s, `gospider` 60 s, `urlfinder` 180 s, 62/402/6 367 partial items kept). `gau`, `katana`, `gospider`
 and `nikto` were the tools whose caps D52 deleted; the idle-kill evidence is the `_limits`/watchdog tests and the
 all-silent run in REVIEW_LOG "D52 addendum".
@@ -1113,15 +1124,15 @@ budget** on a 5 000-URL list (`scan_runs` 169, `14:57:30Z` -> `15:06:46Z`, 52% o
 the pass is then recorded `partial`, the finished batches stay committed and the run still exits 0 (D26). Whether
 600 s per 5 000 URLs is the right ceiling is a `config.yaml` value, not a code defect. (b) `waybackurls` returned
 **0 items** (`ok`, raw file 0 bytes) in this run and in the 2026-11-18 run (`163-waybackurls.txt`), while `gau`
-returned 4 917 archive URLs from the same stage - the adapter asks the apex once (`sakec.ac.in`, i.e. `*.<target>/*`)
+returned 4 917 archive URLs from the same stage - the adapter asks the apex once (`example.com`, i.e. `*.<target>/*`)
 and `gau` was handed every host, but a 0-byte answer from a live CDX query is unexplained and no failure is reported.
 Nothing was changed for either.
 
 **2026-11-19 (Part W): the `waybackurls` zero is upstream, not ours - deferred, no D number.** Raw: the adapter's
 argv is `[<binary>]` with the host on stdin, no flags and no env, and the binary exits **0** with **0 bytes** and
-**no stderr** for `sakec.ac.in`, for `www.sakec.ac.in` and for `http://www.sakec.ac.in` - the parser is never
+**no stderr** for `example.com`, for `www.example.com` and for `http://www.example.com` - the parser is never
 reached. The CDX endpoint it builds answered **503 "Internet Archive: Temporarily Offline"** on one call and **200**
-with real rows on the next, `url=http://www.sakec.ac.in/` returned 200 with rows, and `gau` pulled 4 917 URLs from
+with real rows on the next, `url=http://www.example.com/` returned 200 with rows, and `gau` pulled 4 917 URLs from
 the same archive in the same stage (raw file 487 360 bytes). waybackurls has no error surface, so "the archive
 refused me" and "no URLs" are the same empty success - which is why `tool_runs` stores `ok 0`. Fixing it means a
 different archive reader (scope creep) or classifying a silence the tool cannot signal. Recorded, not fixed.
@@ -1131,7 +1142,7 @@ different archive reader (scope creep) or classifying a silence the tool cannot 
 (five files, four tests), recorded in REVIEW_LOG "C". Nothing was invented in this batch.
 
 **New 2026-11-19: `ctx.timeout` is the stage budget and seven adapters feed it into per-request timeouts (D52
-pre-flight; the sakec.ac.in engine run was not performed and needs a ruling).** D52 changed `RunContext.timeout`
+pre-flight; the example.com engine run was not performed and needs a ruling).** D52 changed `RunContext.timeout`
 from `timeouts.per_tool_default` (600 s) to the stage budget (`max(1.0, stage_budget)`, `engine._run_tools`). Raw
 pre-flight at `41387e0`:
 
@@ -1167,7 +1178,7 @@ total deadline, `gau`/`urlfinder`'s clamp and the two `base` hard walls. The ent
 was asked; nothing in it is open.
 
 **For the reviewer:** tree clean at `41387e0` plus this docs commit, **45 commits ahead of `reconkit/main`**,
-**950 tests**, `scope.yaml` byte-identical (`d45a3c90...eeee8b`). The first sakec.ac.in engine run was **not
+**950 tests**, `scope.yaml` byte-identical (`d45a3c90...eeee8b`). The first example.com engine run was **not
 performed**: its pre-flight stopped the batch over `ctx.timeout` semantics (entry above).
 
 **Superseded 2026-11-19 (Part U):** that run **was** performed, once, after D53; the paragraph above is the record of

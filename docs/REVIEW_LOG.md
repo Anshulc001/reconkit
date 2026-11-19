@@ -68,14 +68,48 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-51 | The `tech` stage had no persistence branch at all: `_persist_stage` covered subs/dns/live/ports/urls, so every `HostStatusRecord` a tech adapter returned was dropped - webanalyze and cdncheck would have run, printed `ok N item(s)` and stored nothing | the tech stage never had an adapter, so the missing branch was invisible; `host_status_history.tech_json`/`waf` existed but only a live pass could fill them | `_persist_tech` merges `tech`/`waf` into the host's newest status row through the new `Store.update_host_extras`: no state row is appended and `state` is never touched, so `diff`/`previous_state()` are unchanged; an off-target record is dropped and a host with no status row is not annotated (D11) | `test_tech_stage_annotates_the_latest_host_row` (`Regression: PIT-51`), `test_tech_stage_drops_a_host_outside_the_target` |
 | PIT-48 | `doctor` showed junk for two installed tools (`katana` -> `__`, `nuclei` -> `[I…` plus ANSI escapes), and `update` could not call `katana` up to date, so an already-current binary would be downloaded again on every run (12j) | `installed_version()` returned `text.splitlines()[0]` for every tool, but `katana -version` prints four lines of ASCII art (the real version is on line 8, on stderr) and `nuclei -version` prints a coloured `[INF]` line first, so `_same_version()` compared a release tag against a logo | A tool may carry a top-level `version_regex` in `tools.yaml`; `installed_version()` searches the whole `version_cmd` output, returns the first capture group (or the whole match when the pattern has no group), and falls back to `splitlines()[0]` when the field is absent or nothing matches. A pattern that does not compile is a `ConfigError` at registry load, before any command runs | `test_katana_version_ignores_the_ascii_banner` (`Regression: PIT-48`), `test_nuclei_version_drops_the_ansi_log_prefix` (`Regression: PIT-48`), `test_a_regex_with_no_match_falls_back_to_the_first_line`, `test_a_version_regex_without_a_group_returns_the_match`, `test_version_regex_is_parsed_from_the_registry`, `test_a_broken_version_regex_is_a_config_error`, `test_version_regex_survives_the_plan_copy` |
 | PIT-58 | A real scan reported `katana: invalid JSON line` and threw away the whole crawl (0 items) although katana had found URLs; `hakrawler`/`gospider`/`subjs` had the same shape (any line their parser could not turn into an http(s) URL raised `ParseError`) | The parsers treated "this line is not output I understand" as "this tool failed", and the tools that print a warning on stdout (katana) or a log line (gospider) produced exactly such lines. PIT-52 fixed only the known non-web schemes, so any other noise was still fatal | A urls parser skips an unusable line, counts it, and keeps parsing: `ToolResult.error` carries one message per skipped line up to 10, then a single `skipped N unusable line(s); last: ...` summary, and the status stays `ok` because the parsed records are the tool's real output. `urlfinder` keeps its stricter archive rule (see docs/09 4a3) | `test_katana_skips_invalid_json_lines` (`Regression: PIT-58`), `test_katana_warning_lines_reach_the_detail_and_stay_ok`, `test_katana_many_junk_lines_are_summarised_once`, `test_crawler_parsers_skip_unusable_lines` |
-| PIT-59 | The results table counted one website twice: `sakec.ac.in` (301) and `www.sakec.ac.in` (200) were two ALIVE hosts, and the same for `admission`, `iprc`, `research`, `portal`, so 39 "ALIVE" rows suggested 39 sites | Nothing in the pipeline related a `www.` name to its bare name: DNS resolves both, the live pass probes both, and neither `subdomains` nor `host_status_history` had anywhere to say they are the same site | A post-`live` pass (`Engine._dedupe_www_variants`) writes **metadata only** (`duplicate_of`, `www_note`, schema 9) on the newest status row: 3xx+2xx marks the 3xx name, two 2xx marks neither, same non-2xx plus a shared IP marks `www.X`, a dead variant and an unknown IP set mark nothing. Host state, confidence and every count query are untouched. The table gains a Notes column (only when a row has a note) and the summary line a unique count (only when a duplicate exists) | `test_www_redirect_to_bare_is_marked_duplicate` (`Regression: PIT-59`), `test_bare_redirect_to_www_is_marked_duplicate`, `test_both_200_independent_servers_not_marked_duplicate`, `test_same_status_on_one_server_marks_the_www_variant`, `test_same_status_on_different_servers_is_only_a_note`, `test_www_dead_is_not_marked_duplicate`, `test_single_variant_not_touched`, `test_www_dedup_never_changes_host_state_or_confidence`, `test_set_host_duplicate_updates_in_place_and_keeps_state`, `test_www_duplicate_rows_get_notes_and_the_summary_counts_unique` |
+| PIT-59 | The results table counted one website twice: `example.com` (301) and `www.example.com` (200) were two ALIVE hosts, and the same for `admission`, `iprc`, `research`, `portal`, so 39 "ALIVE" rows suggested 39 sites | Nothing in the pipeline related a `www.` name to its bare name: DNS resolves both, the live pass probes both, and neither `subdomains` nor `host_status_history` had anywhere to say they are the same site | A post-`live` pass (`Engine._dedupe_www_variants`) writes **metadata only** (`duplicate_of`, `www_note`, schema 9) on the newest status row: 3xx+2xx marks the 3xx name, two 2xx marks neither, same non-2xx plus a shared IP marks `www.X`, a dead variant and an unknown IP set mark nothing. Host state, confidence and every count query are untouched. The table gains a Notes column (only when a row has a note) and the summary line a unique count (only when a duplicate exists) | `test_www_redirect_to_bare_is_marked_duplicate` (`Regression: PIT-59`), `test_bare_redirect_to_www_is_marked_duplicate`, `test_both_200_independent_servers_not_marked_duplicate`, `test_same_status_on_one_server_marks_the_www_variant`, `test_same_status_on_different_servers_is_only_a_note`, `test_www_dead_is_not_marked_duplicate`, `test_single_variant_not_touched`, `test_www_dedup_never_changes_host_state_or_confidence`, `test_set_host_duplicate_updates_in_place_and_keeps_state`, `test_www_duplicate_rows_get_notes_and_the_summary_counts_unique` |
 | PIT-60 | Nothing said whether a stored URL still answers: the urls stage kept 11,785 rows from the archives and the crawler, so a 2019 `/admin` and a page that answered today were the same evidence | `urls` had no status column and no stage sent a request per URL, so the whole archive looked equally alive | `Stage.URL_PROBE` runs after `urls` in `active`/`full` (engine-owned, no adapter) and writes `urls.status_code`: the HTTP status, `-1` for no answer, `-2` when the server answered with a certificate that does not verify. `NULL` alone means "not probed", and a stored answer is never retried. `--skip-url-probe` turns it off; `--mock` leaves NULLs and says so. Host state, confidence, `diff` and counts are untouched | `test_url_probe_stores_status_codes_and_marks_unreachable` (`Regression: PIT-60`), `test_url_probe_never_reprobes_a_stored_answer`, `test_url_probe_marks_an_unverified_certificate_apart_from_unreachable`, `test_url_probe_sends_only_in_scope_urls`, `test_url_probe_is_skipped_in_mock_mode` |
 | PIT-61 | The www-dedup pass marked `www.X` as `duplicate_of X` when **neither** name had an HTTP status: both rows ALIVE with `status_code = NULL` and a shared IP. Seen in verification (`www.testfire.net.duplicate_of = testfire.net`, both codes NULL) | The shared-IP branch compared the two codes with `==`, so `NULL == NULL` read as "same status"; the documented rule is "same **non-2xx** status", and `NULL` means "no status observed" | The branch now requires both codes present and equal (`www_status is not None and bare_status is not None`). A no-status pair gets no `duplicate_of` and no note; the 3xx/2xx, both-2xx and different-IP branches are unchanged, and no state, confidence or count changes | `test_www_both_null_status_not_marked_duplicate` (`Regression: PIT-61`), `test_same_status_on_one_server_marks_the_www_variant`, `test_both_200_independent_servers_not_marked_duplicate` |
 | PIT-63 | A tool that was installed silently disappeared from every scan: `amass` read `wrong program` once at the start of the 2026-11-19 batch, `reconkit subs --tools amass` skipped it as `not installed`, and the next ten probes (and five `doctor` runs) all said `yes / ok` | An identity probe is a single external process; one transient failure returned "not installed", and the engine's selection check turned that into a silent skip - the scan looked like the tool ran and found nothing | `probe_with_retry()` runs the probe once more after 100 ms before the verdict is `wrong program`; a namesake fails both attempts, so no status, enum or message changes. `doctor`'s `installed_version()` and `BinaryAdapter.check_installed()` call the same function, and a missing binary is never retried | `test_a_transient_identity_failure_is_retried_once` (`Regression: PIT-63`), `test_two_consecutive_identity_failures_still_mark_wrong_program`, `test_retry_does_not_fire_on_success`, `test_doctor_and_engine_share_the_retry_helper` |
 | PIT-62 | PD `httpx` v1.12.0 looks like the faster probe transport but is not usable for liveness: it has **no `-insecure` flag** and skips TLS verification by default, so `https://testfire.net/` (certificate issued for `www.testfire.net`) returns `200`; a URL that fails produces **no JSON line at all**; and its default UA is a random browser string | The option list has `-probe`, `-tls-grab`, `-ztls` but no verification switch, and failures are simply absent from JSONL instead of being reported with an error field | The `url_probe` stage keeps the Python httpx transport (D24) - only it can distinguish "answered, certificate did not verify" (`-2`) from "no answer" (`-1`) with verification on. PD `httpx` remains the `httpx`/`httpx_tech` adapter, where a `200` and a technology list are all that is needed | `test_url_probe_marks_an_unverified_certificate_apart_from_unreachable`, `test_url_probe_sees_a_certificate_error_in_the_context_chain` |
-| PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
+| PIT-55 | A real `reconkit run -d example.com --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
-| PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `slice.bank.in` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.slice.bank.in/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
+| PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `target.com` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.target.com/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
+
+## 2026-11-20 (D79) - real target names scrubbed from the repo
+
+**Symptom.** The two authorized targets used for the real verification runs
+(`sakec.ac.in` and `slice.bank.in`) and the mock name `slice.test` had leaked
+into adapter comments, fixtures, scripts, tests and every doc: **219 matching
+lines in 22 files** (grep over `src/ tests/ docs/ config.yaml README.md
+COMMANDS.md AGENTS.md scripts/ .github/`).
+
+**Fix.** Text-only replacement, no code logic touched:
+
+| Before | After |
+|---|---|
+| `sakec.ac.in`, `www.sakec.ac.in`, `admission.sakec.in` | `example.com`, `www.example.com`, `admission.example.com` |
+| `slice.bank.in`, `api/b/blog/nb/assets/temp.slice.bank.in` | `target.com`, same labels (`api.target.com`, ...) |
+| `slice.test` (six mock fixtures) | `example.test` |
+| `scripts/capture_sakec.sh` | `scripts/capture_example.sh` |
+| `captures/sakec`, `v4-sakec.db`, `reconkit-sakec-config.yaml` | `captures/example`, `v4-example.db`, `reconkit-example-config.yaml` |
+| fixture title `Slice Bank` | `Example Bank` |
+
+The six fixtures were renamed with `git mv`:
+`tests/fixtures/{gau,waybackurls,unfurl,urlfinder}/example.test.txt` and
+`tests/fixtures/{pyprobe,dnspython}/example.test.json`. Mock lookup is
+`<fixtures>/<tool>/<target>.*` with a "single file in the directory" fallback,
+so the rename does not break a test that targets another name.
+
+**Deviation from the batch.** It named
+`tests/fixtures/pyprobe/sakec.ac.in.synthetic.json`; that file never existed.
+The real pyprobe fixture was `slice.test.json`, renamed to `example.test.json`.
+
+**Verification.** Before: 219 lines / 22 files. After:
+`grep -rn -i "sakec\|slice\.bank" ...` prints nothing (the batch's `Clean`).
+Suite 1023 passed, ruff/format/mypy clean, `scope.yaml` unchanged
+(`d45a3c90...eeee8b`), no network.
 
 ## 2026-11-19 - loop retry: `live --urls-file` still stops at the same wall
 
@@ -107,7 +141,7 @@ sides; docs/02 section 1 carries the retry.**
 
 ### D76 - third-party URLs stay out of hosts and folders
 
-**Symptom.** A real `slice.bank.in` run (20261119T213006Z) wrote
+**Symptom.** A real `target.com` run (20261119T213006Z) wrote
 `hosts/www.google.com/`, `hosts/www.facebook.com/`, `hosts/apps.apple.com/` and
 `hosts/fonts.googleapis.com/`: the URL pool legitimately names other people's
 assets, and the report treated every URL host as a host of the target.
@@ -133,23 +167,23 @@ $ git diff --stat -- src/reconkit/core/store.py src/reconkit/engine.py src/recon
 (stored/tagged, no `subdomains` row, never offered to DNS),
 `test_third_party_urls_go_to_external_list`, `test_in_scope_hosts_still_get_folders`.
 
-**Mock acceptance** (`tests/fixtures/{gau,waybackurls,unfurl,urlfinder,dnspython,pyprobe}/slice.test.*`,
+**Mock acceptance** (`tests/fixtures/{gau,waybackurls,unfurl,urlfinder,dnspython,pyprobe}/example.test.*`,
 `--mock`, `/tmp` DB and results, no network):
 
 ```
-$ reconkit urls -d slice.test --active --mock --tools gau,waybackurls,unfurl,urlfinder --no-scope --db /tmp/d76.db --config /tmp/d76-config.yaml
+$ reconkit urls -d example.test --active --mock --tools gau,waybackurls,unfurl,urlfinder --no-scope --db /tmp/d76.db --config /tmp/d76-config.yaml
 urls: gau ok 3 item(s)
 ...
 == external_urls.txt
-https://apps.apple.com/app/slice
+https://apps.apple.com/app/example
 https://fonts.googleapis.com/css
-https://www.facebook.com/slice
-https://www.google.com/search?q=slice
+https://www.facebook.com/example
+https://www.google.com/search?q=example
 == hosts/
-slice.test
+example.test
 == report.json
 urls_total 3 external 4
-urls_by_host ['slice.test']
+urls_by_host ['example.test']
 ```
 
 No `hosts/www.google.com/`, and the four third-party URLs are still stored.
@@ -195,7 +229,7 @@ new migration.
 network):
 
 ```
-$ reconkit urls -d slice.test --active --mock --tools gau --no-scope --db /tmp/d78.db --config /tmp/d78-config.yaml
+$ reconkit urls -d example.test --active --mock --tools gau --no-scope --db /tmp/d78.db --config /tmp/d78-config.yaml
 ...
 ℹ 3 URL(s) were skipped because they already had a status code; use
 --reprobe-urls to re-check them.
@@ -276,12 +310,12 @@ answered days earlier. The count of non-NULL `urls.status_code` rows is now read
 built) and carried as `summary.urls_already_probed`; `report_document` adds
 `urls_already_probed` and `report_text` prints the parenthetical.
 
-Acceptance (`--mock` against a copy of the slice DB, no network):
+Acceptance (`--mock` against a copy of the target DB, no network):
 
 ```
 $ cp recon.db /tmp/item5.db
-$ reconkit run -d slice.bank.in --active --mock --db /tmp/item5.db --scope /tmp/scope-d73.yaml
-report: results/mock/slice.bank.in/20261119T205138Z/report.txt ...
+$ reconkit run -d target.com --active --mock --db /tmp/item5.db --scope /tmp/scope-d73.yaml
+report: results/mock/target.com/20261119T205138Z/report.txt ...
 $ grep '^urls:' report.txt
 urls: 3124 total, 3124 shown (2856 already probed in earlier runs; use --reprobe-urls to re-check)
 $ python -c '...urls_already_probed...'
@@ -400,8 +434,8 @@ DB copy:
 $ sqlite3 /tmp/item1.db "SELECT s.fqdn, s.state, h.status_code, h.tech_json, h.run_id
   FROM subdomains s LEFT JOIN host_status_history h ON h.id=(SELECT max(id) ...)
   WHERE s.fqdn IN (SELECT ... subdomain_sources.tool='url-derived')"
-api.slice.bank.in     UNKNOWN  NULL  NULL  (no status row)
-assets.slice.bank.in  UNKNOWN  NULL  NULL  (no status row)
+api.target.com     UNKNOWN  NULL  NULL  (no status row)
+assets.target.com  UNKNOWN  NULL  NULL  (no status row)
 ```
 
 **Answer.** Passive: DNS only. Active/full: DNS plus a `pyprobe` live check.
@@ -419,24 +453,24 @@ starts empty unless `--resume` (`_seed_from_store` is guarded by `resumed`), and
 `Store.url_only_hosts()` skips a host that already has a row. So the name is
 invisible to that run's `tech` stage and to the pass. The stored row and its
 URLs stay correct and appear in the report; only tech/crawl evidence is missing.
-That is the state of `api`/`assets.slice.bank.in` today.
+That is the state of `api`/`assets.target.com` today.
 
 ## 2026-11-19 (D69) - an ALIVE host keeps the HTTP status the live pool observed
 
-**Symptom (owner report).** `results/slice.bank.in/20261119T200322Z/report.txt`
-listed 9 ALIVE hosts, all with `HTTP status code = -`, although `b.slice.bank.in`
+**Symptom (owner report).** `results/target.com/20261119T200322Z/report.txt`
+listed 9 ALIVE hosts, all with `HTTP status code = -`, although `b.target.com`
 had technologies (`Amazon CloudFront`, `Cloudflare`) from the `tech` stage.
 
 **Diagnosis (case a: the live pass wrote the wrong record's status).**
 
 ```
 $ sqlite3 /tmp/item1.db "SELECT s.fqdn, h.state, h.status_code, h.tech_json ..."
-b.slice.bank.in            ALIVE    NULL  ["Amazon CloudFront", "Amazon
-blog.slice.bank.in         ALIVE    NULL  ["Cloudflare", "Google Font AP ...
+b.target.com            ALIVE    NULL  ["Amazon CloudFront", "Amazon
+blog.target.com         ALIVE    NULL  ["Cloudflare", "Google Font AP ...
 ... 9 rows, every status_code NULL, run_id 203
-$ sqlite3 /tmp/item1.db "SELECT url, status_code FROM urls WHERE url LIKE '%b.slice%'"
-https://b.slice.bank.in/                       200
-http://b.slice.bank.in/                         -1
+$ sqlite3 /tmp/item1.db "SELECT url, status_code FROM urls WHERE url LIKE '%b.target.com%'"
+https://b.target.com/                       200
+http://b.target.com/                         -1
 $ sqlite3 /tmp/item1.db "SELECT tool, status, item_count FROM tool_runs WHERE run_id=203"
 httprobe ok 9 | httpx ok 9 | pyprobe ok 9 (unreachable=3) | tlsx ok 13
 ```
@@ -596,13 +630,13 @@ runtime_idle:
 Per-run `tool_runs` for the urls stage (repo `recon.db`, copy):
 
 ```
-run 193 slice 19:06  urlfinder killed    80  "killed after 180s idle at stage 180.1s, 80 partial"  waybackurls ok 0
+run 193 target 19:06  urlfinder killed    80  "killed after 180s idle at stage 180.1s, 80 partial"  waybackurls ok 0
 gaU 1540 killed, katana 380, gospider 681, hakrawler 678, subjs 75, unfurl 24
-run 187 sakec 18:45  urlfinder killed  6367  "killed after 180s idle at stage 281.2s, 6367 partial" waybackurls ok 0
-run 181 slice 18:33  urlfinder killed     6  "killed after 180s idle at stage 180.2s, 6 partial"    waybackurls ok 0
-run 178 slice 17:05  urlfinder ok       2222  (no kill)                                          waybackurls ok 0
-run 174 sakec 16:48  urlfinder killed  6367  "killed after 180s idle at stage 199.2s, 6367 partial" waybackurls ok 0
-run 168 sakec 14:53  urlfinder killed  6367  "killed after 180s idle at stage 193.5s, 6367 partial" waybackurls ok 0
+run 187 example 18:45  urlfinder killed  6367  "killed after 180s idle at stage 281.2s, 6367 partial" waybackurls ok 0
+run 181 target 18:33  urlfinder killed     6  "killed after 180s idle at stage 180.2s, 6 partial"    waybackurls ok 0
+run 178 target 17:05  urlfinder ok       2222  (no kill)                                          waybackurls ok 0
+run 174 example 16:48  urlfinder killed  6367  "killed after 180s idle at stage 199.2s, 6367 partial" waybackurls ok 0
+run 168 example 14:53  urlfinder killed  6367  "killed after 180s idle at stage 193.5s, 6367 partial" waybackurls ok 0
 ```
 
 The batch's proposed evidence - "waybackurls also 0 that run" - does not
@@ -622,11 +656,11 @@ No config change; no D-number.
 
 Before, the only writer was a scan: a run stored before D62 could not be seen in
 the new shape without scanning the target again. After, on a **copy** of the
-repo's `recon.db` (the stale sakec data):
+repo's `recon.db` (the stale example data):
 
 ```
 $ cp recon.db /tmp/item4.db
-$ reconkit report --db /tmp/item4.db --target sakec.ac.in --out /tmp/item4-out/
+$ reconkit report --db /tmp/item4.db --target example.com --out /tmp/item4-out/
 wrote /tmp/item4-out/report.txt and /tmp/item4-out/report.json — 69 hosts, 7421 
 URLs (200 shown)
 
@@ -641,7 +675,7 @@ $ jq -r .generated_at /tmp/item4-out/report.json
 2026-11-19T18:50:30+00:00
 ```
 
-(The batch expected 2,253 URLs; the stored total for `sakec.ac.in` is **7,421**
+(The batch expected 2,253 URLs; the stored total for `example.com` is **7,421**
 over runs 163-187 - that number was from an earlier run's stage output.)
 
 Read-only is a property of the connection, not a promise: `Store.open_readonly`
@@ -724,19 +758,19 @@ Tests (2): `test_scope_limited_run_marks_the_report`,
 allowing scope file prints no banner). Gate: `992 passed`, ruff/format/mypy
 clean.
 
-## 2026-11-19 - state check: `api`/`assets.slice.bank.in` never held DNS_ONLY
+## 2026-11-19 - state check: `api`/`assets.target.com` never held DNS_ONLY
 
 Reported as a DNS_ONLY -> UNKNOWN regression between the 18:36 passive run and
 the 19:13 active run. The stored rows say otherwise:
 
 ```
-subdomains: api.slice.bank.in    UNKNOWN  source_count=1  provenance=dns  first_seen_run=181  last_seen_run=181
-            assets.slice.bank.in UNKNOWN  source_count=1  provenance=dns  first_seen_run=181  last_seen_run=181
-subdomain_sources: (api.slice.bank.in, run 181, 'url-derived')
-                   (assets.slice.bank.in, run 181, 'url-derived')
+subdomains: api.target.com    UNKNOWN  source_count=1  provenance=dns  first_seen_run=181  last_seen_run=181
+            assets.target.com UNKNOWN  source_count=1  provenance=dns  first_seen_run=181  last_seen_run=181
+subdomain_sources: (api.target.com, run 181, 'url-derived')
+                   (assets.target.com, run 181, 'url-derived')
 host_status_history: no row for either host
-slice history at run 180 (dns): 13 rows, all DNS_ONLY except temp.slice.bank.in DEAD
-slice history at run 191 (live): 12 rows, the same hosts, 9 ALIVE + 3 DNS_ONLY
+target history at run 180 (dns): 13 rows, all DNS_ONLY except temp.target.com DEAD
+target history at run 191 (live): 12 rows, the same hosts, 9 ALIVE + 3 DNS_ONLY
 ```
 
 Both names were created by the `urls` stage's D58 second resolve in run 181
@@ -756,13 +790,13 @@ state, or keeps the previous state when one exists. No code change.
 ## 2026-11-19 (D62) - a saved report carries a domain tree and its URLs
 
 **Real-run check (2026-11-19, loop item 1): CONFIRMED.** A report written
-during the loop, `results/slice.bank.in/20261119T193822Z/`, is the first one
+during the loop, `results/target.com/20261119T193822Z/`, is the first one
 saved after `0062f11` (19:08:14Z), and it has the new shape:
 
 ```
-$ grep -c '=== Domains ===\|=== URLs by host ===' results/slice.bank.in/20261119T193822Z/report.txt
+$ grep -c '=== Domains ===\|=== URLs by host ===' results/target.com/20261119T193822Z/report.txt
 2
-$ jq 'keys' results/slice.bank.in/20261119T193822Z/report.json
+$ jq 'keys' results/target.com/20261119T193822Z/report.json
 ['type','target','generated_at','selection','scope_warnings','fields','hosts',
  'urls_total','urls_shown','urls_truncated','roots','urls_by_host']
 $ jq '.urls_total, .urls_shown, .urls_truncated' .../report.json
@@ -771,17 +805,17 @@ $ jq '.roots[0].host_count, (.hosts|length)' .../report.json
 15 15
 ```
 
-Before that report appeared, every report on disk predated D62: `sakec.ac.in`
+Before that report appeared, every report on disk predated D62: `example.com`
 has 15:06:46Z, 16:52:32Z and 18:50:30Z, all with the old 7 keys and 0 `===`
-headings, and `results/slice.bank.in/` held no report until 19:38Z. The same
-real report also shows `api.slice.bank.in` / `assets.slice.bank.in` as
+headings, and `results/target.com/` held no report until 19:38Z. The same
+real report also shows `api.target.com` / `assets.target.com` as
 `UNKNOWN`, `url-derived`, source count 1 - the D63 loop note's finding,
 confirmed on a live artifact rather than only in the DB.
 
 Before: `report.json` had 7 top-level keys (`type`, `target`, `generated_at`,
 `selection`, `scope_warnings`, `fields`, `hosts`) and `report.txt` had **no**
 section headings at all - one header block and one table, 0 occurrences of
-`http`. The 69-host `sakec.ac.in` report therefore showed which hosts exist and
+`http`. The 69-host `example.com` report therefore showed which hosts exist and
 nothing about the 2 253 URLs stored beside them.
 
 After, read from what the run already stored (`Store.url_report_rows()`; no
@@ -877,17 +911,17 @@ Added to docs/02 section 2 (`### Existing list: which hosts are live?`):
 Evidence behind those three statements (no new run needed; all from the shipped code and the existing artifacts):
 
 ```
-$ reconkit db list -d slice.bank.in
+$ reconkit db list -d target.com
 db list is not wired in Part 8; no data was read.
-$ reconkit export -d slice.bank.in --format json
+$ reconkit export -d target.com --format json
 export is not wired in Part 8; no report was written.
-$ reconkit db export -d slice.bank.in
+$ reconkit db export -d target.com
 db export is not wired in Part 8; no data was written.
 $ reconkit live -l /tmp/urls.txt --active --mock --no-color --db /tmp/d57probe.db
 invalid domain label: 'https://nb'
 $ reconkit live -l /tmp/hosts.txt --active --mock --no-color --db /tmp/d57probe.db
 1 hosts: 0 ALIVE, 0 DNS_ONLY, 0 SHUT_DOWN, 0 DEAD, 1 UNKNOWN | tools: 3 ok, 0 gap, 1 failed, 0 skipped, 0 timeout
-report: results/mock/nb.slice.bank.in/20261119T173241Z/report.txt
+report: results/mock/nb.target.com/20261119T173241Z/report.txt
 ```
 
 The first three are the exact stub strings the CLI prints (and the reason the doc points at `report.json` instead);
@@ -998,14 +1032,14 @@ mypy src/reconkit       Success: no issues found in 62 source files
 
 Not verified: a real run of the pass against a live third party (no scan was run and no request was sent); `--resume`
 after a run whose `urls` stage completed (the hook does not re-run for a completed stage - this is by construction, not
-measured); and the pass under a firing budget (the `wait_for` path is code-reviewed, not exercised). The slice.bank.in
+measured); and the pass under a firing budget (the `wait_for` path is code-reviewed, not exercised). The target.com
 figures (3 hosts / 43 URLs) are the earlier analysis counts, not a new measurement.
 
 ## 2026-11-19 (analysis) - what consumes URLs in a passive run, and four stage-order options
 
 Investigation only. No `src/`/`tests/` change, no stage reordering, no new flag, no scan, no network request to
-`slice.bank.in` or `sakec.ac.in`. Baseline `d5caeed`, 974 tests, tree clean, `scope.yaml` sha256
-`d45a3c90...eeee8b` before and after. All run evidence is read from `results/slice.bank.in/20261119T170839Z/` and
+`target.com` or `example.com`. Baseline `d5caeed`, 974 tests, tree clean, `scope.yaml` sha256
+`d45a3c90...eeee8b` before and after. All run evidence is read from `results/target.com/20261119T170839Z/` and
 `recon.db` (target 7). MASTER_PLAN holds no D52-D57 entry (they live in PROGRESS); the D52-D57 rulings were re-read
 there.
 
@@ -1101,13 +1135,13 @@ url_hosts  in_subdomains  url_only  root_itself
 === the three URL-only hosts, by URL count ===
         fqdn          urls
 --------------------  ----
-nb.slice.bank.in        40
-api.slice.bank.in        2
-assets.slice.bank.in     1
+nb.target.com        40
+api.target.com        2
+assets.target.com     1
 ```
 
-**The A.3 number: 3 URL-only hostnames, carrying 43 of the 2 253 URLs** (`nb.slice.bank.in` 40, `api.slice.bank.in` 2,
-`assets.slice.bank.in` 1). None of them has a `subdomains` row, so none was ever resolved, none has a host state, and
+**The A.3 number: 3 URL-only hostnames, carrying 43 of the 2 253 URLs** (`nb.target.com` 40, `api.target.com` 2,
+`assets.target.com` 1). None of them has a `subdomains` row, so none was ever resolved, none has a host state, and
 none appears in `report.json` or `report.txt` (grep count 0 for all three in both files). The `subdomains` table for the
 target holds 12 rows (11 DNS_ONLY, 1 DEAD) - the 12 "in_subdomains" hosts including the root.
 
@@ -1231,7 +1265,7 @@ $ reconkit scope import --help
 Every file-reading option in `cli.py` (`grep -n 'Path'` / `read_text`): `-l/--list` (target file), `--ffuf-wordlist`,
 `--resolvers`, `--config`, `--scope`, `--db`. Only `--list` is a user data file, and `_targets()` parses it with
 **`validate_target()`**, one root domain per line. It is not a hosts file and not a URLs file: a line like
-`https://nb.slice.bank.in/x` is rejected before any run (`invalid domain label: 'https://nb'`, observed with `--mock`
+`https://nb.target.com/x` is rejected before any run (`invalid domain label: 'https://nb'`, observed with `--mock`
 against a throwaway `--db /tmp/d57probe.db`).
 
 Three of the four pasted commands do not work at all yet: `export`, `db list` and `db export` are Part-8 stubs that
@@ -1248,7 +1282,7 @@ reconkit live -l hosts.txt --active --scope scope.yaml
 ```
 
 Proven end to end with `--mock` (no network, throwaway DB and a temp scope file in `/tmp`): the file
-`nb.slice.bank.in` produced `1 hosts: ... 3 ok, 1 failed` with `pyprobe`, `httpx`, `httprobe`, `tlsx` selected for it;
+`nb.target.com` produced `1 hosts: ... 3 ok, 1 failed` with `pyprobe`, `httpx`, `httprobe`, `tlsx` selected for it;
 the same command against the real `scope.yaml` refused it with exit 3, exactly as the gate should, because `scope.yaml`
 lists only testfire.net and friends. Caveats to state plainly: each line becomes a separate target row, the run is
 per-host (one report per hostname), URLs are not accepted, and no liveness result is written back to the original
@@ -1275,15 +1309,15 @@ domain names and never need a resolved host; the crawl tools would break, but no
 passive is the only mode where this is even coherent (active `urls` needs `alive`, which needs `live`, which needs
 `dns`). What it does **not** do on its own: make anything resolve the URL hosts. `_persist_urls()` writes only the
 `urls` table, and the `discovered` set the DNS stage reads is built from subdomain records, so a reordering alone still
-leaves `nb.slice.bank.in` without a row. It also moves a 3-minute stage in front of a 4-second one and would need an
+leaves `nb.target.com` without a row. It also moves a 3-minute stage in front of a 4-second one and would need an
 extraction step (URL host -> `validate_host()` -> subdomain row) to be worth anything.
 
 **Option 2 - one bounded second resolve pass after `urls`, then stop.** After `urls`, extract distinct hosts from the
 URL rows, keep the ones with no `subdomains` row, resolve those, and in active/full run one more live check on the
 newly resolved hosts; no third pass, and the pass is idempotent so a resume does not repeat it. Cost on
-`slice.bank.in`: **3 DNS names** (two of them one label deep) and, if active, 3 live probes - on the order of a couple of
-seconds, versus the 488 s full run. What it would surface: `nb.slice.bank.in` (40 URLs, archive paths that look like a
-real corporate site), `api.slice.bank.in`, `assets.slice.bank.in`. Whether `nb.slice.bank.in` answers today is not
+`target.com`: **3 DNS names** (two of them one label deep) and, if active, 3 live probes - on the order of a couple of
+seconds, versus the 488 s full run. What it would surface: `nb.target.com` (40 URLs, archive paths that look like a
+real corporate site), `api.target.com`, `assets.target.com`. Whether `nb.target.com` answers today is not
 knowable without traffic, which this batch did not send; the value is that the host would gain a row, a state and a
 report line, and any ALIVE result would then hand its 40 URLs to `url_probe` as a normal live host instead of the
 "unreachable filter keeps it because nothing is known" path. The real cost is behavioural, not CPU: a passive run would
@@ -1314,7 +1348,7 @@ dated decision with its own D-number because it changes what a passive run disco
 
 ## 2026-11-19 (D57) - a timeout from an external API is a gap, not a failure
 
-Owner ruling after the final run: the 488 s `sakec.ac.in` run exited 5 over exactly one row,
+Owner ruling after the final run: the 488 s `example.com` run exited 5 over exactly one row,
 `crtsh: request timed out` after 30.71 s, while the other 25 executed tools were ok, gap, skipped or killed. One slow
 free third party made a healthy run look broken. A timeout is the same class of "upstream is slow" as that service's
 502, so it becomes a gap - with the boundary drawn where this box can actually be at fault.
@@ -1377,9 +1411,9 @@ Not re-run: the measured run stands untouched. The 488 s wall, the 39 s `url_pro
 tool counts do not depend on crtsh's status; only the exit code of a future run would differ, and only when a third
 party times out. `scope.yaml` sha256 still `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b`.
 
-## 2026-11-19 (final run) - sakec.ac.in on the complete build: 488 s wall, `url_probe` 39 s
+## 2026-11-19 (final run) - example.com on the complete build: 488 s wall, `url_probe` 39 s
 
-One pass, no re-run, real limits - `reconkit run -d sakec.ac.in --active --phase-timeout 600 --no-color --json
+One pass, no re-run, real limits - `reconkit run -d example.com --active --phase-timeout 600 --no-color --json
 --no-scope`, `url_probe.max_urls: 5000`, the same `recon.db` the D54/D55 measurements used (runs 169/175).
 `scope.yaml` was not touched (`--no-scope`; `scope_mode: unrestricted_flag`).
 
@@ -1433,7 +1467,7 @@ DB after the run (`recon.db`, target 6) proves the skip, not just reports it:
 ```
 urls total 7147 -> 7421   NULL 2147 -> 1515   -1 4982 -> 4984   answered >0 16 -> 919
 status counts: -1 4984 | NULL 1515 | 200 800 | 302 66 | 301 26 | 404 21 | 400 3 | -2 3 | 308 1 | 401 1 | 403 1
-www.sakec.ac.in (DNS_ONLY): answered 4861 (the old run's -1s) | NULL 1371 (this run's new URLs, none probed)
+www.example.com (DNS_ONLY): answered 4861 (the old run's -1s) | NULL 1371 (this run's new URLs, none probed)
 NULL rows on DEAD/DNS_ONLY hosts: 1444  == the skipped count
 ```
 
@@ -1529,30 +1563,30 @@ named); (3) no `--strict-cidr`, as ruled - recorded as future work in PROGRESS O
 ## 2026-11-19 (Parts X-Y) - the 4 982 `-1` answers are DNS_ONLY hosts (D55)
 
 Part X, on a copy of `recon.db` (target_id 6), no code change. Sample (`ORDER BY RANDOM() LIMIT 20`) with the parsed
-host, its recorded state and one manual `curl -m 5` per URL; every URL in the sample is on a `sakec.ac.in` host, so
+host, its recorded state and one manual `curl -m 5` per URL; every URL in the sample is on a `example.com` host, so
 none needed the external-host skip:
 
 ```
-https://www.sakec.ac.in/wp-content/uploads/2025/03/L2.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.054597 (28)
-https://www.sakec.ac.in/wp-includes/js/mediaelement/wp-mediaelement.min.css?ver=6.3.1 | www.sakec.ac.in | DNS_ONLY | https | 000 5.057891 (28)
-https://www.sakec.ac.in/wp-content/uploads/2024/11/research2-980x350.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.060017 (28)
-https://www.sakec.ac.in/wp-content/uploads/2023/07/Connectwise.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.059072 (28)
-https://www.sakec.ac.in/wp-content/uploads/2024/02/tbi-ev4-400x284.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.059399 (28)
-https://www.sakec.ac.in/wp-includes/js/mediaelement/mediaelementplayer-legacy.min.css?ver=4.2.16 | www.sakec.ac.in | DNS_ONLY | https | 000 5.059581 (28)
-https://www.sakec.ac.in/wp-content/uploads/2022/06/Samparka-2019-11-480x321.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.055450 (28)
-https://www.sakec.ac.in/wp-content/uploads/2025/04/ADS-980x523.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.050157 (28)
-http://webmail.sakec.ac.in/ | webmail.sakec.ac.in | DNS_ONLY | http | 000 5.053422 (28)
-https://www.sakec.ac.in/wp-content/et-cache/25911/et-core-unified-tb-232-deferred-25911.min.css?ver=1778245344 | www.sakec.ac.in | DNS_ONLY | https | 000 5.059961 (28)
-https://www.sakec.ac.in/wp-content/uploads/2022/06/2-307-SE-min.pdf | www.sakec.ac.in | DNS_ONLY | https | 000 5.058850 (28)
-https://www.sakec.ac.in/wp-content/et-cache/8068/et-core-unified-8068.min.css?ver=1751271748 | www.sakec.ac.in | DNS_ONLY | https | 000 5.059957 (28)
-https://www.sakec.ac.in/wp-content/et-cache/72/et-divi-dynamic-72.css?ver=1658701566 | www.sakec.ac.in | DNS_ONLY | https | 000 5.058021 (28)
-https://www.sakec.ac.in/wp-content/uploads/2024/07/Program-Intake-480x614.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.059373 (28)
-https://www.sakec.ac.in/wp-content/et-cache/72/et-core-unified-72.min.css?ver=1714217519 | www.sakec.ac.in | DNS_ONLY | https | 000 5.059127 (28)
-https://www.sakec.ac.in/wp-content/et-cache/72/et-core-unified-deferred-72.min.css?ver=1731669203 | www.sakec.ac.in | DNS_ONLY | https | 000 5.051134 (28)
-https://www.sakec.ac.in/wp-content/plugins/contact-form-7/includes/css/styles.css?ver=6.1.3 | www.sakec.ac.in | DNS_ONLY | https | 000 5.059423 (28)
-https://www.sakec.ac.in/wp-content/uploads/2023/10/IPR-KAPILA.png | www.sakec.ac.in | DNS_ONLY | https | 000 5.050410 (28)
-https://www.sakec.ac.in/wp-content/uploads/2025/04/Placement-Policy-SAKEC-_compressed.pdf | www.sakec.ac.in | DNS_ONLY | https | 000 5.058634 (28)
-https://www.sakec.ac.in/wp-content/themes/Divi/js/scripts.min.js?ver=4.27.5 | www.sakec.ac.in | DNS_ONLY | https | 000 5.049882 (28)
+https://www.example.com/wp-content/uploads/2025/03/L2.jpg | www.example.com | DNS_ONLY | https | 000 5.054597 (28)
+https://www.example.com/wp-includes/js/mediaelement/wp-mediaelement.min.css?ver=6.3.1 | www.example.com | DNS_ONLY | https | 000 5.057891 (28)
+https://www.example.com/wp-content/uploads/2024/11/research2-980x350.jpg | www.example.com | DNS_ONLY | https | 000 5.060017 (28)
+https://www.example.com/wp-content/uploads/2023/07/Connectwise.jpg | www.example.com | DNS_ONLY | https | 000 5.059072 (28)
+https://www.example.com/wp-content/uploads/2024/02/tbi-ev4-400x284.jpg | www.example.com | DNS_ONLY | https | 000 5.059399 (28)
+https://www.example.com/wp-includes/js/mediaelement/mediaelementplayer-legacy.min.css?ver=4.2.16 | www.example.com | DNS_ONLY | https | 000 5.059581 (28)
+https://www.example.com/wp-content/uploads/2022/06/Samparka-2019-11-480x321.jpg | www.example.com | DNS_ONLY | https | 000 5.055450 (28)
+https://www.example.com/wp-content/uploads/2025/04/ADS-980x523.jpg | www.example.com | DNS_ONLY | https | 000 5.050157 (28)
+http://webmail.example.com/ | webmail.example.com | DNS_ONLY | http | 000 5.053422 (28)
+https://www.example.com/wp-content/et-cache/25911/et-core-unified-tb-232-deferred-25911.min.css?ver=1778245344 | www.example.com | DNS_ONLY | https | 000 5.059961 (28)
+https://www.example.com/wp-content/uploads/2022/06/2-307-SE-min.pdf | www.example.com | DNS_ONLY | https | 000 5.058850 (28)
+https://www.example.com/wp-content/et-cache/8068/et-core-unified-8068.min.css?ver=1751271748 | www.example.com | DNS_ONLY | https | 000 5.059957 (28)
+https://www.example.com/wp-content/et-cache/72/et-divi-dynamic-72.css?ver=1658701566 | www.example.com | DNS_ONLY | https | 000 5.058021 (28)
+https://www.example.com/wp-content/uploads/2024/07/Program-Intake-480x614.jpg | www.example.com | DNS_ONLY | https | 000 5.059373 (28)
+https://www.example.com/wp-content/et-cache/72/et-core-unified-72.min.css?ver=1714217519 | www.example.com | DNS_ONLY | https | 000 5.059127 (28)
+https://www.example.com/wp-content/et-cache/72/et-core-unified-deferred-72.min.css?ver=1731669203 | www.example.com | DNS_ONLY | https | 000 5.051134 (28)
+https://www.example.com/wp-content/plugins/contact-form-7/includes/css/styles.css?ver=6.1.3 | www.example.com | DNS_ONLY | https | 000 5.059423 (28)
+https://www.example.com/wp-content/uploads/2023/10/IPR-KAPILA.png | www.example.com | DNS_ONLY | https | 000 5.050410 (28)
+https://www.example.com/wp-content/uploads/2025/04/Placement-Policy-example-_compressed.pdf | www.example.com | DNS_ONLY | https | 000 5.058634 (28)
+https://www.example.com/wp-content/themes/Divi/js/scripts.min.js?ver=4.27.5 | www.example.com | DNS_ONLY | https | 000 5.049882 (28)
 ```
 
 Every row is the same bucket: **DNS_ONLY host** (resolves, never serves HTTP). Then the whole population, so the sample
@@ -1570,25 +1604,25 @@ by scheme: {'http': 115, 'https': 4867}
   ('ALIVE', 'https'):       1 (0.0%)
   ('UNKNOWN', 'http'):      1 (0.0%)
   ('UNKNOWN', 'https'):     1 (0.0%)
-27 distinct DNS_ONLY hosts; top: www.sakec.ac.in 4861, sakec.ac.in 5, admission.sakec.ac.in 2, ...
+27 distinct DNS_ONLY hosts; top: www.example.com 4861, example.com 5, admission.example.com 2, ...
 NULL (unprobed) rows by state: {'<no row>': 49, 'ALIVE': 658, 'DNS_ONLY': 1440} total 2147
 answered rows (status > 0) by state: {'ALIVE': 16} total 16
 ```
 
 Classification of the sample: DNS_ONLY 20/20 (100%), ALIVE-wrong-scheme 0, ALIVE-dead-path 0, external host 0,
 other 0. **"ALIVE host, wrong scheme" is ruled out for the population as well:** all 6 ALIVE-host `-1` rows were
-re-checked directly - `http://koha.sakec.ac.in/` 000 after 6.0 s (28), `http://library.sakec.ac.in/` 000/28,
-`http://librarystaff.sakec.ac.in/` 000/28, `http://ws.sakec.ac.in/` 000/0.52 s (56 "Connection reset by peer"),
-`http://www.ws.sakec.ac.in/` 000/0.56 s (56), `https://autodiscover.sakec.ac.in/` 000/6.0 s (28) - none answers on
-the other scheme either. The two UNKNOWN rows are `mail.sakec.ac.in`, which no longer resolves (curl 6).
+re-checked directly - `http://koha.example.com/` 000 after 6.0 s (28), `http://library.example.com/` 000/28,
+`http://librarystaff.example.com/` 000/28, `http://ws.example.com/` 000/0.52 s (56 "Connection reset by peer"),
+`http://www.ws.example.com/` 000/0.56 s (56), `https://autodiscover.example.com/` 000/6.0 s (28) - none answers on
+the other scheme either. The two UNKNOWN rows are `mail.example.com`, which no longer resolves (curl 6).
 
 Three case studies, one per top bucket (DNS_ONLY, DEAD, ALIVE-dead-path):
 
-1. `https://www.sakec.ac.in/wp-content/uploads/2025/03/L2.jpg` - DNS_ONLY - `000` after 5.05 s, curl 28 "Connection
+1. `https://www.example.com/wp-content/uploads/2025/03/L2.jpg` - DNS_ONLY - `000` after 5.05 s, curl 28 "Connection
 timed out": the host resolves, nothing listens on 443. This one host is 4 861 of the 4 982 `-1` rows.
-2. `http://koha.sakec.ac.in/` (DEAD rows behave the same way; koha is ALIVE but its path list is historical) - `000`
+2. `http://koha.example.com/` (DEAD rows behave the same way; koha is ALIVE but its path list is historical) - `000`
 after 6.0 s, curl 28: the path is from an old archive crawl and no longer exists.
-3. `http://ws.sakec.ac.in/` - ALIVE, dead path - `000` in 0.52 s, curl 56 "Connection reset by peer": the host
+3. `http://ws.example.com/` - ALIVE, dead path - `000` in 0.52 s, curl 56 "Connection reset by peer": the host
 answers other traffic but resets this one; retrying would not help.
 
 Distribution (sample n=20): DNS_ONLY 20 (100%), ALIVE-wrong-scheme 0, ALIVE-dead-path 0, external 0, other 0.
@@ -1606,11 +1640,11 @@ Every row: `engine_now = -1`, `curl5s = 000`, DNS resolves. The stored `-1`s are
 probe misconfiguration or a stale verdict. Host level, same day (httpx, 10 s, both schemes on `/`):
 
 ```
-www.sakec.ac.in     | dns=['66.198.240.31']  | http=ConnectTimeout https=ConnectTimeout
-sakec.ac.in         | dns=['66.198.240.31']  | http=ConnectTimeout https=ConnectTimeout
-webmail.sakec.ac.in | dns=['66.198.240.31']  | http=ConnectTimeout https=ConnectTimeout
-koha.sakec.ac.in    | dns=['121.241.29.115'] | http=ConnectTimeout https=200
-ws.sakec.ac.in      | dns=['192.96.210.12']  | http=ReadError       https=TLS
+www.example.com     | dns=['66.198.240.31']  | http=ConnectTimeout https=ConnectTimeout
+example.com         | dns=['66.198.240.31']  | http=ConnectTimeout https=ConnectTimeout
+webmail.example.com | dns=['66.198.240.31']  | http=ConnectTimeout https=ConnectTimeout
+koha.example.com    | dns=['121.241.29.115'] | http=ConnectTimeout https=200
+ws.example.com      | dns=['192.96.210.12']  | http=ReadError       https=TLS
 ```
 
 `www`/apex/webmail share one address that answers nothing on either scheme, so DNS_ONLY is correct for them and the
@@ -1621,7 +1655,7 @@ which is why no scheme rewrite was attempted - Y.2 needs a scheme column and wou
 Part Y (Y.1), code: `Store._dead_fqdns` -> `_unreachable_fqdns` with `state IN ('DEAD', 'DNS_ONLY')`,
 `ProbeCandidates.skipped_dead` -> `skipped_unreachable`, engine line
 `url_probe: skipping N URL(s) whose host is unreachable`. ALIVE / SHUT_DOWN / UNKNOWN / no-row hosts still probe.
-Measured on the sakec copy:
+Measured on the example copy:
 
 ```
 NULL rows (unfiltered): 2147
@@ -1641,7 +1675,7 @@ $ pytest -q tests/test_store.py -k probe_candidates tests/test_engine.py -k prob
 24 passed, 216 deselected in 2.36s
 ```
 
-## 2026-11-19 (Part W) - waybackurls returns 0 on sakec.ac.in: upstream, deferred
+## 2026-11-19 (Part W) - waybackurls returns 0 on example.com: upstream, deferred
 
 Adapter path (`src/reconkit/adapters/waybackurls.py`): `build_command` returns `[self.binary_path() or self.binary]`
 and nothing else, `stdin_text` returns `_query_roots(...)` - the apex once, because the 2026-11-18 rule collapsed the
@@ -1652,23 +1686,23 @@ Manual runs, one archive.org query each, 60 s cap, the same binary the adapter r
 (`/home/kali/.reconkit/bin/waybackurls`, 9 948 804 bytes, `-h` markers `-no-subs` / `don't include subdomains`):
 
 ```
-$ printf 'sakec.ac.in\n'           | timeout 60 ~/.reconkit/bin/waybackurls
-input=sakec.ac.in          exit=0 stdout_lines=0 stdout_bytes=0 stderr_bytes=0
-$ printf 'www.sakec.ac.in\n'       | timeout 60 ~/.reconkit/bin/waybackurls
-input=www.sakec.ac.in      exit=0 stdout_lines=0 stdout_bytes=0 stderr_bytes=0
-$ printf 'http://www.sakec.ac.in\n' | timeout 60 ~/.reconkit/bin/waybackurls
-input=http://www.sakec.ac.in exit=0 stdout_lines=0 stdout_bytes=0 stderr_bytes=0
+$ printf 'example.com\n'           | timeout 60 ~/.reconkit/bin/waybackurls
+input=example.com          exit=0 stdout_lines=0 stdout_bytes=0 stderr_bytes=0
+$ printf 'www.example.com\n'       | timeout 60 ~/.reconkit/bin/waybackurls
+input=www.example.com      exit=0 stdout_lines=0 stdout_bytes=0 stderr_bytes=0
+$ printf 'http://www.example.com\n' | timeout 60 ~/.reconkit/bin/waybackurls
+input=http://www.example.com exit=0 stdout_lines=0 stdout_bytes=0 stderr_bytes=0
 ```
 
 `gau` proved the archive has the data - its raw file from the same stage and run is 487 360 bytes / 4 919 JSON lines:
 
 ```
-$ grep -m5 'sakec' workspaces/sakec.ac.in/urls/168-gau.txt
-{"url":"https://autodiscover.student.sakec.ac.in/autodiscover/autodiscover.xml"}
-{"url":"https://www.sakec.ac.in/.well-known/ai-plugin.json"}
-{"url":"https://www.sakec.ac.in/.well-known/assetlinks.json"}
-{"url":"https://www.sakec.ac.in/.well-known/dnt-policy.txt"}
-{"url":"https://www.sakec.ac.in/.well-known/gpc.json"}
+$ grep -m5 'example' workspaces/example.com/urls/168-gau.txt
+{"url":"https://autodiscover.student.example.com/autodiscover/autodiscover.xml"}
+{"url":"https://www.example.com/.well-known/ai-plugin.json"}
+{"url":"https://www.example.com/.well-known/assetlinks.json"}
+{"url":"https://www.example.com/.well-known/dnt-policy.txt"}
+{"url":"https://www.example.com/.well-known/gpc.json"}
 ```
 
 Endpoints baked into the binary (`strings ... | grep archive.org`), i.e. the same CDX host `gau` reads:
@@ -1683,10 +1717,10 @@ http://index.commoncrawl.org/CC-MAIN-2018-22-index?url=%s%s/*&output=json
 That CDX shape answers intermittently, and the tool reports neither answer:
 
 ```
-$ curl -sL 'https://web.archive.org/cdx/search/cdx?url=sakec.ac.in/*&output=json&collapse=urlkey&limit=3'
+$ curl -sL 'https://web.archive.org/cdx/search/cdx?url=example.com/*&output=json&collapse=urlkey&limit=3'
 attempt1 status=503 bytes=11832   <title>Internet Archive: Temporarily Offline</title>
-attempt2 status=200 bytes=553     [["urlkey","timestamp",...],["in,ac,sakec)/","20170624141040","http://acm@sakec.ac.in/",...]]
-$ curl -sL 'https://web.archive.org/cdx/search/cdx?url=http://www.sakec.ac.in/&output=json&limit=3'
+attempt2 status=200 bytes=553     [["urlkey","timestamp",...],["in,ac,example)/","20170624141040","http://acm@example.com/",...]]
+$ curl -sL 'https://web.archive.org/cdx/search/cdx?url=http://www.example.com/&output=json&limit=3'
 status=200 bytes=443
 ```
 
@@ -1698,7 +1732,7 @@ per the batch rule for this class; the finding is in PROGRESS under Open risks w
 
 ## 2026-11-19 (Part V) - url_probe skips URLs whose host is DEAD (D54)
 
-Measurement first (V.1), against `recon.db` read-only, target_id 6 (`sakec.ac.in`), done in Python because the URL
+Measurement first (V.1), against `recon.db` read-only, target_id 6 (`example.com`), done in Python because the URL
 host has to be parsed (`urlsplit(url).hostname`) and schema 11 has no `hosts` table: the name is `subdomains.fqdn`
 and the current state is `subdomains.state` (the newest `host_status_history` row agrees on this DB: 29 DEAD,
 27 DNS_ONLY, 12 ALIVE over 69 hosts).
@@ -1714,7 +1748,7 @@ Q4  probed answers: -1 4982 | 200 8 | 301 6 | -2 2 | 404 1 | 308 1   (= the 5000
 V.4, with the new filter, against a **copy** of the DB so the original is untouched:
 
 ```
-$ python -c 'Store("/tmp/v4-sakec.db").probe_candidates(6, limit=...)'
+$ python -c 'Store("/tmp/v4-example.db").probe_candidates(6, limit=...)'
 limit=5000: before(NULL rows, unfiltered)=2147  after(rows)=2147  skipped_dead=0
 limit=5001: before(NULL rows, unfiltered)=2147  after(rows)=2147  skipped_dead=0
 reprobe=True limit=5001: after(rows)=5001  skipped_dead=58
@@ -1742,21 +1776,21 @@ $ pytest -q <the seven probe tests>
 7 passed in 0.43s
 ```
 
-## 2026-11-19 (Part U) - the first sakec.ac.in engine run, made once
+## 2026-11-19 (Part U) - the first example.com engine run, made once
 
 Part T (`b6df719`) made per-request timeouts adapter constants (D53). This is the one engine run that followed, on the
 target the owner named. It was **not repeated**; everything below comes from that single run.
 
-Two deviations from the batch's literal command are disclosed in PROGRESS (D53 addendum): `--no-scope` (sakec.ac.in
+Two deviations from the batch's literal command are disclosed in PROGRESS (D53 addendum): `--no-scope` (example.com
 is not in `scope.yaml`, which was left byte-identical, so the gate would have exited 3 with no scan;
 `scan_runs.scope_mode` reads `unrestricted_flag`) and `--json` (U.3 asks for the JSON summary block; without the flag
 that block would have needed a second run, which the batch forbids). The temp config was
-`/tmp/reconkit-sakec-config.yaml`, a byte-identical copy of `config.yaml` (`diff -q` clean; `url_probe.max_urls: 5000`,
+`/tmp/reconkit-example-config.yaml`, a byte-identical copy of `config.yaml` (`diff -q` clean; `url_probe.max_urls: 5000`,
 config line 38).
 
 ```
-$ time reconkit run -d sakec.ac.in --active --phase-timeout 600 --no-color --no-scope --json \
-    --config /tmp/reconkit-sakec-config.yaml
+$ time reconkit run -d example.com --active --phase-timeout 600 --no-color --no-scope --json \
+    --config /tmp/reconkit-example-config.yaml
 wall 1060.685 s
 exit=0
 ```
@@ -1765,7 +1799,7 @@ stderr, 99 lines, verbatim:
 
 ```
 ⚠ --no-scope given: active stages will run WITHOUT scope enforcement.
-  target(s): sakec.ac.in
+  target(s): example.com
   no scope file is being read, checked, or enforced.
   a scan_runs record will be written with scope_mode = "unrestricted_flag".
 subs: running 9 tool(s)
@@ -1862,13 +1896,13 @@ budget with --phase-timeout.
   run 'reconkit doctor' to see what is installed; see docs/10_TOOL_SOURCES.md 
 for provenance.
   this is not a failure — the scan used every tool that was available.
-report: results/sakec.ac.in/20261119T150646Z/report.txt and results/sakec.ac.in/20261119T150646Z/report.json
+report: results/example.com/20261119T150646Z/report.txt and results/example.com/20261119T150646Z/report.json
 ```
 
 `--json` document (stdout, 1 473 078 bytes) - the scalars and the `summary` block:
 
 ```
-target: "sakec.ac.in"  type: "summary"  exit_code: 0
+target: "example.com"  type: "summary"  exit_code: 0
 scope_mode: "unrestricted_flag"  scope_denied: false  resumed: false
 completion: {"status": "complete_with_gaps", "gaps": [{"stage": "subs", "reason": "hackertarget: free quota exceeded, otx: rate limited (HTTP 429)"}]}
 www_dedup: {"applied": false, "pairs": []}
@@ -1905,9 +1939,9 @@ summary: {
 ```
 
 One more zero-item row, but `ok`: `waybackurls ok 0` in 0.62 s. Its raw file
-(`workspaces/sakec.ac.in/urls/168-waybackurls.txt`) is **0 bytes**, and the 2026-11-18 run's file (`163-waybackurls.txt`)
+(`workspaces/example.com/urls/168-waybackurls.txt`) is **0 bytes**, and the 2026-11-18 run's file (`163-waybackurls.txt`)
 is 0 bytes too, while `gau`'s file from the same stage is 487 360 bytes / 4 919 lines. The adapter asks the apex once
-(`_query_roots`: `sakec.ac.in`, covered by `*.<target>/*`); `gau` was handed every host. Nothing failed - 0 rows is
+(`_query_roots`: `example.com`, covered by `*.<target>/*`); `gau` was handed every host. Nothing failed - 0 rows is
 `ok` - so this is recorded as a new edge, not a defect and not fixed here (PROGRESS, Open risks).
 
 Item counts asked for, against the 2026-11-18 six-tool capture: `gau` 4 917 (70.23 s) vs 6 227; `katana` 356 (52.05 s)
@@ -7767,7 +7801,7 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
 
 ## 2026-11-18 (batch) Part 1 - external-service errors are gaps; stale docs cleanup
 
-- **Owner report:** `reconkit run -d sakec.ac.in --active --no-scope` exited `5`
+- **Owner report:** `reconkit run -d example.com --active --no-scope` exited `5`
   because `otx` (429), `hackertarget` (quota) and `crtsh` (502) all failed. None
   of those is a defect on this box, so the run looked broken when it was not.
 - **Docs first:** docs/02 (Tools-table statuses, a `gap` rule, `completion`/gaps
@@ -7832,7 +7866,7 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
 
 ## 2026-11-18 (batch) Part 2 - katana JSON skip, hakrawler/subjs caps, urlfinder inactivity kill
 
-- **Owner report:** the sakec.ac.in scan showed `katana: invalid JSON line` (tool
+- **Owner report:** the example.com scan showed `katana: invalid JSON line` (tool
   failed with 0 items), `hakrawler timeout 0 item(s)` and `subjs timeout 0
   item(s)`, and `urlfinder`'s flat 180 s cap was too short for a target with
   hundreds of hosts.
@@ -7902,7 +7936,7 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
 ## 2026-11-18 (batch) Part 3 - www/non-www deduplication with `duplicate_of` metadata
 
 - **Owner request:** "www.anywebsite.com and anywebsite.com are the same - fix that
-  yourself", after a real `sakec.ac.in` scan listed both names as ALIVE.
+  yourself", after a real `example.com` scan listed both names as ALIVE.
 - **Docs first:** docs/04 section 5 (`duplicate_of`/`www_note` semantics) and
   section 11 (schema 9), docs/09 section 5 (the five rules), docs/02 section 5
   (Notes column, summary line, `--json`), MASTER_PLAN D22, COMMANDS.md.
@@ -7964,7 +7998,7 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
   --no-scope --tools assetfinder,dnspython,pyprobe` -> both names answer 200,
   which is the "two 2xx" branch: **nothing** was marked and both rows got
   `has www sibling at ...`, exit 0. The DB rows above are from that run and the
-  mock run in the same workspace. No scan of `sakec.ac.in` was made.
+  mock run in the same workspace. No scan of `example.com` was made.
 - **Tests:** 855 -> 869. New: `test_www_redirect_to_bare_is_marked_duplicate`,
   `test_bare_redirect_to_www_is_marked_duplicate`,
   `test_both_200_independent_servers_not_marked_duplicate`,
@@ -8025,7 +8059,7 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
 - **Mock.** `--mock` sends nothing, leaves every `status_code` `NULL` and warns
   `url_probe: skipped in --mock (N URL(s) left unprobed)`, so a mock run can
   never look like a probed one.
-- **Real proof (testfire.net, small, no re-scan of sakec.ac.in).** The
+- **Real proof (testfire.net, small, no re-scan of example.com).** The
   workspace `/tmp/rk4` used a copy of `config.yaml` with `max_urls: 20` and the
   command `reconkit run -d testfire.net --active --no-scope --tools
   pyprobe,katana,gau`:
@@ -8128,7 +8162,7 @@ reconkit run -d <authorized-host> --active --speed slow --tools httpx --db /tmp/
   no `tls_error`, no `error`, no `failed: true`. A local UA-logging server showed the default
   request carries `Mozilla/5.0 (Windows NT 10.0; ...) Edge/18.18363`, while
   `-H "User-Agent: reconkit/0.1"` sends `reconkit/0.1`.
-- **Speed, same 158 stored testfire URLs (both passes <= 200, no sakec.ac.in traffic):**
+- **Speed, same 158 stored testfire URLs (both passes <= 200, no example.com traffic):**
   `PD httpx (threads 100): WALL=9.190335087 s`, 157 lines, `{200: 122, 302: 3, 404: 32}` - the 58
   certificate-invalid URLs came back `200`. `Python httpx (threads 50): WALL=4.59 s`,
   `{-2: 58, -1: 1, 200: 66, 302: 2, 400: 1, 404: 30}`. After the change (`threads 100`, one client):
@@ -8729,7 +8763,7 @@ Suite 908 -> 909.
 
 ### Investigation (raw)
 
-The machinery R8 asks for already existed under the name `gap` (added 2026-11-18 by the sakec.ac.in ruling):
+The machinery R8 asks for already existed under the name `gap` (added 2026-11-18 by the example.com ruling):
 `ToolStatus.GAP`, one classifier `adapters.base.classify_external_gap()`, `tool_runs.status='gap'` (schema 8),
 `Engine._completion_gaps()`, and three engine tests. So the question was not "does it exist" but "does the signature
 list match R8". Raw matrix before the change:
@@ -9921,7 +9955,7 @@ tests/test_ui.py::test_a_run_with_no_kill_prints_no_stopped_early_block PASSED
 200 000 URLs (160 000 NULL), 23.7 MB -> `probe_candidates 162.59 ms`, `1000 set_url_status 333.36 ms`,
 `limits 0.01 ms`, `stage loop (4 tools) 2.89 ms`, peak RSS 122.0 MB. `bench/scale_50k.db` = 50 000 hosts /
 500 000 URLs (400 000 NULL), 59.7 MB -> `456.71 ms`, `336.76 ms`, `0.01 ms`, `4.40 ms`, peak RSS 224.9 MB.
-Sakec capture (one 2m40s run, never scanned by the engine): subfinder 36.83 s/67, assetfinder 4.53 s/105,
+example capture (one 2m40s run, never scanned by the engine): subfinder 36.83 s/67, assetfinder 4.53 s/105,
 crtsh 3.25 s/37, gau 70.39 s/6227, katana 10.64 s/1, httprobe 34.99 s/18. 10x replay of the gau+katana rows:
 62 280 -> padded to 200 000, `200000 probed: 16.36 s, 12,227 URL/s, peak RSS 153.2 MB`.
 
@@ -9958,7 +9992,7 @@ counts differ from the S1 record (158 000 vs 160 000 and 399 000 vs 400 000) bec
 earlier copy of the generated fixture; the store sizes are identical, and both runs are the same script on the
 same files that exist now.
 
-**Sakec replay, 10x (mock transport, nothing scanned):**
+**example replay, 10x (mock transport, nothing scanned):**
 
 ```
 gau: 6227 -> 62270 URLs; katana: 1 -> 10
@@ -9967,8 +10001,8 @@ replay list: 62280 unique URLs, padded to 200000
 db 28.6 MB (temporary, deleted)
 ```
 
-S1 was `16.36 s`, `12,227 URL/s`, `153.2 MB`. The capture itself was taken once by `scripts/capture_sakec.sh`
-(2m40s, six tools, written to the gitignored `captures/sakec/`) and is never re-taken here.
+S1 was `16.36 s`, `12,227 URL/s`, `153.2 MB`. The capture itself was taken once by `scripts/capture_example.sh`
+(2m40s, six tools, written to the gitignored `captures/example/`) and is never re-taken here.
 
 **All-silent run, exit 0** (real `Engine`, `mock=True`, one classed tool that waits forever, 0.3 s window):
 

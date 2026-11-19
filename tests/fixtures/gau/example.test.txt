@@ -1,0 +1,3 @@
+{"url":"https://example.test/login"}
+{"url":"https://example.test/admin"}
+{"url":"https://www.google.com/search?q=example"}

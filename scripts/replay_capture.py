@@ -1,6 +1,6 @@
 """Replay a real capture at 10x through the url_probe pass, no network.
 
-Reads the capture files `scripts/capture_sakec.sh` wrote (`gau.txt`,
+Reads the capture files `scripts/capture_example.sh` wrote (`gau.txt`,
 `katana.txt`), writes a 10x copy of each (every URL repeated with `?i=1..10`),
 inserts the result into a throwaway database and runs the engine's real
 url_probe pass against it with a mock transport that answers 200 in 1 ms.
@@ -11,7 +11,7 @@ looks like. Nothing here scans anything.
 
 Usage:
 
-    python scripts/replay_capture.py captures/sakec --urls 200000
+    python scripts/replay_capture.py captures/example --urls 200000
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ FACTOR = 10
 # The target is the captured domain, not a synthetic one: the probe pass keeps
 # only URLs whose host belongs to the target, so a `scale.example` target would
 # silently drop every real capture row and bench the padding instead.
-TARGET = "sakec.ac.in"
+TARGET = "example.com"
 PAD_HOST = f"pad.{TARGET}"
 
 
@@ -125,14 +125,14 @@ async def probe(db: Path) -> tuple[float, int]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("capture_dir", type=Path, nargs="?", default=Path("captures/sakec"))
+    parser.add_argument("capture_dir", type=Path, nargs="?", default=Path("captures/example"))
     parser.add_argument("--urls", type=int, default=200_000)
     args = parser.parse_args()
 
     gau = read_urls(args.capture_dir / "gau.txt")
     katana = read_urls(args.capture_dir / "katana.txt")
     if not gau and not katana:
-        print(f"{args.capture_dir}: no gau.txt/katana.txt (run scripts/capture_sakec.sh first)")
+        print(f"{args.capture_dir}: no gau.txt/katana.txt (run scripts/capture_example.sh first)")
         return 2
     gau_10x = write_ten_x(args.capture_dir / "gau.txt", args.capture_dir / "gau_10x.txt")
     katana_10x = write_ten_x(args.capture_dir / "katana.txt", args.capture_dir / "katana_10x.txt")

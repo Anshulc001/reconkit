@@ -376,10 +376,10 @@ tools agree plus the stage's evidence rules.
 
 ```
 Subdomain          State    Status  Ports   Sources                Trust       Notes
-sakec.ac.in        ALIVE    301     -       crtsh, subfinder       MEDIUM (2)  -> redirects to www.sakec.ac.in
-www.sakec.ac.in    ALIVE    200     -       crtsh, subfinder       MEDIUM (2)  canonical
-admission.sakec.in ALIVE    403     -       crtsh                  LOW (1)     canonical
-www.admission...   ALIVE    403     -       crtsh                  LOW (1)     -> duplicate of admission.sakec.in
+example.com        ALIVE    301     -       crtsh, subfinder       MEDIUM (2)  -> redirects to www.example.com
+www.example.com    ALIVE    200     -       crtsh, subfinder       MEDIUM (2)  canonical
+admission.example.com ALIVE    403     -       crtsh                  LOW (1)     canonical
+www.admission...   ALIVE    403     -       crtsh                  LOW (1)     -> duplicate of admission.example.com
 ```
 
 `Notes` explains a www/non-www pair (D22) without hiding the row: `-> redirects

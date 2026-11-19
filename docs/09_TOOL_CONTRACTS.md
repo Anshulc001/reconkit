@@ -271,10 +271,10 @@ which proves the default `*.<line>/*` query already covers them - feeding it all
 The adapter now feeds the apex once and passes through any host that is not under
 it (a scope file can name several domains), so nothing is lost.
 
-**2026-11-19: the `ok 0` on sakec.ac.in is the tool's, not the adapter's.** The
+**2026-11-19: the `ok 0` on example.com is the tool's, not the adapter's.** The
 adapter's argv is `[<binary>]` with the host on stdin and no flags; the binary
-exited **0** with **0 bytes** and empty stderr for `sakec.ac.in`,
-`www.sakec.ac.in` and `http://www.sakec.ac.in`, so the parser never saw a line.
+exited **0** with **0 bytes** and empty stderr for `example.com`,
+`www.example.com` and `http://www.example.com`, so the parser never saw a line.
 The CDX endpoint it builds answered **503 "Internet Archive: Temporarily
 Offline"** on one call and **200** with real rows on the next, and `gau`
 returned 4 917 URLs from the same archive in the same stage. waybackurls has no
@@ -509,7 +509,7 @@ tool. `base.is_non_web_reference()` recognises `javascript:`, `mailto:`,
   with inner whitespace or a non-web scheme is skipped silently, anything else
   is still a parse error), because its input is an archive, not a live page.
 - **Per-tool runtime caps (2026-11-18; deleted by D52, see 4a2c).** `hakrawler`
-  was capped at 120 s and `subjs` at 60 s: on the sakec.ac.in scan both hit the phase budget with 0
+  was capped at 120 s and `subjs` at 60 s: on the example.com scan both hit the phase budget with 0
   items and owned the whole `urls` stage. A capped run keeps its partial stdout,
   records `ok N` with `capped at <n>s; kept partial output` in the detail
   column, and never reports `timeout` - which stays reserved for a tool that
@@ -1056,9 +1056,9 @@ URL, `tlsx` reads a certificate) and adapters that do (`pyprobe`'s local probe
 and the `httpx` binary). `_persist_live` used to pass the **first ALIVE record
 in completion order** to `_write_host`, so the stored `status_code` depended on
 which tool finished first: a 200 from `pyprobe` was discarded whenever
-`httprobe`'s statusless record landed first. Measured on `slice.bank.in` run
+`httprobe`'s statusless record landed first. Measured on `target.com` run
 203: four live tools, 9 ALIVE hosts, every `status_code` `NULL`, while the URL
-probe stored 200 for `https://b.slice.bank.in/` in the same scan.
+probe stored 200 for `https://b.target.com/` in the same scan.
 
 One rule now picks the record whose fields the row keeps:
 
@@ -1108,7 +1108,7 @@ only when some row has a note, so an ordinary table keeps its six columns), the
 The `urls` stage stores URLs, not hosts. A name that only an archive reported -
 no `subs` tool and no `dns` answer - therefore had no `subdomains` row, no state
 and no line in `report.json`, and in passive mode nothing ever read its URL back
-(measured 2026-11-19: 3 such hosts, 43 URLs, on `slice.bank.in`). After `urls`
+(measured 2026-11-19: 3 such hosts, 43 URLs, on `target.com`). After `urls`
 completes, the engine runs exactly one extra pass for the hosts in that run's
 URL rows that have no `subdomains` row (`Store.url_only_hosts()`):
 
@@ -1235,16 +1235,16 @@ slot) and reports how many it dropped; the engine prints
 `...whose host is unreachable`) when that number is non-zero. Only
 a **known** DEAD state is enough to skip: a URL whose host has no `subdomains` row
 (never resolved), whose host is ALIVE/DNS_ONLY/SHUT_DOWN/UNKNOWN, or whose host
-cannot be parsed is still probed. Measured on the one sakec.ac.in run: **0 of the
+cannot be parsed is still probed. Measured on the one example.com run: **0 of the
 2 147 `NULL` URLs** pointed at a DEAD host (2 147 -> 2 147 candidates) and 58 of
 5 001 under `--reprobe-urls`; the pass's real cost is the 4 982 `-1` answers out of
 5 000 probes, not dead hosts.
 
 **DNS_ONLY hosts too (D55, 2026-11-19).** The same skip now covers `DNS_ONLY` as
 well: those hosts resolved in the DNS stage but never answered an HTTP probe, so
-their URLs cannot answer either. Measured on the one sakec.ac.in run: **4 916 of
+their URLs cannot answer either. Measured on the one example.com run: **4 916 of
 the 4 982 `-1` answers (98.7%) sat on DNS_ONLY hosts** - 4 861 of them on
-`www.sakec.ac.in` alone, which resolves and then times out - and **0 of the 20
+`www.example.com` alone, which resolves and then times out - and **0 of the 20
 randomly sampled `-1` URLs was "ALIVE host, wrong scheme"** (the 6 ALIVE-host
 `-1` rows are paths that time out or reset by peer, not a scheme mismatch). With
 both states skipped the unprobed candidate set goes 2 147 -> **707** (-67%) and

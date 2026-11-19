@@ -909,8 +909,8 @@ D21. 2026-11-18 - `scripts/install-tools.sh`: the owner reinstates installation,
 
 D22. 2026-11-18 - www/non-www deduplication (owner request: "www.anywebsite.com
     and anywebsite.com are the same - fix that yourself").
-    Reason: a real `sakec.ac.in` scan listed `sakec.ac.in` (301) and
-    `www.sakec.ac.in` (200) as two ALIVE hosts, and the same again for
+    Reason: a real `example.com` scan listed `example.com` (301) and
+    `www.example.com` (200) as two ALIVE hosts, and the same again for
     `admission`, `iprc`, `research`, `portal`, so 39 "ALIVE" hosts looked like
     39 websites. New metadata, not a new state rule: schema 9 adds
     `host_status_history.duplicate_of` and `.www_note`;
@@ -940,7 +940,7 @@ D22. 2026-11-18 - www/non-www deduplication (owner request: "www.anywebsite.com
     keeps the two meanings apart.
 
 D23. 2026-11-18 - URL liveness probe (`url_probe` stage, owner-requested after
-    the sakec.ac.in scan).
+    the example.com scan).
 
     Problem: the urls stage records what the archives and the crawl returned
     (11,785 URLs on that target) but nothing says which of them still answers,

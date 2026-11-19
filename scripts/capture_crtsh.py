@@ -4,7 +4,7 @@
 capture it is to run the adapter itself, with a RunContext exactly like the one
 the engine builds (honest User-Agent, real endpoint, real parser). The adapter's
 raw response goes to stdout, one line per record the parser accepted, and the
-status/error to stderr, so `scripts/capture_sakec.sh` can time it and keep the
+status/error to stderr, so `scripts/capture_example.sh` can time it and keep the
 output like every other tool's.
 
 Usage: python scripts/capture_crtsh.py <domain>

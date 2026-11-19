@@ -1,0 +1,2 @@
+https://example.test/login
+https://apps.apple.com/app/example

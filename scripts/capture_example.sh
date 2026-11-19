@@ -3,17 +3,17 @@
 #
 # This is a capture, not a scan: no engine, no stages, no scope file, no writes
 # to the database. Each tool runs once, its raw stdout goes to
-# captures/sakec/<tool>.txt and its wall clock into captures/sakec/timings.json.
+# captures/example/<tool>.txt and its wall clock into captures/example/timings.json.
 # Every call is bounded by a 300 s `timeout`, which shows the shape of a real
 # tool's runtime without letting one hang the capture.
 #
-# Usage: scripts/capture_sakec.sh [domain]
-#        (default: sakec.ac.in; captures/ is gitignored because it is third-party
+# Usage: scripts/capture_example.sh [domain]
+#        (default: example.com; captures/ is gitignored because it is third-party
 #         data, not project material)
 set -uo pipefail
 
-DOMAIN="${1:-sakec.ac.in}"
-OUT="captures/sakec"
+DOMAIN="${1:-example.com}"
+OUT="captures/example"
 BIN="${HOME}/.reconkit/bin"
 mkdir -p "$OUT"
 

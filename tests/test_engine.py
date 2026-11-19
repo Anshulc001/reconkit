@@ -1874,7 +1874,7 @@ def test_both_200_independent_servers_not_marked_duplicate(tmp_path: Path) -> No
 
 
 def test_same_status_on_one_server_marks_the_www_variant(tmp_path: Path) -> None:
-    """The sakec.ac.in 403 pair: same code, shared IP -> www is the duplicate."""
+    """The example.com 403 pair: same code, shared IP -> www is the duplicate."""
     rows = _dedup_run(
         tmp_path,
         bare=(403, HostState.ALIVE),
@@ -2003,7 +2003,7 @@ async def test_exit_code_partial_success(tmp_path: Path) -> None:
 async def test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps(tmp_path: Path) -> None:
     """Owner ruling 2026-11-18: 429/quota/5xx is a gap, never exit 5.
 
-    The sakec.ac.in case: every subs source was refused by its provider, the run
+    The example.com case: every subs source was refused by its provider, the run
     looked broken (exit 5) although nothing on this box was wrong.
     """
     rec = Recorder()
@@ -4626,7 +4626,7 @@ async def test_alive_host_has_status_code_in_report(tmp_path: Path) -> None:
     Regression: `_persist_live` took the first ALIVE record in completion order,
     so a live pool mixing adapters with a status (`pyprobe`, `httpx`) and
     adapters without one (`httprobe`, `tlsx`) could store `NULL` while the
-    report showed `-` for an ALIVE host. Measured on `slice.bank.in` run 203.
+    report showed `-` for an ALIVE host. Measured on `target.com` run 203.
     """
     rec = Recorder()
     specs = {"live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE)}

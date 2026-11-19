@@ -184,7 +184,7 @@ async def test_429_is_a_gap_and_not_retried() -> None:
 
 
 async def test_a_5xx_from_the_upstream_is_a_gap() -> None:
-    """The real sakec.ac.in evidence: crt.sh answered 502 to every request."""
+    """The real example.com evidence: crt.sh answered 502 to every request."""
     adapter = CrtshAdapter(transport=httpx.MockTransport(lambda _r: httpx.Response(502)))
     result = await adapter.run(make_ctx())
     assert result.status == ToolStatus.GAP
@@ -360,7 +360,7 @@ async def test_external_timeout_is_a_gap() -> None:
     """D57: an API that does not answer in time is the upstream, not this box.
 
     Measured 2026-11-19: crtsh timed out after 30.71 s and was the only failure
-    in a 488 s sakec.ac.in run, so one slow third party made the whole run exit
+    in a 488 s example.com run, so one slow third party made the whole run exit
     5. A timeout is the same class of "upstream is slow" as that service's 502.
     """
     calls: list[httpx.Request] = []
