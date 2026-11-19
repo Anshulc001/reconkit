@@ -7604,3 +7604,82 @@ replaced by "What is finished" / "What is explicitly open and why" (R14, R15, R1
 the hash, the commit count, the test count and the untouched `scope.yaml`.
 
 Suite unchanged (939); gate green (see the report).
+
+## 2026-11-19 (close-out) R+S - the crtsh 404 measured, then classified (D47)
+
+### R.1 Raw
+
+The adapter's request (`src/reconkit/adapters/crtsh.py:16-20`): `url()` -> `https://crt.sh/`, `params()` ->
+`{"q": "%.<target>", "output": "json"}`, so the wire URL is:
+
+```
+https://crt.sh/?q=%25.testfire.net&output=json
+```
+
+Ten sequential calls, 1 s apart (`curl -s -o /dev/null -w "%{http_code}\n" --max-time 60`):
+
+```
+=== testfire.net x10 ===
+1 200  2 200  3 200  4 200  5 200  6 200  7 200  8 200  9 200  10 200
+=== example.com x10 ===
+1 200  2 200  3 200  4 200  5 200  6 404  7 502  8 200  9 200  10 200
+=== crt.sh root ===
+root=502 time=8.805546
+```
+
+A second series aimed at catching a 404 body:
+
+```
+call 1 -> 200
+call 2 -> 200
+call 3 -> 200
+call 4 -> 404
+=== 404 body (first 500 chars) ===
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+<html><head>
+<title>404 Not Found</title>
+</head><body>
+<h1>Not Found</h1>
+<p>The requested URL was not found on this server.</p>
+<hr>
+<address>Apache Server at crt.sh Port 443</address>
+</body></html>
+=== size ===
+253
+```
+
+### R.2 Classification: intermittent
+
+`sleep`-spaced identical requests alternate 200/404/502: 1/10 for `example.com`, 0/10 for `testfire.net` in a quiet
+minute, 1 more 404 in the chase loop, and `502` on the service root. A wrong API path would 404 **every** time; a 404
+that a 200 replaces one second later is the front end dropping a request under load. The body confirms it is not a CT
+"no certificates found" answer and not a Cloudflare challenge (plain Apache 404). So: not systematic, not transient
+(it reproduced twice in three series), no adapter change (S.1 does not apply), classifier extension (S.2).
+
+### S.2 The change (2 source files, 3 tests)
+
+- `src/reconkit/adapters/base.py`: `HttpAdapter.external_api: ClassVar[bool] = False`, and in `_attempt()` a
+  `status_code == 404 and self.external_api` branch raising `ExternalServiceGap(f"{self.name}: HTTP 404")` before the
+  generic `>= 400` `FetchFailed`. The 429 check, the 5xx check, body limits, the parse path and `probe_with_retry`
+  (D46) are untouched, so the 404 is **not** retried.
+- `src/reconkit/adapters/crtsh.py`: `external_api = True` with a three-line reason.
+- Docs: `docs/09_TOOL_CONTRACTS.md` line 137's sentence now separates "a 404 from a local binary or non-API adapter"
+  (still `failed`) from "a whole-response 404 from an `external_api` adapter" (a gap), plus a paragraph after the
+  per-tool table with the tools.yaml cross-reference. PROGRESS D47.
+
+Deviation (stop rule once, disclosed): the preferred `external: true` in `tools.yaml` needs a `ToolSpec` field in
+`registry.py`, the yaml edit, and a per-adapter opt-in for the seven API tools (otx, hackertarget, certspotter, urlscan,
+chaos, github_subdomains) - that is ten files, over the three-file budget. The scoped `external_api` class flag is the
+same idea one layer down, one line per adapter, and `crtsh` is the only wearer in this batch.
+
+### S.3 Tests (939 -> 941)
+
+- `test_a_404_from_an_external_tool_is_a_gap` - `CrtshAdapter` + `MockTransport(404)`: `status == GAP`,
+  `error == "crtsh: HTTP 404"`, exactly 1 request (no retry).
+- `test_a_404_from_a_local_binary_is_still_a_failure` - `classify_external_gap("localhttp: HTTP 404") is None`, and an
+  `HttpAdapter` subclass with `external_api = False` returns `FAILED` for the same 404.
+- `test_crtsh_404_is_a_gap_not_a_retry` - `CrtshAdapter.external_api is True`, `HttpAdapter.external_api is False`, and
+  `sleep` is rigged to raise: a 404 must never reach the connection-retry path.
+- Replaced `test_a_404_is_still_a_failure_not_a_gap` (it asserted the rule this ruling changes) - 1 removed, 3 added.
+
+Suite `941 passed`; `ruff check .` clean; `ruff format --check .` 92 files; `mypy src/reconkit` clean.

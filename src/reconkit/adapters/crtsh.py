@@ -12,6 +12,10 @@ from reconkit.models import Record, RunContext, Stage
 class CrtshAdapter(HttpAdapter):
     name = "crtsh"
     stage = Stage.SUBS
+    # crt.sh is a free third party with no SLA; its front end answers 404 for a
+    # query it served a second earlier (D47), so a 404 here is a gap, not a
+    # failure that makes every scan exit 5.
+    external_api = True
 
     def url(self, ctx: RunContext) -> str:
         return "https://crt.sh/"

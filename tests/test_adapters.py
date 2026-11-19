@@ -191,11 +191,70 @@ async def test_a_5xx_from_the_upstream_is_a_gap() -> None:
     assert "502" in (result.error or "")
 
 
-async def test_a_404_is_still_a_failure_not_a_gap() -> None:
-    """Guard: only the third-party signatures are gaps; a 404 is our mistake."""
-    adapter = CrtshAdapter(transport=httpx.MockTransport(lambda _r: httpx.Response(404)))
+async def test_a_404_from_an_external_tool_is_a_gap() -> None:
+    """D47: an API pane answering 404 for its own query is the service, not us.
+
+    Measured (2026-11-19): crt.sh answered 404 on 1 of 10 identical calls for
+    example.com, 0 of 10 for testfire.net, and 502 on its own root - the run
+    that exited 5 was reading a flaky front end as a broken tool.
+    """
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(404)
+
+    adapter = CrtshAdapter(transport=httpx.MockTransport(handler))
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.GAP
+    assert result.error == "crtsh: HTTP 404"
+    # A gap is not a failure that makes the run exit 5, and it is not retried.
+    assert len(calls) == 1
+
+
+async def test_a_404_from_a_local_binary_is_still_a_failure() -> None:
+    """D47 is scoped to external APIs; a 404 anywhere else keeps its old meaning."""
+    from reconkit.adapters.base import classify_external_gap
+
+    # A local tool that prints a 404 is still a failure, through the text path.
+    assert classify_external_gap("localhttp: HTTP 404") is None
+
+    class LocalAdapter(HttpAdapter):
+        """An HTTP adapter with no third-party API behind it."""
+
+        name = "localhttp"
+
+        def url(self, ctx: RunContext) -> str:
+            return "http://127.0.0.1/"
+
+        def parse_output(self, raw: str) -> list[object]:
+            return []
+
+    adapter = LocalAdapter(transport=httpx.MockTransport(lambda _r: httpx.Response(404)))
+    assert LocalAdapter.external_api is False
     result = await adapter.run(make_ctx())
     assert result.status == ToolStatus.FAILED
+    assert result.error == "localhttp: HTTP 404"
+
+
+async def test_crtsh_404_is_a_gap_not_a_retry() -> None:
+    """The 404 fix is a classification, not the identity retry (D46) leaking in."""
+    assert CrtshAdapter.external_api is True
+    assert HttpAdapter.external_api is False
+
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(404)
+
+    async def no_sleep(_seconds: float) -> None:
+        raise AssertionError("a 404 must not be retried")
+
+    adapter = CrtshAdapter(transport=httpx.MockTransport(handler), sleep=no_sleep)
+    result = await adapter.run(make_ctx())
+    assert result.status == ToolStatus.GAP
+    assert len(calls) == 1
 
 
 async def test_hackertarget_quota_answer_is_a_gap() -> None:

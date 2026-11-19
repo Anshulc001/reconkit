@@ -169,6 +169,18 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   enum or message moved. Measured cost: `time reconkit doctor` was 1.72 s / 5.16 s / 1.60 s before and 1.63 s / 1.58 s /
   1.57 s after (median 1.60 s -> 1.58 s); the retry only fires on a failure, so a healthy box pays nothing. Suite 935 ->
   939 (+4 tests). D42's open risk is removed by this change.
+- **D47 (2026-11-19): a whole-response 404 from an external API is a gap, not a failure.** Measured first (Part R): the
+  adapter's query is `GET https://crt.sh/?q=%25.<domain>&output=json`; ten consecutive calls for `testfire.net` were
+  `200 x10`, ten for `example.com` were `200 200 200 200 200 404 502 200 200 200`, a second series hit `404` on call 4,
+  the 404 body is a plain Apache `404 Not Found` page (253 bytes, no challenge, no JSON), and `https://crt.sh/` itself
+  answered `502` in 8.8 s. Verdict: **intermittent** - crt.sh's front end drops requests under load, so the URL is right
+  and the classifier was incomplete. `HttpAdapter` gained `external_api` (`ClassVar[bool] = False`, set True by
+  `CrtshAdapter` only) and raises `ExternalServiceGap("<tool>: HTTP 404")` for a 404 when it is set; `classify` calls,
+  4xx handling for every other adapter, parsed-body 404s and the D46 retry are untouched. A 404 from a local binary or a
+  non-API adapter is still `failed`. Suite 939 -> 941 (+3 tests, one replaced: `test_a_404_is_still_a_failure_not_a_gap`
+  encoded the old rule and became `test_a_404_from_a_local_binary_is_still_a_failure`). Deviations: the brief's preferred
+  `external: true` in `tools.yaml` would have needed `registry.py`, `tools.yaml` and one edit per API adapter - more than
+  the three-file budget - so the scoped per-adapter flag was used, with `crtsh` as the only wearer.
 
 
 

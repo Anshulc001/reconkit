@@ -588,6 +588,13 @@ class BinaryAdapter(BaseToolAdapter):
 class HttpAdapter(BaseToolAdapter):
     """Async HTTP adapter: one retry on connection errors, never hammer on 429/5xx."""
 
+    # True when every request goes to a third party's API, so the service can be
+    # the thing that is wrong. A whole-response 404 then says "that front end did
+    # not find its own endpoint", not "this box is broken" (D47, measured: crt.sh
+    # answered 404 on 1 of 10 identical calls and 502 on its own root). A local
+    # tool's 404 stays a failure; this flag is per adapter, not global.
+    external_api: ClassVar[bool] = False
+
     def __init__(
         self,
         *,
@@ -685,6 +692,11 @@ class HttpAdapter(BaseToolAdapter):
                     raise ExternalServiceGap(
                         f"{self.name}: server error (HTTP {response.status_code})"
                     )
+                if response.status_code == 404 and self.external_api:
+                    # An external API pane that 404s its own query is the service
+                    # being wrong, not this scan: a gap, never a failure, and
+                    # never retried (the retry above is for connections only).
+                    raise ExternalServiceGap(f"{self.name}: HTTP 404")
                 if response.status_code >= 400:
                     raise FetchFailed(f"{self.name}: HTTP {response.status_code}")
                 declared = response.headers.get("content-length")
