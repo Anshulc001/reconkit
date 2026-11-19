@@ -126,6 +126,33 @@ reconkit --db /tmp/copy.db db delete --target example.com --yes
 
 `db list` and `db export` remain Phase 3 stubs.
 
+## Contributing
+
+Contributions and collaboration are welcome: bug reports, documentation fixes,
+adapter ideas, and code.
+
+- Open an issue first for anything larger than a typo, so the approach can be
+  agreed before you write it.
+- Fork the repo, branch from `main`, and keep each change focused.
+- Run the gate before opening a pull request:
+
+```bash
+source .venv/bin/activate
+pytest -q
+ruff check .
+ruff format --check .
+mypy src/reconkit
+```
+
+- Add tests for behavior changes and update the matching doc in the same PR.
+- Never commit real target data, `scope.yaml`, API keys, `.env` values or raw
+  scan output; use the fixtures under `tests/fixtures/`.
+- reconkit is for authorized testing only. Changes that add evasion, scope
+  bypasses or unrequested intrusive behavior will not be accepted.
+
+There is no `LICENSE` file in the repository yet; if you plan to reuse the code,
+open an issue to settle licensing first.
+
 ## Documentation
 
 | File | Purpose |
