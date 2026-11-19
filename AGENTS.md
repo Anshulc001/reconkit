@@ -26,6 +26,9 @@ plan (5-10 lines, assumptions) -> implement -> tests (normal, empty, malformed, 
 
 ## 0c. Rules learned from reviews
 
+- Never add AI attribution trailers to a commit (`Co-Authored-By:`,
+  `Generated with ...`). This repository records no attribution trailers, by
+  anyone or any tool.
 - Never say a check passed unless you ran it and pasted the output.
 - Test results with `if cmd; then echo PASS; else echo FAIL; fi`, never `echo $?`.
 - Work only in the repo root of this checkout. Never edit other copies. Never push unless asked.

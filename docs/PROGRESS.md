@@ -4,6 +4,14 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, attribution): **the last four commits were re-created
+  without AI attribution trailers**, per the rule already recorded below in this
+  file. Only messages changed; every tree is byte-identical. AGENTS.md section 0c
+  now states the rule explicitly so it cannot be missed again. Hashes:
+  `7803624` -> `eadf76a`, `2b62964` -> `aaf7ca5`, `edbaacf` -> `db965ea`,
+  `03ef49e` -> `18baa4f`. The published `v1.0.0` tag was re-created on the
+  rewritten D81 commit `db965ea` and force-pushed. See the top entry in
+  REVIEW_LOG.
 - Status (2026-11-20, D81): **`reconkit db delete` and `reconkit db wipe` exist.**
   `db delete --target X [--yes]` counts the target's rows, asks (default yes),
   then removes `port_sources`, `host_status_history`, `ports`,

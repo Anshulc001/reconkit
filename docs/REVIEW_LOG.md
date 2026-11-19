@@ -77,6 +77,27 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 | PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `target.com` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.target.com/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
 
+## 2026-11-20 - AI attribution trailers stripped from four commits
+
+The D79, D80, D81 and README-contribution commits carried `Generated with ...`
+and `Co-Authored-By: ...` trailers, against the rule already recorded in
+PROGRESS ("no attribution trailers are added, by anyone or any tool"). At the
+owner's request the four messages were re-created with
+`git filter-branch --msg-filter`; no file content changed.
+
+| Before | After | Tree |
+|---|---|---|
+| `7803624` | `eadf76a` | identical |
+| `2b62964` | `aaf7ca5` | identical |
+| `edbaacf` | `db965ea` | identical |
+| `03ef49e` | `18baa4f` | identical |
+
+`git diff <before> <after>` is empty for every pair. AGENTS.md section 0c now
+states the rule explicitly. The published annotated tag `v1.0.0` was re-created
+on the rewritten D81 commit (`db965ea`) and force-pushed with the branch. Old
+hashes remain in local reflog/original refs and may be cached by GitHub, but no
+branch or tag points at them.
+
 ## 2026-11-20 (D81) - `db delete` and `db wipe`
 
 **What existed.** `reconkit db` had two Phase 3 stubs (`list`, `export`) and no
