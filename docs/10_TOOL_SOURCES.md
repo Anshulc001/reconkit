@@ -119,6 +119,14 @@ program: `masscan --version` exits 1 and is accepted, while a nonzero exit with
 unrelated text stays `wrong program` (PIT-35). Every probe gets `HOME` in its
 child environment, never the parent environment (PIT-30).
 
+**A probe is retried once** (D42/D46, PIT-63). A single failed probe used to mean
+`wrong program`, which silently removed a working tool from every scan: `amass`
+answered ten probes and failed one (2026-11-19). `probe_with_retry()` in
+`adapters/base.py` runs the probe again after 100 ms, and the second answer is the
+verdict; a genuinely wrong program still reads `wrong program`, because it fails
+both times. `doctor` and the engine's selection check share that one function -
+greshing a tool name is not retried, only its identity probe.
+
 **The "wrong program" rule.** A same-named binary that is not the expected
 program must never be driven as if it were. Tools with an adapter enforce it in
 `BinaryAdapter.check_installed()`, which requires the tool's identity markers

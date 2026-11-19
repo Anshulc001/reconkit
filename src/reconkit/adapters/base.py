@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -40,6 +40,9 @@ MAX_ERROR_CHARS = 200
 # How many unusable parser lines are named one by one in the detail column.
 SKIP_WARNINGS = 10
 IDENTITY_TIMEOUT = 10.0
+# A probe that fails once must not drop a working tool from every scan (D42):
+# one retry after a short pause, then today's verdict stands.
+IDENTITY_RETRY_DELAY = 0.1
 FIXTURES = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -49,6 +52,34 @@ _VERSION = re.compile(r"v?\d+\.\d+(?:\.\d+)?")
 
 Sleep = Callable[[float], Awaitable[None]]
 Finder = Callable[[str], str | None]
+
+
+ProbeResult = TypeVar("ProbeResult")
+
+
+def probe_with_retry(
+    probe: Callable[[], ProbeResult],
+    *,
+    ok: Callable[[ProbeResult], bool],
+    delay: float = IDENTITY_RETRY_DELAY,
+) -> ProbeResult:
+    """Run an identity probe once, and once more when it did not identify the tool.
+
+    A single failed probe used to mean `wrong program`, and that silently removed
+    the tool from every scan - it looks like the tool ran and found nothing. The
+    failure is transient in practice (D42: amass answered 10/10 probes and failed
+    one), so the second attempt decides. After it, the verdict is exactly today's:
+    no new status, no enum change. `ok` says what a successful probe looks like.
+    """
+    try:
+        result = probe()
+    except RuntimeError:
+        time.sleep(delay)
+        return probe()
+    if ok(result):
+        return result
+    time.sleep(delay)
+    return probe()
 
 
 class FetchFailed(Exception):
@@ -512,21 +543,31 @@ class BinaryAdapter(BaseToolAdapter):
     def check_installed(self) -> InstallStatus:
         """Resolve the binary and prove it is the expected program, not a namesake.
 
-        The probe gets `HOME` because ProjectDiscovery tools write their config
-        under `$HOME/.config`; with no HOME they fall back to the current
-        directory and create or move `subfinder/` and `naabu/` into it.
+        The probe is retried once (D42): a transient failure must not silently
+        drop a working tool from every scan. A missing binary is not retried.
         """
         path = self.binary_path()
         if path is None:
             return InstallStatus(installed=False)
         try:
-            outcome = run_exec(
-                [path, *self.version_args],
-                timeout=IDENTITY_TIMEOUT,
-                env={"HOME": str(Path.home())},
+            return probe_with_retry(
+                lambda: self._probe_identity(path), ok=lambda status: status.installed
             )
         except RuntimeError:
             return InstallStatus(installed=False, path=Path(path))
+
+    def _probe_identity(self, path: str) -> InstallStatus:
+        """One identity attempt: run the version command and read what it says.
+
+        The probe gets `HOME` because ProjectDiscovery tools write their config
+        under `$HOME/.config`; with no HOME they fall back to the current
+        directory and create or move `subfinder/` and `naabu/` into it.
+        """
+        outcome = run_exec(
+            [path, *self.version_args],
+            timeout=IDENTITY_TIMEOUT,
+            env={"HOME": str(Path.home())},
+        )
         text = f"{outcome.stdout}\n{outcome.stderr}"
         if outcome.timed_out or outcome.returncode is None:
             return InstallStatus(installed=False, path=Path(path))

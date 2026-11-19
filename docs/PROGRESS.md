@@ -151,6 +151,16 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   **R18 - `shots`' missing browser and `masscan`'s unverified build are environmental, not defects.** Neither is a
   project defect, so neither is fixed and neither stays on the Open risks list; README gains a "Known environmental
   limits" section naming both with their one-line cause.
+- **D46 (2026-11-19): the identity probe retries once before declaring `wrong program` (R17, closes D42).**
+  `adapters/base.py` gained `probe_with_retry(probe, ok=..., delay=IDENTITY_RETRY_DELAY)` (100 ms): a probe that does
+  not identify the tool is run **once more**, and only the second answer decides. `BinaryAdapter.check_installed()` now
+  resolves the path first (a missing binary is never retried) and probes through `_probe_identity()`; `core/toolcheck`'s
+  `installed_version()` wraps its own probe in the same function, so `doctor` and the engine's selection check share one
+  retry implementation instead of two. Nothing else changed: the identity command, regex and `IDENTITY_TIMEOUT` (10 s)
+  are untouched, and a real namesake still reads `wrong program / failed` because it fails both attempts, so no status,
+  enum or message moved. Measured cost: `time reconkit doctor` was 1.72 s / 5.16 s / 1.60 s before and 1.63 s / 1.58 s /
+  1.57 s after (median 1.60 s -> 1.58 s); the retry only fires on a failure, so a healthy box pays nothing. Suite 935 ->
+  939 (+4 tests). D42's open risk is removed by this change.
 
 
 
@@ -651,10 +661,6 @@ Real, current items only. Everything else this file used to list is either close
   (`--phase-timeout 300`, testfire.net): 29 tools `ok`, 1 gap (`otx` 429), 2 selection skips, and `gau` still running
   when the stage hit 300 s -> `timeout` -> exit **5**. `gau` normally answers in ~31 s (D20), so this is archive.org
   latency; the exit code is right and the operator raises `--phase-timeout` for a slow target. Not a defect, not fixed.
-- **A transient identity-probe failure silently drops a tool from every scan (D42).** `amass` read `wrong program` once
-  at the start of the 2026-11-19 batch and `yes / ok` in ten consecutive probes afterwards. A tool that fails its 10 s
-  probe is `skipped (not installed)` and the work simply does not happen. A retry or a longer `IDENTITY_TIMEOUT` would
-  be a behaviour change and needs a ruling.
 - **Out-of-scope CIDRs cannot be expressed (R14, D45).** `scope.yaml` has no exclusion field, so an authorization that
   names a range cannot be written down. The owner's schema question is exact: does the field read
   `exclude_cidrs: [10.0.0.0/8, ...]` beside `in_scope_cidrs`, and does an exclusion override an inclusion? Answering it

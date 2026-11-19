@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import inspect
 import json
 import os
 import subprocess
@@ -324,6 +325,69 @@ def test_assetfinder_usage_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_exec(monkeypatch, outcome("Usage: assetfinder [--subs-only] <domain>\n", returncode=0))
     status = AssetfinderAdapter(finder=lambda _name: "/usr/bin/assetfinder").check_installed()
     assert status.installed is True
+
+
+def fake_exec_sequence(
+    monkeypatch: pytest.MonkeyPatch, results: list[ExecResult]
+) -> list[list[str]]:
+    """`run_exec` that answers with `results` in order, repeating the last one."""
+    calls: list[list[str]] = []
+
+    def fake(argv: list[str], **_kwargs: object) -> ExecResult:
+        calls.append(argv)
+        return results[min(len(calls) - 1, len(results) - 1)]
+
+    monkeypatch.setattr(base_module, "run_exec", fake)
+    return calls
+
+
+def test_a_transient_identity_failure_is_retried_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D42: one failed probe does not drop a working tool from every scan."""
+    calls = fake_exec_sequence(
+        monkeypatch,
+        [
+            outcome("cannot execute binary file", returncode=126),
+            outcome("projectdiscovery.io\n[INF] Current Version: v2.17.0"),
+        ],
+    )
+    status = SubfinderAdapter(finder=lambda _name: "/usr/bin/subfinder").check_installed()
+    assert status.installed is True
+    assert status.version == "v2.17.0"
+    assert len(calls) == 2
+
+
+def test_two_consecutive_identity_failures_still_mark_wrong_program(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The retry changes nothing when the first program really is a namesake."""
+    calls = fake_exec_sequence(
+        monkeypatch,
+        [outcome("0.28.1", returncode=0), outcome("0.28.1", returncode=0)],
+    )
+    status = HttpxAdapter(finder=lambda _name: "C:/python/Scripts/httpx").check_installed()
+    assert status.installed is False
+    assert status.path is not None
+    assert len(calls) == 2
+
+
+def test_retry_does_not_fire_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = fake_exec_sequence(
+        monkeypatch, [outcome("projectdiscovery.io\nCurrent Version: v1.6.9")]
+    )
+    status = HttpxAdapter(finder=lambda _name: "C:/tools/httpx").check_installed()
+    assert status.installed is True
+    assert len(calls) == 1
+
+
+def test_doctor_and_engine_share_the_retry_helper() -> None:
+    """One retry implementation: both probes call the same function (D42)."""
+    from reconkit.core import toolcheck
+
+    assert toolcheck.probe_with_retry is base_module.probe_with_retry
+    assert "probe_with_retry" in inspect.getsource(BinaryAdapter.check_installed)
+    assert "probe_with_retry" in inspect.getsource(toolcheck.installed_version)
 
 
 @pytest.mark.parametrize(

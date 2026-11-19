@@ -17,6 +17,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+from reconkit.adapters.base import probe_with_retry
 from reconkit.adapters.registry import ToolSpec
 from reconkit.core.runner import ExecResult, run_exec
 
@@ -65,22 +66,28 @@ def installed_version(
         argv0 = found
     if len(command) < 2:
         return argv0
-    outcome = runner(
-        [argv0, *command[1:]],
-        timeout=timeout,
-        env={"HOME": str(Path.home())},
-    )
-    if outcome.timed_out or outcome.returncode is None:
-        return None
-    text = (outcome.stdout or outcome.stderr).strip()
-    # Some tools print a valid banner and still exit nonzero (`masscan --version`
-    # exits 1). Accept that only when the banner names the program; anything else
-    # with a nonzero exit stays "not usable" (Part B audit, 2026-11-14).
-    if outcome.returncode != 0 and (spec.binary or "").lower() not in text.lower():
-        return None
-    if spec.version_regex is not None:
-        match = re.search(spec.version_regex, text)
-        if match is None:
+
+    def probe() -> str | None:
+        outcome = runner(
+            [argv0, *command[1:]],
+            timeout=timeout,
+            env={"HOME": str(Path.home())},
+        )
+        if outcome.timed_out or outcome.returncode is None:
             return None
-        return match.group(1) if match.groups() else match.group(0)
-    return text.splitlines()[0] if text else str(copy)
+        text = (outcome.stdout or outcome.stderr).strip()
+        # Some tools print a valid banner and still exit nonzero (`masscan --version`
+        # exits 1). Accept that only when the banner names the program; anything else
+        # with a nonzero exit stays "not usable" (Part B audit, 2026-11-14).
+        if outcome.returncode != 0 and (spec.binary or "").lower() not in text.lower():
+            return None
+        if spec.version_regex is not None:
+            match = re.search(spec.version_regex, text)
+            if match is None:
+                return None
+            return match.group(1) if match.groups() else match.group(0)
+        return text.splitlines()[0] if text else str(copy)
+
+    # Same retry the adapters use (D42): a transient failure here drops a tool
+    # from the scan exactly as silently. A missing copy is not retried.
+    return probe_with_retry(probe, ok=lambda version: version is not None)
