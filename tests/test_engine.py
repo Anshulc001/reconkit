@@ -3560,6 +3560,7 @@ def _probe_engine(
     *,
     transport: object | None = None,
     scope_text: str | None = SCOPE,
+    progress: Callable[[str], None] | None = None,
 ) -> Engine:
     rec = Recorder()
     # R10 (2026-11-19): an active urls tool with no alive host is now skipped, so
@@ -3575,7 +3576,12 @@ def _probe_engine(
         )
     }
     return make_engine(
-        tmp_path, specs, adapters, scope_text=scope_text, url_probe_transport=transport
+        tmp_path,
+        specs,
+        adapters,
+        scope_text=scope_text,
+        url_probe_transport=transport,
+        progress=progress,
     )
 
 
@@ -3707,6 +3713,28 @@ async def test_url_probe_is_skipped_in_mock_mode(tmp_path: Path) -> None:
     assert any(
         "url_probe: skipped in --mock (1 URL(s) left unprobed)" in note for note in summary.warnings
     )
+
+
+async def test_probe_candidates_logs_the_skip_count(tmp_path: Path) -> None:
+    """D54: a probe pass says how many URLs it dropped for a DEAD host."""
+    lines: list[str] = []
+    calls: list[str] = []
+    transport = _probe_transport({}, calls)
+    urls = [f"https://www.example.com/{index}" for index in range(6)] + [
+        f"https://dead.example.com/{index}" for index in range(4)
+    ]
+    engine = _probe_engine(
+        tmp_path, urls, transport=transport, scope_text=None, progress=lines.append
+    )
+    target_id = engine.store.create_target("example.com")
+    dns_run = engine.store.create_scan_run(target_id, "dns")
+    engine.store.upsert_subdomain(target_id, "dead.example.com", run_id=dns_run, state="DEAD")
+    await engine.run("example.com", ScanOptions(active=True))
+    assert [line for line in lines if "whose host is DEAD" in line] == [
+        "url_probe: skipping 4 URL(s) whose host is DEAD"
+    ]
+    assert [url for url in calls if "dead.example.com" in url] == []
+    assert len(calls) == 6
 
 
 async def test_skipping_the_url_probe_stage_leaves_every_status_null(tmp_path: Path) -> None:

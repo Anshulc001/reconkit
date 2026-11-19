@@ -1998,9 +1998,12 @@ class Engine:
         goes through (docs/05 rule 2).
         """
         settings = self.config.url_probe
-        rows = self.store.probe_candidates(
+        plan = self.store.probe_candidates(
             target_id, limit=settings.max_urls + 1, reprobe=opts.reprobe_urls
         )
+        rows = plan.rows
+        if plan.skipped_dead:
+            self._progress(f"url_probe: skipping {plan.skipped_dead} URL(s) whose host is DEAD")
         if len(rows) > settings.max_urls:
             rows = rows[: settings.max_urls]
             note = (

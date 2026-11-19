@@ -11,8 +11,10 @@ import re
 import sqlite3
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from reconkit.errors import ConfigError
 
@@ -360,6 +362,28 @@ def _text_list(raw: object) -> tuple[str, ...]:
     if not isinstance(values, list):
         return ()
     return tuple(str(value) for value in values if isinstance(value, str))
+
+
+def _url_host(url: str) -> str:
+    """A stored URL's hostname, lowercased; `""` when it has none (D54)."""
+    try:
+        host = urlsplit(url).hostname
+    except ValueError:
+        return ""
+    return (host or "").lower().rstrip(".")
+
+
+@dataclass(frozen=True)
+class ProbeCandidates:
+    """What the `url_probe` stage should send a request to (D23, D54).
+
+    `skipped_dead` is the number of URLs left out because their host is already
+    known DEAD. It never shrinks `rows`: the filter runs before the limit is
+    filled, so a skipped row does not eat a probe slot.
+    """
+
+    rows: list[dict[str, object]]
+    skipped_dead: int
 
 
 class Store:
@@ -854,23 +878,46 @@ class Store:
 
     def probe_candidates(
         self, target_id: int, *, limit: int, reprobe: bool = False
-    ) -> list[dict[str, object]]:
+    ) -> ProbeCandidates:
         """The target's URLs the `url_probe` stage should send a request to (D23).
 
         `NULL` is the only "not probed" value: a URL that did not answer is
         stored as `-1`, so by default it is never handed back here. `reprobe`
         (`--reprobe-urls`, D24) returns every URL, including ones that already
         carry an answer, so a live URL that has since gone dead can be found.
+
+        D54: a URL whose host the latest state pass recorded as `DEAD` is not
+        probed at all - that host did not resolve or went silent, so its URLs
+        can only be paid for and thrown away. Only a **known** DEAD state is
+        enough to skip: a URL whose host has no `subdomains` row (never
+        resolved), whose host is ALIVE/DNS_ONLY/SHUT_DOWN/UNKNOWN, or whose
+        host cannot be parsed is kept. The filter runs before the limit is
+        filled, so a skipped row never eats a probe slot.
         """
         if reprobe:
-            sql = "SELECT id, url FROM urls WHERE target_id = ? ORDER BY id LIMIT ?"
+            sql = "SELECT id, url FROM urls WHERE target_id = ? ORDER BY id"
         else:
-            sql = (
-                "SELECT id, url FROM urls WHERE target_id = ? AND status_code IS NULL"
-                " ORDER BY id LIMIT ?"
-            )
-        rows = self._conn.execute(sql, (target_id, limit)).fetchall()
-        return [{"id": int(row["id"]), "url": str(row["url"])} for row in rows]
+            sql = "SELECT id, url FROM urls WHERE target_id = ? AND status_code IS NULL ORDER BY id"
+        dead = self._dead_fqdns(target_id)
+        found: list[dict[str, object]] = []
+        skipped = 0
+        for row in self._conn.execute(sql, (target_id,)):
+            url = str(row["url"])
+            if dead and _url_host(url) in dead:
+                skipped += 1
+                continue
+            found.append({"id": int(row["id"]), "url": url})
+            if len(found) >= limit:
+                break
+        return ProbeCandidates(rows=found, skipped_dead=skipped)
+
+    def _dead_fqdns(self, target_id: int) -> set[str]:
+        """Hosts the latest state pass recorded as `DEAD` (D54)."""
+        rows = self._conn.execute(
+            "SELECT fqdn FROM subdomains WHERE target_id = ? AND state = 'DEAD'",
+            (target_id,),
+        ).fetchall()
+        return {str(row["fqdn"]).lower().rstrip(".") for row in rows}
 
     def set_url_status(self, url_id: int, status_code: int) -> None:
         """Write the `url_probe` answer on the URL row (D23).

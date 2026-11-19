@@ -76,6 +76,52 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
+## 2026-11-19 (Part V) - url_probe skips URLs whose host is DEAD (D54)
+
+Measurement first (V.1), against `recon.db` read-only, target_id 6 (`sakec.ac.in`), done in Python because the URL
+host has to be parsed (`urlsplit(url).hostname`) and schema 11 has no `hosts` table: the name is `subdomains.fqdn`
+and the current state is `subdomains.state` (the newest `host_status_history` row agrees on this DB: 29 DEAD,
+27 DNS_ONLY, 12 ALIVE over 69 hosts).
+
+```
+Q1  urls with status_code IS NULL        2147   (of 7147 rows for the target)
+Q2  ... whose host is DEAD                  0
+Q3  NULL URLs by the state of their host: DNS_ONLY 1440 | ALIVE 658 | no host row 49 | unparseable 0
+Q4  probed answers: -1 4982 | 200 8 | 301 6 | -2 2 | 404 1 | 308 1   (= the 5000 probed)
+    distinct hosts behind the NULL rows: 34 (ALIVE 11, DNS_ONLY 4, no row 19)
+```
+
+V.4, with the new filter, against a **copy** of the DB so the original is untouched:
+
+```
+$ python -c 'Store("/tmp/v4-sakec.db").probe_candidates(6, limit=...)'
+limit=5000: before(NULL rows, unfiltered)=2147  after(rows)=2147  skipped_dead=0
+limit=5001: before(NULL rows, unfiltered)=2147  after(rows)=2147  skipped_dead=0
+reprobe=True limit=5001: after(rows)=5001  skipped_dead=58
+```
+
+**Drop = 0 of 2 147 (0%) - under the batch's 10% floor, so the DEAD-host filter is not the bottleneck.** The pass's
+real cost is the **4 982 `-1` answers out of 5 000 probes**: URLs that do not answer each burn their connect
+timeout. Probe concurrency, connection reuse and retries are the next investigation; the filter was not widened to
+DNS_ONLY or UNKNOWN, and nothing else changed. It ships as specified because it is correct (a DEAD host can only
+time out) and costs one indexed read.
+
+Behaviour: `Store.probe_candidates` returns `ProbeCandidates(rows, skipped_dead)`, filters **before** `limit` is
+filled, keeps URLs for unknown hosts / ALIVE / DNS_ONLY / SHUT_DOWN / UNKNOWN / unparseable hosts, and the engine
+prints `url_probe: skipping N URL(s) whose host is DEAD` only when N > 0 (before the `--mock` early return, so the
+line is visible in a mock pass too).
+
+Tests, 961 -> 965: `test_probe_candidates_skips_urls_with_dead_hosts`,
+`test_probe_candidates_keeps_urls_with_no_host_row`, `test_probe_candidates_skip_does_not_eat_the_limit` (extra),
+and the engine-level `test_probe_candidates_logs_the_skip_count` (10 URLs, 4 on a DEAD host, injected transport:
+asserts the exact line, that no `dead.example.com` URL is requested and that the other 6 are). Raw:
+
+```
+$ pytest -q <the seven probe tests>
+.......                                                                  [100%]
+7 passed in 0.43s
+```
+
 ## 2026-11-19 (Part U) - the first sakec.ac.in engine run, made once
 
 Part T (`b6df719`) made per-request timeouts adapter constants (D53). This is the one engine run that followed, on the

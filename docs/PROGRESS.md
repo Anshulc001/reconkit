@@ -264,6 +264,19 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   stage 0.3s, 0 partial`, summary `..., 1 killed, 0 timeout`, the `⚠ 1 tool(s) stopped early — partial output kept`
   block, **exit 0**. A run where every tool is stopped is still a completed run; only the budget (`timeout`) exits 5.
 
+- **D54 (2026-11-19): the url_probe skips URLs whose host is already known DEAD.** `Store.probe_candidates` now
+  returns `ProbeCandidates(rows, skipped_dead)` and drops a URL whose host the latest state pass stored as
+  `subdomains.state = 'DEAD'`; the filter runs **before** `limit` is filled, so a skipped row never eats a probe
+  slot. Kept on purpose: a URL whose host has no `subdomains` row (never resolved), whose host is
+  ALIVE/DNS_ONLY/SHUT_DOWN/UNKNOWN, and a URL with no parseable host - the only rule is "known DEAD". The engine
+  prints `url_probe: skipping N URL(s) whose host is DEAD` only when the count is non-zero. **Measured against the
+  one sakec.ac.in run, and the filter is not the bottleneck:** of the 2 147 URLs still `NULL`, **0 point at a DEAD
+  host** (1 440 DNS_ONLY, 658 ALIVE, 49 on hosts with no row), so candidates stay 2 147 -> **2 147** with
+  `skipped_dead = 0`; under `--reprobe-urls` the same DB skips **58 of 5 001**. The real cost is in the answers: of
+  the 5 000 probed, **4 982 came back `-1`** (no answer) and 18 answered. Per the batch's stop rule nothing else was
+  changed - probe concurrency, connection reuse and retries are a separate investigation, and the filter was not
+  widened to DNS_ONLY. Suite 961 -> 965 (three specified tests plus one proving the skip does not eat the limit).
+
 - **D53 (2026-11-19): per-request timeouts are adapter constants, not the stage budget.** `RunContext.timeout` is the
   stage budget and now belongs to the hard wall only: `run_exec(timeout=...)` for the tool and for a read-back command,
   plus the stage's own `asyncio.wait_for`. Eight places were borrowing it as a per-request value - `hakrawler -timeout`,

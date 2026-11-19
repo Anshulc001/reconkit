@@ -309,14 +309,14 @@ def test_probe_candidates_and_set_url_status(store: Store) -> None:
     target_id, run_id = make_run(store)
     first = store.upsert_url(target_id, "https://example.com/a", run_id=run_id)
     second = store.upsert_url(target_id, "https://example.com/b", run_id=run_id)
-    assert store.probe_candidates(target_id, limit=10) == [
+    assert store.probe_candidates(target_id, limit=10).rows == [
         {"id": first, "url": "https://example.com/a"},
         {"id": second, "url": "https://example.com/b"},
     ]
     store.set_url_status(first, -1)
     store.set_url_status(second, 200)
-    assert store.probe_candidates(target_id, limit=10) == []
-    assert store.probe_candidates(target_id, limit=1) == []
+    assert store.probe_candidates(target_id, limit=10).rows == []
+    assert store.probe_candidates(target_id, limit=1).rows == []
     stored = [
         (str(row["url"]), row["status_code"])
         for row in store._conn.execute("SELECT url, status_code FROM urls ORDER BY id")
@@ -330,10 +330,11 @@ def test_probe_candidates_reprobe_returns_answered_rows(store: Store) -> None:
     first = store.upsert_url(target_id, "https://example.com/a", run_id=run_id)
     store.upsert_url(target_id, "https://example.com/b", run_id=run_id)
     store.set_url_status(first, 404)
-    assert [row["url"] for row in store.probe_candidates(target_id, limit=10)] == [
+    assert [row["url"] for row in store.probe_candidates(target_id, limit=10).rows] == [
         "https://example.com/b"
     ]
-    assert [row["url"] for row in store.probe_candidates(target_id, limit=10, reprobe=True)] == [
+    reprobe = store.probe_candidates(target_id, limit=10, reprobe=True)
+    assert [row["url"] for row in reprobe.rows] == [
         "https://example.com/a",
         "https://example.com/b",
     ]
@@ -343,7 +344,49 @@ def test_probe_candidates_is_bounded_by_the_limit(store: Store) -> None:
     target_id, run_id = make_run(store)
     for index in range(3):
         store.upsert_url(target_id, f"https://example.com/{index}", run_id=run_id)
-    assert len(store.probe_candidates(target_id, limit=2)) == 2
+    assert len(store.probe_candidates(target_id, limit=2).rows) == 2
+
+
+def test_probe_candidates_skips_urls_with_dead_hosts(store: Store) -> None:
+    """D54: a URL whose host is known DEAD is skipped; ALIVE and unseen hosts stay."""
+    target_id, run_id = make_run(store)
+    store.upsert_subdomain(target_id, "dead.example.com", run_id=run_id, state="DEAD")
+    store.upsert_subdomain(target_id, "alive.example.com", run_id=run_id, state="ALIVE")
+    store.upsert_url(target_id, "https://dead.example.com/a", run_id=run_id)
+    store.upsert_url(target_id, "https://alive.example.com/b", run_id=run_id)
+    store.upsert_url(target_id, "https://never.example.com/c", run_id=run_id)
+    plan = store.probe_candidates(target_id, limit=10)
+    assert [row["url"] for row in plan.rows] == [
+        "https://alive.example.com/b",
+        "https://never.example.com/c",
+    ]
+    assert plan.skipped_dead == 1
+
+
+def test_probe_candidates_keeps_urls_with_no_host_row(store: Store) -> None:
+    """A URL for a host that never reached `subdomains` is still worth a probe (D54)."""
+    target_id, run_id = make_run(store)
+    store.upsert_subdomain(target_id, "dead.example.com", run_id=run_id, state="DEAD")
+    store.upsert_url(target_id, "https://never.example.com/x", run_id=run_id)
+    store.upsert_url(target_id, "not-a-url", run_id=run_id)
+    plan = store.probe_candidates(target_id, limit=10)
+    assert [row["url"] for row in plan.rows] == ["https://never.example.com/x", "not-a-url"]
+    assert plan.skipped_dead == 0
+
+
+def test_probe_candidates_skip_does_not_eat_the_limit(store: Store) -> None:
+    """The filter runs before the limit is filled, so no probe slot is lost (D54)."""
+    target_id, run_id = make_run(store)
+    store.upsert_subdomain(target_id, "dead.example.com", run_id=run_id, state="DEAD")
+    store.upsert_url(target_id, "https://dead.example.com/a", run_id=run_id)
+    store.upsert_url(target_id, "https://alive.example.com/b", run_id=run_id)
+    store.upsert_url(target_id, "https://alive.example.com/c", run_id=run_id)
+    plan = store.probe_candidates(target_id, limit=2)
+    assert [row["url"] for row in plan.rows] == [
+        "https://alive.example.com/b",
+        "https://alive.example.com/c",
+    ]
+    assert plan.skipped_dead == 1
 
 
 def test_set_host_duplicate_updates_in_place_and_keeps_state(store: Store) -> None:

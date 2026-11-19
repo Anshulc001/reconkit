@@ -79,7 +79,7 @@ def bench(path: Path) -> dict[str, object]:
 
         rows: list[dict[str, object]] = []
         probe_started = time.perf_counter()
-        candidates = store.probe_candidates(target_id, limit=url_count)
+        candidates = store.probe_candidates(target_id, limit=url_count).rows
         probe_ms = (time.perf_counter() - probe_started) * 1000.0
         rows.append({"metric": "probe_candidates", "value": probe_ms, "rows": len(candidates)})
 

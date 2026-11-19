@@ -1083,6 +1083,19 @@ URLs `200`, while the Python transport took **3.44 s** with `-2` for all 58. The
 probe therefore keeps the Python client, reuses one client per pass and raises
 `threads` from 50 to 100.
 
+**DEAD-host filter (D54, 2026-11-19).** The probe skips a URL whose host the latest
+state pass already recorded as `DEAD` - that host did not resolve or went silent, so
+its URLs can only be paid for and thrown away. `Store.probe_candidates` applies the
+filter **before** the `max_urls` limit is filled (a skipped row never eats a probe
+slot) and reports how many it dropped; the engine prints
+`url_probe: skipping N URL(s) whose host is DEAD` when that number is non-zero. Only
+a **known** DEAD state is enough to skip: a URL whose host has no `subdomains` row
+(never resolved), whose host is ALIVE/DNS_ONLY/SHUT_DOWN/UNKNOWN, or whose host
+cannot be parsed is still probed. Measured on the one sakec.ac.in run: **0 of the
+2 147 `NULL` URLs** pointed at a DEAD host (2 147 -> 2 147 candidates) and 58 of
+5 001 under `--reprobe-urls`; the pass's real cost is the 4 982 `-1` answers out of
+5 000 probes, not dead hosts.
+
 `-1` and `-2` are *stored answers* ("no answer" and "answered with a certificate that does not verify"), so neither is retried;
 `NULL` keeps its single meaning of "not probed yet". The probe runs through the
 same active-stage scope gate as every other active stage (docs/05 rule 2) and
