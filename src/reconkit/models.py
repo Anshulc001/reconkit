@@ -126,6 +126,9 @@ class ToolResult(BaseModel):
     # D52: seconds since this tool last printed anything when it was stopped.
     # None means "it finished on its own" (or the adapter cannot tell).
     last_output_s: float | None = None
+    # D77: distinct items this tool contributed to the table that the store did
+    # not already hold. Only the `urls` stage fills it; 0 elsewhere.
+    unique_count: int = 0
     # Captured output for the raw-output file (docs/09 section 3). It is
     # unredacted in memory and redacted only by Workspace.write, so it is
     # excluded from every serialization (`--json` included).

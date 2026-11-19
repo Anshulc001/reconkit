@@ -3729,11 +3729,16 @@ async def test_url_probe_never_reprobes_a_stored_answer(tmp_path: Path) -> None:
     engine = _probe_engine(
         tmp_path, ["https://www.example.com/a"], transport=transport, scope_text=None
     )
-    await engine.run("example.com", ScanOptions(active=True))
+    first = await engine.run("example.com", ScanOptions(active=True))
     assert calls == ["https://www.example.com/a"]
+    assert first.urls_probed_this_run == 1
+    assert first.urls_skipped_already_probed == 0
     # A second run finds nothing NULL and sends nothing.
-    await engine.run("example.com", ScanOptions(active=True))
+    second = await engine.run("example.com", ScanOptions(active=True))
     assert calls == ["https://www.example.com/a"]
+    # D78: the stored answer is what the report counts as skipped.
+    assert second.urls_probed_this_run == 0
+    assert second.urls_skipped_already_probed == 1
 
 
 async def test_reprobe_urls_probes_urls_that_already_carry_an_answer(tmp_path: Path) -> None:
@@ -4944,3 +4949,66 @@ async def test_new_and_previously_orphaned_hosts_both_processed(tmp_path: Path) 
     assert _latest_tech(store, "new.example.com") == ["caddy"]
     tech_hosts = rec.hosts[rec.names.index("tech-fake")]
     assert sorted(tech_hosts) == ["new.example.com", "orphan.example.com"]
+
+
+# ------------------------------- (D76) third-party URLs stay out of hosts
+
+
+async def test_third_party_hosts_are_not_added_to_subdomains(tmp_path: Path) -> None:
+    """D76: a URL on another domain is stored, tagged, and never becomes a host."""
+    rec = Recorder()
+    specs = {"urls-fake": tool("urls-fake", Stage.URLS, mode=Mode.PASSIVE)}
+    adapters = {
+        "urls-fake": adapter(
+            "urls-fake",
+            Stage.URLS,
+            rec,
+            records=[
+                UrlRecord(url="https://www.example.com/a", source="fake"),
+                UrlRecord(url="https://www.google.com/search?q=example", source="fake"),
+                UrlRecord(url="https://fonts.googleapis.com/css", source="fake"),
+            ],
+        )
+    }
+    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+    await engine.run("example.com", ScanOptions(stages=(Stage.URLS,)))
+
+    sources = {
+        str(row["url"]): row["source"]
+        for row in rows(engine.store, "SELECT url, source FROM urls ORDER BY url")
+    }
+    assert sources == {
+        "https://fonts.googleapis.com/css": "external",
+        "https://www.example.com/a": None,
+        "https://www.google.com/search?q=example": "external",
+    }
+    fqdns = {str(row["fqdn"]) for row in rows(engine.store, "SELECT fqdn FROM subdomains")}
+    assert "www.example.com" in fqdns
+    assert "www.google.com" not in fqdns
+    assert "fonts.googleapis.com" not in fqdns
+    # The second resolve never even offered a third-party name to DNS.
+    assert not [host for host in rec.hosts if "google" in host]
+
+
+# ------------------------------- (D77) how much each URL tool added
+
+
+async def test_unique_count_is_zero_for_all_duplicate_tool(tmp_path: Path) -> None:
+    """D77: a tool whose whole output is already stored contributes 0 new URLs."""
+    rec = Recorder()
+    specs = {"urls-fake": tool("urls-fake", Stage.URLS, mode=Mode.PASSIVE)}
+    adapters = {
+        "urls-fake": adapter(
+            "urls-fake",
+            Stage.URLS,
+            rec,
+            records=[UrlRecord(url="https://www.example.com/a", source="fake")],
+        )
+    }
+    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+    first = await engine.run("example.com", ScanOptions(stages=(Stage.URLS,)))
+    assert first.stages[0].results[0].unique_count == 1
+
+    second = await engine.run("example.com", ScanOptions(stages=(Stage.URLS,)))
+    assert second.stages[0].results[0].unique_count == 0
+    assert len(rows(engine.store, "SELECT url FROM urls")) == 1

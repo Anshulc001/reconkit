@@ -22,7 +22,7 @@ from rich.text import Text
 
 from reconkit.doctor import YES, DoctorReport, KeyCheck
 from reconkit.engine import DiffSnapshot, HostSnapshot, RunSnapshot, ScanSummary, UrlSnapshot
-from reconkit.models import Confidence, HostState, ToolResult, ToolStatus
+from reconkit.models import Confidence, HostState, Stage, ToolResult, ToolStatus
 
 _STATE_STYLES: dict[HostState, str] = {
     HostState.ALIVE: "green",
@@ -369,6 +369,7 @@ def _tool_table(summary: ScanSummary) -> Table:
     table.add_column("Stage")
     table.add_column("Status")
     table.add_column("Items")
+    table.add_column("Unique")
     table.add_column("Time")
     table.add_column("Last output")
     table.add_column("Details")
@@ -379,6 +380,9 @@ def _tool_table(summary: ScanSummary) -> Table:
                 Text(stage.stage.value),
                 Text(result.status.value, style=_STATUS_STYLES[result.status]),
                 Text(str(len(result.records))),
+                # D77: only the `urls` pool writes rows whose novelty is
+                # counted; every other stage prints `-` rather than a fake 0.
+                Text(str(result.unique_count) if stage.stage is Stage.URLS else "-"),
                 Text(f"{result.duration_s:.1f}s"),
                 Text(
                     f"{result.last_output_s:.0f}s ago"
@@ -392,6 +396,7 @@ def _tool_table(summary: ScanSummary) -> Table:
                 Text(skip.tool),
                 Text(stage.stage.value),
                 Text(ToolStatus.SKIPPED.value, style=_STATUS_STYLES[ToolStatus.SKIPPED]),
+                Text("-"),
                 Text("-"),
                 Text("-"),
                 Text("-"),
@@ -619,7 +624,11 @@ def report_urls(
     """
 
     extra = _noise_re(noise_params)
-    ordered = sorted(urls, key=lambda item: _url_rank(item, extra))
+    # D76: a third-party URL is stored but belongs to `external_urls.txt`, not
+    # to a host block or a `hosts/<host>/` folder.
+    ordered = sorted(
+        (item for item in urls if not item.external), key=lambda item: _url_rank(item, extra)
+    )
     if urls_max > 0:
         ordered = ordered[:urls_max]
     grouped: dict[str, list[dict[str, object]]] = {}
@@ -646,6 +655,8 @@ def report_document(
     urls_max: int = 0,
     noise_params: Sequence[str] = (),
     urls_already_probed: int = 0,
+    urls_probed_this_run: int | None = None,
+    urls_skipped_already_probed: int = 0,
     mode: str | None = None,
     scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
@@ -653,6 +664,7 @@ def report_document(
     """Build the report's JSON document from stored values only."""
 
     grouped, shown = report_urls(urls, urls_max, noise_params)
+    scoped = [item for item in urls if not item.external]
     document: dict[str, object] = {
         "type": "report",
         "target": target,
@@ -669,14 +681,24 @@ def report_document(
             if "hosts" in hidden
             else [{field.key: field_value(row, field) for field in fields} for row in rows]
         ),
-        "urls_total": len(urls),
+        # D76: the report's URL list is the in-scope pool; third-party URLs are
+        # counted apart (and listed in `external_urls.txt`), never mixed in.
+        "urls_total": len(scoped),
         "urls_shown": shown,
-        "urls_truncated": len(urls) > shown,
+        "urls_truncated": len(scoped) > shown,
     }
+    if len(urls) > len(scoped):
+        document["external_urls_total"] = len(urls) - len(scoped)
     if urls_already_probed:
         # D73: says how much of the list was answered before this run, so a
         # repeat scan does not read as if it had re-probed everything.
         document["urls_already_probed"] = urls_already_probed
+    if urls_probed_this_run is not None:
+        # D78: what this run sent, and what it left alone. `None` means a
+        # rebuilt report with no run context, which omits both.
+        document["urls_probed_this_run"] = urls_probed_this_run
+        if urls_skipped_already_probed:
+            document["urls_skipped_already_probed"] = urls_skipped_already_probed
     if mode is not None:
         # D63: a run whose mode `--include` changed says so in the artifact.
         document["mode"] = mode
@@ -727,6 +749,8 @@ def report_text(
     urls_max: int = 0,
     noise_params: Sequence[str] = (),
     urls_already_probed: int = 0,
+    urls_probed_this_run: int | None = None,
+    urls_skipped_already_probed: int = 0,
     mode: str | None = None,
     scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
@@ -763,7 +787,15 @@ def report_text(
         lines.append("(no hosts)")
     lines.extend(
         _report_tree_sections(
-            target, rows, urls, urls_max, hidden, noise_params, urls_already_probed
+            target,
+            rows,
+            urls,
+            urls_max,
+            hidden,
+            noise_params,
+            urls_already_probed,
+            urls_probed_this_run,
+            urls_skipped_already_probed,
         )
     )
     return "\n".join(lines) + "\n"
@@ -782,10 +814,15 @@ def _report_tree_sections(
     hidden: frozenset[str] = frozenset(),
     noise_params: Sequence[str] = (),
     urls_already_probed: int = 0,
+    urls_probed_this_run: int | None = None,
+    urls_skipped_already_probed: int = 0,
 ) -> list[str]:
     """The two D62 sections, minus any D63-hidden one, or nothing without URLs."""
 
-    if not urls or {"domains", "urls"} <= hidden:
+    # D76: a third-party URL is not "a URL this report has"; a report whose
+    # whole pool is external writes neither block, exactly like an empty one.
+    scoped = [item for item in urls if not item.external]
+    if not scoped or {"domains", "urls"} <= hidden:
         return []
     lines: list[str] = []
     if "domains" not in hidden:
@@ -798,15 +835,23 @@ def _report_tree_sections(
     if "urls" not in hidden:
         grouped, shown = report_urls(urls, urls_max, noise_params)
         lines.extend(["", "=== URLs by host ==="])
-        if shown < len(urls):
-            head = f"urls: {shown} of {len(urls)} shown (report.urls_max {urls_max})"
+        if urls_probed_this_run is not None:
+            # D78: separate what this run sent from what an earlier run had
+            # already answered, so a short probe does not read as a lost list.
+            head = f"urls: {len(scoped)} total, {urls_probed_this_run} probed this run"
+            if urls_skipped_already_probed:
+                head += f", {urls_skipped_already_probed} already probed (use --reprobe-urls)"
+            if shown < len(scoped):
+                head += f" ({shown} shown; report.urls_max {urls_max})"
+        elif shown < len(scoped):
+            head = f"urls: {shown} of {len(scoped)} shown (report.urls_max {urls_max})"
         else:
-            head = f"urls: {len(urls)} total, {shown} shown"
-        if urls_already_probed:
-            head += (
-                f" ({urls_already_probed} already probed in earlier runs;"
-                " use --reprobe-urls to re-check)"
-            )
+            head = f"urls: {len(scoped)} total, {shown} shown"
+            if urls_already_probed:
+                head += (
+                    f" ({urls_already_probed} already probed in earlier runs;"
+                    " use --reprobe-urls to re-check)"
+                )
         lines.append(head)
         for host, items in grouped.items():
             lines.append(f"{host}  ({items[0]['host_state']})")
@@ -838,7 +883,9 @@ def _line(value: object) -> str:
     return str(value)
 
 
-def _write_report_lists(directory: Path, rows: Sequence[HostSnapshot]) -> None:
+def _write_report_lists(
+    directory: Path, rows: Sequence[HostSnapshot], urls: Sequence[UrlSnapshot] = ()
+) -> None:
     """`subdomains.txt`, `alive.txt`, `dns_resolved.txt`, `host-info.*` (D71).
 
     Empty lists are written as empty files, not skipped: a script must be able
@@ -858,6 +905,13 @@ def _write_report_lists(directory: Path, rows: Sequence[HostSnapshot]) -> None:
         ),
     )
     entries = [_host_info_entry(row) for row in rows]
+    # D76: third-party URLs are still evidence, just not this target's hosts.
+    _write_atomically(
+        directory / "external_urls.txt",
+        "".join(
+            f"{item.url}\n" for item in sorted(urls, key=lambda item: item.url) if item.external
+        ),
+    )
     _write_atomically(directory / "host-info.json", json.dumps(entries, indent=2) + "\n")
     lines = ["domain | state | status | ips | tech"]
     for row in rows:
@@ -891,6 +945,10 @@ def _write_per_host_folders(
 
     by_host: dict[str, list[UrlSnapshot]] = {}
     for item in urls:
+        if item.external:
+            # D76: a third-party asset gets no folder; it is named in
+            # `external_urls.txt` instead.
+            continue
         by_host.setdefault(item.host, []).append(item)
     info = {row.fqdn: _host_info_entry(row) for row in rows}
     for host, items in sorted(by_host.items()):
@@ -924,6 +982,8 @@ def write_field_report(
     urls_max: int = 0,
     noise_params: Sequence[str] = (),
     urls_already_probed: int = 0,
+    urls_probed_this_run: int | None = None,
+    urls_skipped_already_probed: int = 0,
     mode: str | None = None,
     scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
@@ -952,6 +1012,8 @@ def write_field_report(
         urls_max=urls_max,
         noise_params=noise_params,
         urls_already_probed=urls_already_probed,
+        urls_probed_this_run=urls_probed_this_run,
+        urls_skipped_already_probed=urls_skipped_already_probed,
         mode=mode,
         scope_limited=scope_limited,
         hidden=hidden,
@@ -970,6 +1032,8 @@ def write_field_report(
             urls_max=urls_max,
             noise_params=noise_params,
             urls_already_probed=urls_already_probed,
+            urls_probed_this_run=urls_probed_this_run,
+            urls_skipped_already_probed=urls_skipped_already_probed,
             mode=mode,
             scope_limited=scope_limited,
             hidden=hidden,
@@ -979,7 +1043,7 @@ def write_field_report(
     # reader can never find a URL in `hosts/<name>/urls.txt` that `report.txt`
     # says the run did not store.
     if emit_lists:
-        _write_report_lists(directory, rows)
+        _write_report_lists(directory, rows, urls)
     if per_host_folders:
         _write_per_host_folders(directory, rows, urls, noise_params)
     return text_path, json_path
@@ -1228,6 +1292,7 @@ def render(
             side_console = make_console(stderr, no_color=no_color)
             render_killed_tools(summary, console=side_console)
             render_completion_gaps(summary, console=side_console)
+            render_skipped_urls(summary, console=side_console)
         return code
     if silent:
         return int(summary.exit_code)
@@ -1282,7 +1347,31 @@ def render(
         target.print(Text(f"warning: {warning}", style="yellow"))
     render_killed_tools(summary, console=target)
     render_completion_gaps(summary, console=target)
+    render_skipped_urls(summary, console=target)
     return int(summary.exit_code)
+
+
+def render_skipped_urls(
+    summary: ScanSummary,
+    *,
+    console: Console | None = None,
+    no_color: bool = False,
+) -> None:
+    """One line when a `url_probe` pass left stored answers alone (D78).
+
+    Silence when nothing was skipped, so a first run's output is unchanged.
+    `--reprobe-urls` makes the count 0, because then nothing was skipped.
+    """
+
+    if not summary.urls_skipped_already_probed:
+        return
+    target = console if console is not None else make_console(no_color=no_color)
+    target.print(
+        Text(
+            f"\u2139 {summary.urls_skipped_already_probed} URL(s) were skipped because they "
+            "already had a status code; use --reprobe-urls to re-check them."
+        )
+    )
 
 
 def render_killed_tools(

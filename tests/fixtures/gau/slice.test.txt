@@ -1,0 +1,3 @@
+{"url":"https://slice.test/login"}
+{"url":"https://slice.test/admin"}
+{"url":"https://www.google.com/search?q=slice"}

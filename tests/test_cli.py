@@ -1421,6 +1421,26 @@ def test_exclude_stage_skips_it_and_hides_its_section(tmp_path: Path) -> None:
     first = CliRunner().invoke(app, scan_args(config, "run", "--active", "--no-scope", "--db", db))
     assert first.exit_code == 0, first.stderr
     assert "urls: running" in first.stderr
+    # D76: the mock URL fixtures name testfire.net, so they are external to
+    # example.com. Seed one in-scope URL so this test still proves that a
+    # hidden section is a display choice, not missing data.
+    conn = sqlite3.connect(db)
+    try:
+        target_id = conn.execute("SELECT id FROM targets WHERE domain = 'example.com'").fetchone()[
+            0
+        ]
+        run_id = conn.execute(
+            "SELECT id FROM scan_runs WHERE target_id = ? ORDER BY id DESC LIMIT 1",
+            (target_id,),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO urls (target_id, url, first_seen_run, last_seen_run)"
+            " VALUES (?, 'https://www.example.com/admin', ?, ?)",
+            (target_id, run_id, run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
     second = CliRunner().invoke(
         app, scan_args(config, "run", "--active", "--no-scope", "--db", db, "--exclude", "urls")
     )
@@ -1430,7 +1450,10 @@ def test_exclude_stage_skips_it_and_hides_its_section(tmp_path: Path) -> None:
     # The URLs are still stored from the first run, so their absence from the
     # report is the section being hidden, not the data being empty.
     document = json.loads((_reports(tmp_path)[-1] / "report.json").read_text(encoding="utf-8"))
+    # D76: the mock URL fixtures name testfire.net while the target is
+    # example.com, so every stored URL is third-party and counted apart.
     assert document["urls_total"] > 0
+    assert document["external_urls_total"] > 0
     assert "urls_by_host" not in document
     text = (_reports(tmp_path)[-1] / "report.txt").read_text(encoding="utf-8")
     assert "=== URLs by host ===" not in text
@@ -1593,8 +1616,11 @@ def test_report_from_db_writes_both_files(tmp_path: Path) -> None:
     assert (out / "report.txt").is_file()
     document = json.loads((out / "report.json").read_text(encoding="utf-8"))
     assert len(document["hosts"]) > 0
-    assert document["urls_total"] > 0
-    assert "=== URLs by host ===" in (out / "report.txt").read_text(encoding="utf-8")
+    # D76: the stored mock URLs name testfire.net, so they are external to
+    # example.com and live in external_urls.txt instead of the URL block.
+    assert document["urls_total"] == 0
+    assert document["external_urls_total"] > 0
+    assert "testfire.net" in (out / "external_urls.txt").read_text(encoding="utf-8")
     # Informational lines are stderr in this CLI; stdout stays data-only.
     assert "hosts," in result.stderr and "URLs (" in result.stderr
 

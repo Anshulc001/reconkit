@@ -28,6 +28,7 @@ from reconkit.models import (
     SubdomainRecord,
     ToolResult,
     ToolStatus,
+    UrlRecord,
 )
 
 REPO = Path(__file__).resolve().parents[1]
@@ -659,9 +660,20 @@ def _snapshot(
     )
 
 
-def _url(url: str, status_code: int | None = None, host_state: str = "ALIVE") -> UrlSnapshot:
+def _url(
+    url: str,
+    status_code: int | None = None,
+    host_state: str = "ALIVE",
+    external: bool = False,
+) -> UrlSnapshot:
     host = url.split("//", 1)[1].split("/", 1)[0]
-    return UrlSnapshot(url=url, host=host, status_code=status_code, host_state=host_state)
+    return UrlSnapshot(
+        url=url,
+        host=host,
+        status_code=status_code,
+        host_state=host_state,
+        external=external,
+    )
 
 
 def _document(
@@ -1026,3 +1038,121 @@ def test_report_omits_already_probed_when_zero() -> None:
     document, text = _repeat_document([_url("https://example.com/a", 200)], 0)
     assert "urls_already_probed" not in document
     assert "already probed" not in text
+
+
+# ------------------------------- (D76) third-party URLs and hosts folders
+
+
+def _write_urls(tmp_path: Path, urls: list[UrlSnapshot]) -> Path:
+    directory = tmp_path / "report"
+    directory.mkdir()
+    ui.write_field_report(
+        directory,
+        "example.com",
+        [_snapshot("www.example.com")],
+        ui.REPORT_FIELDS,
+        run_at=datetime(2026, 11, 20, 12, 0, 0, tzinfo=UTC),
+        urls=urls,
+    )
+    return directory
+
+
+def test_third_party_urls_go_to_external_list(tmp_path: Path) -> None:
+    """D76: a google.com URL is listed apart and never grouped with the host."""
+    directory = _write_urls(
+        tmp_path,
+        [
+            _url("https://www.example.com/admin", 200),
+            _url("https://www.google.com/search?q=example", external=True),
+        ],
+    )
+    external = (directory / "external_urls.txt").read_text(encoding="utf-8")
+    assert "https://www.google.com/search?q=example" in external
+    assert "https://www.example.com/admin" not in external
+    document = json.loads((directory / "report.json").read_text(encoding="utf-8"))
+    assert document["urls_total"] == 1
+    assert document["external_urls_total"] == 1
+    assert set(document["urls_by_host"]) == {"www.example.com"}
+
+
+def test_in_scope_hosts_still_get_folders(tmp_path: Path) -> None:
+    """D76: the filter is not a blanket drop - in-scope hosts keep their folder."""
+    directory = _write_urls(
+        tmp_path,
+        [
+            _url("https://www.example.com/admin", 200),
+            _url("https://www.google.com/search?q=example", external=True),
+        ],
+    )
+    assert (directory / "hosts" / "www.example.com" / "urls.txt").is_file()
+    assert not (directory / "hosts" / "www.google.com").exists()
+
+
+# ------------------------------- (D78) probed now vs answered earlier
+
+
+def test_report_shows_probed_vs_already_probed() -> None:
+    """D78: the header separates this run's probes from stored answers."""
+    urls = [
+        _url("https://example.com/a", 200),
+        _url("https://example.com/b", 200),
+        _url("https://example.com/c", None),
+    ]
+    kwargs = {
+        "run_at": datetime(2026, 11, 20, 12, 0, 0, tzinfo=UTC),
+        "urls_probed_this_run": 1,
+        "urls_skipped_already_probed": 2,
+    }
+    document = ui.report_document(
+        "example.com", [_snapshot("example.com")], ui.REPORT_FIELDS, urls=urls, **kwargs
+    )
+    text = ui.report_text(
+        "example.com", [_snapshot("example.com")], ui.REPORT_FIELDS, urls=urls, **kwargs
+    )
+    assert document["urls_probed_this_run"] == 1
+    assert document["urls_skipped_already_probed"] == 2
+    assert "urls: 3 total, 1 probed this run, 2 already probed (use --reprobe-urls)" in text
+
+
+def test_report_warns_about_already_probed_if_present() -> None:
+    """D78: one stderr line names the skipped URLs and the flag that re-checks them."""
+    summary = make_summary()
+    summary.urls_skipped_already_probed = 5551
+    _, _, err = render_text(summary)
+    # The console wraps at 80 columns; compare the sentence with its whitespace
+    # collapsed so the note is proven regardless of the terminal width.
+    assert (
+        "\u2139 5551 URL(s) were skipped because they already had a status code; "
+        "use --reprobe-urls to re-check them." in " ".join(err.split())
+    )
+
+
+# ------------------------------- (D77) the Tools table Unique column
+
+
+def test_tool_table_shows_unique_count() -> None:
+    """D77: Items is what the tool returned; Unique is what the store gained."""
+    records = [UrlRecord(url=f"https://example.com/{index}", source="gau") for index in range(100)]
+    summary = make_summary(
+        stages=[
+            StageOutcome(
+                Stage.URLS,
+                1,
+                results=[
+                    ToolResult(
+                        tool="gau",
+                        status=ToolStatus.OK,
+                        records=records,
+                        unique_count=15,
+                    )
+                ],
+            )
+        ]
+    )
+    stream = StringIO()
+    console = Console(file=stream, width=200, force_terminal=False, color_system=None)
+    ui.render(summary, host_rows(), console=console)
+    rendered = stream.getvalue()
+    line = next(line for line in rendered.splitlines() if "gau" in line)
+    assert "Unique" in rendered
+    assert "100" in line and "15" in line

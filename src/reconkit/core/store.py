@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from reconkit.errors import ConfigError
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 REDACTED = "***"
 # docs/04 section 5: the stored reason is one line of at most this many characters.
 DETAIL_MAX_CHARS = 200
@@ -221,6 +221,14 @@ DROP TABLE tool_runs;
 ALTER TABLE tool_runs_new RENAME TO tool_runs;
 """
 
+# docs/04 section 11 (2026-11-20, MASTER_PLAN D76): a URL whose host is
+# outside the target is kept (an archive named it) but tagged so the report
+# never turns it into a host or a folder. Additive: every existing row reads
+# NULL, which means "host is the target or under it".
+_SCHEMA_V12 = """
+ALTER TABLE urls ADD COLUMN source TEXT;
+"""
+
 _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, _SCHEMA_V1),
     (2, _SCHEMA_V2),
@@ -233,6 +241,7 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (9, _SCHEMA_V9),
     (10, _SCHEMA_V10),
     (11, _SCHEMA_V11),
+    (12, _SCHEMA_V12),
 )
 
 _COUNT_SQL: dict[str, str] = {
@@ -892,24 +901,27 @@ class Store:
         category: str | None = None,
         patterns: Sequence[str] | None = None,
         source_count: int | None = None,
+        source: str | None = None,
     ) -> int:
         self._conn.execute(
             "INSERT INTO urls"
-            " (target_id, url, category, patterns_json, source_count,"
+            " (target_id, url, category, patterns_json, source_count, source,"
             "  first_seen_run, last_seen_run)"
             " VALUES (:target_id, :url, :category, COALESCE(:patterns_json, '[]'),"
-            "  COALESCE(:source_count, 0), :run_id, :run_id)"
+            "  COALESCE(:source_count, 0), :source, :run_id, :run_id)"
             " ON CONFLICT(target_id, url) DO UPDATE SET"
             "  last_seen_run = excluded.last_seen_run,"
             "  category = COALESCE(:category, urls.category),"
             "  patterns_json = COALESCE(:patterns_json, urls.patterns_json),"
-            "  source_count = COALESCE(:source_count, urls.source_count)",
+            "  source_count = COALESCE(:source_count, urls.source_count),"
+            "  source = COALESCE(:source, urls.source)",
             {
                 "target_id": target_id,
                 "url": url,
                 "category": category,
                 "patterns_json": None if patterns is None else json.dumps(list(patterns)),
                 "source_count": source_count,
+                "source": source,
                 "run_id": run_id,
             },
         )
@@ -954,6 +966,17 @@ class Store:
             if len(found) >= limit:
                 break
         return ProbeCandidates(rows=found, skipped_unreachable=skipped)
+
+    def url_strings(self, target_id: int) -> set[str]:
+        """Every URL string already stored for the target (D77).
+
+        Used once per `urls` stage so a tool's contribution can be told apart
+        from the pool it duplicated; read-only, one query, no host parsing.
+        """
+        return {
+            str(row["url"])
+            for row in self._conn.execute("SELECT url FROM urls WHERE target_id = ?", (target_id,))
+        }
 
     def url_only_hosts(self, target_id: int) -> list[str]:
         """Hostnames this target's URLs name that have no `subdomains` row (D58).
@@ -1029,7 +1052,8 @@ class Store:
         }
         rows: list[dict[str, object]] = []
         for row in self._conn.execute(
-            "SELECT url, status_code FROM urls WHERE target_id = ? ORDER BY url", (target_id,)
+            "SELECT url, status_code, source FROM urls WHERE target_id = ? ORDER BY url",
+            (target_id,),
         ):
             url = str(row["url"])
             host = _url_host(url)
@@ -1042,6 +1066,7 @@ class Store:
                     "host": host,
                     "status_code": status if isinstance(status, int) else None,
                     "host_state": states.get(host, "UNKNOWN"),
+                    "external": row["source"] == "external",
                 }
             )
         return rows

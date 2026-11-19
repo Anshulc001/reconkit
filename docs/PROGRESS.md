@@ -4,6 +4,19 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D76-D78): **third-party URLs no longer make hosts, folders or
+  URL groups.** `Engine._within_scope()` decides target or `*.target`;
+  `_persist_urls` tags every other URL `urls.source = 'external'` (schema 12), and
+  they reach the report only through `external_urls.txt`. The Tools table gained a
+  `Unique` column (new URL rows a tool contributed; `-` outside the `urls` stage).
+  The URL header now reads `N total, M probed this run, K already probed (use
+  --reprobe-urls)` and the run ends with the same `ℹ` note when K > 0;
+  `report.json` carries `urls_probed_this_run` and `urls_skipped_already_probed`
+  (both in-scope only). Suite 1016 -> 1023. Acceptances: a `slice.test` mock run
+  wrote four third-party URLs to `external_urls.txt` and only
+  `hosts/slice.test/`; a repeat run over seeded statuses printed
+  `ℹ 3 URL(s) were skipped because they already had a status code; use
+  --reprobe-urls to re-check them.` See D76-D78 in REVIEW_LOG.
 - Status (2026-11-20, post-D75): all queued code work closed. Two rulings closed by accepting the current
 workflow (see Open risks). 1016 tests, tree clean. Remaining items are: one real `--active` run to verify
 D69/D71/D72 on an authorized target (owner's step); export stubs (superseded by report); R15 masscan (needs
@@ -994,6 +1007,47 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   two dicts finds only `STAGE_ORDER`, `RAW_OUTPUT_DIRS`, single-stage command
   tuples and the aggressive `{LIVE, PORTS}` addition - all deliberate, none a
   per-mode rule.
+
+- **D76 (2026-11-20): third-party URLs are filtered from hosts and folders.**
+  URLs come from archives that mention other people's domains, so the run that
+  produced the request wrote `hosts/www.google.com/`, `hosts/apps.apple.com/`
+  and friends. `_within_scope(host, target)` is now the single rule (target
+  itself or `*.<target>`), applied in `_clean_hosts` and `_persist_urls`; an
+  out-of-scope URL is still stored but `urls.source = 'external'` (schema 11 ->
+  12), and the report lists it only in `external_urls.txt`. `urls_total`,
+  `urls_shown` and `urls_truncated` describe the in-scope pool;
+  `external_urls_total` counts the rest. **Disclosed addition:** the brief said
+  "tag it source='external'" and the table had no such column, so migration 12
+  adds one instead of overloading `urls.category`. **Disclosed test change:** the
+  mock URL fixtures name `testfire.net` while most CLI tests scan `example.com`,
+  so two D63/D65 tests now assert `external_urls_total` (one seeds an in-scope
+  URL to keep proving the hidden-section rule). No scope, state, confidence or
+  diff rule changed.
+- **D77 (2026-11-20): the Tools table says how much each URL tool added.**
+  `ToolResult.unique_count` is computed in `_persist_urls` from
+  `Store.url_strings()`: the first result (completion order) that reports a URL
+  the target did not already hold gets the credit, so the stage's sum equals its
+  new rows. `Items` stays what the tool returned, `Unique` is what the store
+  gained, `0` means all duplicates. **Disclosed narrowing:** only the `urls` stage
+  defines "item" for this column; every other stage prints `-` rather than a
+  misleading `0`. The host `report.txt` has no Tools table (never had one), so the
+  column appears in the terminal table and in `--json` (`stages[].results[]`).
+- **D78 (2026-11-20): a short URL probe is explained, not silent.**
+  `ScanSummary.urls_probed_this_run` is `_url_probe_progress[0]` (survives a
+  timeout) and `urls_skipped_already_probed` is the pre-run in-scope answer
+  count, forced to 0 by `--reprobe-urls`. `report.txt` prints
+  `urls: N total, M probed this run, K already probed (use --reprobe-urls)`;
+  `report.json` carries both keys (D73's `urls_already_probed` stays). A K > 0
+  run ends with one `ℹ` line. **Disclosed correction:** D73's count included
+  every stored URL; with D76 it must be the in-scope pool, or the header could
+  say "3 total, 7 already probed".
+
+- **Batch commit (2026-11-20):** D76-D78 land in one commit, not the three the
+  prompt named. They share `_persist_urls` (D76's tagging and D77's counting are
+  one function) and the same `ui.report_*` signatures (D76's external flag and
+  D78's counters), so a per-item split would require splitting hunks inside a
+  function and a four-way rewrite of the same signature. The one commit names
+  all three decisions; nothing was dropped.
 
 ## What is finished
 

@@ -1091,6 +1091,9 @@ def _run_scan(
                 # D73: counted before any stage ran, so a repeat scan says how
                 # many URL answers came from earlier runs.
                 urls_already_probed=summary.urls_already_probed,
+                # D78: what this run probed, beside what earlier runs answered.
+                urls_probed_this_run=summary.urls_probed_this_run,
+                urls_skipped_already_probed=summary.urls_skipped_already_probed,
                 # D63: the artifact records the mode the run actually used.
                 mode="active (forced by --include)" if forced_contact else None,
                 # D64: a requested active run whose active stages the scope gate

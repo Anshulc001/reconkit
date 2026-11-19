@@ -1134,6 +1134,15 @@ Rules that keep it bounded and honest:
 - **Origin label.** Rows keep `provenance = 'dns'` and carry one
   `subdomain_sources` entry whose tool is the sentinel `url-derived` (not a
   `tools.yaml` tool), so `report.json` sources show where the name came from.
+- **Third-party URLs never become hosts (D76, 2026-11-20).** A URL pool can
+  name another domain (`www.google.com`, `apps.apple.com`, a font CDN). Such a
+  URL is still stored, because an archive named it, but `_persist_urls` writes
+  `urls.source = 'external'`, and `_within_scope(host, target)` (target itself
+  or `*.target`) keeps the name out of the D58 candidate list, the
+  `urls_by_host` block, the `hosts/<hostname>/` folders and the `url_probe`
+  pool. The saved report lists them in `external_urls.txt` instead. This
+  filters only *hosts derived from URLs*: a discovery tool that genuinely
+  reports a name under the target is untouched.
 - **Mock.** Both steps use the existing adapters in mock form: fixtures, no
   network, no subprocess. A missing fixture means no records and the found count
   is still reported.
@@ -1182,7 +1191,9 @@ setting (`config.yaml` `report.urls_max`), never a stage or probe bound: it
 changes what is printed, never what is stored, and `urls_total` /
 `urls_shown` / `urls_truncated` make a cut visible. Order inside a host:
 interesting path, then a query string, then a `200`/`301`/`302`, then the rest
-(docs/02 section 5).
+(docs/02 section 5). A URL tagged `source = 'external'` (D76) is counted apart
+in `external_urls_total`, written to `external_urls.txt`, and never grouped
+under a host. `urls_total` describes the in-scope pool only.
 
 ### URL liveness probe (D23, 2026-11-18)
 
@@ -1198,6 +1209,7 @@ Tools table, because there is no external program to run.
 | Input | `urls` rows of the current target whose `status_code` is `NULL` |
 | Write | `urls.status_code` = the HTTP status, `-1` when unreachable, `-2` when its certificate did not verify |
 | Transport | one `GET` per URL through httpx, honest `reconkit/<version>` UA, no retries |
+| Report counters | `urls_probed_this_run` and, when non-zero, `urls_skipped_already_probed` (D78, 2026-11-20): the same numbers the header prints (`urls: N total, M probed this run, K already probed`). Under `--reprobe-urls` the skipped count is 0. The pass never re-checks a stored answer unless asked. |
 | Bounds | `config.yaml` `url_probe:` - `max_urls` 5000, `batch_size` 200, `threads` 100, `timeout_s` 10 |
 | Off switch | `--skip-url-probe`; `--reprobe-urls` probes every stored URL, not only the `NULL` ones |
 | Mock | sends nothing, leaves `status_code` `NULL`, says so on stderr |

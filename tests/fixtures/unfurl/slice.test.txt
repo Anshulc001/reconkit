@@ -1,0 +1,2 @@
+https://slice.test/admin
+https://fonts.googleapis.com/css

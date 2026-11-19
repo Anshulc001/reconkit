@@ -604,6 +604,10 @@ class ScanSummary:
     # D73: URLs that already carried a status when this run started, so the
     # report can say how much of its URL list came from earlier runs.
     urls_already_probed: int = 0
+    # D78: what this run's `url_probe` actually sent, and what it skipped
+    # because a stored answer already existed (`--reprobe-urls` sends those too).
+    urls_probed_this_run: int = 0
+    urls_skipped_already_probed: int = 0
 
     @property
     def completion_status(self) -> str:
@@ -669,6 +673,9 @@ class UrlSnapshot:
     host: str
     status_code: int | None
     host_state: str
+    # D76: the host is outside the target, so the report keeps the URL out of
+    # `urls_by_host`, the `hosts/` tree and the probed pool.
+    external: bool = False
 
 
 def host_snapshots(store: Store, target_id: int) -> list[HostSnapshot]:
@@ -717,6 +724,7 @@ def url_snapshots(store: Store, target_id: int) -> list[UrlSnapshot]:
             host=str(row["host"]),
             status_code=(row["status_code"] if isinstance(row["status_code"], int) else None),
             host_state=str(row["host_state"]),
+            external=bool(row["external"]),
         )
         for row in store.url_report_rows(target_id)
     ]
@@ -981,7 +989,14 @@ class Engine:
         # D73: counted before any stage runs, so a `url_probe` pass this run
         # cannot inflate the number the report calls "earlier runs".
         summary.urls_already_probed = sum(
-            1 for row in self.store.url_report_rows(target_id) if row["status_code"] is not None
+            1
+            for row in self.store.url_report_rows(target_id)
+            if row["status_code"] is not None and not row["external"]
+        )
+        # D78: `--reprobe-urls` sends the stored answers again, so nothing is
+        # "skipped because it already had a code" in that run.
+        summary.urls_skipped_already_probed = (
+            0 if opts.reprobe_urls else summary.urls_already_probed
         )
         discovered: set[str] = set()
         alive: set[str] = set()
@@ -1014,6 +1029,10 @@ class Engine:
                     self._note_scope_refusal(target, scope_error)
                 if probe is not None:
                     summary.stages.append(probe)
+                # D78: `_url_probe_progress` is (done, total) and survives a
+                # timeout, so the report can separate "probed now" from
+                # "answered by an earlier run".
+                summary.urls_probed_this_run = self._url_probe_progress[0]
                 continue
             hosts = self._stage_hosts(stage, target, discovered, alive)
             selected, skipped = await self._select(stage, opts)
@@ -1363,6 +1382,15 @@ class Engine:
             return self._clean_hosts([target, *discovered], target)
         return self._clean_hosts(alive, target)
 
+    @staticmethod
+    def _within_scope(host: str, target: str) -> bool:
+        """The target itself, or a name under it (D76).
+
+        One predicate for the URL pool and the report: `slice.bank.in` is in
+        scope, `*.slice.bank.in` is in scope, and `www.google.com` is not.
+        """
+        return host == target or host.endswith(f".{target}")
+
     def _clean_hosts(self, hosts: Any, target: str) -> list[str]:
         kept: list[str] = []
         seen: set[str] = set()
@@ -1371,7 +1399,7 @@ class Engine:
                 host = validate_host(raw)
             except (TypeError, ValueError):
                 continue
-            if host != target and not host.endswith(f".{target}"):
+            if not self._within_scope(host, target):
                 continue
             if host not in seen:
                 seen.add(host)
@@ -2079,7 +2107,7 @@ class Engine:
         elif stage is Stage.TECH:
             self._persist_tech(target_id, run_id, results, target)
         elif stage is Stage.URLS:
-            self._persist_urls(target_id, run_id, results, opts)
+            self._persist_urls(target_id, run_id, results, opts, target)
 
     def _persist_discovery(
         self, target_id: int, run_id: int, results: list[ToolResult], opts: ScanOptions
@@ -2114,8 +2142,25 @@ class Engine:
                 self.store.add_subdomain_source(sub_id, run_id, tool)
 
     def _persist_urls(
-        self, target_id: int, run_id: int, results: list[ToolResult], opts: ScanOptions
+        self,
+        target_id: int,
+        run_id: int,
+        results: list[ToolResult],
+        opts: ScanOptions,
+        target: str,
     ) -> None:
+        """Store the URL pool, keeping third-party URLs apart (D76).
+
+        A URL whose host is not the target or under it is still stored - an
+        archive named it, and dropping it would lose evidence - but it carries
+        `source = 'external'`, so it never becomes a `subdomains` row, a
+        `hosts/<host>/` folder, or part of `urls_by_host`.
+
+        D77: each `urls` tool also gets `unique_count`, the distinct URLs it
+        contributed that the target did not already hold. The first result (in
+        completion order) that reports a new URL gets the credit, so the sum
+        over the stage is exactly the number of new rows a tool added.
+        """
         groups: dict[str, set[str]] = {}
         for result in results:
             if result.status is not ToolStatus.OK:
@@ -2123,10 +2168,31 @@ class Engine:
             for record in result.records:
                 if isinstance(record, UrlRecord):
                     groups.setdefault(record.url, set()).add(result.tool)
+        known = self.store.url_strings(target_id)
+        credited: set[str] = set()
+        for result in results:
+            if result.status is not ToolStatus.OK:
+                continue
+            new = 0
+            for record in result.records:
+                if not isinstance(record, UrlRecord):
+                    continue
+                url = record.url
+                if url in known or url in credited:
+                    continue
+                if len(groups[url]) < opts.min_sources:
+                    continue
+                credited.add(url)
+                new += 1
+            result.unique_count = new
         for url, tools in groups.items():
             if len(tools) < opts.min_sources:
                 continue
-            self.store.upsert_url(target_id, url, run_id=run_id, source_count=len(tools))
+            host = self._url_host(url)
+            source = "external" if host and not self._within_scope(host, target) else None
+            self.store.upsert_url(
+                target_id, url, run_id=run_id, source_count=len(tools), source=source
+            )
 
     # ------------------------------------------------------- D58 second resolve
 

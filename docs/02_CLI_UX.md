@@ -472,7 +472,7 @@ line gains the unique count when any duplicate exists:
 `20 hosts (18 unique after www-dedup): 12 ALIVE, ...`.
 
 - A final summary line: counts per state and tool statuses. New items are shown by `diff`, not in the stage summary.
-- A "Tools" table lists each adapter with stage, status (`ok`, `gap`, `skipped`, `failed`, `timeout`, `killed`), item count, time taken, how stale its last output was and a short detail. The `Last output` column is `-` except for a `killed` row, where it is the number of seconds since the tool last printed anything - what tells a stuck tool apart from a slow one that is still working (D52).
+- A "Tools" table lists each adapter with stage, status (`ok`, `gap`, `skipped`, `failed`, `timeout`, `killed`), item count, time taken, how stale its last output was and a short detail. The `Last output` column is `-` except for a `killed` row, where it is the number of seconds since the tool last printed anything - what tells a stuck tool apart from a slow one that is still working (D52). The `Unique` column (D77, 2026-11-20) is the number of distinct URLs that tool contributed to the store that the target did not already hold, so `Items 663 / Unique 15` means 648 of its 663 URLs were duplicates; a tool that added nothing shows `0`, and a stage that stores no URLs prints `-`.
 - A stop is not a failure: a tool the idle watchdog killed keeps every record it had already produced, the summary line gains `N killed` only when N is above zero, and stderr gains the block below. A run whose tools were all killed still exits `0`.
 
 **`gap` is a tool status, not a failure (owner ruling 2026-11-18).** An adapter whose upstream refused the request for a reason that is not about the tool - HTTP 429/rate limiting, a free-quota message, or an HTTP 5xx from the service it calls - is recorded `gap` with the service's own message in the detail column. It keeps whatever data it did return (usually none), it does **not** make the run partial (exit `5`), and it appears in the completion gaps block: the scan used every tool that was available, the third party simply did not answer. Every other non-zero outcome stays `failed`/`timeout` and still exits `5`.
@@ -575,6 +575,7 @@ One folder per domain per run, never reused:
   dns_resolved.txt    ALIVE + DNS_ONLY; DNS_ONLY = resolves but answers no HTTP
   host-info.txt       domain | state | status | ips | tech (no URLs)
   host-info.json      the same rows as objects
+  external_urls.txt   URLs whose host is outside the target (D76)
   hosts/<hostname>/
     urls.txt          this host's URLs, one line each, status appended when probed
     info.json         this host's row from host-info
@@ -639,15 +640,28 @@ script can tell "the run found nothing" from "the run did not write this file".
   `urls: 200 of 300 shown (report.urls_max 200)` instead of leaving a short list
   looking complete. `hosts/<hostname>/urls.txt` is never capped: it is that
   host's own list.
-- **A repeat scan says how many URL answers came from earlier runs (added
-  2026-11-19, D73).** `url_probe` never re-checks a stored answer, so after the
-  first scan most of a URL list is already known. When the target had non-NULL
-  `urls.status_code` values **before this run started** (`K`), `report.txt`
-  prints `urls: 3124 total, 3124 shown (2856 already probed in earlier runs; use
-  --reprobe-urls to re-check)` and `report.json` gains
-  `"urls_already_probed": 2856` beside `urls_total`/`urls_shown`. `K = 0`
-  writes neither: the key is absent and the header keeps its old form. A
-  `report` rebuild has no run context and omits it.
+- **A repeat scan says what it probed and what was already answered (D73,
+  changed 2026-11-20 by D78).** `url_probe` never re-checks a stored answer, so
+  after the first scan most of a URL list is already known. The header now
+  names both halves: `urls: 5639 total, 88 probed this run, 5551 already probed
+  (use --reprobe-urls)`. `report.json` carries `urls_probed_this_run` and, when
+  non-zero, `urls_skipped_already_probed`; D73's `urls_already_probed` stays
+  beside them for compatibility. Under `--reprobe-urls` nothing is skipped, so
+  the skipped key is absent and no note is printed. When a count above zero was
+  skipped, the run ends with one line: `ℹ 5551 URL(s) were skipped because
+  they already had a status code; use --reprobe-urls to re-check them.` A first
+  run writes neither key nor line, and a `report` rebuild (no run context) keeps
+  the old `urls: N total, M shown` form.
+- **Third-party URLs are stored but kept out of the host report (D76,
+  2026-11-20).** A URL stage can return assets on another domain
+  (`www.google.com`, `fonts.googleapis.com`, `apps.apple.com`). They are still
+  stored - an archive named them, so dropping them would lose evidence - and
+  `urls.source` is `'external'`. They never create a `subdomains` row, never
+  appear under `urls_by_host`, and never get a `hosts/<hostname>/` folder; the
+  list is written to `external_urls.txt` instead. In scope means the target
+  itself or a name ending in `.<target>`. `report.json` counts them apart as
+  `external_urls_total`, and `urls_total`/`urls_shown`/`urls_truncated` describe
+  the in-scope pool only.
 - **The text file gets the same two blocks.** After the hosts table,
   `=== Domains ===` lists the root and then one `  <host>   <STATE>  <CONFIDENCE>`
   line per subdomain (a single `69 subdomains, see hosts table` line past 50,

@@ -103,6 +103,112 @@ Either fix is engine work (an explicit host list the engine accepts, which is
 re-attempt that. **Skipped, blocker unchanged and now recorded from both
 sides; docs/02 section 1 carries the retry.**
 
+## 2026-11-20 (D76-D78) - third-party URLs, per-tool uniqueness, probe accounting
+
+### D76 - third-party URLs stay out of hosts and folders
+
+**Symptom.** A real `slice.bank.in` run (20261119T213006Z) wrote
+`hosts/www.google.com/`, `hosts/www.facebook.com/`, `hosts/apps.apple.com/` and
+`hosts/fonts.googleapis.com/`: the URL pool legitimately names other people's
+assets, and the report treated every URL host as a host of the target.
+
+**Fix.** `Engine._within_scope(host, target)` is the one predicate (the target
+itself or a name ending in `.<target>`), used by `_clean_hosts` (so the D58
+second resolve and `url_probe` never see a third-party name) and by
+`_persist_urls`. An out-of-scope URL is still stored - dropping it would lose
+what the archive found - with `urls.source = 'external'` (schema 11 -> 12,
+additive). `Store.url_report_rows` exposes it as `external`; `ui.report_urls`
+never groups it, `_write_per_host_folders` skips it, and `_write_report_lists`
+writes it to `external_urls.txt`. `urls_total` / `urls_shown` /
+`urls_truncated` describe the in-scope pool, `external_urls_total` the rest.
+
+```
+$ git diff --stat -- src/reconkit/core/store.py src/reconkit/engine.py src/reconkit/ui.py
+ src/reconkit/core/store.py | 35 ++++++++++--
+ src/reconkit/engine.py     | 76 +++++++++++++++++++++--
+ src/reconkit/ui.py         | 121 ++++++++++++++++++++++++++++++++------
+```
+
+**Tests (2 + report tests).** `test_third_party_hosts_are_not_added_to_subdomains`
+(stored/tagged, no `subdomains` row, never offered to DNS),
+`test_third_party_urls_go_to_external_list`, `test_in_scope_hosts_still_get_folders`.
+
+**Mock acceptance** (`tests/fixtures/{gau,waybackurls,unfurl,urlfinder,dnspython,pyprobe}/slice.test.*`,
+`--mock`, `/tmp` DB and results, no network):
+
+```
+$ reconkit urls -d slice.test --active --mock --tools gau,waybackurls,unfurl,urlfinder --no-scope --db /tmp/d76.db --config /tmp/d76-config.yaml
+urls: gau ok 3 item(s)
+...
+== external_urls.txt
+https://apps.apple.com/app/slice
+https://fonts.googleapis.com/css
+https://www.facebook.com/slice
+https://www.google.com/search?q=slice
+== hosts/
+slice.test
+== report.json
+urls_total 3 external 4
+urls_by_host ['slice.test']
+```
+
+No `hosts/www.google.com/`, and the four third-party URLs are still stored.
+
+### D77 - the Tools table says how much each URL tool added
+
+`ToolResult.unique_count` (default 0) is filled by `_persist_urls` after the
+stage returns: `Store.url_strings()` is the pool before the stage, and the first
+result (completion order) that reports a URL not already held gets the credit,
+so the sum over the stage equals the new rows. `_tool_table` adds `Unique` after
+`Items`; only the `urls` stage prints a number, every other stage prints `-`.
+
+**Tests.** `test_unique_count_is_zero_for_all_duplicate_tool` (first run 1,
+second identical run 0, one row stored), `test_tool_table_shows_unique_count`
+(Items 100 / Unique 15 in one rendered row).
+
+Acceptance row from the D76 run above:
+
+```
+│ gau         │ urls  │ ok     │ 3     │ 3      │ ... │
+│ waybackurls │ urls  │ ok     │ 2     │ 1      │ ... │
+│ unfurl      │ urls  │ ok     │ 2     │ 1      │ ... │
+│ urlfinder   │ urls  │ ok     │ 2     │ 2      │ ... │
+```
+
+### D78 - what this run probed, and what it left alone
+
+`ScanSummary.urls_probed_this_run` is `_url_probe_progress[0]` (kept on a
+timeout); `urls_skipped_already_probed` is the pre-run in-scope answered count
+and is forced to 0 by `--reprobe-urls`. Both reach `report.json`; `report.txt`
+prints `urls: N total, M probed this run, K already probed (use
+--reprobe-urls)`, and `ui.render_skipped_urls` prints one `ℹ` line at the
+end of a run when K > 0. D73's `urls_already_probed` stayed for compatibility,
+but its count is now in-scope only (external URLs are never probed).
+
+**Tests.** `test_report_shows_probed_vs_already_probed` (both JSON keys + the
+header sentence), `test_report_warns_about_already_probed_if_present`, plus the
+engine count assertions in `test_url_probe_never_reprobes_a_stored_answer`.
+The schema-version assertions in `tests/test_store.py` moved 11 -> 12 with the
+new migration.
+
+**Mock acceptance** (copy of the D76 DB, three in-scope statuses seeded, no
+network):
+
+```
+$ reconkit urls -d slice.test --active --mock --tools gau --no-scope --db /tmp/d78.db --config /tmp/d78-config.yaml
+...
+ℹ 3 URL(s) were skipped because they already had a status code; use
+--reprobe-urls to re-check them.
+
+== report.txt
+urls: 3 total, 0 probed this run, 3 already probed (use --reprobe-urls)
+== report.json
+{'urls_total': 3, 'urls_probed_this_run': 0, 'urls_skipped_already_probed': 3, 'urls_already_probed': 3}
+```
+
+**Gate.** `1023 passed`, `ruff check .` clean, `96 files already formatted`,
+`mypy src/reconkit` clean, `scope.yaml` sha256 unchanged.
+
 ## 2026-11-19 (D75) - an orphaned URL-derived host is tech-scanned by the next active run
 
 **Symptom (documented at b055cc9, fixed here).** A host D58 created got DNS +
