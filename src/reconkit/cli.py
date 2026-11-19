@@ -39,7 +39,7 @@ from reconkit.engine import (
     load_stored_report,
     registry_tool_index,
 )
-from reconkit.errors import ConfigError, ScopeError
+from reconkit.errors import ConfigError, ScopeError, StorageError
 from reconkit.models import HostState, Mode, Stage
 from reconkit.ui import (
     REPORT_FIELDS,
@@ -1682,17 +1682,28 @@ def db_delete(
             for folder in planned:
                 render_message(f"  {folder} (will be removed)")
             if not typer.confirm(
-                "This cannot be undone. Delete this target?", default=True, err=True
+                "This cannot be undone. Delete this target?", default=False, err=True
             ):
                 render_message("cancelled; nothing was deleted.")
                 raise typer.Exit(code=int(ExitCode.USAGE))
-        removed_counts = engine.store.delete_target(normalized)
+        try:
+            removed_counts = engine.store.delete_target(normalized)
+        except StorageError as exc:
+            render_error(str(exc))
+            raise typer.Exit(code=int(ExitCode.ERROR)) from None
         if removed_counts is None:  # pragma: no cover - guarded by get_target above
             render_error(f"target {normalized} disappeared while it was being deleted")
             raise typer.Exit(code=int(ExitCode.ERROR))
     finally:
         engine.close()
-    removed = _remove_results(config, normalized)
+    try:
+        removed = _remove_results(config, normalized)
+    except OSError as exc:
+        render_message(
+            f"warning: database rows for {normalized} were deleted, but "
+            f"{config.results_dir}/{normalized}/ could not be removed: {exc}"
+        )
+        return
     line = f"Deleted {_counts_line(removed_counts)}."
     if removed:
         line += f" Removed {', '.join(removed)}"
@@ -1735,6 +1746,9 @@ def db_wipe(
         raise typer.Exit(code=int(ExitCode.ERROR)) from None
     try:
         engine.store.wipe()
+    except StorageError as exc:
+        render_error(str(exc))
+        raise typer.Exit(code=int(ExitCode.ERROR)) from None
     finally:
         engine.close()
     render_message(f"Wiped {db_path}.")

@@ -4,6 +4,16 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D85): **`db delete` now defaults to no, and both
+  destructive db commands fail cleanly on a locked database.** The prompt is
+  `[y/N]`; Enter cancels with exit 2. `core.store` translates
+  `sqlite3.OperationalError` to `StorageError` (the CLI must not import
+  `sqlite3`, per the layering test), and `db delete`/`db wipe` print
+  `Error: Database is locked. Is a scan running?` then exit 1 with no traceback.
+  If row deletion succeeds but `results/<domain>/` cannot be removed, `db delete`
+  prints a warning and exits 0. Tests 1036 -> 1040, including two real
+  `BEGIN IMMEDIATE` lock tests (about 10 s of the suite). Gate clean. See D85 in
+  REVIEW_LOG.
 - Status (2026-11-20, D84): **version and User-Agent now have one source of
   truth.** `pyproject.toml` and `reconkit.__version__` are both `1.0.0`; the
   root CLI prints `reconkit v1.0.0` for `--version` and exits 0; `adapters.base`

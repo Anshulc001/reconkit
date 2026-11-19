@@ -189,7 +189,7 @@ The `--active` `--help` text says this in one sentence: `A scope.yaml is require
 | `diff -d X` | New / changed / gone items since the previous run; `GONE` needs two consecutive misses |
 | `status [--json]` | Progress of running or finished scans |
 | `report --target X [--run ID] [--out DIR]` | Rebuild a saved `report.txt`/`report.json` from stored rows; read-only connection, no network, no adapter (D65, section 5) |
-| `db delete --target X [--yes]` | Delete one target, all its rows and `results/X/`; asks first (D81) |
+| `db delete --target X [--yes]` | Delete one target, all its rows and `results/X/`; asks first, default no (D81, D85) |
 | `db wipe [--yes]` | Delete every row, recreate the current schema; `results/` is kept (D81) |
 | `db list\|export -d X [--new-only]` | **Phase 3 stub** in this build: exits 1 with a clear message; no data is read |
 | `export -d X --format json\|md\|html` | **Phase 3 stub** in this build: exits 1 with a clear message; no report is written |
@@ -204,13 +204,13 @@ reconkit db wipe [--yes]
 ```
 
 **`db delete`** removes one target and everything that hangs off it. Without
-`--yes` it prints the counts it is about to delete and asks, default **yes**:
+`--yes` it prints the counts it is about to delete and asks, default **no**:
 
 ```
 Delete example.com from recon.db:
   1 target, 15 subdomains, 3161 URLs, 190 tool runs, 31 stage runs
   results/example.com/ (will be removed)
-This cannot be undone. Delete this target? [Y/n]:
+This cannot be undone. Delete this target? [y/N]:
 ```
 
 Answering `n` prints `cancelled; nothing was deleted.` and exits `2`. The rows
@@ -226,6 +226,13 @@ Deleted 1 target, 15 subdomains, 3161 URLs, 190 tool runs, 31 stage runs. Remove
 
 A target that is not in the database is exit `2` with
 `target <domain> is not in <db>`; nothing is written and no folder is removed.
+
+If SQLite reports the database is locked (for example, a scan is running),
+`db delete` and `db wipe` print
+`Error: Database is locked. Is a scan running?` and exit `1` with no traceback.
+If the rows were deleted but `results/<domain>/` could not be removed,
+`db delete` prints a warning naming the folder and exits `0`: the database is
+already clean, and the leftover folder is a manual filesystem cleanup.
 
 **`db wipe`** is the whole-database reset. It always prints the loud warning,
 then asks (default **no** unless `--yes`):

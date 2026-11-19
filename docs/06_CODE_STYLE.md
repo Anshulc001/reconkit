@@ -43,7 +43,7 @@
 
 ## 6. Error Handling
 
-- Define exceptions in `reconkit/errors.py`: `ScopeError`, `ToolNotInstalled`, `ToolFailed`, `ToolTimeout`, `ParseError`, `ConfigError`, `InstallError`, and `InstallSkipped` (an `InstallError` subclass for a declined sudo action).
+- Define exceptions in `reconkit/errors.py`: `ScopeError`, `ToolNotInstalled`, `ToolFailed`, `ToolTimeout`, `ParseError`, `ConfigError`, `StorageError`, `InstallError`, and `InstallSkipped` (an `InstallError` subclass for a declined sudo action). `StorageError` is raised by `core.store` when a database operation fails (for example, a locked database); the CLI catches it and never imports `sqlite3`.
 - Adapters convert failures into a `ToolResult(status=...)` instead of crashing the stage.
 - The CLI maps exceptions to exit codes (docs/02_CLI_UX.md) and one-line messages.
 - Do not swallow errors silently. Do not expose secrets or full tracebacks unless `-v`.

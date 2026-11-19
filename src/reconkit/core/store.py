@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from reconkit.errors import ConfigError
+from reconkit.errors import ConfigError, StorageError
 
 SCHEMA_VERSION = 12
 
@@ -589,24 +589,28 @@ class Store:
 
         One transaction, children before parents, so a failure leaves the
         database exactly as it was. Returns the counts that were removed, or
-        `None` when the target is not stored.
+        `None` when the target is not stored. A locked database is translated
+        to `StorageError` so the CLI never imports `sqlite3` (D85).
         """
-        target_id = self.get_target(domain)
-        if target_id is None:
-            return None
-        counts = self.target_counts(target_id)
-        with self.transaction():
-            # Children before parents; the always-present `target_id` binding is
-            # the only value in these statements.
-            self._conn.execute(_DELETE_PORT_SOURCES, (target_id,))
-            self._conn.execute(_DELETE_STATUSES, (target_id,))
-            self._conn.execute(_DELETE_PORTS, (target_id,))
-            self._conn.execute(_DELETE_SUBDOMAIN_SOURCES, (target_id,))
-            self._conn.execute(_DELETE_TOOL_RUNS, (target_id,))
-            self._conn.execute("DELETE FROM urls WHERE target_id = ?", (target_id,))
-            self._conn.execute("DELETE FROM subdomains WHERE target_id = ?", (target_id,))
-            self._conn.execute("DELETE FROM scan_runs WHERE target_id = ?", (target_id,))
-            self._conn.execute("DELETE FROM targets WHERE id = ?", (target_id,))
+        try:
+            target_id = self.get_target(domain)
+            if target_id is None:
+                return None
+            counts = self.target_counts(target_id)
+            with self.transaction():
+                # Children before parents; the always-present `target_id` binding is
+                # the only value in these statements.
+                self._conn.execute(_DELETE_PORT_SOURCES, (target_id,))
+                self._conn.execute(_DELETE_STATUSES, (target_id,))
+                self._conn.execute(_DELETE_PORTS, (target_id,))
+                self._conn.execute(_DELETE_SUBDOMAIN_SOURCES, (target_id,))
+                self._conn.execute(_DELETE_TOOL_RUNS, (target_id,))
+                self._conn.execute("DELETE FROM urls WHERE target_id = ?", (target_id,))
+                self._conn.execute("DELETE FROM subdomains WHERE target_id = ?", (target_id,))
+                self._conn.execute("DELETE FROM scan_runs WHERE target_id = ?", (target_id,))
+                self._conn.execute("DELETE FROM targets WHERE id = ?", (target_id,))
+        except sqlite3.OperationalError as exc:
+            raise StorageError("Error: Database is locked. Is a scan running?") from exc
         return counts
 
     # Children before parents: `wipe()` drops every table with foreign_keys ON.
@@ -641,12 +645,16 @@ class Store:
         """Drop every table and recreate the current schema (D81).
 
         `results/` folders are deliberately untouched: deleting them is a
-        separate, explicit filesystem decision the CLI announces.
+        separate, explicit filesystem decision the CLI announces. A locked
+        database is translated to `StorageError` (D85).
         """
-        counts = self.database_counts()
-        with self.transaction():
-            for table in self._WIPE_ORDER:
-                self._conn.execute(f"DROP TABLE IF EXISTS {table}")
+        try:
+            counts = self.database_counts()
+            with self.transaction():
+                for table in self._WIPE_ORDER:
+                    self._conn.execute(f"DROP TABLE IF EXISTS {table}")
+        except sqlite3.OperationalError as exc:
+            raise StorageError("Error: Database is locked. Is a scan running?") from exc
         self._migrate()
         return counts
 

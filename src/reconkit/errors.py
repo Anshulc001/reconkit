@@ -47,3 +47,9 @@ class ConfigError(Exception):
     """Configuration or CLI values are invalid (exit code 2)."""
 
     exit_code: ClassVar[int] = 2
+
+
+class StorageError(Exception):
+    """A persistence operation failed, usually a locked database (exit 1)."""
+
+    exit_code: ClassVar[int] = 1

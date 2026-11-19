@@ -1814,6 +1814,87 @@ def test_db_delete_requires_yes_when_interactive(tmp_path: Path) -> None:
         assert store.get_target("example.com") is None
 
 
+def test_db_delete_defaults_to_no(tmp_path: Path) -> None:
+    """D85: Enter on the destructive prompt must cancel, not delete."""
+    config = _db_config(tmp_path)
+    database = _seed_target(tmp_path)
+
+    result = CliRunner().invoke(
+        app, ["--config", str(config), "db", "delete", "--target", "example.com"], input="\n"
+    )
+
+    assert result.exit_code == 2
+    assert "[y/N]" in result.output
+    assert "cancelled; nothing was deleted." in result.output
+    with Store(database) as store:
+        assert store.get_target("example.com") is not None
+
+
+def test_db_delete_handles_locked_database_cleanly(tmp_path: Path) -> None:
+    """D85: a write lock becomes one clean error, not a traceback."""
+    config = _db_config(tmp_path)
+    database = _seed_target(tmp_path)
+    lock = sqlite3.connect(database)
+    lock.execute("BEGIN IMMEDIATE")
+    try:
+        result = CliRunner().invoke(
+            app,
+            ["--config", str(config), "db", "delete", "--target", "example.com", "--yes"],
+        )
+    finally:
+        lock.rollback()
+        lock.close()
+
+    assert result.exit_code == 1
+    assert "Error: Database is locked. Is a scan running?" in result.stderr
+    assert "Traceback" not in result.stderr
+    with Store(database) as store:
+        assert store.get_target("example.com") is not None
+
+
+def test_db_wipe_handles_locked_database_cleanly(tmp_path: Path) -> None:
+    """D85: wipe reports the same locked-database error and leaves the schema."""
+    config = _db_config(tmp_path)
+    database = _seed_target(tmp_path)
+    lock = sqlite3.connect(database)
+    lock.execute("BEGIN IMMEDIATE")
+    try:
+        result = CliRunner().invoke(app, ["--config", str(config), "db", "wipe", "--yes"])
+    finally:
+        lock.rollback()
+        lock.close()
+
+    assert result.exit_code == 1
+    assert "Error: Database is locked. Is a scan running?" in result.stderr
+    assert "Traceback" not in result.stderr
+    with Store(database) as store:
+        assert store.get_target("example.com") is not None
+
+
+def test_db_delete_warns_if_results_folder_cannot_be_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D85: the rows are gone, so the folder failure is a warning and exit 0."""
+    config = _db_config(tmp_path)
+    database = _seed_target(tmp_path)
+    folder = tmp_path / "results" / "example.com"
+    folder.mkdir(parents=True)
+
+    def boom(_path: str) -> None:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("shutil.rmtree", boom)
+    result = CliRunner().invoke(
+        app, ["--config", str(config), "db", "delete", "--target", "example.com", "--yes"]
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert "warning: database rows for example.com were deleted" in result.output
+    assert "could not be removed" in result.output
+    with Store(database) as store:
+        assert store.get_target("example.com") is None
+
+
 def test_db_delete_nonexistent_target_errors_cleanly(tmp_path: Path) -> None:
     config = _db_config(tmp_path)
 
