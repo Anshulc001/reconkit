@@ -127,6 +127,30 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
 - **D42 (2026-11-19): amass is installed; the one "needs attention" reading was a transient identity probe.** Current raw: `doctor` row `amass | subs | core | yes | /usr/bin/amass | ok`, footer `47 installed, 1 manual (dnsreaper)`, `--json` `installed: 47`, and 10/10 `AmassAdapter().check_installed()` runs at 0.03 s. At the top of this batch the same build reported `wrong program / failed` once and `--tools amass` skipped it as `not installed`; that is not reproducible in 10 probes, 5 doctor runs or either output mode. B3's `manual: true`/count change did not cause it - amass was never `manual`, "needs attention" was the pre-existing wrong-program bucket. **No code change:** a probe retry or a longer `IDENTITY_TIMEOUT` is a behaviour change that needs a ruling. Consequence recorded under Open risks (a transient probe failure silently drops a tool from every scan).
 - **D43 (2026-11-19): no input is a skip, not a failure (R10).** `Engine._run_one` now decides before running: a `live`/`tech`/`urls`/`vulns` tool handed an empty host list returns `skipped / no input hosts` and the adapter is never invoked; `subs`/`dns` are untouched and `ports` already skips its whole stage. `skipped` counts as complete (`_completed`), so a stage whose results are all skips becomes `CompletionGap(stage, "no input hosts", n)` and the run exits **0** (mock proof: `0 ok, 0 gap, 0 failed, 2 skipped`, exit 0). One real failure anywhere still gives 5 - the same real 30 s testfire.net run now reads `17 ok, 2 gap, 0 failed, 11 skipped, 3 timeout` (was `15 ok, 1 gap, 9 failed, 3 skipped, 5 timeout`) with the 5 coming only from the three genuine stage timeouts (amass, gau, urlfinder), which the rule says must stay 5. Suite 928 -> 932. **Disclosed test-fixture change:** `_probe_engine()`'s fake urls adapter moved from `mode=ACTIVE` to `mode=PASSIVE` (it stands in for gau/waybackurls, which get the apex regardless of liveness), because an active urls tool with no alive host is exactly what R10 skips; no assertion changed.
 - **D44 (2026-11-19): engine-stage Ctrl+C kills the child (R12, closes F8).** `core/runner.py` keeps a locked set of live children: `run_exec` registers right after `Popen` and unregisters in a `finally`, and the new `terminate_all_live()` kills every registered process group through the same `terminate_tree()` the timeout path uses. The CLI's `KeyboardInterrupt` handler calls it before printing the resumable message and returning **130**, which is the only place a terminal Ctrl+C can reach a tool whose `run_exec` sits in an `asyncio.to_thread` worker. Suite 932 -> 935; the integration test drives the real CLI (fake `Engine.run` starting a real `sleep 60` in a thread, then `KeyboardInterrupt`): exit 130, child killed, registry drained. F8 is closed; a literal SIGINT during a real scan is the one thing not exercised, because the test raises the same exception in the same place.
+- **D45 (2026-11-19): the six closing rulings (R13-R18), recorded as written; one of them lands code in D46.**
+  **R13 - a slow upstream that kills the `urls` stage exits 5, accepted as-is.** A `gau` still running when the `urls`
+  stage hits its deadline makes a real `--active` scan exit 5 (N.6 capstone); that is correct, because a timeout is a
+  genuine signal that a real tool did not finish, and laundering it into a gap - as R10 did for empty input - would hide
+  a real problem. A user who sees exit 5 has a target that needs a bigger `--phase-timeout`, which is the operator's
+  call. No code change; the flag's description in docs/02 section 4 and the `COMMANDS.md` mirror now say a killed stage
+  exits 5 by design.
+  **R14 - out-of-scope CIDRs are deferred to a future schema v8.** `scope.yaml` cannot express an excluded CIDR today;
+  that is a real gap, but it needs a schema decision (which shape, and whether an exclusion overrides an inclusion) and
+  v7 is stable. Deferred to a batch where a real target needs it; the exact question the owner must answer is under
+  "Open risks".
+  **R15 - masscan/smap on a real large range is deferred pending authorization.** No real-network masscan/smap run has
+  been made against a large range; that needs a written authorization naming the block, which no `scope.yaml` field can
+  express today (R14). Deferred; recorded under "Open risks".
+  **R16 - the interactive `[a]` prompt's evidence standard is one historical run.** The single historical pty session
+  (pre-D3 `--speed`, documented earlier in this file) is accepted as sufficient evidence for the interactive scope-write
+  path; re-running it needs a pty in the harness and a human at the keyboard, which is not worth the setup cost. The
+  "needs pty" open risk is removed.
+  **R17 - retry the identity probe once.** The transient probe failure in D42 can silently drop a tool from every scan,
+  which is worse than a genuinely absent tool because it looks like the tool ran and found nothing. Implemented as D46
+  in the same batch; D42's open risk closes with it.
+  **R18 - `shots`' missing browser and `masscan`'s unverified build are environmental, not defects.** Neither is a
+  project defect, so neither is fixed and neither stays on the Open risks list; README gains a "Known environmental
+  limits" section naming both with their one-line cause.
 
 
 
@@ -623,23 +647,26 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
 Real, current items only. Everything else this file used to list is either closed (see the dated notes in
 `docs/REVIEW_LOG.md`) or is one of the three owner questions below.
 
-- **The `urls` stage deadline decides whether a real scan exits 0.** Capstone 2026-11-19 (`--phase-timeout 300`,
-  testfire.net): 29 tools `ok`, 1 gap (`otx` 429), 2 selection skips, and `gau` still running when the stage hit 300 s
-  -> `timeout` -> exit **5**. `gau` normally answers in ~31 s (D20), so this is archive.org latency, not a code defect;
-  whether the `urls` stage should get its own, larger budget (or whether a per-tool timeout on an archive query should
-  read as a gap) is a ruling, not a fix.
+- **The `urls` stage deadline decides whether a real scan exits 0 - accepted behaviour (R13, D45).** Capstone 2026-11-19
+  (`--phase-timeout 300`, testfire.net): 29 tools `ok`, 1 gap (`otx` 429), 2 selection skips, and `gau` still running
+  when the stage hit 300 s -> `timeout` -> exit **5**. `gau` normally answers in ~31 s (D20), so this is archive.org
+  latency; the exit code is right and the operator raises `--phase-timeout` for a slow target. Not a defect, not fixed.
 - **A transient identity-probe failure silently drops a tool from every scan (D42).** `amass` read `wrong program` once
   at the start of the 2026-11-19 batch and `yes / ok` in ten consecutive probes afterwards. A tool that fails its 10 s
   probe is `skipped (not installed)` and the work simply does not happen. A retry or a longer `IDENTITY_TIMEOUT` would
   be a behaviour change and needs a ruling.
-- **`shots` cannot run on this box.** `/usr/bin/chromium` exists but `gowitness` execs `google-chrome`; `doctor` reports
-  `chromium missing` and the stage is a gap (D35). Environment, not code - installing a Chrome-family binary is the fix.
-- **`libpcap-dev` is absent**, so `masscan`'s build path is unverified here; the adapter is proven with the installed
-  binary only, and a real run still needs root.
-- **The interactive pty re-exercise is still outstanding** (B7, deferred by R9): the automated suite covers the
-  non-interactive branches of the `[a]` scope-write prompt, and no scripted pty session has driven it end to end.
+- **Out-of-scope CIDRs cannot be expressed (R14, D45).** `scope.yaml` has no exclusion field, so an authorization that
+  names a range cannot be written down. The owner's schema question is exact: does the field read
+  `exclude_cidrs: [10.0.0.0/8, ...]` beside `in_scope_cidrs`, and does an exclusion override an inclusion? Answering it
+  is schema v8 plus a scope-gate change.
+- **masscan/smap are untested on ranges larger than the box's own /24 (R15, D45).** A real test requires an
+  authorization naming the target block; nothing in `scope.yaml` can express one today (see the item above).
 
 ## Three questions for the owner (2026-11-19)
+
+**Answered 2026-11-19 (D45):** all three were ruled on - 1 is R14 (deferred to schema v8), 2 is R15 (deferred pending
+an authorization that names a block), 3 is R16 (one historical pty run is sufficient). The table is kept as the record
+of what was asked; nothing in it is open.
 
 Questions, not work items. Each one blocks something that cannot be decided from the code or the docs.
 

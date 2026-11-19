@@ -92,6 +92,13 @@ No changes since run #1.
 | docs/10_TOOL_SOURCES.md | Tool reference: every tool, its stage, where the project lives, doctor's checks |
 | tools.yaml / config.yaml / scope.example.yaml | Registry, settings, scope template |
 
+## Known environmental limits
+
+Two things do not work on every machine, and neither is a defect in reconkit:
+
+- **Screenshots need a Chrome-family browser.** `gowitness` execs `google-chrome`, so on a box with only `/usr/bin/chromium` `doctor` reports `chromium missing` and the `shots` stage produces no images.
+- **`masscan`'s build path is unverified here.** `libpcap-dev` is absent on this box, so only the installed binary has been exercised; a real `masscan` run also needs root.
+
 ## Legal disclaimer
 
 reconkit is intended for **authorized security testing only**. Use it only on systems you own or where you have explicit written permission (for example an in-scope bug bounty program or a signed engagement). Unauthorized scanning may be illegal. The authors assume no liability for misuse.
