@@ -4,6 +4,10 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, post-D75): all queued code work closed. Two rulings closed by accepting the current
+workflow (see Open risks). 1016 tests, tree clean. Remaining items are: one real `--active` run to verify
+D69/D71/D72 on an authorized target (owner's step); export stubs (superseded by report); R15 masscan (needs
+written authorization); waybackurls CDX (upstream); urlfinder idle (deferred by evidence). Nothing is in flight.
 - Status (2026-11-19, D75): **a URL-derived host is tech-scanned on a later run.** D58's pass ran after
   `urls`, so `tech` had already finished, and `url_only_hosts()` skipped the row it created forever
   (`discovered` is seeded only for `--resume`). `Store.url_derived_unprocessed()` now finds rows whose
@@ -1132,10 +1136,12 @@ Questions, not work items. Each one blocks something that cannot be decided from
 
 ## Open risks
 
-Both entries below are **awaiting owner ruling**. Neither is implemented; the
-code and docs reflect the deferred state described next to each.
+Both entries below were **awaiting owner ruling** and were **closed on
+2026-11-20** by accepting the workflow that already exists. Nothing in this
+section is waiting on an owner decision now; each entry keeps the reasoning and
+the ruling that closed it.
 
-### Awaiting owner ruling: `live --urls-file`
+### Closed (2026-11-20): `live --urls-file`
 
 `--urls-file` was attempted twice (D74; the second time as a standalone command
 path). Both times the stop rule fired: `_scan_command` is shared across every
@@ -1151,7 +1157,13 @@ equivalent explicit-host entry point), plus the flag on a command that owns it.
 **Decision needed:** authorize the engine work (one small batch) or close the
 scenario with `reconkit live -l hosts.txt` (hostnames only, works today).
 
-### Awaiting owner ruling: tech + crawl in the same run (D70)
+Ruling (2026-11-20): closed by accepting the hostname workflow.
+`reconkit live -l hosts.txt --scope scope.yaml` is the supported path for "I
+have a list, which are live?". A URL-list flag is not authorized - the
+`ScanOptions.hosts` engine work is not worth it for a scenario the hostname path
+already covers.
+
+### Closed (2026-11-20): tech + crawl in the same run (D70)
 
 D70 documented but did not implement "URL-derived hosts get tech + crawl in the
 same run". The blocker: `tech` and `urls` run before the second resolve, so a
@@ -1163,6 +1175,12 @@ would repeat the archive pool and needs its own stage row.
 **Decision needed:** authorize the second tech + crawler pass after resolve
 (stage machinery, ~3-4 files) or accept the multi-run workflow that D75 now
 supports.
+
+Ruling (2026-11-20): closed by accepting the next-run workflow that D75
+supports. URL-derived hosts get tech on the following active run (D75); crawl
+stays absent by design. Authorizing a second tech+crawler stage pass is not
+worth the stage-machinery cost for a rare edge case. A user who wants to crawl a
+specific URL-derived host can run `katana -u https://host` manually.
 
 ### Owner verification path: D69 on a real run
 
