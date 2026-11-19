@@ -7328,3 +7328,74 @@ output modes all say `yes / ok`, and the probe takes 0.03 s against a 10 s `IDEN
 installed. The single failure is an unexplained, transient identity-probe result — the same class as PIT-30/PIT-35 in
 consequence: a tool that fails its probe is silently left out of every scan. No code change: a retry or a longer
 timeout is a behaviour change and needs a ruling. Recorded as D42 and as an open risk.
+
+## 2026-11-19 (close-out) N.4 - R10: no input is a skip, not a failure (D43)
+
+### The defect
+
+A discovery pass that finds nothing alive leaves `tech`/`urls`/`vulns` with an empty host list. Every tool in those
+stages then raised its own `no hosts to scan/crawl` guard, the adapter turned that into `ToolStatus.FAILED`, and the run
+reported nine broken tools and exit 5 while nothing was broken. Measured before the change (same 30 s command as below):
+`tools: 15 ok, 1 gap, 9 failed, 3 skipped, 5 timeout`, `EXIT=5`.
+
+### The change (`src/reconkit/engine.py`)
+
+- `HOST_INPUT_STAGES = {LIVE, TECH, URLS, VULNS}` and `NO_INPUT_HOSTS = "no input hosts"`.
+- `_run_one` decides before calling the adapter: an empty `ctx.hosts` in one of those stages returns
+  `ToolResult(status=SKIPPED, error="no input hosts")` with `raw_path=None` (the tool never ran, so there is nothing to
+  capture). `live` is in the set for intent but always receives `[target, *discovered]`; `subs`/`dns` are not in it;
+  `ports` already skips its whole stage when nothing is alive.
+- `_completed()` now counts `SKIPPED` as complete, so a skip is never a failure.
+- `_completion_gaps()` adds `CompletionGap(stage, "no input hosts", n)` when every executed result in a stage is a skip.
+
+DNS/subs semantics are untouched, and every existing exit-5 test still passes (`pytest -q`: 932).
+
+### Raw proof, deterministic (mock, no network)
+
+```
+$ reconkit run -d testfire.net --mock --active --tools whatweb,katana --no-color --db /tmp/n4.db
+tech: whatweb skipped 0 item(s)
+urls: katana skipped 0 item(s)
+│ whatweb │ tech  │ skipped │ 0 │ no input hosts │
+│ katana  │ urls  │ skipped │ 0 │ no input hosts │
+0 hosts: ... | tools: 0 ok, 0 gap, 0 failed, 2 skipped, 0 timeout
+active scan completed with gaps - 2 stage(s) incomplete
+  tech: 1 tool(s) skipped (no input hosts)
+  urls: 1 tool(s) skipped (no input hosts)
+EXIT=0
+```
+
+### Raw proof, the real starved scenario (30 s phase timeout, testfire.net)
+
+```
+36 hosts: 0 ALIVE, 8 DNS_ONLY, 0 SHUT_DOWN, 28 DEAD, 0 UNKNOWN | tools: 17 ok, 2
+gap, 0 failed, 11 skipped, 3 timeout
+  subs: crtsh: server error (HTTP 502), otx: rate limited (HTTP 429)
+  tech: 5 tool(s) skipped (no input hosts)
+EXIT=5
+```
+
+The downstream cascade is gone (`failed` 9 -> 0, `skipped` 2 -> 11). The remaining `5` is **not** R10's business: the
+three timeouts (`amass`, `gau`, `urlfinder` hit the 30 s stage deadline) are genuine hard failures, and the batch rule
+says a timeout stays 5. Both free providers refused again in the same run (`crtsh` 502, `otx` 429) and were recorded as
+gaps, which is B1/D34 working live.
+
+### Tests (928 -> 932)
+
+- `test_a_tool_with_no_input_hosts_is_skipped_not_failed` - `whatweb` gets an empty list: status `skipped`, detail
+  `no input hosts`, `raw_path is None`, and the fake adapter's `run()` was never called.
+- `test_a_stage_of_only_skipped_tools_is_a_gap_and_exits_zero` - two urls tools, all skipped -> `complete_with_gaps`,
+  one gap naming `urls`, exit 0.
+- `test_a_skip_does_not_mask_a_real_failure` - a skipped `katana` beside a failed `crtsh` -> exit 5.
+- `test_live_still_scans_the_apex_when_nothing_was_discovered` - `live` with no discoveries still receives
+  `["example.com"]` and runs `ok` (the brief's "legitimately scans the apex" case).
+
+**Test-fixture deviation, disclosed:** `_probe_engine()` (the url_probe family, 12 tests) built its fake urls adapter as
+`mode=ACTIVE`, which is exactly the class R10 now skips with no alive host. The fixture is `mode=PASSIVE` now - it
+stands in for gau/waybackurls, the class that receives the apex regardless of liveness - so those tests still exercise
+the probe instead of asserting on a skipped stage. No assertion in them changed.
+
+### Docs
+
+`docs/02_CLI_UX.md` section 6 gains the "no input -> skipped -> gap (exit 0)" bullet, `docs/03_ARCHITECTURE.md` the
+status-semantics paragraph, `docs/PROGRESS.md` D43.

@@ -180,8 +180,13 @@ def _is_redirect(status: object) -> bool:
 
 
 def _completed(status: ToolStatus) -> bool:
-    """True for a tool that did all it could: `ok`, or a `gap` from its upstream."""
-    return status in (ToolStatus.OK, ToolStatus.GAP)
+    """True for a tool that did all it could: `ok`, a `gap` from its upstream,
+    or a `skipped` tool that was never given any input (R10, 2026-11-19).
+
+    A skip is not a failure: it is the engine declining to run a tool against an
+    empty list. The stage becomes a completion gap instead (exit 0).
+    """
+    return status in (ToolStatus.OK, ToolStatus.GAP, ToolStatus.SKIPPED)
 
 
 def allow_all_ip(_ip: str) -> bool:
@@ -193,6 +198,13 @@ def allow_all_ip(_ip: str) -> bool:
     """
     return True
 
+
+# R10 (2026-11-19): the stages whose tools consume a host list. `subs` and
+# `dns` get the target itself and are never input-less; `ports` already skips its
+# whole stage when nothing is alive. `live` is listed because its list is
+# `[target, *discovered]` - never empty, so the rule can never skip the apex.
+HOST_INPUT_STAGES = frozenset({Stage.LIVE, Stage.TECH, Stage.URLS, Stage.VULNS})
+NO_INPUT_HOSTS = "no input hosts"
 
 Now = Callable[[], str]
 # One short progress line for the CLI to render on stderr (docs/03 section 5).
@@ -1017,12 +1029,17 @@ class Engine:
                 else [skip for skip in outcome.skipped if self._is_gap_reason(skip.reason)]
             )
             external = [result for result in outcome.results if result.status is ToolStatus.GAP]
+            # R10: a stage whose tools were all handed an empty host list did not
+            # get to work, but nothing is broken either - a gap, not a failure.
+            idle = [result for result in outcome.results if result.status is ToolStatus.SKIPPED]
             if absent:
                 reasons = ", ".join(sorted({skip.reason for skip in absent}))
                 gaps.append(CompletionGap(outcome.stage, reasons, len(absent)))
             elif external:
                 reasons = ", ".join(sorted(self._gap_reason(result) for result in external))
                 gaps.append(CompletionGap(outcome.stage, reasons, 0))
+            elif idle and len(idle) == len(outcome.results):
+                gaps.append(CompletionGap(outcome.stage, NO_INPUT_HOSTS, len(idle)))
         if self._url_probe_timeout is not None:
             timeout, done, total = self._url_probe_timeout
             gaps.append(
@@ -1476,18 +1493,32 @@ class Engine:
         workspace: Workspace,
     ) -> ToolResult:
         started = time.perf_counter()
-        try:
-            result = await asyncio.wait_for(adapter().run(ctx), timeout=ctx.timeout)
-        except TimeoutError:
-            result = ToolResult(tool=adapter.name, status=ToolStatus.TIMEOUT, error="timed out")
-        except Exception as exc:
-            result = ToolResult(
-                tool=adapter.name,
-                status=ToolStatus.FAILED,
-                error=redact(f"{type(exc).__name__}: {exc}", self._secrets),
-            )
+        skipped_for_input = adapter.stage in HOST_INPUT_STAGES and not ctx.hosts
+        if skipped_for_input:
+            # R10 (2026-11-19): a stage tool handed no hosts has nothing to do.
+            # Calling the adapter only to turn its own "no hosts to crawl" guard
+            # into a failed result made a starved run read as nine broken tools
+            # and exit 5. The tool never ran, so it is skipped, not failed, and
+            # the stage becomes a completion gap (exit 0). `live` and `dns`
+            # always receive the target itself, so this can never skip a tool
+            # that legitimately works on the apex.
+            result = ToolResult(tool=adapter.name, status=ToolStatus.SKIPPED, error=NO_INPUT_HOSTS)
+        else:
+            try:
+                result = await asyncio.wait_for(adapter().run(ctx), timeout=ctx.timeout)
+            except TimeoutError:
+                result = ToolResult(tool=adapter.name, status=ToolStatus.TIMEOUT, error="timed out")
+            except Exception as exc:
+                result = ToolResult(
+                    tool=adapter.name,
+                    status=ToolStatus.FAILED,
+                    error=redact(f"{type(exc).__name__}: {exc}", self._secrets),
+                )
         update: dict[str, object] = {
-            "raw_path": self._write_raw(workspace, run_id, adapter, result)
+            # A tool that never ran has nothing to capture.
+            "raw_path": None
+            if skipped_for_input
+            else self._write_raw(workspace, run_id, adapter, result)
         }
         if result.duration_s <= 0:
             # The adapter's own measurement is authoritative; this is the only

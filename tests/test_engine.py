@@ -1525,7 +1525,7 @@ async def test_injected_clock_controls_state_and_run_timestamps(tmp_path: Path) 
     specs = {"live": tool("live", Stage.LIVE)}
     adapters = {"live": adapter("live", Stage.LIVE, rec, records=[alive("example.com")])}
     engine = make_engine(tmp_path, specs, adapters, now=lambda: fixed)
-    await engine.run("example.com", ScanOptions(stages=(Stage.LIVE,), mock=True))
+    await engine.run("example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True))
     target = engine.store._conn.execute("SELECT created_at FROM targets").fetchone()
     run = engine.store._conn.execute("SELECT started_at, finished_at FROM scan_runs").fetchone()
     history = engine.store._conn.execute("SELECT checked_at FROM host_status_history").fetchone()
@@ -1676,7 +1676,7 @@ async def test_url_tools_receive_the_configured_runtime_bounds(tmp_path: Path) -
 
     specs = {"urls-fake": tool("urls-fake", Stage.URLS)}
     summary = await make_engine(tmp_path, specs, {"urls-fake": Urls}).run(
-        "example.com", ScanOptions(stages=(Stage.URLS,), mock=True)
+        "example.com", ScanOptions(stages=(Stage.URLS,), active=True, mock=True)
     )
     assert summary.exit_code is ExitCode.SUCCESS
     urlfinder = seen["urlfinder"]
@@ -3552,7 +3552,10 @@ def _probe_engine(
     scope_text: str | None = SCOPE,
 ) -> Engine:
     rec = Recorder()
-    specs = {"urls-fake": tool("urls-fake", Stage.URLS, mode=Mode.ACTIVE)}
+    # R10 (2026-11-19): an active urls tool with no alive host is now skipped, so
+    # this fixture is a *passive* urls tool - the class that receives the apex
+    # even when the live stage found nothing (it stands in for gau/waybackurls).
+    specs = {"urls-fake": tool("urls-fake", Stage.URLS, mode=Mode.PASSIVE)}
     adapters = {
         "urls-fake": adapter(
             "urls-fake",
@@ -3954,3 +3957,96 @@ async def test_shots_without_chromium_is_a_gap_and_exit_zero(tmp_path: Path) -> 
     assert summary.completion_status == "complete_with_gaps"
     assert [gap.stage for gap in summary.gaps] == [Stage.SHOTS]
     assert "no chromium; 0 screenshots" in summary.gaps[0].reason
+
+
+async def test_a_tool_with_no_input_hosts_is_skipped_not_failed(tmp_path: Path) -> None:
+    """R10 (2026-11-19): an empty host list is a skip, never a broken tool.
+
+    The `tech` stage's pool is handed the alive hosts; with none, whatweb has
+    nothing to scan. Calling it anyway turned its own `no hosts to scan` guard
+    into a FAILED result and made a starved run look broken.
+    """
+    rec = Recorder()
+    specs = {"whatweb": tool("whatweb", Stage.TECH, mode=Mode.ACTIVE)}
+    adapters = {"whatweb": adapter("whatweb", Stage.TECH, rec, records=[])}
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com", ScanOptions(stages=(Stage.TECH,), active=True, mock=True)
+    )
+    tech = summary.stages[0]
+    assert [(result.tool, result.status) for result in tech.results] == [
+        ("whatweb", ToolStatus.SKIPPED)
+    ]
+    assert tech.results[0].error == "no input hosts"
+    assert tech.results[0].raw_path is None  # the tool never ran
+    assert rec.names == []  # the adapter was never invoked
+    assert summary.exit_code is ExitCode.SUCCESS
+
+
+async def test_a_stage_of_only_skipped_tools_is_a_gap_and_exits_zero(tmp_path: Path) -> None:
+    """R10: nothing was broken, so the stage is a completion gap (exit 0)."""
+    rec = Recorder()
+    specs = {
+        "katana": tool("katana", Stage.URLS, mode=Mode.ACTIVE),
+        "hakrawler": tool("hakrawler", Stage.URLS, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "katana": adapter("katana", Stage.URLS, rec, records=[]),
+        "hakrawler": adapter("hakrawler", Stage.URLS, rec, records=[]),
+    }
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com", ScanOptions(stages=(Stage.URLS,), active=True, mock=True)
+    )
+    assert all(result.status is ToolStatus.SKIPPED for result in summary.stages[0].results)
+    assert summary.exit_code is ExitCode.SUCCESS
+    assert summary.completion_status == "complete_with_gaps"
+    assert [gap.stage for gap in summary.gaps] == [Stage.URLS]
+    assert summary.gaps[0].reason == "no input hosts"
+
+
+async def test_a_skip_does_not_mask_a_real_failure(tmp_path: Path) -> None:
+    """R10: the skip is not a failure, but it never hides one either.
+
+    `katana` is skipped for having no alive host; `crtsh` really failed. The run
+    must still be partial (5) - a skip cannot launder a broken tool.
+    """
+    rec = Recorder()
+    specs = {
+        "katana": tool("katana", Stage.URLS, mode=Mode.ACTIVE),
+        "crtsh": tool("crtsh", Stage.SUBS, mode=Mode.PASSIVE),
+    }
+    adapters = {
+        "katana": adapter("katana", Stage.URLS, rec, records=[]),
+        "crtsh": adapter(
+            "crtsh",
+            Stage.SUBS,
+            rec,
+            status=ToolStatus.FAILED,
+            detail="crtsh: invalid JSON line",
+        ),
+    }
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com", ScanOptions(stages=(Stage.SUBS, Stage.URLS), active=True, mock=True)
+    )
+    urls = next(stage for stage in summary.stages if stage.stage is Stage.URLS)
+    assert [result.status for result in urls.results] == [ToolStatus.SKIPPED]
+    assert summary.exit_code is ExitCode.PARTIAL
+
+
+async def test_live_still_scans_the_apex_when_nothing_was_discovered(tmp_path: Path) -> None:
+    """R10's exemption: `live` receives the target itself, so it never skips.
+
+    With an empty discovered set the live stage is still given `example.com` and
+    must run - a scan of the target is the point of the stage.
+    """
+    rec = Recorder()
+    specs = {"live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE)}
+    adapters = {"live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("example.com")])}
+    summary = await make_engine(tmp_path, specs, adapters).run(
+        "example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True)
+    )
+    live = summary.stages[0]
+    assert [(result.tool, result.status) for result in live.results] == [
+        ("live-fake", ToolStatus.OK)
+    ]
+    assert rec.hosts == [["example.com"]]
+    assert summary.exit_code is ExitCode.SUCCESS
