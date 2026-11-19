@@ -982,6 +982,36 @@ class Store:
                 unknown.add(host)
         return sorted(unknown)
 
+    def url_derived_unprocessed(self, target_id: int) -> list[str]:
+        """URL-only hosts that no `tech` pass has annotated (D75).
+
+        `url_only_hosts()` deliberately skips a name that already has a
+        `subdomains` row, which is right for a second *resolve* but wrong for
+        the tech side: a host D58 created was never offered to `tech` again,
+        because a fresh run starts `discovered` empty (only `--resume` seeds it
+        from the store). This is the other half of the D58 question: rows whose
+        sources include the `url-derived` sentinel and whose newest status row
+        carries no `tech_json`.
+
+        A host with no status row at all counts as unprocessed too - `tech`
+        cannot annotate a row that does not exist (docs/04 section 5), so the
+        pass gives such a host a live check first. The sentinel is the literal
+        `url-derived` because `core` must not import the engine's constant
+        (docs/03 section 9). Read-only; one query.
+        """
+        rows = self._conn.execute(
+            "SELECT s.fqdn FROM subdomains s"
+            " WHERE s.target_id = ?"
+            "   AND EXISTS (SELECT 1 FROM subdomain_sources ss"
+            "               WHERE ss.subdomain_id = s.id AND ss.tool = 'url-derived')"
+            "   AND NOT EXISTS (SELECT 1 FROM host_status_history h"
+            "                   WHERE h.subdomain_id = s.id"
+            "                     AND h.tech_json IS NOT NULL AND h.tech_json != '[]')"
+            " ORDER BY s.fqdn",
+            (target_id,),
+        ).fetchall()
+        return [str(row["fqdn"]) for row in rows]
+
     def url_report_rows(self, target_id: int) -> list[dict[str, object]]:
         """Every stored URL of a target, with its host and that host's state (D62).
 

@@ -4760,3 +4760,187 @@ async def test_multiple_live_adapters_prefer_200_over_other(tmp_path: Path) -> N
         "SELECT status_code FROM host_status_history ORDER BY id DESC LIMIT 1"
     ).fetchone()
     assert row["status_code"] == 200
+
+
+# --- D75: url-derived hosts are tech-scanned on a follow-up run ------------
+
+
+def _seed_url_derived(
+    store: Store, hosts: tuple[str, ...] = ("orphan.example.com",), urls: tuple[str, ...] = ()
+) -> None:
+    """Rows an earlier D58 pass left behind: the host plus its URL, no tech."""
+    target_id = store.create_target("example.com")
+    run_id = store.create_scan_run(target_id, "urls")
+    for fqdn in hosts:
+        sub_id = store.upsert_subdomain(target_id, fqdn, run_id=run_id)
+        store.add_subdomain_source(sub_id, run_id, "url-derived")
+    for url in urls:
+        store.upsert_url(target_id, url, run_id=run_id, source_count=1)
+
+
+def _latest_tech(store: Store, fqdn: str) -> list[str] | None:
+    row = store._conn.execute(
+        "SELECT h.tech_json FROM host_status_history h JOIN subdomains s ON s.id = h.subdomain_id"
+        " WHERE s.fqdn = ? ORDER BY h.id DESC LIMIT 1",
+        (fqdn,),
+    ).fetchone()
+    return None if row is None else json.loads(str(row["tech_json"]))
+
+
+async def test_url_derived_host_gets_tech_on_follow_up_run(tmp_path: Path) -> None:
+    """D75: a host D58 created is tech-scanned by the next active run.
+
+    Nothing else would ever offer it again: `url_only_hosts()` skips a name with
+    a row, and a fresh run does not seed `discovered` from the store.
+    """
+    rec = Recorder()
+    specs = {
+        "urls-fake": tool("urls-fake", Stage.URLS),
+        "tech-fake": tool("tech-fake", Stage.TECH, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "urls-fake": adapter("urls-fake", Stage.URLS, rec, records=[]),
+        "pyprobe": adapter(
+            "pyprobe",
+            Stage.LIVE,
+            rec,
+            records=[
+                HostStatusRecord(
+                    fqdn="orphan.example.com",
+                    source="pyprobe",
+                    state=HostState.ALIVE,
+                    status_code=200,
+                )
+            ],
+        ),
+        "tech-fake": adapter(
+            "tech-fake",
+            Stage.TECH,
+            rec,
+            records=[
+                HostStatusRecord(
+                    fqdn="orphan.example.com",
+                    source="tech-fake",
+                    state=HostState.ALIVE,
+                    tech=["nginx"],
+                )
+            ],
+        ),
+    }
+    store = Store(tmp_path / "recon.db")
+    _seed_url_derived(store, urls=("https://orphan.example.com/x",))
+    engine = make_engine(tmp_path, specs, adapters, store=store)
+    await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), active=True, mock=True))
+
+    assert _latest_tech(store, "orphan.example.com") == ["nginx"]
+    assert "tech-fake" in rec.names
+
+
+async def test_url_derived_host_is_not_re_resolved_if_it_has_a_state(tmp_path: Path) -> None:
+    """D75: the DNS step only ever sees names with no `subdomains` row."""
+    rec = Recorder()
+    specs = {
+        "urls-fake": tool("urls-fake", Stage.URLS),
+        "tech-fake": tool("tech-fake", Stage.TECH, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "urls-fake": adapter("urls-fake", Stage.URLS, rec, records=[]),
+        "dnspython": adapter("dnspython", Stage.DNS, rec, records=[]),
+        "pyprobe": adapter("pyprobe", Stage.LIVE, rec, records=[]),
+        "tech-fake": adapter("tech-fake", Stage.TECH, rec, records=[]),
+    }
+    store = Store(tmp_path / "recon.db")
+    _seed_url_derived(
+        store,
+        hosts=("orphan.example.com",),
+        urls=("https://orphan.example.com/x", "https://new.example.com/y"),
+    )
+    engine = make_engine(tmp_path, specs, adapters, store=store)
+    await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), active=True, mock=True))
+
+    assert rec.names.count("dnspython") == 1
+    assert rec.hosts[rec.names.index("dnspython")] == ["new.example.com"]
+
+
+async def test_passive_does_not_tech_scan_url_derived_hosts(tmp_path: Path) -> None:
+    """D75: passive is unchanged - no live probe and no tech pool."""
+    rec = Recorder()
+    specs = {
+        "urls-fake": tool("urls-fake", Stage.URLS),
+        "tech-fake": tool("tech-fake", Stage.TECH, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "urls-fake": adapter("urls-fake", Stage.URLS, rec, records=[]),
+        "dnspython": adapter("dnspython", Stage.DNS, rec, records=[]),
+        "pyprobe": adapter("pyprobe", Stage.LIVE, rec, records=[]),
+        "tech-fake": adapter("tech-fake", Stage.TECH, rec, records=[]),
+    }
+    store = Store(tmp_path / "recon.db")
+    _seed_url_derived(store, urls=("https://orphan.example.com/x",))
+    engine = make_engine(tmp_path, specs, adapters, store=store)
+    await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), mock=True))
+
+    assert "pyprobe" not in rec.names
+    assert "tech-fake" not in rec.names
+    assert _latest_tech(store, "orphan.example.com") is None
+
+
+async def test_new_and_previously_orphaned_hosts_both_processed(tmp_path: Path) -> None:
+    """D75: one pass covers both halves - the new name and the earlier one."""
+    rec = Recorder()
+    specs = {
+        "urls-fake": tool("urls-fake", Stage.URLS),
+        "tech-fake": tool("tech-fake", Stage.TECH, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "urls-fake": adapter("urls-fake", Stage.URLS, rec, records=[]),
+        "dnspython": adapter("dnspython", Stage.DNS, rec, records=[]),
+        "pyprobe": adapter(
+            "pyprobe",
+            Stage.LIVE,
+            rec,
+            records=[
+                HostStatusRecord(
+                    fqdn="orphan.example.com",
+                    source="pyprobe",
+                    state=HostState.ALIVE,
+                    status_code=200,
+                ),
+                HostStatusRecord(
+                    fqdn="new.example.com", source="pyprobe", state=HostState.ALIVE, status_code=200
+                ),
+            ],
+        ),
+        "tech-fake": adapter(
+            "tech-fake",
+            Stage.TECH,
+            rec,
+            records=[
+                HostStatusRecord(
+                    fqdn="orphan.example.com",
+                    source="tech-fake",
+                    state=HostState.ALIVE,
+                    tech=["nginx"],
+                ),
+                HostStatusRecord(
+                    fqdn="new.example.com",
+                    source="tech-fake",
+                    state=HostState.ALIVE,
+                    tech=["caddy"],
+                ),
+            ],
+        ),
+    }
+    store = Store(tmp_path / "recon.db")
+    _seed_url_derived(
+        store,
+        hosts=("orphan.example.com",),
+        urls=("https://orphan.example.com/x", "https://new.example.com/y"),
+    )
+    engine = make_engine(tmp_path, specs, adapters, store=store)
+    await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), active=True, mock=True))
+
+    assert _latest_tech(store, "orphan.example.com") == ["nginx"]
+    assert _latest_tech(store, "new.example.com") == ["caddy"]
+    tech_hosts = rec.hosts[rec.names.index("tech-fake")]
+    assert sorted(tech_hosts) == ["new.example.com", "orphan.example.com"]

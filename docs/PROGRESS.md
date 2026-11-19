@@ -4,6 +4,15 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-19, D75): **a URL-derived host is tech-scanned on a later run.** D58's pass ran after
+  `urls`, so `tech` had already finished, and `url_only_hosts()` skipped the row it created forever
+  (`discovered` is seeded only for `--resume`). `Store.url_derived_unprocessed()` now finds rows whose
+  sources include the `url-derived` sentinel and whose newest status row has no `tech_json`; in
+  active/full the pass probes them with `pyprobe` and runs the `tech` pool, then `_persist_tech`. No
+  re-resolution (DNS still sees only names without a row), one round, passive unchanged. Crawl is still
+  not included. Suite 1012 -> 1016. Acceptance: `www.testfire.net` went from no status row to
+  `ALIVE 200 ["Java", "aws"]` written by the `urls` run, logs
+  `urls: 1 url-derived host(s) already known; tech-scanned on follow-up`. See D75 in REVIEW_LOG.
 - Status (2026-11-19, D73): **a repeat scan says how many URL answers came from earlier runs.**
   `url_probe` never re-checks a stored answer, so the report now carries `urls_already_probed` (JSON) and
   `urls: N total, M shown (K already probed in earlier runs; use --reprobe-urls to re-check)` (text).

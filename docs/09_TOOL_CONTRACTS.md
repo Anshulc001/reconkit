@@ -1138,38 +1138,37 @@ Rules that keep it bounded and honest:
   network, no subprocess. A missing fixture means no records and the found count
   is still reported.
 
-#### Known gap: a URL-derived host is not tech-scanned or crawled (D70, 2026-11-19)
+#### URL-derived hosts get tech on a later run (D75, 2026-11-19)
 
-Measured on `slice.bank.in` (`/tmp/item1.db`, loop item 2): the two URL-derived
-rows (`api.slice.bank.in`, `assets.slice.bank.in`) are `UNKNOWN`, have no
-`host_status_history` row, no `status_code` and an empty `tech_json`.
+D58's pass cannot tech-scan a host in the run that discovers it: it runs after
+`urls`, and the `tech` stage already finished. Until D75 the gap was permanent,
+because `Store.url_only_hosts()` skips any name that already has a `subdomains`
+row and a fresh run seeds `discovered` only for `--resume` - so the row D58
+created was never offered to `tech` again.
 
-The stage order is `subs, dns, live, ports, tech, urls, url_probe, ...`, and the
-D58 pass runs **after** `urls` - the last stage that could annotate a host
-already ran. So for a URL-derived host:
+The pass now also reads `Store.url_derived_unprocessed(target_id)`: rows whose
+sources include the `url-derived` sentinel and whose newest status row carries
+no `tech_json` (a host with no status row at all counts as unprocessed). In
+`active`/`full` it runs `pyprobe` and then the `tech` pool over them, through
+the same adapters, scope gate and mock fixtures as the stages.
 
-| Mode | DNS | `pyprobe` | `tech` pool | crawlers (`katana`, `hakrawler`, `gospider`, `subjs`) |
+| Mode | DNS re-check | `pyprobe` | `tech` pool | crawlers |
 |---|---|---|---|---|
-| passive | yes | no | no | no |
-| active / full | yes | yes | no | no |
+| passive | no | no | no | no |
+| active / full | no (it already has a state) | yes | yes | no |
 
-It is not fixed inside the pass because a tech or crawl run needs its own
-`scan_runs`/`tool_runs` rows, its own budget and a scope decision per host -
-the same machinery as a stage - and a second `urls` execution in one scan would
-re-run the archive pool too. That is a stage-level change, not a bounded pass.
-
-**A plain follow-up run does not pick the host up either.** `discovered` starts
-empty on a fresh run (`Engine._seed_from_store` runs only for `--resume`), and
-`Store.url_only_hosts()` skips a host that already has a `subdomains` row. The
-name is therefore invisible to that run's `subs`/`dns`/`live`/`tech` stages and
-to the D58 pass, until a `subs` tool reports it again or the run resumes. The
-stored row and its URLs remain correct and appear in the report; only the tech
-and crawl evidence is missing.
-
-Enabler, if it is ever wanted: seed `discovered`/`alive` from `subdomains` at
-the start of every run (not only `--resume`), or give the D58 pass a `tech`
-step that writes its own stage row. Both are ordinary changes to review on
-their own, with docs first.
+- **No re-resolution.** The `dnspython` step still receives only the names with
+  no `subdomains` row; an existing state is never queried again.
+- **Tech needs a status row.** `_persist_tech` merges into the newest
+  `host_status_history` row and never creates one (docs/04 section 5), so the
+  pass probes first. A host that answers nothing keeps no tech - correct, since
+  a technology match is not liveness evidence.
+- **One round, no new hosts.** Names this pass or its tech run discover are
+  handled on the next run. The pass names itself in the log:
+  `urls: N url-derived host(s) already known; tech-scanned on follow-up`.
+- **Crawl is still not part of it.** A second `urls` execution would repeat the
+  archive pool and needs its own stage row; D70's second half stays open
+  (PROGRESS "Open risks").
 
 ### What a saved report reads back (D62, 2026-11-19)
 

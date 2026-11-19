@@ -2154,6 +2154,13 @@ class Engine:
         probes the new hosts, so `url_probe` finds their URLs on a host that has
         a real state instead of one nothing ever resolved.
 
+        D75: in active/full the pass also picks up the hosts an earlier D58 pass
+        created but never tech-scanned (`Store.url_derived_unprocessed()`). Those
+        already have a `subdomains` row, so `url_only_hosts()` will never offer
+        them again, and a fresh run does not seed `discovered` from the store -
+        without this they stay orphaned forever. They are not re-resolved; they
+        get the live probe and the tech pool only.
+
         Bounds: no new config key. The pass inherits a stage budget - `urls` in
         passive, `url_probe` in active/full, because that is the stage whose
         input the new state exists to serve. A pass that hits it leaves the rows
@@ -2163,10 +2170,17 @@ class Engine:
         # the loop like every other query, not in a worker thread.
         candidates = self._clean_hosts(self.store.url_only_hosts(target_id), target)
         hosts = list(dict.fromkeys(candidates))
-        if not hosts:
+        live = opts.active
+        orphans: list[str] = []
+        if live:
+            orphans = [
+                host
+                for host in self._clean_hosts(self.store.url_derived_unprocessed(target_id), target)
+                if host not in hosts
+            ]
+        if not hosts and not orphans:
             self._progress("urls: 0 host(s) found only in URLs; resolved")
             return
-        live = opts.active
         budget = self._stage_timeout(Stage.URL_PROBE if live else Stage.URLS)
         try:
             now_alive = await asyncio.wait_for(
@@ -2176,6 +2190,7 @@ class Engine:
                     opts,
                     run_id,
                     hosts,
+                    orphans,
                     discovered,
                     alive,
                     workspace,
@@ -2191,9 +2206,16 @@ class Engine:
             )
             return
         if live:
-            self._progress(
-                f"urls: {len(hosts)} host(s) found only in URLs; resolved, {now_alive} now ALIVE"
-            )
+            if hosts:
+                self._progress(
+                    f"urls: {len(hosts)} host(s) found only in URLs; "
+                    f"resolved, {now_alive} now ALIVE"
+                )
+            if orphans:
+                self._progress(
+                    f"urls: {len(orphans)} url-derived host(s) already known; "
+                    "tech-scanned on follow-up"
+                )
         else:
             self._progress(f"urls: {len(hosts)} host(s) found only in URLs; resolved")
 
@@ -2204,6 +2226,7 @@ class Engine:
         opts: ScanOptions,
         run_id: int,
         hosts: list[str],
+        orphans: list[str],
         discovered: set[str],
         alive: set[str],
         workspace: Path,
@@ -2230,17 +2253,24 @@ class Engine:
             user_agent=opts.user_agent,
             results_dir=Path(self.config.results_dir),
         )
-        dns_results = await self._second_resolve_dns(ctx)
-        self._label_url_derived(target_id, run_id, hosts)
-        with self.store.transaction():
-            self._persist_dns(target_id, run_id, dns_results, target, defer=live)
-        discovered.update(hosts)
+        dns_results: list[ToolResult] = []
+        if hosts:
+            dns_results = await self._second_resolve_dns(ctx)
+            self._label_url_derived(target_id, run_id, hosts)
+            with self.store.transaction():
+                self._persist_dns(target_id, run_id, dns_results, target, defer=live)
+            discovered.update(hosts)
         if not live:
+            return 0
+        # D75: the orphans join the same pass, but never the DNS step - a host
+        # that already has a state is not resolved again.
+        targets = list(dict.fromkeys([*hosts, *orphans]))
+        if not targets:
             return 0
         # Active contact needs the same gate as every other active stage, and
         # only for the hosts this pass would touch.
         allowed, _dropped, scope_error = await asyncio.to_thread(
-            self._active_hosts, target, hosts, opts
+            self._active_hosts, target, targets, opts
         )
         if scope_error is not None:
             self._progress(
@@ -2255,6 +2285,13 @@ class Engine:
                 target_id, run_id, live_results, dns_results, target, allowed, opts, alive
             )
         self._update_discovered(Stage.LIVE, live_results, target, discovered, alive)
+        # D75: tech runs after live because `_persist_tech` merges into the
+        # newest status row and never creates one (docs/04 section 5). Hosts this
+        # pass discovers are handled on the next run, not fed back into this one.
+        tech_results = await self._second_resolve_tech(ctx, allowed, opts)
+        if tech_results:
+            with self.store.transaction():
+                self._persist_tech(target_id, run_id, tech_results, target)
         return sum(1 for host in allowed if host in alive)
 
     async def _second_resolve_dns(self, ctx: RunContext) -> list[ToolResult]:
@@ -2276,6 +2313,22 @@ class Engine:
             return []
         probe_ctx = ctx.model_copy(update={"hosts": list(hosts)})
         return [await adapter().run(probe_ctx)]
+
+    async def _second_resolve_tech(
+        self, ctx: RunContext, hosts: list[str], opts: ScanOptions
+    ) -> list[ToolResult]:
+        """The `tech` stage's pool on this pass's ctx, for hosts that never got it (D75).
+
+        The same adapters, `run(ctx)` and mock fixtures as the stage, so a
+        follow-up run sees what `tech` would have seen. The results go through
+        `_persist_tech`, which annotates each host's newest status row. One
+        round only: a tech tool that names a new host starts nothing here.
+        """
+        selected, _skipped = await self._select(Stage.TECH, opts)
+        if not selected:
+            return []
+        tech_ctx = ctx.model_copy(update={"hosts": list(hosts)})
+        return [await adapter().run(tech_ctx) for _spec, adapter in selected]
 
     def _label_url_derived(self, target_id: int, run_id: int, hosts: list[str]) -> None:
         """Create the missing rows and name the URL pool as what found them.

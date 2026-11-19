@@ -103,6 +103,64 @@ Either fix is engine work (an explicit host list the engine accepts, which is
 re-attempt that. **Skipped, blocker unchanged and now recorded from both
 sides; docs/02 section 1 carries the retry.**
 
+## 2026-11-19 (D75) - an orphaned URL-derived host is tech-scanned by the next active run
+
+**Symptom (documented at b055cc9, fixed here).** A host D58 created got DNS +
+`pyprobe` once and was never offered to `tech` again. Two rules combined:
+
+```
+$ grep -n 'url_only_hosts\|def _stage_hosts\|discovered' src/reconkit/engine.py | head -30
+958:    def url_only_hosts(self, target_id: int) -> list[str]:
+...
+986:        discovered: set[str] = set()
+989:            self._seed_from_store(target_id, target, discovered, alive)
+1018:            hosts = self._stage_hosts(stage, target, discovered, alive)
+1347:    def _seed_from_store(self, target_id, target, discovered, alive):
+```
+
+`url_only_hosts()` returns names named by a URL that have **no** `subdomains`
+row, and `discovered` starts empty unless `resumed`. So on a follow-up run the
+three URL-derived rows are fed to `tech`: **no** (its input is the run's own
+`alive` set); to the crawlers: **no** (same input, and `urls` has already run);
+to `live`/`dns`: **no** as well, because they only see `[target, *discovered]`.
+The "skip if a row exists" rule is right for re-resolution and wrong for
+tech: it conflated "has a row" with "has been processed".
+
+**Fix (3 non-doc files).** The new `Store.url_derived_unprocessed()` returns
+rows whose sources include the `url-derived` sentinel and whose newest status
+row has no `tech_json` (no status row at all counts as unprocessed). `_second_resolve`
+reads it only when `opts.active`, and `_second_resolve_pass` runs the union through
+one scope gate, `pyprobe` and then `_second_resolve_tech` (the `tech` stage's own
+selected pool, same adapters/`run(ctx)`), with `_persist_tech`. The DNS step still
+receives only `hosts`.
+
+**Mutation check.** Setting `orphans = []` unconditionally makes
+`test_url_derived_host_gets_tech_on_follow_up_run` and
+`test_new_and_previously_orphaned_hosts_both_processed` fail with
+`assert None == ['nginx']`; restored, all four pass.
+
+**Tests (4).** `test_url_derived_host_gets_tech_on_follow_up_run`,
+`test_url_derived_host_is_not_re_resolved_if_it_has_a_state`,
+`test_passive_does_not_tech_scan_url_derived_hosts`,
+`test_new_and_previously_orphaned_hosts_both_processed`. Suite 1012 -> 1016.
+
+**Mock acceptance (copy of a fresh DB, no network).** Seeded
+`www.testfire.net` as url-derived with no status row; every host the mock `urls`
+fixtures can name got a row first, and `subs`/`dns` were excluded, so nothing but
+the new pass could touch it:
+
+```
+BEFORE: ['www.testfire.net'] | tech rows: 0
+urls: 1 url-derived host(s) already known; tech-scanned on follow-up
+AFTER (stage of the writing run = urls):
+stage  state  status_code  tech_json
+urls   ALIVE  200          ["Java", "aws"]
+report.txt: www.testfire.net  ALIVE  LOW  url-derived  0  -  200  Altoro Mutual ...  Java, aws
+```
+
+**Not included: crawl.** A second `urls` execution would repeat the archive
+pool and needs its own stage row; it stays in the open-rulings list.
+
 ## 2026-11-19 (D73) - a repeat scan says how much of the URL list was already answered
 
 `url_probe` stores one answer per URL and never re-checks it (D23), so a second
