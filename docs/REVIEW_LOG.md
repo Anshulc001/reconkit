@@ -76,6 +76,69 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
+## 2026-11-19 (final run) - sakec.ac.in on the complete build: 488 s wall, `url_probe` 39 s
+
+One pass, no re-run, real limits - `reconkit run -d sakec.ac.in --active --phase-timeout 600 --no-color --json
+--no-scope`, `url_probe.max_urls: 5000`, the same `recon.db` the D54/D55 measurements used (runs 169/175).
+`scope.yaml` was not touched (`--no-scope`; `scope_mode: unrestricted_flag`).
+
+```
+start 2026-11-19T11:44:24-05:00   end 11:52:32-05:00   wall 488.0 s   exit 5
+previous run (ca0dcd0)            wall 1 060.685 s      exit 0
+url_probe run 169  14:57:30Z -> 15:06:46Z = 556 s
+url_probe run 175  16:51:53Z -> 16:52:32Z =  39 s   (-517 s, 14.3x)
+```
+
+stderr, in order:
+
+```
+url_probe: skipping 1444 URL(s) whose host is unreachable
+url_probe: probing 906 URL(s)
+url_probe: 200/906 URL(s) probed
+url_probe: 400/906 URL(s) probed
+url_probe: 600/906 URL(s) probed
+url_probe: 800/906 URL(s) probed
+url_probe: finished 906 URL(s)
+```
+
+Tool rows, compact (records, seconds, error):
+
+```
+subs     otx gap 0 5.39 'otx: rate limited (HTTP 429)'
+subs     urlscan ok 1 6.01 | certspotter ok 27 6.64 | subfinder ok 67 18.30 | findomain ok 38 20.02
+subs     amass ok 14 22.18 | assetfinder ok 37 31.05
+subs     hackertarget gap 0 6.56 'hackertarget: free quota exceeded'
+subs     crtsh FAILED 0 30.71 'crtsh: request timed out'
+dns      dig ok 46 | massdns ok 39 | dnsx ok 39 | dnspython ok 15 'timeout=53' | puredns ok 39
+live     tlsx ok 21 | httpx ok 12 | httprobe ok 12 | pyprobe ok 12 'unreachable=57'
+tech     cdncheck ok 2 | webanalyze ok 6 | httpx_tech ok 12 | whatweb ok 12 | wafw00f ok 2 (104.80 s)
+urls     unfurl ok 138 0.02 | waybackurls ok 0 0.57 | subjs ok 100 10.26 | gau ok 4918 58.17
+urls     hakrawler ok 137 60.07 | katana ok 543 63.43 'output truncated; skipped unusable line ...'
+urls     gospider KILLED 397 130.87 'killed after 60s idle at stage 130.9s, 397 partial; ...'
+urls     urlfinder KILLED 6367 199.17 'killed after 180s idle at stage 199.2s, 6367 partial'
+```
+
+Summary line: `69 hosts: 12 ALIVE, 27 DNS_ONLY, 0 SHUT_DOWN, 29 DEAD, 1 UNKNOWN | tools: 26 ok, 2 gap, 1 failed,
+2 skipped, 0 timeout, 2 killed`, `completion: complete_with_gaps` (gaps: the otx/hackertarget pair). Exit **5** comes
+from the single `failed` row, `crtsh: request timed out` - the R13 rule, not a regression; crt.sh was already recorded
+as intermittent in Part R.
+
+Comparison with the previous run: `gau` 4 918 (was 4 917), `katana` 543 (was 356), `urlfinder` 6 367 (identical),
+`waybackurls` 0 (unchanged, the deferred upstream finding), ALIVE hosts 12 (unchanged), total wall 488.0 s against
+1 060.685 s (-54%), kills 2 against 3 (gospider and urlfinder, both idle windows, partial output kept).
+
+DB after the run (`recon.db`, target 6) proves the skip, not just reports it:
+
+```
+urls total 7147 -> 7421   NULL 2147 -> 1515   -1 4982 -> 4984   answered >0 16 -> 919
+status counts: -1 4984 | NULL 1515 | 200 800 | 302 66 | 301 26 | 404 21 | 400 3 | -2 3 | 308 1 | 401 1 | 403 1
+www.sakec.ac.in (DNS_ONLY): answered 4861 (the old run's -1s) | NULL 1371 (this run's new URLs, none probed)
+NULL rows on DEAD/DNS_ONLY hosts: 1444  == the skipped count
+```
+
+Of 906 probed URLs, 903 answered (`919 - 16`), 2 came back `-1` and 1 `-2` (`3 - 2`), which reconciles with the 906
+progress line. Nothing was changed or retried after the run.
+
 ## 2026-11-19 (R14) - scope excludes CIDRs, and the run says where that is partial (D56)
 
 Owner rulings: exclusion beats inclusion (both CIDRs and names), and a partial exclusion is warned on **two** surfaces

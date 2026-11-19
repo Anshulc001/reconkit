@@ -4,7 +4,13 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status (2026-11-19, D56): **R14 closed - `scope.yaml` can exclude CIDRs, and the run reports where it cannot enforce
+- Status (2026-11-19, final run): **the complete build ran `sakec.ac.in` in 488.0 s (was 1 060.685 s) and `url_probe`
+  in **39 s** (was 556 s) - the D54/D55 filter is the whole delta.** 973 tests, gate clean, tree clean, `scope.yaml`
+  byte-identical. Exit **5** for one new upstream failure (`crtsh: request timed out`, 30.7 s); 69 hosts (12 ALIVE,
+  27 DNS_ONLY, 29 DEAD, 1 UNKNOWN); `url_probe: skipping 1444 URL(s) whose host is unreachable`, 906 probed; the
+  1 371 newly discovered `www.sakec.ac.in` URLs are left `NULL` (skipped, proven), `gau` 4 918, `katana` 543,
+  `urlfinder` 6 367, `waybackurls` 0. No code changed, nothing re-run. See the final-run entry in REVIEW_LOG.
+- Previous status (2026-11-19, D56): **R14 closed - `scope.yaml` can exclude CIDRs, and the run reports where it cannot enforce
   them.** 973 tests, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (`d45a3c90...eeee8b`).
   `pyscan` and the engine's pre-resolved `naabu` input honour `exclude_cidrs`; every other active tool resolves inside
   its own child, so a non-empty `exclude_cidrs` produces one warning at run start and the same `scope_warnings` entry
@@ -858,6 +864,13 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
 ## What is explicitly open and why
 
 Three owner decisions. Nothing here is a code defect waiting to be found.
+
+**2026-11-19 (final `sakec.ac.in` run): `crtsh` failed with `request timed out` after 30.7 s, so the run exited 5.** Raw
+row from the run's `--json`: `{"stage": "subs", "tool": "crtsh", "status": "failed", "items": 0, "duration_s":
+30.713192408002215, "error": "crtsh: request timed out"}`, while the other seven `subs` tools answered (`subfinder`
+67, `assetfinder` 37, `findomain` 38, `amass` 14, `certspotter` 27, `urlscan` 1) and the two gaps were the known `otx`
+429 and `hackertarget` quota. A failed tool exits 5 by the R13 rule, so the code is right for what happened; the
+endpoint was simply slow that minute (crt.sh was already recorded as intermittent in Part R). Not fixed, not re-run.
 
 **R14 closed 2026-11-19 (D56).** `exclude_cidrs` exists and wins over `in_scope_cidrs`; the run reports which selected
   tools cannot honour it, because they resolve inside the child. **Future, not now:** a `--strict-cidr` flag that refuses
