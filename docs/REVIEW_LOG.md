@@ -7683,3 +7683,62 @@ same idea one layer down, one line per adapter, and `crtsh` is the only wearer i
 - Replaced `test_a_404_is_still_a_failure_not_a_gap` (it asserted the rule this ruling changes) - 1 removed, 3 added.
 
 Suite `941 passed`; `ruff check .` clean; `ruff format --check .` 92 files; `mypy src/reconkit` clean.
+
+### T - final capstone (once, `6a6d47b`)
+
+Command (unchanged from Part Q except the config path; the temp config is `config.yaml` with `db_path`/`workspace_dir`
+under `capstone/` and `url_probe.max_urls: 20`):
+
+```
+reconkit run -d testfire.net --active --phase-timeout 600 --no-color --config capstone/config.yaml
+```
+
+Raw summary and exit:
+
+```
+9 hosts: 8 ALIVE, 0 DNS_ONLY, 0 SHUT_DOWN, 1 DEAD, 0 UNKNOWN | tools: 30 ok, 1
+gap, 0 failed, 2 skipped, 0 timeout
+
+warning: url_probe: probed the first 20 URL(s) only; re-run to probe the rest
+⚠ active scan completed with gaps — 1 stage(s) incomplete
+  subs: otx: rate limited (HTTP 429)
+report: results/testfire.net/20261119T121320Z/report.txt and results/testfire.net/20261119T121320Z/report.json
+EXIT=0
+```
+
+Stage lines and the two rows that dominated the table:
+
+```
+subs: finished 9/9 tool(s), 32 item(s)      crtsh ok 1 item(s)   otx gap 0 item(s)
+dns:  finished 5/5 tool(s), 41 item(s)
+live: finished 4/4 tool(s)          pyprobe ok 8 (unreachable=1)
+tech: cdncheck ok 0, wafw00f ok 0, httpx_tech/whatweb/webanalyze ok 8
+urls: katana 67, hakrawler 493, gospider 529, gau 1508, urlfinder 714, subjs 0, waybackurls 0, unfurl 18
+```
+
+`scan_runs` (all six rows, nothing non-ok):
+
+```
+1 subs      completed  enforced
+2 dns       completed  enforced
+3 live      completed  enforced
+4 tech      completed  enforced
+5 urls      completed  enforced
+6 url_probe completed  enforced
+```
+
+Notes, stated plainly rather than explained away:
+
+- `crtsh` did **not** reproduce the 404 here: it answered 200 and returned `1 item(s)`, so this run exercises D47's
+  path only through the tests. Had it 404'd, the row would read `gap`, not `failed`, and the exit would still be 0.
+- The host count is 9, not the 36 of Part Q's capstone. No tool failed and no stage timed out; the external `subs`
+  sources simply answered with less this time (`certspotter 0`, `crtsh 1`, `urlscan 3`, `hackertarget 3`, local tools
+  8/8/5/4). It is upstream variability, not a regression: the `dns` stage saw 9 hosts and all five DNS tools agreed on
+  8 of them, the same internal consistency the earlier run showed.
+- Exit 0 with one gap is the documented B1-B4 behaviour: gaps are excluded from `failed_total`, `subs` is marked
+  incomplete, and the warning names the reason.
+
+### Tree state at the close
+
+`git status --short` empty; `pytest -q` 941 passed; `ruff check .` clean; `ruff format --check .` 92 files;
+`mypy src/reconkit` clean; `sha256sum scope.yaml` = `d45a3c90...eeee8b` (unchanged since the baseline).
