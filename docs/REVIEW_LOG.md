@@ -7177,3 +7177,104 @@ Docs only (`docs/PROGRESS.md` D41, `docs/09_TOOL_CONTRACTS.md` 4b). Three facts 
    now says fixture statuses are synthetic and not evidence.
 
 Also removed a duplicated truncated D38 paragraph left by the previous batch. Suite unchanged (928).
+
+## 2026-11-19 (close-out) N.2 - the five B1 exit-code cases, raw
+
+All commands run from the repo root with the venv active and `--no-color --db /tmp/n2.db`. No code change: every case
+already has a test (names below).
+
+### 1. otx HTTP 429 (real, no fixture)
+
+```
+$ reconkit subs -d testfire.net --tools otx --no-color --db /tmp/n2.db
+subs: running 1 tool(s)
+subs: otx gap 0 item(s)
+┃ otx  ┃ subs  ┃ gap    ┃ 0     ┃ otx: rate limited (HTTP 429) ┃
+0 hosts: 0 ALIVE, 0 DNS_ONLY, 0 SHUT_DOWN, 0 DEAD, 0 UNKNOWN | tools: 0 ok, 1
+gap, 0 failed, 0 skipped, 0 timeout
+passive scan completed with gaps - 1 stage(s) incomplete
+  subs: otx: rate limited (HTTP 429)
+EXIT=0
+```
+
+### 2. hackertarget free quota (mock, new fixture `tests/fixtures/hackertarget/quota.example.com.txt`)
+
+The real API answered normally this time (`hackertarget ok 3`, the quota was not exhausted again), so the quota answer is
+pinned with the sentence the real free tier returns.
+
+```
+$ reconkit subs -d quota.example.com --mock --tools hackertarget --no-color --db /tmp/n2.db
+passive scan completed with gaps - 1 stage(s) incomplete
+  subs: hackertarget: free quota exceeded
+EXIT=0
+```
+
+### 3. missing binary - the brief's "exit 5" does not survive contact with D9
+
+```
+$ reconkit subs -d example.com --tools amass --no-color --db /tmp/n2.db   # /usr/bin/amass is the wrong program here
+subs: running 0 tool(s)
+┃ amass ┃ subs  ┃ skipped ┃ -  ┃ not installed ┃
+warning: subs stage executed no tools: 1 tool(s) skipped (not installed)
+passive scan completed with gaps - 1 stage(s) incomplete
+  subs: 1 tool(s) skipped (not installed)
+EXIT=4
+```
+
+With a second, working tool in the same run it is exit 0 instead:
+
+```
+$ reconkit subs -d testfire.net --tools amass,otx --no-color --db /tmp/n2.db
+subs: otx gap 0 item(s)
+  subs: otx: rate limited (HTTP 429)
+EXIT=0
+```
+
+**Why 4/0 and not 5:** an absent binary is caught at **selection** (`skipped / not installed`), and docs/02 section 6
+already rules that absence is a completion gap (0), with "nothing usable at all" as 4. The `5` in docs/02's local-fault
+sentence is the *post-selection* failure (the binary was there at selection and gone/broken when executed, detail
+`not installed or not executable`), which `test_degraded_tools_never_exit_five_but_a_local_fault_does` pins at engine
+level; a CLI run cannot produce that race deterministically, so it is pinned by the test only. Recorded as a
+clarification, not a behaviour change.
+
+### 4. mixed: one gap + one hard failure (mock, `mix.example.com`)
+
+```
+$ reconkit subs -d mix.example.com --mock --tools hackertarget,otx --no-color --db /tmp/n2.db
+subs: otx failed 0 item(s)
+subs: hackertarget gap 0 item(s)
+┃ otx          ┃ subs ┃ failed ┃ 0 ┃ otx: expected passive_dns to be a list ┃
+┃ hackertarget ┃ subs ┃ gap    ┃ 0 ┃ hackertarget: free quota exceeded       ┃
+0 hosts: ... | tools: 0 ok, 1 gap, 1 failed, 0 skipped, 0 timeout
+EXIT=5
+```
+
+### 5. all OK (mock)
+
+```
+$ reconkit subs -d example.com --mock --tools otx,hackertarget --no-color --db /tmp/n2.db
+subs: otx ok 2 item(s)
+subs: hackertarget ok 1 item(s)
+subs: finished 2/2 tool(s), 3 item(s)
+... | tools: 1 ok, 0 gap, 0 failed, 0 skipped, 0 timeout
+EXIT=0
+```
+
+### Tests already covering these (the 909 -> 915 block, B1)
+
+- `tests/test_engine.py::test_degraded_tools_never_exit_five_but_a_local_fault_does` - all four engine cases in one test
+  (all-gap -> 0; gap+failed -> 5; missing-next-to-working -> 5; all-ok -> 0).
+- `tests/test_engine.py::test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`
+- `tests/test_engine.py::test_a_gap_does_not_hide_a_failed_tool`
+- `tests/test_adapters.py` - the classifier at adapter level: `test_429_is_a_gap_and_not_retried`,
+  `test_500_is_a_gap_and_not_retried` (B1), `test_a_5xx_from_the_upstream_is_a_gap`,
+  `test_hackertarget_free_quota_is_a_gap`, `test_hackertarget_quota_answer_is_a_gap`,
+  `test_a_404_is_still_a_failure_not_a_gap`, `test_a_429_gap_still_reports_its_own_duration`, and the parametrised
+  `test_classify_external_gap_matches_only_third_party_signatures`, whose B1 rows add `HTTP 500 Internal Server Error`
+  (True), `server error (HTTP 500)` (True), `500 items parsed` (False), `401 Unauthorized` (False), `403 Forbidden`
+  (False).
+- `tests/test_ui.py::test_a_gap_tool_is_shown_as_gap_and_named_in_the_block` and
+  `test_the_gaps_block_goes_to_stderr_and_the_json_carries_completion` - the block and `--json` `tools_gap`.
+- `tests/test_binary_adapters.py` - the stderr/exit-code path of the same classifier.
+
+No test was added: all five cases were already pinned.
