@@ -44,7 +44,9 @@ url_probe:
 # report lists across all hosts; 0 means no cap. A cut is always stated in the
 # report itself (urls_shown / urls_truncated), so a short list is never silent.
 report:
-  urls_max: 200
+  urls_max: 0                  # 0 = no cap; one report lists every stored URL
+  emit_lists: true             # subdomains/alive/dns_resolved/host-info files
+  per_host_folders: true       # hosts/<hostname>/{urls.txt,info.json}
 
 confidence:
   high_min_sources: 3

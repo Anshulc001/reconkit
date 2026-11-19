@@ -4,6 +4,13 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-19, D71): **a report folder now carries the host lists, per-host folders, and every URL.**
+  `report.txt`/`report.json` are unchanged except that `report.urls_max` defaults to `0` (no cap);
+  `subdomains.txt`, `alive.txt`, `dns_resolved.txt` (ALIVE + DNS_ONLY), `host-info.txt`, `host-info.json`
+  and `hosts/<hostname>/{urls.txt,info.json}` (only for hosts with URLs) are new. `report.emit_lists` and
+  `report.per_host_folders` (both true) switch them; `reconkit report` writes the same shape. Verified on
+  `results/mock/example.com/20261119T204517Z` (24 URLs, 3 hosts folders, 21 names). Suite 999 -> 1006.
+  Five non-doc files changed, exactly the item's limit. See D71 in REVIEW_LOG.
 - Status (2026-11-19, D70): **a URL-derived host gets DNS and (in active) a live check - never tech, never a crawl.**
   The D58 pass runs after `urls`, so the last annotating stage has already finished; measured
   `api`/`assets.slice.bank.in` as UNKNOWN with no status row and empty tech. Not implemented: a tech/crawl

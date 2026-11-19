@@ -597,7 +597,7 @@ def report_document(
     selection: ReportSelection | None = None,
     scope_warnings: Sequence[str] = (),
     urls: Sequence[UrlSnapshot] = (),
-    urls_max: int = 200,
+    urls_max: int = 0,
     mode: str | None = None,
     scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
@@ -672,7 +672,7 @@ def report_text(
     selection: ReportSelection | None = None,
     scope_warnings: Sequence[str] = (),
     urls: Sequence[UrlSnapshot] = (),
-    urls_max: int = 200,
+    urls_max: int = 0,
     mode: str | None = None,
     scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
@@ -748,6 +748,97 @@ def _report_tree_sections(
     return lines
 
 
+def _host_info_entry(row: HostSnapshot) -> dict[str, object]:
+    """One row of `host-info.json`, and the object a host's `info.json` copies."""
+
+    return {
+        "domain": row.fqdn,
+        "state": row.state.value,
+        "status": row.status_code,
+        "ips": list(row.ips),
+        "tech": list(row.tech),
+    }
+
+
+def _line(value: object) -> str:
+    """The `-` an empty cell prints in a list file."""
+
+    if value is None or value == "" or value == []:
+        return "-"
+    if isinstance(value, list | tuple):
+        return ", ".join(str(item) for item in value) if value else "-"
+    return str(value)
+
+
+def _write_report_lists(directory: Path, rows: Sequence[HostSnapshot]) -> None:
+    """`subdomains.txt`, `alive.txt`, `dns_resolved.txt`, `host-info.*` (D71).
+
+    Empty lists are written as empty files, not skipped: a script must be able
+    to tell "the run found nothing" from "the run did not write this file".
+    "DNS_ONLY" means the name resolves but answers no HTTP (docs/02 section 5).
+    """
+
+    _write_atomically(directory / "subdomains.txt", "".join(f"{row.fqdn}\n" for row in rows))
+    _write_atomically(
+        directory / "alive.txt",
+        "".join(f"{row.fqdn}\n" for row in rows if row.state is HostState.ALIVE),
+    )
+    _write_atomically(
+        directory / "dns_resolved.txt",
+        "".join(
+            f"{row.fqdn}\n" for row in rows if row.state in (HostState.ALIVE, HostState.DNS_ONLY)
+        ),
+    )
+    entries = [_host_info_entry(row) for row in rows]
+    _write_atomically(directory / "host-info.json", json.dumps(entries, indent=2) + "\n")
+    lines = ["domain | state | status | ips | tech"]
+    for row in rows:
+        lines.append(
+            " | ".join(
+                [
+                    row.fqdn,
+                    row.state.value,
+                    _line(row.status_code),
+                    _line(list(row.ips)),
+                    _line(list(row.tech)),
+                ]
+            )
+        )
+    _write_atomically(directory / "host-info.txt", "".join(f"{line}\n" for line in lines))
+
+
+def _write_per_host_folders(
+    directory: Path, rows: Sequence[HostSnapshot], urls: Sequence[UrlSnapshot]
+) -> None:
+    """`hosts/<hostname>/{urls.txt,info.json}` for hosts that have URLs (D71).
+
+    A host with no stored URL gets no folder: an empty directory is not
+    evidence, and the top-level lists already name every host. `urls.txt` is
+    that host's own list, so `report.urls_max` does not apply; a probed URL
+    carries its status after a tab, an unprobed one is the URL alone.
+    """
+
+    by_host: dict[str, list[UrlSnapshot]] = {}
+    for item in urls:
+        by_host.setdefault(item.host, []).append(item)
+    info = {row.fqdn: _host_info_entry(row) for row in rows}
+    for host, items in sorted(by_host.items()):
+        if not items or not host or host in {".", ".."} or "/" in host or "\\" in host:
+            continue
+        folder = directory / "hosts" / host
+        folder.mkdir(parents=True, exist_ok=True)
+        lines = [
+            item.url if item.status_code is None else f"{item.url}\t{item.status_code}"
+            for item in sorted(items, key=_url_rank)
+        ]
+        _write_atomically(folder / "urls.txt", "".join(f"{line}\n" for line in lines))
+        entry = info.get(
+            host,
+            {"domain": host, "state": "UNKNOWN", "status": None, "ips": [], "tech": []},
+        )
+        _write_atomically(folder / "info.json", json.dumps(entry, indent=2) + "\n")
+
+
 def write_field_report(
     directory: Path,
     target: str,
@@ -758,16 +849,20 @@ def write_field_report(
     selection: ReportSelection | None = None,
     scope_warnings: Sequence[str] = (),
     urls: Sequence[UrlSnapshot] = (),
-    urls_max: int = 200,
+    urls_max: int = 0,
     mode: str | None = None,
     scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
+    emit_lists: bool = True,
+    per_host_folders: bool = True,
 ) -> tuple[Path, Path]:
-    """Write `report.txt` and `report.json` into this run's folder.
+    """Write the whole report directory, not just `report.txt`/`report.json`.
 
     Both files are always written, whatever the field selection was, and both come
     from the same snapshots, so they cannot disagree. `selection` is not None only
-    when a display filter narrowed the rows (docs/02 section 5).
+    when a display filter narrowed the rows (docs/02 section 5). The list files
+    (`emit_lists`) and `hosts/<hostname>/` (`per_host_folders`) are on by
+    default; both read the same snapshots and make no request (D71).
     """
 
     json_path = directory / "report.json"
@@ -802,6 +897,13 @@ def write_field_report(
             hidden=hidden,
         ),
     )
+    # D71: the lists and per-host folders come from the same snapshots, so a
+    # reader can never find a URL in `hosts/<name>/urls.txt` that `report.txt`
+    # says the run did not store.
+    if emit_lists:
+        _write_report_lists(directory, rows)
+    if per_host_folders:
+        _write_per_host_folders(directory, rows, urls)
     return text_path, json_path
 
 

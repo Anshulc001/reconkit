@@ -561,9 +561,26 @@ One folder per domain per run, never reused:
 
 ```
 <results_dir>/<domain>/<YYYYmmddTHHMMSSZ>/
-  report.txt    selected fields, one row per host, aligned columns
-  report.json   the same rows as objects, plus target, run time and field keys
+  report.txt          selected fields, one row per host, aligned columns
+  report.json         the same rows as objects, plus target, run time and field keys
+  subdomains.txt      every stored name, one per line
+  alive.txt           ALIVE hosts only, one per line
+  dns_resolved.txt    ALIVE + DNS_ONLY; DNS_ONLY = resolves but answers no HTTP
+  host-info.txt       domain | state | status | ips | tech (no URLs)
+  host-info.json      the same rows as objects
+  hosts/<hostname>/
+    urls.txt          this host's URLs, one line each, status appended when probed
+    info.json         this host's row from host-info
 ```
+
+The five top-level lists and the `hosts/` tree are written by default
+(`report.emit_lists` and `report.per_host_folders`, both `true`). A
+`hosts/<hostname>/` folder is created only for a host that has at least one
+stored URL - an empty folder is not evidence. `subdomains.txt`,
+`alive.txt` and `dns_resolved.txt` are written even when empty, so a downstream
+script can tell "the run found nothing" from "the run did not write this file".
+`urls.txt` carries `<url>` alone when the URL was never probed and
+`<url>\t<status>` once `url_probe` stored one.
 
 - `results_dir` is the `config.yaml` key of that name (default `results`), used
   by `--config` like every other key.
@@ -601,11 +618,13 @@ One folder per domain per run, never reused:
   `config`, `upload`, `debug`, `phpinfo`, `swagger`, `graphql`, `.sql`, `.zip`,
   `.bak`, `dashboard`, `panel`, `test`, `dev`), (2) a URL with a query string,
   (3) a URL that answered `200`/`301`/`302`, (4) everything else. The cap is the
-  `config.yaml` key `report.urls_max` (default `200`, `0` = no cap) and it
-  applies to the **whole report**, not per host: `urls_shown` and
+  `config.yaml` key `report.urls_max` (default `0` = no cap, changed 2026-11-19)
+  and it applies to the **whole report**, not per host. With `0` every stored URL
+  is listed and `urls_truncated` stays `false`; with a cap, `urls_shown` and
   `urls_truncated` say exactly what was cut, and `report.txt` prints
   `urls: 200 of 300 shown (report.urls_max 200)` instead of leaving a short list
-  looking complete.
+  looking complete. `hosts/<hostname>/urls.txt` is never capped: it is that
+  host's own list.
 - **The text file gets the same two blocks.** After the hosts table,
   `=== Domains ===` lists the root and then one `  <host>   <STATE>  <CONFIDENCE>`
   line per subdomain (a single `69 subdomains, see hosts table` line past 50,

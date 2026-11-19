@@ -104,14 +104,18 @@ class UrlProbeConfig(_StrictModel):
 
 
 class ReportConfig(_StrictModel):
-    """How much one saved report lists (D62, docs/02 section 5).
+    """What one saved report directory contains (D62/D71, docs/02 section 5).
 
     `urls_max` caps the `urls_by_host` block across the whole report, not per
-    host; `0` means no cap. A cut is always stated in the report
-    (`urls_shown` / `urls_truncated`).
+    host; `0` (the default since D71) means no cap. A cut is always stated in
+    the report (`urls_shown` / `urls_truncated`). `emit_lists` writes the five
+    top-level list files. `per_host_folders` writes `hosts/<hostname>/` for
+    every host with at least one stored URL.
     """
 
-    urls_max: int = Field(default=200, ge=0)
+    urls_max: int = Field(default=0, ge=0)
+    per_host_folders: bool = True
+    emit_lists: bool = True
 
 
 class WildcardCheck(_StrictModel):

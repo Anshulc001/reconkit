@@ -793,3 +793,144 @@ def test_roots_has_one_entry_for_single_target() -> None:
     assert isinstance(roots, list) and len(roots) == 1
     assert roots[0]["domain"] == "example.com"
     assert roots[0]["host_count"] == 2
+
+
+# ------------------------------- (D71) lists, per-host folders, no URL cap
+
+
+def _info_row(
+    fqdn: str,
+    state: HostState = HostState.ALIVE,
+    *,
+    status_code: int | None = 200,
+    ips: tuple[str, ...] = ("192.0.2.1",),
+    tech: tuple[str, ...] = ("nginx",),
+) -> HostSnapshot:
+    return HostSnapshot(
+        fqdn=fqdn,
+        state=state,
+        confidence=Confidence.HIGH,
+        sources=("crtsh",),
+        status_code=status_code,
+        ports=(),
+        ips=ips,
+        tech=tech,
+    )
+
+
+def _write_report(
+    tmp_path: Path,
+    rows: list[HostSnapshot],
+    urls: list[UrlSnapshot],
+    **kwargs: object,
+) -> Path:
+    directory = tmp_path / "20261119T120000Z"
+    directory.mkdir()
+    ui.write_field_report(
+        directory,
+        "example.com",
+        rows,
+        ui.REPORT_FIELDS,
+        run_at=datetime(2026, 11, 19, 12, 0, 0, tzinfo=UTC),
+        urls=urls,
+        **kwargs,  # type: ignore[arg-type]
+    )
+    return directory
+
+
+def test_report_no_url_cap_by_default(tmp_path: Path) -> None:
+    """D71: `urls_max` defaults to 0, so every stored URL is listed."""
+    urls = [_url(f"https://example.com/page{index}", 404) for index in range(500)]
+    directory = _write_report(tmp_path, [_info_row("example.com")], urls)
+    document = json.loads((directory / "report.json").read_text(encoding="utf-8"))
+    assert document["urls_total"] == 500
+    assert document["urls_shown"] == 500
+    assert document["urls_truncated"] is False
+    assert len(document["urls_by_host"]["example.com"]) == 500
+
+
+def test_report_emits_per_host_folders(tmp_path: Path) -> None:
+    """D71: one `hosts/<name>/` per host with URLs, none for a host without."""
+    rows = [_info_row(f"h{index}.example.com") for index in range(3)]
+    rows.append(_info_row("quiet.example.com"))
+    urls = [_url(f"https://h{index}.example.com/a", 200) for index in range(3)]
+    directory = _write_report(tmp_path, rows, urls)
+    folders = sorted(path.name for path in (directory / "hosts").iterdir())
+    assert folders == ["h0.example.com", "h1.example.com", "h2.example.com"]
+    assert not (directory / "hosts" / "quiet.example.com").exists()
+
+
+def test_per_host_urls_file_contains_only_that_hosts_urls(tmp_path: Path) -> None:
+    """D71: each `urls.txt` is that host's list, with the status when probed."""
+    rows = [_info_row("a.example.com"), _info_row("b.example.com")]
+    urls = [
+        _url("https://a.example.com/one", 200),
+        _url("https://a.example.com/two", None),
+        _url("https://b.example.com/three", 301),
+    ]
+    directory = _write_report(tmp_path, rows, urls)
+    first = (directory / "hosts" / "a.example.com" / "urls.txt").read_text(encoding="utf-8")
+    second = (directory / "hosts" / "b.example.com" / "urls.txt").read_text(encoding="utf-8")
+    assert first.splitlines() == ["https://a.example.com/one\t200", "https://a.example.com/two"]
+    assert second.splitlines() == ["https://b.example.com/three\t301"]
+
+
+def test_report_emits_subdomains_alive_dns_resolved_lists(tmp_path: Path) -> None:
+    """D71: `dns_resolved.txt` is ALIVE + DNS_ONLY; `alive.txt` is ALIVE only."""
+    rows = [
+        _info_row("a.example.com", HostState.ALIVE),
+        _info_row("b.example.com", HostState.DNS_ONLY, status_code=None),
+        _info_row("c.example.com", HostState.DEAD, status_code=None),
+        _info_row("d.example.com", HostState.UNKNOWN, status_code=None),
+    ]
+    directory = _write_report(tmp_path, rows, [])
+
+    def lines(name: str) -> list[str]:
+        return (directory / name).read_text(encoding="utf-8").splitlines()
+
+    assert lines("subdomains.txt") == [
+        "a.example.com",
+        "b.example.com",
+        "c.example.com",
+        "d.example.com",
+    ]
+    assert lines("alive.txt") == ["a.example.com"]
+    assert lines("dns_resolved.txt") == ["a.example.com", "b.example.com"]
+
+
+def test_report_emits_host_info_without_urls(tmp_path: Path) -> None:
+    """D71: host-info carries no URL, in either the text or the JSON file."""
+    rows = [_info_row("a.example.com", ips=("192.0.2.1", "192.0.2.2"), tech=("nginx", "HSTS"))]
+    directory = _write_report(tmp_path, rows, [_url("https://a.example.com/admin", 200)])
+    text = (directory / "host-info.txt").read_text(encoding="utf-8")
+    assert "://" not in text
+    assert "a.example.com | ALIVE | 200 | 192.0.2.1, 192.0.2.2 | nginx, HSTS" in text
+    entries = json.loads((directory / "host-info.json").read_text(encoding="utf-8"))
+    assert entries == [
+        {
+            "domain": "a.example.com",
+            "state": "ALIVE",
+            "status": 200,
+            "ips": ["192.0.2.1", "192.0.2.2"],
+            "tech": ["nginx", "HSTS"],
+        }
+    ]
+
+
+def test_emit_lists_disabled_skips_lists(tmp_path: Path) -> None:
+    """D71: `report.emit_lists: false` leaves only the two report files."""
+    directory = _write_report(
+        tmp_path, [_info_row("a.example.com")], [], emit_lists=False, per_host_folders=False
+    )
+    assert sorted(path.name for path in directory.iterdir()) == ["report.json", "report.txt"]
+
+
+def test_urls_max_still_respected_when_set(tmp_path: Path) -> None:
+    """D71: setting `urls_max` still caps the report and says it did."""
+    urls = [_url(f"https://example.com/page{index}", 404) for index in range(500)]
+    directory = _write_report(tmp_path, [_info_row("example.com")], urls, urls_max=100)
+    document = json.loads((directory / "report.json").read_text(encoding="utf-8"))
+    assert document["urls_shown"] == 100
+    assert document["urls_truncated"] is True
+    text = (directory / "report.txt").read_text(encoding="utf-8")
+    assert "urls: 100 of 500 shown (report.urls_max 100)" in text

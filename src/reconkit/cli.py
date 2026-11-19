@@ -1093,6 +1093,10 @@ def _run_scan(
                 # refused still saves passive results; the artifact says so.
                 scope_limited=summary.scope_denied,
                 hidden=frozenset(excluded.sections),
+                # D71: the list files and per-host folders are report settings,
+                # on by default, and read the same snapshots as the two files.
+                emit_lists=config.report.emit_lists,
+                per_host_folders=config.report.per_host_folders,
             )
             if summary.scope_denied:
                 # D64: one line at run end. The pre-flight block says what will
@@ -1516,6 +1520,8 @@ def report_command(
             run_at=stored.started_at,
             urls=stored.urls,
             urls_max=config.report.urls_max,
+            emit_lists=config.report.emit_lists,
+            per_host_folders=config.report.per_host_folders,
         )
         shown = len(stored.urls)
         if config.report.urls_max:

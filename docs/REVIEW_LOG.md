@@ -77,6 +77,60 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 | PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `slice.bank.in` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.slice.bank.in/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
 
+## 2026-11-19 (D71) - a report folder carries lists, per-host folders, and every URL
+
+**Before.** A report folder held `report.txt` + `report.json`, the URL block was
+capped at `report.urls_max: 200`, and the only per-host view was inside
+`report.json`.
+
+**After (measured on a `--mock` run, `results/mock/example.com/20261119T204517Z`):**
+
+```
+$ ls -R <dir> | head -30
+alive.txt  dns_resolved.txt  host-info.json  host-info.txt  hosts
+report.json  report.txt  subdomains.txt
+<dir>/hosts: demo.testfire.net  testfire.net  www.testfire.net
+<dir>/hosts/www.testfire.net: info.json  urls.txt
+$ head -5 subdomains.txt        alias.example.com ... (21 names)
+$ head -5 alive.txt             api.example.com  www.example.com
+$ head -5 dns_resolved.txt      alias.example.com  api.example.com  www.example.com
+$ head -5 host-info.txt         domain | state | status | ips | tech
+                                alias.example.com | DNS_ONLY | - | - | -
+$ head -3 hosts/www.testfire.net/urls.txt
+https://www.testfire.net/admin/admin.aspx
+https://www.testfire.net/logout.jsp
+$ python -c 'json...' -> urls_total 24, urls_shown 24, urls_truncated False
+```
+
+**Design choices.**
+
+- `report.urls_max` default is now `0` (no cap); a set value still caps
+  `report.txt`/`report.json` and prints `urls: 100 of 500 shown`, and
+  `urls_truncated` stays honest. `hosts/<name>/urls.txt` is never capped.
+- `hosts/<name>/` exists only when that host has a stored URL (an empty folder
+  would be evidence that is not there); `info.json` falls back to
+  `state: UNKNOWN` for a URL host with no `subdomains` row, matching the URL
+  block's own rule.
+- `urls.txt` is `<url>` when unprobed and `<url>\t<status>` when `url_probe`
+  stored one; two `hosts/` names are impossible to confuse with a URL.
+- The three name lists are written even when empty; `host-info.txt/json` are
+  written even when there are no hosts (header / `[]`).
+- `emit_lists: false` and `per_host_folders: false` skip their outputs and
+  leave `report.txt`/`report.json` untouched; `reconkit report` passes the same
+  two settings through, so a rebuild has the same shape as a scan.
+
+**Tests (7).** `test_report_no_url_cap_by_default`,
+`test_report_emits_per_host_folders` (and asserts no folder for a URL-less
+host), `test_per_host_urls_file_contains_only_that_hosts_urls`,
+`test_report_emits_subdomains_alive_dns_resolved_lists`,
+`test_report_emits_host_info_without_urls` (asserts no `://` - a tech name such
+as `HTTP/3` is not a URL), `test_emit_lists_disabled_skips_lists`,
+`test_urls_max_still_respected_when_set` (100 of 500, `urls_truncated` true).
+Suite 999 -> 1006.
+
+**Files.** `ui.py`, `config.py`, `config.yaml`, `cli.py`, `tests/test_ui.py` -
+five non-doc files, at the item's limit, no stop rule fired.
+
 ## 2026-11-19 (D70) - a URL-derived host gets DNS and a live check, never tech or crawl
 
 **Question.** D58 adds URL-only hosts to `subdomains` after `urls`. `tech` and
