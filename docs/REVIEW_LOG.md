@@ -144,6 +144,30 @@ answers other traffic but resets this one; retrying would not help.
 Distribution (sample n=20): DNS_ONLY 20 (100%), ALIVE-wrong-scheme 0, ALIVE-dead-path 0, external 0, other 0.
 **The dominant cause is DNS_ONLY hosts** - 98.7% of the whole `-1` population, 67% of the unprobed candidates.
 
+**X.1b (same day, after the commit): the engine probed correctly.** A second random sample of 30 `-1` rows was
+re-probed with the **engine's own transport settings** (httpx, 10 s timeout, `reconkit/0.1` UA, no redirects,
+certificate verification on, the same `-1`/`-2` mapping) and with `curl -m 5`:
+
+```
+agree (engine still -1): 30/30 | disagree: 0
+```
+
+Every row: `engine_now = -1`, `curl5s = 000`, DNS resolves. The stored `-1`s are genuinely unanswering URLs, not a
+probe misconfiguration or a stale verdict. Host level, same day (httpx, 10 s, both schemes on `/`):
+
+```
+www.sakec.ac.in     | dns=['66.198.240.31']  | http=ConnectTimeout https=ConnectTimeout
+sakec.ac.in         | dns=['66.198.240.31']  | http=ConnectTimeout https=ConnectTimeout
+webmail.sakec.ac.in | dns=['66.198.240.31']  | http=ConnectTimeout https=ConnectTimeout
+koha.sakec.ac.in    | dns=['121.241.29.115'] | http=ConnectTimeout https=200
+ws.sakec.ac.in      | dns=['192.96.210.12']  | http=ReadError       https=TLS
+```
+
+`www`/apex/webmail share one address that answers nothing on either scheme, so DNS_ONLY is correct for them and the
+4 861-row skip is safe. The two exceptions are the ALIVE-host residue: `koha` answers **https** but not http (the 5
+stored rows are `http://` URLs), and `ws` answers only with an untrusted certificate. That is 6 of 4 982 rows (0.1%),
+which is why no scheme rewrite was attempted - Y.2 needs a scheme column and would buy 6 rows.
+
 Part Y (Y.1), code: `Store._dead_fqdns` -> `_unreachable_fqdns` with `state IN ('DEAD', 'DNS_ONLY')`,
 `ProbeCandidates.skipped_dead` -> `skipped_unreachable`, engine line
 `url_probe: skipping N URL(s) whose host is unreachable`. ALIVE / SHUT_DOWN / UNKNOWN / no-row hosts still probe.
