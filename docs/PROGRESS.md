@@ -4,7 +4,13 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status: **Parts T and U done (`b6df719` plus this docs commit): per-request timeouts are adapter constants (D53),
+- Status (2026-11-19, D55): **the url_probe's 4 982 `-1` answers are DNS_ONLY hosts, not a probe bug - the unreachable
+  filter now covers DNS_ONLY too.** 966 tests, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical
+  (`d45a3c90...eeee8b`). On the sakec.ac.in DB 4 916 of the 4 982 `-1` rows (98.7%) sit on DNS_ONLY hosts - 4 861 on
+  `www.sakec.ac.in` alone - and 0 of the 20 sampled rows is "ALIVE host, wrong scheme"; the change takes unprobed
+  candidates 2 147 -> **707** (-67%) and `--reprobe-urls` 5 001 -> 733. `waybackurls` stays deferred (W). See D55 and
+  the Part X-Y entry in REVIEW_LOG.
+- Previous status: **Parts T and U done (`b6df719` plus this docs commit): per-request timeouts are adapter constants (D53),
   and the first sakec.ac.in engine run is recorded (D53 addendum).** 961 tests, `ruff`/`format`/`mypy` clean, tree
   clean, `scope.yaml` byte-identical (`d45a3c90...eeee8b`). The run, made **once**, exited **0** in 1 060.685 s:
   `69 hosts: 12 ALIVE, 27 DNS_ONLY, 0 SHUT_DOWN, 29 DEAD, 1 UNKNOWN | tools: 26 ok, 2 gap, 0 failed, 2 skipped,
@@ -264,12 +270,23 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   stage 0.3s, 0 partial`, summary `..., 1 killed, 0 timeout`, the `⚠ 1 tool(s) stopped early — partial output kept`
   block, **exit 0**. A run where every tool is stopped is still a completed run; only the budget (`timeout`) exits 5.
 
+- **D55 (2026-11-19): the url_probe also skips DNS_ONLY hosts; the filter is now "unreachable".** The 4 982 `-1`
+  answers on the sakec.ac.in DB were investigated (Part X) and **4 916 of them (98.7%) sit on DNS_ONLY hosts** - 4 861 on
+  `www.sakec.ac.in` alone, a host that resolves and then times out (20/20 sampled rows: `000` after 5 s, curl exit 28);
+  the 6 ALIVE-host `-1` rows are dead paths (timeout / reset by peer, not a scheme mismatch), 58 are on DEAD hosts and 2
+  on a host that does not resolve. A DNS_ONLY host never served HTTP, so its URLs cannot answer: `_dead_fqdns` became
+  `_unreachable_fqdns` (`state IN ('DEAD', 'DNS_ONLY')`), `ProbeCandidates.skipped_dead` became `skipped_unreachable`,
+  and the line is `url_probe: skipping N URL(s) whose host is unreachable`. Measured on the sakec.ac.in DB: unprobed
+  candidates **2 147 -> 707** (1 440 skipped, -67%), `--reprobe-urls` 5 001 -> 733 (6 414 skipped of 7 147). ALIVE,
+  SHUT_DOWN, UNKNOWN and unrecorded hosts are still probed - two known facts, not a heuristic. Suite 965 -> 966.
+
 - **D54 (2026-11-19): the url_probe skips URLs whose host is already known DEAD.** `Store.probe_candidates` now
   returns `ProbeCandidates(rows, skipped_dead)` and drops a URL whose host the latest state pass stored as
   `subdomains.state = 'DEAD'`; the filter runs **before** `limit` is filled, so a skipped row never eats a probe
   slot. Kept on purpose: a URL whose host has no `subdomains` row (never resolved), whose host is
   ALIVE/DNS_ONLY/SHUT_DOWN/UNKNOWN, and a URL with no parseable host - the only rule is "known DEAD". The engine
-  prints `url_probe: skipping N URL(s) whose host is DEAD` only when the count is non-zero. **Measured against the
+  prints `url_probe: skipping N URL(s) whose host is DEAD` only when the count is non-zero (D55 widened the filter to
+  DNS_ONLY and renamed the line to `...whose host is unreachable`). **Measured against the
   one sakec.ac.in run, and the filter is not the bottleneck:** of the 2 147 URLs still `NULL`, **0 point at a DEAD
   host** (1 440 DNS_ONLY, 658 ALIVE, 49 on hosts with no row), so candidates stay 2 147 -> **2 147** with
   `skipped_dead = 0`; under `--reprobe-urls` the same DB skips **58 of 5 001**. The real cost is in the answers: of

@@ -76,6 +76,97 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
+## 2026-11-19 (Parts X-Y) - the 4 982 `-1` answers are DNS_ONLY hosts (D55)
+
+Part X, on a copy of `recon.db` (target_id 6), no code change. Sample (`ORDER BY RANDOM() LIMIT 20`) with the parsed
+host, its recorded state and one manual `curl -m 5` per URL; every URL in the sample is on a `sakec.ac.in` host, so
+none needed the external-host skip:
+
+```
+https://www.sakec.ac.in/wp-content/uploads/2025/03/L2.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.054597 (28)
+https://www.sakec.ac.in/wp-includes/js/mediaelement/wp-mediaelement.min.css?ver=6.3.1 | www.sakec.ac.in | DNS_ONLY | https | 000 5.057891 (28)
+https://www.sakec.ac.in/wp-content/uploads/2024/11/research2-980x350.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.060017 (28)
+https://www.sakec.ac.in/wp-content/uploads/2023/07/Connectwise.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.059072 (28)
+https://www.sakec.ac.in/wp-content/uploads/2024/02/tbi-ev4-400x284.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.059399 (28)
+https://www.sakec.ac.in/wp-includes/js/mediaelement/mediaelementplayer-legacy.min.css?ver=4.2.16 | www.sakec.ac.in | DNS_ONLY | https | 000 5.059581 (28)
+https://www.sakec.ac.in/wp-content/uploads/2022/06/Samparka-2019-11-480x321.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.055450 (28)
+https://www.sakec.ac.in/wp-content/uploads/2025/04/ADS-980x523.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.050157 (28)
+http://webmail.sakec.ac.in/ | webmail.sakec.ac.in | DNS_ONLY | http | 000 5.053422 (28)
+https://www.sakec.ac.in/wp-content/et-cache/25911/et-core-unified-tb-232-deferred-25911.min.css?ver=1778245344 | www.sakec.ac.in | DNS_ONLY | https | 000 5.059961 (28)
+https://www.sakec.ac.in/wp-content/uploads/2022/06/2-307-SE-min.pdf | www.sakec.ac.in | DNS_ONLY | https | 000 5.058850 (28)
+https://www.sakec.ac.in/wp-content/et-cache/8068/et-core-unified-8068.min.css?ver=1751271748 | www.sakec.ac.in | DNS_ONLY | https | 000 5.059957 (28)
+https://www.sakec.ac.in/wp-content/et-cache/72/et-divi-dynamic-72.css?ver=1658701566 | www.sakec.ac.in | DNS_ONLY | https | 000 5.058021 (28)
+https://www.sakec.ac.in/wp-content/uploads/2024/07/Program-Intake-480x614.jpg | www.sakec.ac.in | DNS_ONLY | https | 000 5.059373 (28)
+https://www.sakec.ac.in/wp-content/et-cache/72/et-core-unified-72.min.css?ver=1714217519 | www.sakec.ac.in | DNS_ONLY | https | 000 5.059127 (28)
+https://www.sakec.ac.in/wp-content/et-cache/72/et-core-unified-deferred-72.min.css?ver=1731669203 | www.sakec.ac.in | DNS_ONLY | https | 000 5.051134 (28)
+https://www.sakec.ac.in/wp-content/plugins/contact-form-7/includes/css/styles.css?ver=6.1.3 | www.sakec.ac.in | DNS_ONLY | https | 000 5.059423 (28)
+https://www.sakec.ac.in/wp-content/uploads/2023/10/IPR-KAPILA.png | www.sakec.ac.in | DNS_ONLY | https | 000 5.050410 (28)
+https://www.sakec.ac.in/wp-content/uploads/2025/04/Placement-Policy-SAKEC-_compressed.pdf | www.sakec.ac.in | DNS_ONLY | https | 000 5.058634 (28)
+https://www.sakec.ac.in/wp-content/themes/Divi/js/scripts.min.js?ver=4.27.5 | www.sakec.ac.in | DNS_ONLY | https | 000 5.049882 (28)
+```
+
+Every row is the same bucket: **DNS_ONLY host** (resolves, never serves HTTP). Then the whole population, so the sample
+is not the argument:
+
+```
+total -1: 4982
+by state: {'DNS_ONLY': 4916, 'DEAD': 58, 'ALIVE': 6, 'UNKNOWN': 2}
+by scheme: {'http': 115, 'https': 4867}
+  ('DNS_ONLY', 'https'): 4836 (97.1%)
+  ('DNS_ONLY', 'http'):    80 (1.6%)
+  ('DEAD', 'http'):        29 (0.6%)
+  ('DEAD', 'https'):       29 (0.6%)
+  ('ALIVE', 'http'):        5 (0.1%)
+  ('ALIVE', 'https'):       1 (0.0%)
+  ('UNKNOWN', 'http'):      1 (0.0%)
+  ('UNKNOWN', 'https'):     1 (0.0%)
+27 distinct DNS_ONLY hosts; top: www.sakec.ac.in 4861, sakec.ac.in 5, admission.sakec.ac.in 2, ...
+NULL (unprobed) rows by state: {'<no row>': 49, 'ALIVE': 658, 'DNS_ONLY': 1440} total 2147
+answered rows (status > 0) by state: {'ALIVE': 16} total 16
+```
+
+Classification of the sample: DNS_ONLY 20/20 (100%), ALIVE-wrong-scheme 0, ALIVE-dead-path 0, external host 0,
+other 0. **"ALIVE host, wrong scheme" is ruled out for the population as well:** all 6 ALIVE-host `-1` rows were
+re-checked directly - `http://koha.sakec.ac.in/` 000 after 6.0 s (28), `http://library.sakec.ac.in/` 000/28,
+`http://librarystaff.sakec.ac.in/` 000/28, `http://ws.sakec.ac.in/` 000/0.52 s (56 "Connection reset by peer"),
+`http://www.ws.sakec.ac.in/` 000/0.56 s (56), `https://autodiscover.sakec.ac.in/` 000/6.0 s (28) - none answers on
+the other scheme either. The two UNKNOWN rows are `mail.sakec.ac.in`, which no longer resolves (curl 6).
+
+Three case studies, one per top bucket (DNS_ONLY, DEAD, ALIVE-dead-path):
+
+1. `https://www.sakec.ac.in/wp-content/uploads/2025/03/L2.jpg` - DNS_ONLY - `000` after 5.05 s, curl 28 "Connection
+timed out": the host resolves, nothing listens on 443. This one host is 4 861 of the 4 982 `-1` rows.
+2. `http://koha.sakec.ac.in/` (DEAD rows behave the same way; koha is ALIVE but its path list is historical) - `000`
+after 6.0 s, curl 28: the path is from an old archive crawl and no longer exists.
+3. `http://ws.sakec.ac.in/` - ALIVE, dead path - `000` in 0.52 s, curl 56 "Connection reset by peer": the host
+answers other traffic but resets this one; retrying would not help.
+
+Distribution (sample n=20): DNS_ONLY 20 (100%), ALIVE-wrong-scheme 0, ALIVE-dead-path 0, external 0, other 0.
+**The dominant cause is DNS_ONLY hosts** - 98.7% of the whole `-1` population, 67% of the unprobed candidates.
+
+Part Y (Y.1), code: `Store._dead_fqdns` -> `_unreachable_fqdns` with `state IN ('DEAD', 'DNS_ONLY')`,
+`ProbeCandidates.skipped_dead` -> `skipped_unreachable`, engine line
+`url_probe: skipping N URL(s) whose host is unreachable`. ALIVE / SHUT_DOWN / UNKNOWN / no-row hosts still probe.
+Measured on the sakec copy:
+
+```
+NULL rows (unfiltered): 2147
+limit=5000: rows=707 skipped_unreachable=1440
+limit=5001: rows=707 skipped_unreachable=1440
+reprobe limit=5001: rows=733 skipped_unreachable=6414   (7147 total rows)
+```
+
+Drop 1 440 of 2 147 (**67%**, above the 10% floor). The `-1` bucket the filter removes: 1 440 unprobed URLs on
+DNS_ONLY hosts; of the 4 982 existing `-1` rows it would have prevented 4 916. Tests: new
+`test_probe_candidates_skips_urls_for_dns_only_hosts` (3 URLs, one DNS_ONLY -> 2 candidates, skip 1); the engine test
+renamed `test_probe_candidates_logs_unreachable_skip_count` (6 www + 4 DEAD + 2 DNS_ONLY -> `skipping 6`, `calls == 6`,
+no non-www host requested); the DEAD and no-row tests still pass unchanged in meaning. Focused run:
+
+```
+$ pytest -q tests/test_store.py -k probe_candidates tests/test_engine.py -k probe
+24 passed, 216 deselected in 2.36s
+```
+
 ## 2026-11-19 (Part W) - waybackurls returns 0 on sakec.ac.in: upstream, deferred
 
 Adapter path (`src/reconkit/adapters/waybackurls.py`): `build_command` returns `[self.binary_path() or self.binary]`

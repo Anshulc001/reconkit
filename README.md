@@ -99,6 +99,10 @@ Two things do not work on every machine, and neither is a defect in reconkit:
 - **Screenshots need a Chrome-family browser.** `gowitness` execs `google-chrome`, so on a box with only `/usr/bin/chromium` `doctor` reports `chromium missing` and the `shots` stage produces no images.
 - **`masscan`'s build path is unverified here.** `libpcap-dev` is absent on this box, so only the installed binary has been exercised; a real `masscan` run also needs root.
 
+## Known upstream limitations
+
+- `waybackurls` returns 0 items when archive.org is offline (HTTP 503): it cannot distinguish "no data" from "service down", so its `urls` row can read `ok 0` while the archive actually has data (docs/09 section 4a2b).
+
 ## Legal disclaimer
 
 reconkit is intended for **authorized security testing only**. Use it only on systems you own or where you have explicit written permission (for example an in-scope bug bounty program or a signed engagement). Unauthorized scanning may be illegal. The authors assume no liability for misuse.

@@ -1098,13 +1098,26 @@ state pass already recorded as `DEAD` - that host did not resolve or went silent
 its URLs can only be paid for and thrown away. `Store.probe_candidates` applies the
 filter **before** the `max_urls` limit is filled (a skipped row never eats a probe
 slot) and reports how many it dropped; the engine prints
-`url_probe: skipping N URL(s) whose host is DEAD` when that number is non-zero. Only
+`url_probe: skipping N URL(s) whose host is DEAD` (D55 widened it to
+`...whose host is unreachable`) when that number is non-zero. Only
 a **known** DEAD state is enough to skip: a URL whose host has no `subdomains` row
 (never resolved), whose host is ALIVE/DNS_ONLY/SHUT_DOWN/UNKNOWN, or whose host
 cannot be parsed is still probed. Measured on the one sakec.ac.in run: **0 of the
 2 147 `NULL` URLs** pointed at a DEAD host (2 147 -> 2 147 candidates) and 58 of
 5 001 under `--reprobe-urls`; the pass's real cost is the 4 982 `-1` answers out of
 5 000 probes, not dead hosts.
+
+**DNS_ONLY hosts too (D55, 2026-11-19).** The same skip now covers `DNS_ONLY` as
+well: those hosts resolved in the DNS stage but never answered an HTTP probe, so
+their URLs cannot answer either. Measured on the one sakec.ac.in run: **4 916 of
+the 4 982 `-1` answers (98.7%) sat on DNS_ONLY hosts** - 4 861 of them on
+`www.sakec.ac.in` alone, which resolves and then times out - and **0 of the 20
+randomly sampled `-1` URLs was "ALIVE host, wrong scheme"** (the 6 ALIVE-host
+`-1` rows are paths that time out or reset by peer, not a scheme mismatch). With
+both states skipped the unprobed candidate set goes 2 147 -> **707** (-67%) and
+`--reprobe-urls` 5 001 -> 733, and the progress line reads
+`url_probe: skipping N URL(s) whose host is unreachable`. Only DEAD and DNS_ONLY
+skip; ALIVE, SHUT_DOWN, UNKNOWN and hosts with no row are still probed.
 
 `-1` and `-2` are *stored answers* ("no answer" and "answered with a certificate that does not verify"), so neither is retried;
 `NULL` keeps its single meaning of "not probed yet". The probe runs through the

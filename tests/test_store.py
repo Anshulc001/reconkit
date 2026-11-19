@@ -360,7 +360,22 @@ def test_probe_candidates_skips_urls_with_dead_hosts(store: Store) -> None:
         "https://alive.example.com/b",
         "https://never.example.com/c",
     ]
-    assert plan.skipped_dead == 1
+    assert plan.skipped_unreachable == 1
+
+
+def test_probe_candidates_skips_urls_for_dns_only_hosts(store: Store) -> None:
+    """D55: a DNS_ONLY host resolved but never served HTTP, so its URLs are skipped."""
+    target_id, run_id = make_run(store)
+    store.upsert_subdomain(target_id, "dns-only.example.com", run_id=run_id, state="DNS_ONLY")
+    store.upsert_url(target_id, "https://dns-only.example.com/a", run_id=run_id)
+    store.upsert_url(target_id, "https://alive.example.com/b", run_id=run_id)
+    store.upsert_url(target_id, "https://never.example.com/c", run_id=run_id)
+    plan = store.probe_candidates(target_id, limit=10)
+    assert [row["url"] for row in plan.rows] == [
+        "https://alive.example.com/b",
+        "https://never.example.com/c",
+    ]
+    assert plan.skipped_unreachable == 1
 
 
 def test_probe_candidates_keeps_urls_with_no_host_row(store: Store) -> None:
@@ -371,7 +386,7 @@ def test_probe_candidates_keeps_urls_with_no_host_row(store: Store) -> None:
     store.upsert_url(target_id, "not-a-url", run_id=run_id)
     plan = store.probe_candidates(target_id, limit=10)
     assert [row["url"] for row in plan.rows] == ["https://never.example.com/x", "not-a-url"]
-    assert plan.skipped_dead == 0
+    assert plan.skipped_unreachable == 0
 
 
 def test_probe_candidates_skip_does_not_eat_the_limit(store: Store) -> None:
@@ -386,7 +401,7 @@ def test_probe_candidates_skip_does_not_eat_the_limit(store: Store) -> None:
         "https://alive.example.com/b",
         "https://alive.example.com/c",
     ]
-    assert plan.skipped_dead == 1
+    assert plan.skipped_unreachable == 1
 
 
 def test_set_host_duplicate_updates_in_place_and_keeps_state(store: Store) -> None:

@@ -375,15 +375,15 @@ def _url_host(url: str) -> str:
 
 @dataclass(frozen=True)
 class ProbeCandidates:
-    """What the `url_probe` stage should send a request to (D23, D54).
+    """What the `url_probe` stage should send a request to (D23, D54, D55).
 
-    `skipped_dead` is the number of URLs left out because their host is already
-    known DEAD. It never shrinks `rows`: the filter runs before the limit is
-    filled, so a skipped row does not eat a probe slot.
+    `skipped_unreachable` is the number of URLs left out because their host is
+    already known DEAD or DNS_ONLY. It never shrinks `rows`: the filter runs
+    before the limit is filled, so a skipped row does not eat a probe slot.
     """
 
     rows: list[dict[str, object]]
-    skipped_dead: int
+    skipped_unreachable: int
 
 
 class Store:
@@ -886,35 +886,36 @@ class Store:
         (`--reprobe-urls`, D24) returns every URL, including ones that already
         carry an answer, so a live URL that has since gone dead can be found.
 
-        D54: a URL whose host the latest state pass recorded as `DEAD` is not
-        probed at all - that host did not resolve or went silent, so its URLs
-        can only be paid for and thrown away. Only a **known** DEAD state is
-        enough to skip: a URL whose host has no `subdomains` row (never
-        resolved), whose host is ALIVE/DNS_ONLY/SHUT_DOWN/UNKNOWN, or whose
-        host cannot be parsed is kept. The filter runs before the limit is
-        filled, so a skipped row never eats a probe slot.
+        D54/D55: a URL whose host the latest state pass recorded as `DEAD` or
+        `DNS_ONLY` is not probed at all - a dead host went silent, and a
+        DNS_ONLY host resolved but never served HTTP, so in both cases the URL
+        can only be paid for and thrown away. Only those two **known** states
+        are enough to skip: a URL whose host has no `subdomains` row (never
+        resolved), whose host is ALIVE/SHUT_DOWN/UNKNOWN, or whose host cannot
+        be parsed is kept. The filter runs before the limit is filled, so a
+        skipped row never eats a probe slot.
         """
         if reprobe:
             sql = "SELECT id, url FROM urls WHERE target_id = ? ORDER BY id"
         else:
             sql = "SELECT id, url FROM urls WHERE target_id = ? AND status_code IS NULL ORDER BY id"
-        dead = self._dead_fqdns(target_id)
+        unreachable = self._unreachable_fqdns(target_id)
         found: list[dict[str, object]] = []
         skipped = 0
         for row in self._conn.execute(sql, (target_id,)):
             url = str(row["url"])
-            if dead and _url_host(url) in dead:
+            if unreachable and _url_host(url) in unreachable:
                 skipped += 1
                 continue
             found.append({"id": int(row["id"]), "url": url})
             if len(found) >= limit:
                 break
-        return ProbeCandidates(rows=found, skipped_dead=skipped)
+        return ProbeCandidates(rows=found, skipped_unreachable=skipped)
 
-    def _dead_fqdns(self, target_id: int) -> set[str]:
-        """Hosts the latest state pass recorded as `DEAD` (D54)."""
+    def _unreachable_fqdns(self, target_id: int) -> set[str]:
+        """Hosts the latest state pass recorded as `DEAD` or `DNS_ONLY` (D54, D55)."""
         rows = self._conn.execute(
-            "SELECT fqdn FROM subdomains WHERE target_id = ? AND state = 'DEAD'",
+            "SELECT fqdn FROM subdomains WHERE target_id = ? AND state IN ('DEAD', 'DNS_ONLY')",
             (target_id,),
         ).fetchall()
         return {str(row["fqdn"]).lower().rstrip(".") for row in rows}

@@ -3715,25 +3715,30 @@ async def test_url_probe_is_skipped_in_mock_mode(tmp_path: Path) -> None:
     )
 
 
-async def test_probe_candidates_logs_the_skip_count(tmp_path: Path) -> None:
-    """D54: a probe pass says how many URLs it dropped for a DEAD host."""
+async def test_probe_candidates_logs_unreachable_skip_count(tmp_path: Path) -> None:
+    """D55: a probe pass says how many URLs it dropped for an unreachable host."""
     lines: list[str] = []
     calls: list[str] = []
     transport = _probe_transport({}, calls)
-    urls = [f"https://www.example.com/{index}" for index in range(6)] + [
-        f"https://dead.example.com/{index}" for index in range(4)
-    ]
+    urls = (
+        [f"https://www.example.com/{index}" for index in range(6)]
+        + [f"https://dead.example.com/{index}" for index in range(4)]
+        + [f"https://dns-only.example.com/{index}" for index in range(2)]
+    )
     engine = _probe_engine(
         tmp_path, urls, transport=transport, scope_text=None, progress=lines.append
     )
     target_id = engine.store.create_target("example.com")
     dns_run = engine.store.create_scan_run(target_id, "dns")
     engine.store.upsert_subdomain(target_id, "dead.example.com", run_id=dns_run, state="DEAD")
+    engine.store.upsert_subdomain(
+        target_id, "dns-only.example.com", run_id=dns_run, state="DNS_ONLY"
+    )
     await engine.run("example.com", ScanOptions(active=True))
-    assert [line for line in lines if "whose host is DEAD" in line] == [
-        "url_probe: skipping 4 URL(s) whose host is DEAD"
+    assert [line for line in lines if "whose host is unreachable" in line] == [
+        "url_probe: skipping 6 URL(s) whose host is unreachable"
     ]
-    assert [url for url in calls if "dead.example.com" in url] == []
+    assert [url for url in calls if "www.example.com" not in url] == []
     assert len(calls) == 6
 
 
