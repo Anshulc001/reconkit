@@ -784,15 +784,49 @@ Three owner decisions. Nothing here is a code defect waiting to be found.
 **Untested edge cases after the A.2 audit** (list, not work): a target with thousands of hosts (no test above 43 and
 no host-count ceiling), resuming a run interrupted mid-stage (Ctrl+C itself is tested), CDN IP collapse changing a
 verdict (no test), IDN/unicode and 10 KB URLs (rejected or unlimited by code, no test either way), and a stalled tool
-other than `urlfinder` (only `urlfinder` has an idle kill; the others rely on their cap). `gau`, `katana`, `gospider`
-and `nikto` now have caps but no end-to-end test of a capped run; the unit-level `_limits` tests are the evidence.
+other than `urlfinder` (since D52 every classed tool has an idle kill, but only the mock all-silent run proves one end
+to end, with a 0.3 s window; no real tool has been caught by a production window yet). `gau`, `katana`, `gospider`
+and `nikto` were the tools whose caps D52 deleted; the idle-kill evidence is the `_limits`/watchdog tests and the
+all-silent run in REVIEW_LOG "D52 addendum".
 
 **Part C's follow-up (no D number yet).** `live` cannot seed `urls` because `HostStatusRecord` carries no URL and its
 `status_code` is `None` for `httprobe` rows; the fix is `url` on the model plus three adapters plus the engine write
 (five files, four tests), recorded in REVIEW_LOG "C". Nothing was invented in this batch.
 
-**For the reviewer:** tree clean at `a0eac33` (code) / this docs commit, **43 commits ahead of `reconkit/main`**,
-**951 tests**, `scope.yaml` byte-identical.
+**New 2026-11-19: `ctx.timeout` is the stage budget and seven adapters feed it into per-request timeouts (D52
+pre-flight; the sakec.ac.in engine run was not performed and needs a ruling).** D52 changed `RunContext.timeout`
+from `timeouts.per_tool_default` (600 s) to the stage budget (`max(1.0, stage_budget)`, `engine._run_tools`). Raw
+pre-flight at `41387e0`:
+
+```
+$ grep -rn 'ctx.timeout\|self.ctx.timeout\|context.timeout' src/reconkit/adapters/
+src/reconkit/adapters/gowitness.py:133:                    timeout=ctx.timeout,      # per-URL child run
+src/reconkit/adapters/hakrawler.py:83:            str(max(1, int(ctx.timeout))),      # -timeout, seconds per URL
+src/reconkit/adapters/pyprobe.py:86:            timeout=ctx.timeout,                # httpx client timeout
+src/reconkit/adapters/httprobe.py:53:            str(max(1, int(ctx.timeout * 1000))),  # -t, milliseconds per probe
+src/reconkit/adapters/nikto.py:84:        deadline = started + ctx.timeout      # per-host share of the budget
+src/reconkit/adapters/gospider.py:87:            str(max(1, int(ctx.timeout))),      # -m, seconds per request
+src/reconkit/adapters/subjs.py:68:            str(max(1, int(ctx.timeout))),      # -t, seconds per request
+src/reconkit/adapters/urlfinder.py:71:        budget = max(1, int(ctx.timeout))    # capped at 30 s by REQUEST_TIMEOUT_S
+src/reconkit/adapters/gau.py:57:            f"--timeout={min(HTTP_TIMEOUT_S, max(1, int(ctx.timeout)))}"  # capped at 45 s
+src/reconkit/adapters/base.py:310:            run_exec, argv, timeout=ctx.timeout, env=...   # read-back child
+src/reconkit/adapters/base.py:331:        budget = ctx.timeout               # the run's hard wall (intended)
+src/reconkit/adapters/base.py:675:        timeout = ctx.timeout              # HttpAdapter request timeout
+src/reconkit/adapters/pyscan.py:149:            ... timeout=ctx.timeout)       # per-connection connect timeout
+```
+
+`urlfinder` and `gau` clamp the value to their own per-request ceilings (30 s / 45 s) and `nikto` converts it into a
+per-host share, which is what 4a2b/D52 intended. The other seven (`hakrawler -timeout`, `gospider -m`, `subjs -t`,
+`httprobe -t` in ms, `pyprobe`/`gowitness`/`HttpAdapter` client timeouts, `pyscan` connect) use the run budget as a
+**per-request** timeout; before D52 that was a flat 600 s, now it is whatever the stage's budget is. With the batch's
+`--phase-timeout 600` the value is unchanged, but a run without the flag hands the `urls` stage's 1800 s to three
+crawlers per request, and `httprobe` 1 800 000 ms. **Decision needed:** does `ctx.timeout` mean "this stage's
+remaining time" for every adapter (status quo), or do these flags get their own constants the way `gau`/`urlfinder`
+already do? No code changed, no scan was run.
+
+**For the reviewer:** tree clean at `41387e0` plus this docs commit, **45 commits ahead of `reconkit/main`**,
+**950 tests**, `scope.yaml` byte-identical (`d45a3c90...eeee8b`). The first sakec.ac.in engine run was **not
+performed**: its pre-flight stopped the batch over `ctx.timeout` semantics (entry above).
 
 ## Three questions for the owner (2026-11-19)
 
