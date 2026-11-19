@@ -4,6 +4,11 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D83): **the repo now has an MIT LICENSE and matching
+  package metadata.** Copyright 2026 Anshul. `pyproject.toml` carries
+  `license = {text = "MIT"}`, `authors = [{name = "Anshul"}]` and classifiers
+  (MIT, Python 3.11-3.13, POSIX Linux, Security); README ends with a License
+  section pointing at `LICENSE`. No behaviour change; suite stays 1032.
 - Status (2026-11-20, D82): **active/full scans now fail closed when no
   `scope.yaml` is present.** The CLI refuses before `Engine.open` with exit 3 and
   the exact message `Error: No scope.yaml found. Active scanning requires a scope

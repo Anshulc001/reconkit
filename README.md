@@ -206,3 +206,7 @@ Two things do not work on every machine, and neither is a defect in reconkit:
 ## Legal disclaimer
 
 reconkit is intended for **authorized security testing only**. Use it only on systems you own or where you have explicit written permission (for example an in-scope bug bounty program or a signed engagement). Unauthorized scanning may be illegal. The authors assume no liability for misuse.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
