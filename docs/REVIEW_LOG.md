@@ -7864,3 +7864,80 @@ three gaps (502 / quota / 429), zero failures, exit 0, `urlfinder` unchanged at 
 Suite `941 -> 948` (+7: six named tests plus `test_a_tool_with_no_class_gets_no_cap`), and the D47 tests
 stayed green through the `external:` migration. `ruff check .` clean, `ruff format --check .` 92 files,
 `mypy src/reconkit` clean.
+
+## 2026-11-19 (scalability) C - live->urls dedup: STOPPED by the part's own rule
+
+### C.1 Raw investigation
+
+The live stage writes hosts, not URLs. `_write_host` in `engine.py` (the ALIVE path):
+
+```
+        self.store.append_host_status(
+            sub_id, run_id, transition.state.value,
+            status_code=None if best is None else best.status_code,
+            title=None if best is None else best.title,
+            location=None if best is None else best.location,
+            ...
+```
+
+`best` is a `HostStatusRecord`, whose every field is (`models.py`):
+
+```
+class HostStatusRecord(BaseModel):
+    fqdn: str; source: str; state: HostState
+    status_code: int | None = None
+    title: str | None = None
+    location: str | None = None
+    detail: str | None = None
+    ips: list[str] = []; tech: list[str] = []; waf: str | None = None
+```
+
+There is no `url` field, and no adapter keeps the scheme it probed:
+
+| adapter | what it knows | what it stores |
+|---|---|---|
+| `httprobe.py:80` | parses `scheme://host` on each line | `fqdn`, `state=ALIVE`; **the scheme is dropped**, no status code at all |
+| `pyprobe.py:122` | iterates `SCHEMES`, requests `f"{scheme}://{host}/"` | `fqdn`, `status_code`, `title`, `location`; **the scheme is dropped** |
+| `httpx_tool.py:113` | the JSON row has a `url` field | `fqdn`, `status_code`, `title`, `location`, `tech`, `waf`; **`url` is not read** |
+| `tlsx.py:89` | `host`, `probe_status`, `ip` | `fqdn`, `state`, `detail`, `ips`; no URL, no status |
+
+`probe_candidates` (`store.py:833`) is exactly as assumed - `NULL` is the only "not probed" value:
+
+```
+        else:
+            sql = ("SELECT id, url FROM urls WHERE target_id = ? AND status_code IS NULL"
+                   " ORDER BY id LIMIT ?")
+```
+
+And the only `urls` writer is the discovery path (`engine.py:1786`,
+`self.store.upsert_url(target_id, url, run_id=run_id, source_count=len(tools))`), called from the
+`urls` stage - the live stage never inserts a URL. The duplicate the brief describes is therefore real
+but shaped differently: crawlers return `https://host/` and `http://host/`, and `url_probe` requests those
+roots again even though the live pass already got an answer for the same host (pyprobe tries
+`http`, then `https`, and records the status under the host only).
+
+### Why C.2 did not land
+
+The part's stop rule: *if the live record doesn't carry the answering URL/scheme safely -> stop and
+report; a wrong-scheme URL is worse than a duplicate probe.* It does not carry it. Writing
+`http://{host}/` for a pyprobe row would be wrong for a host that answered `https`; writing
+`https://{host}/` would be wrong for the `http`-only hosts; and `httprobe` rows have no status code at all
+(`status_code=None`), so they cannot satisfy "insert with that status". A correct fix needs the URL to
+travel with the record:
+
+1. `models.py`: `HostStatusRecord.url: str | None = None`.
+2. `httprobe.py`: keep the normalised URL it already computed (line 79) instead of discarding it.
+3. `pyprobe.py`: pass the `f"{scheme}://{host}/"` it just requested.
+4. `httpx_tool.py`: read `data["url"]` (validated with `normalize_url`).
+5. `engine.py`: after `_write_host`, when `state is ALIVE and best.url and 200 <= (best.status_code or 0) <= 399`,
+   `store.upsert_url(...)` + `set_url_status(...)`; log once when the URL is missing
+   (`live: skipped urls insert for {host}, scheme unknown`).
+
+That is five source files and four tests - a follow-up batch, not a sub-step of this one. Nothing was
+changed for C: no model field, no insert, no test, no commit beyond this record.
+
+### What the owner should decide
+
+Whether the duplicate is worth that change: it is one wasted request per alive host (500 hosts -> 500
+requests), and the alternative - deriving the scheme from `location` or from the tech pass' httpx JSON
+later - is exactly the guess the stop rule forbids.

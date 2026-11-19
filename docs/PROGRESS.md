@@ -198,6 +198,12 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   deviation properly: one yaml field, no per-adapter flag, and the S-batch's "would have been ten files" note no longer
   applies. `test_crtsh_404_is_still_a_gap` asserts the field and the gap, and a synthetic unlisted adapter still fails
   on 404.
+- **C (2026-11-19): stopped by its own rule, so there is no D49 and no live->urls insert.** The live stage has no
+  answering URL to store: `HostStatusRecord` carries `fqdn/state/status/title/location` and every live adapter drops
+  the scheme it probed (`httprobe` even drops the status). Writing `http://` or `https://` onto the host would be a
+  guess, and the part's stop rule forbids exactly that. The fix needs the URL to travel with the record (models + three
+  adapters + engine, five files, four tests); recorded in REVIEW_LOG "C" for the owner to schedule. The duplicate
+  itself is real: crawler rows like `https://host/` are probed again by `url_probe` after `live` already answered.
 
 
 
