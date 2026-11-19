@@ -4,6 +4,12 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-19, D59): **the list-check workflow is documented; the two gaps are recorded, not fixed.** docs/02
+  section 2 now shows the working hostname command (`reconkit live -l hosts.txt --active --scope scope.yaml`, each line
+  its own target, gate enforced), states plainly that URL lists are rejected by `validate_target()` and that the
+  smallest enabler is a new flag needing a ruling, and says that `export`/`db list`/`db export` are Phase 3 stubs while
+  the real list is `results/<target>/<timestamp>/report.json` `hosts[].hostname`. The same gap is recorded under "What
+  is explicitly open and why" with the exact stub message. Docs only; suite stays 978, `scope.yaml` unchanged.
 - Status (2026-11-19, D58): **a host only the URL pool names now gets a row, a state and a report line.** One bounded
   pass runs right after `urls`: `Store.url_only_hosts()` (distinct URL hostnames with no `subdomains` row), the `dns`
   stage's `dnspython` adapter resolves them through the normal `_persist_dns()` state rule, and in `active`/`full` the
@@ -921,6 +927,15 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
 ## What is explicitly open and why
 
 Three owner decisions. Nothing here is a code defect waiting to be found.
+
+**2026-11-19 (D59): there is no export, and a URL list cannot be checked.** `export`, `db list` and `db export` print
+`db export is not wired in Part 8; no data was written.` (and its two siblings) and exit `1` without reading the
+database; the only export is the `report.json`/`report.txt` each run writes, which lists hosts and not URLs. A list of
+**hostnames** can be liveness-checked today with `reconkit live -l hosts.txt --active --scope scope.yaml` (each line
+is its own target; documented in docs/02 section 2), but a list of **URLs** is rejected by `validate_target()` before
+the run (`invalid domain label: 'https://nb'`). The smallest enabler is a new option that reads a file, routes lines
+through `validate_host()` and probes them like `url_probe` - a new flag, so it needs an owner ruling and is not built.
+Both items are recorded here, not fixed, and docs/02 now says so in the user-facing workflow.
 
 **2026-11-19 (final `sakec.ac.in` run): `crtsh` failed with `request timed out` after 30.7 s, so the run exited 5.** Raw
 row from the run's `--json`: `{"stage": "subs", "tool": "crtsh", "status": "failed", "items": 0, "duration_s":

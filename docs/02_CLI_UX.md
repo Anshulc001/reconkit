@@ -166,6 +166,39 @@ The `--active` `--help` text says this in one sentence: `A scope.yaml, when pres
 
 **`diff` semantics.** `diff` compares the two latest completed discovery runs for the target: `scan_runs` rows for the `subs` stage whose status is `completed` or `partial`, newest first. Resume does not change which runs these are (a resumed stage produces its own row like any other run); no other stage takes part in the comparison. A host is **`GONE` only after two consecutive misses**: it must have been seen in the run *before* the previous one and be missing from both the previous run and the latest run. One miss is not a change and is never reported as `GONE`, because a single flaky passive source (a CT log timing out, a subfinder run returning fewer names) is indistinguishable from a real removal in one run. Consequences a user will see: a host that is missing from only the latest run is silent in the table and is listed once under `Not reported as GONE yet (needs two consecutive misses)`; a host that comes back after one miss is neither `NEW` (its first sighting is not reset) nor `GONE`; a real removal appears as `GONE` on the run after the second consecutive miss; and with fewer than three completed discovery runs nothing can be confirmed gone, so `gone` is empty and `diff` says so. A host is **`NEW`** when the latest completed discovery run is its first sighting by any discovery tool: a host that the `dns` stage resolved before any discovery tool returned it is stored with `provenance` `dns`, appears in `status` with no sources, and is never reported NEW - the first discovery run that returns it is the run that reports it new.
 
+### Existing list: which hosts are live? (D59, 2026-11-19)
+
+**A list of hostnames works today, one hostname per line:**
+
+```bash
+reconkit live -l hosts.txt --active --scope scope.yaml
+```
+
+`-l` reads the file with `validate_target()` and runs each line as its **own
+target**, so every name gets its own row set, its own report and its own pass
+through the live stage (`pyprobe`, `httpx`, `httprobe`, `tlsx`). `--active` is
+required because `live` is an active stage, and `--scope` gates it exactly like
+any other active run: a name that is not in the scope file is refused with exit
+`3`, never probed. Very large lists mean very many targets, so run it against a
+scope file that names what you are authorized to touch.
+
+**A list of URLs does not work.** The same `-l` parser is a *target* file: a
+line like `https://nb.example.com/x` fails validation before any run starts
+(`invalid domain label: 'https://nb'`), because `validate_target()` accepts
+FQDNs only. The smallest enabler is a new option that reads a file, sends each
+line through `validate_host()` rather than `validate_target()`, and probes those
+URLs the way the `url_probe` stage does; that is a new flag and needs an owner
+ruling, so this build does not have it.
+
+**Getting the list out of a previous run.** `export`, `db list` and `db export`
+are Phase 3 stubs in this build: they print `... is not wired in Part 8` and
+exit `1` without reading the database. The export that does exist is the report
+every run writes next to its results: `results/<target>/<timestamp>/report.json`,
+where `hosts[].hostname` is the hostname list (and `report.txt` carries the same
+names in its first column). That report contains hosts only - a name that
+appeared only in `urls` rows is not in it unless D58's second resolve reached it
+(see `docs/03` and `docs/09` section 5).
+
 ## 2b. Interactive scan mode (no target flags)
 
 A scan command given **neither `-d` nor `-l`** asks a short question series

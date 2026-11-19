@@ -76,6 +76,49 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
+## 2026-11-19 (D59) - the list-check workflow, documented with its two gaps
+
+Docs only, no `src/`/`tests/` change. The owner asked how to check a list they already have; the answer is "hostnames
+yes, URLs no, and there is no export yet", so that is what docs/02 now says instead of leaving the operator to infer
+it from `--help`.
+
+Added to docs/02 section 2 (`### Existing list: which hosts are live?`):
+
+- The working command, `reconkit live -l hosts.txt --active --scope scope.yaml`, with the two facts an operator needs
+  before using it - every line becomes its **own target**, and `--scope` gates every name (a name not in the file is
+  refused with exit 3, never probed).
+- Why a URL list fails, with the real message: `-l` is parsed by `validate_target()`, so `https://nb.example.com/x`
+  gives `invalid domain label: 'https://nb'` before the run starts; the smallest enabler is a new option routing lines
+  through `validate_host()`, and that needs an owner ruling.
+- Where the list comes from: `export`, `db list` and `db export` are Part-8 stubs that print `... is not wired in
+  Part 8` and exit 1; the real export is `results/<target>/<timestamp>/report.json` with `hosts[].hostname`, hosts
+  only.
+
+Evidence behind those three statements (no new run needed; all from the shipped code and the existing artifacts):
+
+```
+$ reconkit db list -d slice.bank.in
+db list is not wired in Part 8; no data was read.
+$ reconkit export -d slice.bank.in --format json
+export is not wired in Part 8; no report was written.
+$ reconkit db export -d slice.bank.in
+db export is not wired in Part 8; no data was written.
+$ reconkit live -l /tmp/urls.txt --active --mock --no-color --db /tmp/d57probe.db
+invalid domain label: 'https://nb'
+$ reconkit live -l /tmp/hosts.txt --active --mock --no-color --db /tmp/d57probe.db
+1 hosts: 0 ALIVE, 0 DNS_ONLY, 0 SHUT_DOWN, 0 DEAD, 1 UNKNOWN | tools: 3 ok, 0 gap, 1 failed, 0 skipped, 0 timeout
+report: results/mock/nb.slice.bank.in/20261119T173241Z/report.txt
+```
+
+The first three are the exact stub strings the CLI prints (and the reason the doc points at `report.json` instead);
+the last two are the same probe recorded in the analysis entry above, reused here rather than re-run.
+
+PROGRESS records the same gap under "What is explicitly open and why", with the stub message quoted and the URL-list
+enabler named as a ruling, so it cannot be mistaken for finished work.
+
+Gate: docs only, nothing to re-run; suite stays `978 passed` (verified on the D58 commit and unchanged here since no
+`src/`/`tests/` file moved).
+
 ## 2026-11-19 (D58) - a bounded second resolve gives URL-only hosts a row
 
 Owner ruled Option 2 from the analysis above. One pass runs immediately after `urls` and before `url_probe`: it takes
