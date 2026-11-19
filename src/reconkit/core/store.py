@@ -19,6 +19,35 @@ from urllib.parse import urlsplit
 from reconkit.errors import ConfigError
 
 SCHEMA_VERSION = 12
+
+# D81: one target's children, deleted before the parent. `?` is the target id.
+_DELETE_PORT_SOURCES = """
+DELETE FROM port_sources WHERE port_id IN (
+  SELECT id FROM ports WHERE subdomain_id IN (
+    SELECT id FROM subdomains WHERE target_id = ?
+  )
+)
+"""
+_DELETE_STATUSES = """
+DELETE FROM host_status_history WHERE subdomain_id IN (
+  SELECT id FROM subdomains WHERE target_id = ?
+)
+"""
+_DELETE_PORTS = """
+DELETE FROM ports WHERE subdomain_id IN (
+  SELECT id FROM subdomains WHERE target_id = ?
+)
+"""
+_DELETE_SUBDOMAIN_SOURCES = """
+DELETE FROM subdomain_sources WHERE subdomain_id IN (
+  SELECT id FROM subdomains WHERE target_id = ?
+)
+"""
+_DELETE_TOOL_RUNS = """
+DELETE FROM tool_runs WHERE run_id IN (
+  SELECT id FROM scan_runs WHERE target_id = ?
+)
+"""
 REDACTED = "***"
 # docs/04 section 5: the stored reason is one line of at most this many characters.
 DETAIL_MAX_CHARS = 200
@@ -474,7 +503,10 @@ class Store:
             self._conn.rollback()
             raise
         else:
-            self._commit()
+            # The outermost block owns the commit. `_commit()` would decline it
+            # here (`_batch_depth` is 1), leaving the whole block uncommitted
+            # when no later write happens before close (found by D81).
+            self._conn.commit()
         finally:
             self._batch_depth = 0
 
@@ -516,6 +548,107 @@ class Store:
     def get_target(self, domain: str) -> int | None:
         row = self._conn.execute("SELECT id FROM targets WHERE domain = ?", (domain,)).fetchone()
         return None if row is None else int(row["id"])
+
+    def target_counts(self, target_id: int) -> dict[str, int]:
+        """Rows that belong to one target, counted before a delete (D81)."""
+
+        def count(sql: str) -> int:
+            row = self._conn.execute(sql, (target_id,)).fetchone()
+            return int(row[0]) if row is not None else 0
+
+        return {
+            "targets": count("SELECT COUNT(*) FROM targets WHERE id = ?"),
+            "stage_runs": count("SELECT COUNT(*) FROM scan_runs WHERE target_id = ?"),
+            "tool_runs": count(
+                "SELECT COUNT(*) FROM tool_runs"
+                " WHERE run_id IN (SELECT id FROM scan_runs WHERE target_id = ?)"
+            ),
+            "subdomains": count("SELECT COUNT(*) FROM subdomains WHERE target_id = ?"),
+            "sources": count(
+                "SELECT COUNT(*) FROM subdomain_sources"
+                " WHERE subdomain_id IN (SELECT id FROM subdomains WHERE target_id = ?)"
+            ),
+            "statuses": count(
+                "SELECT COUNT(*) FROM host_status_history"
+                " WHERE subdomain_id IN (SELECT id FROM subdomains WHERE target_id = ?)"
+            ),
+            "ports": count(
+                "SELECT COUNT(*) FROM ports"
+                " WHERE subdomain_id IN (SELECT id FROM subdomains WHERE target_id = ?)"
+            ),
+            "port_sources": count(
+                "SELECT COUNT(*) FROM port_sources WHERE port_id IN"
+                " (SELECT id FROM ports WHERE subdomain_id IN"
+                "  (SELECT id FROM subdomains WHERE target_id = ?))"
+            ),
+            "urls": count("SELECT COUNT(*) FROM urls WHERE target_id = ?"),
+        }
+
+    def delete_target(self, domain: str) -> dict[str, int] | None:
+        """Delete one target and every row that hangs off it (D81).
+
+        One transaction, children before parents, so a failure leaves the
+        database exactly as it was. Returns the counts that were removed, or
+        `None` when the target is not stored.
+        """
+        target_id = self.get_target(domain)
+        if target_id is None:
+            return None
+        counts = self.target_counts(target_id)
+        with self.transaction():
+            # Children before parents; the always-present `target_id` binding is
+            # the only value in these statements.
+            self._conn.execute(_DELETE_PORT_SOURCES, (target_id,))
+            self._conn.execute(_DELETE_STATUSES, (target_id,))
+            self._conn.execute(_DELETE_PORTS, (target_id,))
+            self._conn.execute(_DELETE_SUBDOMAIN_SOURCES, (target_id,))
+            self._conn.execute(_DELETE_TOOL_RUNS, (target_id,))
+            self._conn.execute("DELETE FROM urls WHERE target_id = ?", (target_id,))
+            self._conn.execute("DELETE FROM subdomains WHERE target_id = ?", (target_id,))
+            self._conn.execute("DELETE FROM scan_runs WHERE target_id = ?", (target_id,))
+            self._conn.execute("DELETE FROM targets WHERE id = ?", (target_id,))
+        return counts
+
+    # Children before parents: `wipe()` drops every table with foreign_keys ON.
+    _WIPE_ORDER = (
+        "port_sources",
+        "host_status_history",
+        "ports",
+        "subdomain_sources",
+        "tool_runs",
+        "urls",
+        "subdomains",
+        "scan_runs",
+        "targets",
+        "schema_version",
+    )
+
+    def database_counts(self) -> dict[str, int]:
+        """The five headline totals a wipe reports, before it runs (D81)."""
+
+        def count(sql: str) -> int:
+            return int(self._conn.execute(sql).fetchone()[0])
+
+        return {
+            "targets": count("SELECT COUNT(*) FROM targets"),
+            "subdomains": count("SELECT COUNT(*) FROM subdomains"),
+            "urls": count("SELECT COUNT(*) FROM urls"),
+            "tool_runs": count("SELECT COUNT(*) FROM tool_runs"),
+            "stage_runs": count("SELECT COUNT(*) FROM scan_runs"),
+        }
+
+    def wipe(self) -> dict[str, int]:
+        """Drop every table and recreate the current schema (D81).
+
+        `results/` folders are deliberately untouched: deleting them is a
+        separate, explicit filesystem decision the CLI announces.
+        """
+        counts = self.database_counts()
+        with self.transaction():
+            for table in self._WIPE_ORDER:
+                self._conn.execute(f"DROP TABLE IF EXISTS {table}")
+        self._migrate()
+        return counts
 
     def scan_runs(self, target_id: int) -> list[dict[str, object]]:
         """Every stage row for one target, oldest first (engine resume)."""

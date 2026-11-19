@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shutil
 import sys
 import traceback
 from collections.abc import Callable
@@ -68,6 +69,57 @@ scope_app = typer.Typer(help="Inspect or import scope.yaml.", no_args_is_help=Tr
 db_app = typer.Typer(help="Query stored assets.", no_args_is_help=True)
 app.add_typer(scope_app, name="scope")
 app.add_typer(db_app, name="db")
+
+
+@dataclass(frozen=True)
+class _GlobalOptions:
+    """The root options a `db` command needs (D81).
+
+    `--db` and `--config` are declared once on the root callback. Typer does
+    not pass them to subcommands, so the callback stores them here instead of
+    adding a second, silently different flag to `db delete`/`db wipe`.
+    """
+
+    config_path: Path | None
+    db_path: Path | None
+
+
+def _global_options(ctx: typer.Context) -> _GlobalOptions:
+    obj = ctx.obj
+    return obj if isinstance(obj, _GlobalOptions) else _GlobalOptions(None, None)
+
+
+def _db_path(config: AppConfig, options: _GlobalOptions) -> Path:
+    return Path(options.db_path) if options.db_path is not None else Path(config.db_path)
+
+
+def _counts_line(counts: dict[str, int]) -> str:
+    """`1 target, 15 subdomains, 3161 URLs, 190 tool runs, 31 stage runs` (D81)."""
+
+    def many(n: int, singular: str, plural: str | None = None) -> str:
+        return f"{n} {singular if n == 1 else (plural or singular + 's')}"
+
+    return ", ".join(
+        (
+            many(counts["targets"], "target"),
+            many(counts["subdomains"], "subdomain"),
+            many(counts["urls"], "URL", "URLs"),
+            many(counts["tool_runs"], "tool run"),
+            many(counts["stage_runs"], "stage run"),
+        )
+    )
+
+
+def _remove_results(config: AppConfig, target: str) -> list[str]:
+    """Remove this target's report folders, real and mock; return what went."""
+    root = Path(config.results_dir)
+    removed: list[str] = []
+    for folder in (root / target, root / "mock" / target):
+        if folder.is_dir():
+            shutil.rmtree(folder)
+            removed.append(f"{folder}/")
+    return removed
+
 
 _SCAN_COMMANDS = (
     "subs",
@@ -1351,6 +1403,7 @@ def main(
     # 12f: before any command body, because Engine.open loads `.env` too late
     # for errors raised by _targets()/load_config()/the usage refusals.
     _configure_redaction()
+    ctx.obj = _GlobalOptions(config_path=config_path, db_path=db_path)
     if ctx.invoked_subcommand is not None:
         return
     raise typer.Exit(
@@ -1568,6 +1621,104 @@ def doctor_command(
         )
         raise typer.Exit(code=int(ExitCode.ERROR))
     raise typer.Exit(code=code)
+
+
+@db_app.command("delete", help="db delete: remove one target and all its rows (D81).")
+def db_delete(
+    ctx: typer.Context,
+    target: Annotated[str, typer.Option("--target", help="Target domain to delete.")],
+    yes: Annotated[
+        bool, typer.Option("--yes", help="Delete without asking for confirmation.")
+    ] = False,
+) -> None:
+    """Delete one target, all its rows, and its results/<target>/ folder (D81)."""
+    options = _global_options(ctx)
+    try:
+        config = load_config(options.config_path)
+        normalized = validate_target(target)
+    except (ConfigError, ValueError) as exc:
+        render_error(redact(str(exc)))
+        raise typer.Exit(code=int(ExitCode.USAGE)) from None
+    db_path = _db_path(config, options)
+    try:
+        engine = Engine.open(config, db_path=db_path)
+    except (ConfigError, OSError, ValueError) as exc:
+        render_error(redact(f"cannot open {db_path}: {exc}"))
+        raise typer.Exit(code=int(ExitCode.ERROR)) from None
+    try:
+        target_id = engine.store.get_target(normalized)
+        if target_id is None:
+            render_error(f"target {normalized} is not in {db_path}")
+            raise typer.Exit(code=int(ExitCode.USAGE))
+        counts = engine.store.target_counts(target_id)
+        results = Path(config.results_dir)
+        planned = [f"{folder}/" for folder in (results / normalized,) if folder.is_dir()]
+        if not yes:
+            render_message(f"Delete {normalized} from {db_path}:")
+            render_message(f"  {_counts_line(counts)}")
+            for folder in planned:
+                render_message(f"  {folder} (will be removed)")
+            if not typer.confirm(
+                "This cannot be undone. Delete this target?", default=True, err=True
+            ):
+                render_message("cancelled; nothing was deleted.")
+                raise typer.Exit(code=int(ExitCode.USAGE))
+        removed_counts = engine.store.delete_target(normalized)
+        if removed_counts is None:  # pragma: no cover - guarded by get_target above
+            render_error(f"target {normalized} disappeared while it was being deleted")
+            raise typer.Exit(code=int(ExitCode.ERROR))
+    finally:
+        engine.close()
+    removed = _remove_results(config, normalized)
+    line = f"Deleted {_counts_line(removed_counts)}."
+    if removed:
+        line += f" Removed {', '.join(removed)}"
+    render_message(line)
+
+
+@db_app.command("wipe", help="db wipe: remove every target and recreate the schema (D81).")
+def db_wipe(
+    ctx: typer.Context,
+    yes: Annotated[
+        bool, typer.Option("--yes", help="Wipe without asking for confirmation.")
+    ] = False,
+) -> None:
+    """Delete every target and rebuild an empty database with the current schema (D81)."""
+    options = _global_options(ctx)
+    try:
+        config = load_config(options.config_path)
+    except ConfigError as exc:
+        render_error(redact(str(exc)))
+        raise typer.Exit(code=int(ExitCode.USAGE)) from None
+    db_path = _db_path(config, options)
+    try:
+        engine = Engine.open(config, db_path=db_path)
+    except (ConfigError, OSError, ValueError) as exc:
+        render_error(redact(f"cannot open {db_path}: {exc}"))
+        raise typer.Exit(code=int(ExitCode.ERROR)) from None
+    try:
+        counts = engine.store.database_counts()
+    finally:
+        engine.close()
+    render_message(f"\u26a0 This will delete ALL targets and data from {db_path}. Are you sure?")
+    render_message(f"  {_counts_line(counts)}")
+    if not yes and not typer.confirm("Wipe the database?", default=False, err=True):
+        render_message("cancelled; nothing was deleted.")
+        raise typer.Exit(code=int(ExitCode.USAGE))
+    try:
+        engine = Engine.open(config, db_path=db_path)
+    except (ConfigError, OSError, ValueError) as exc:
+        render_error(redact(f"cannot open {db_path}: {exc}"))
+        raise typer.Exit(code=int(ExitCode.ERROR)) from None
+    try:
+        engine.store.wipe()
+    finally:
+        engine.close()
+    render_message(f"Wiped {db_path}.")
+    render_message(
+        'Note: results/ folders are untouched; use "rm -rf results/" manually'
+        " if you want a full reset."
+    )
 
 
 @db_app.command("list")

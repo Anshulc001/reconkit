@@ -1204,6 +1204,20 @@ def test_transaction_commits_once_and_rolls_back(store: Store) -> None:
     assert store.get_target("rollback.example.com") is None
 
 
+def test_transaction_is_committed_even_when_nothing_follows(tmp_path: Path) -> None:
+    """Regression: D81 caught an outer transaction that closed uncommitted.
+
+    `_commit()` declines inside a batch, so the block's commit must be explicit;
+    otherwise the last write before close is rolled back.
+    """
+    database = tmp_path / "tx.db"
+    with Store(database) as store:
+        with store.transaction():
+            store.create_target("commit.example.com")
+    with Store(database) as reopened:
+        assert reopened.get_target("commit.example.com") is not None
+
+
 def test_only_store_imports_sqlite3() -> None:
     importers = [
         path.name

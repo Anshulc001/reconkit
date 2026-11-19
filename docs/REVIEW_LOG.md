@@ -77,6 +77,80 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 | PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `target.com` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.target.com/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
 
+## 2026-11-20 (D81) - `db delete` and `db wipe`
+
+**What existed.** `reconkit db` had two Phase 3 stubs (`list`, `export`) and no
+way to remove a target except manual SQL, which breaks whenever the schema
+moves. The batch asked for two commands with counts, confirmation, cascade
+delete and a results-folder cleanup.
+
+**Store (`core/store.py`).** `target_counts()`, `database_counts()`,
+`delete_target()` and `wipe()`. `delete_target` counts first, then deletes in one
+`transaction()`, children before parents: `port_sources`,
+`host_status_history`, `ports`, `subdomain_sources`, `tool_runs`, `urls`,
+`subdomains`, `scan_runs`, `targets`. `wipe` drops all ten tables in the same
+order and calls `_migrate()` from version 0, so the file is recreated at
+`SCHEMA_VERSION` (12) rather than merely emptied.
+
+**CLI (`cli.py`).** `db delete --target` (required) `[--yes]` and `db wipe
+[--yes]`. The root callback now stores `--config`/`--db` in `ctx.obj`, because
+Typer does not forward root options to subcommands; no second `--db` flag was
+added. `db delete` prints the counts and plan, asks default **yes**, exits `2`
+on `n`, and on success prints the literal five-count summary plus
+`Removed <folder>`. A missing target is `target X is not in <db>`, exit `2`,
+nothing removed. `db wipe` always prints `⚠ This will delete ALL targets and
+data from <db>. Are you sure?`, asks default **no** without `--yes`, then wipes
+and prints `Note: results/ folders are untouched; use "rm -rf results/" manually
+if you want a full reset.` `results/` is never touched by wipe; delete removes
+`results/<domain>/` and `results/mock/<domain>/` after the commit.
+
+**Layering.** `test_cli_imports_only_the_allowed_layers` forbids importing
+`Store`/`sqlite3` in `cli.py`, so the commands reach the store through the
+existing `Engine.open(...).store` handle; all SQL stays in `store.py`. No
+`engine.py` change.
+
+**Latent bug found by the new tests.** The first delete printed a correct
+summary but the reopened database still had the target: `transaction()` set
+`_batch_depth = 1`, then called `_commit()`, which deliberately declines while a
+batch is open, and the block ended without a commit. Existing callers were
+saved by a later write committing on the same connection; a delete that is the
+last write before `close()` was rolled back. The outer branch now calls
+`self._conn.commit()` directly (the docstring and PIT-27 already required this).
+`test_transaction_is_committed_even_when_nothing_follows` reopens the file to
+guard it.
+
+**Tests (1023 -> 1029).** `test_db_delete_removes_target_and_cascades`,
+`test_db_delete_requires_yes_when_interactive`,
+`test_db_delete_nonexistent_target_errors_cleanly`,
+`test_db_wipe_removes_all_data_and_recreates_schema`,
+`test_db_wipe_requires_yes_when_interactive`, plus the transaction reopen test.
+
+**Acceptance (on `/tmp` copies, not the real DB).**
+
+```
+$ reconkit --config /tmp/d81-config.yaml db delete --target example.com --yes
+Deleted 1 target, 13 subdomains, 1177 URLs, 33 tool runs, 6 stage runs. Removed
+/tmp/d81-results/example.com/
+$ sqlite3 /tmp/d81.db "select count(*) from targets where domain='example.com'"
+0
+```
+
+```
+$ reconkit --config /tmp/d81-wipe-config.yaml db wipe --yes
+⚠ This will delete ALL targets and data from /tmp/d81-wipe.db. Are you sure?
+  6 targets, 27631 subdomains, 10181 URLs, 1077 tool runs, 182 stage runs
+Wiped /tmp/d81-wipe.db.
+Note: results/ folders are untouched; use "rm -rf results/" manually if you want
+a full reset.
+$ sqlite3 /tmp/d81-wipe.db "select count(*) from targets; select max(version) from schema_version"
+0
+12
+```
+
+`reconkit db --help` lists `delete` and `wipe` above the two stubs. Full gate:
+1029 passed, ruff check and format clean, mypy clean. `scope.yaml` unchanged
+(`d45a3c90...eeee8b`), no network.
+
 ## 2026-11-20 (D80) - README, COMMANDS and CLI docs synced with the tool
 
 **What was stale.** Compared against the raw help of the shipped CLI:
@@ -118,22 +192,22 @@ ruff/format/mypy clean, `scope.yaml` unchanged, no network.
 
 ## 2026-11-20 (D79) - real target names scrubbed from the repo
 
-**Symptom.** The two authorized targets used for the real verification runs
-(`sakec.ac.in` and `slice.bank.in`) and the mock name `slice.test` had leaked
-into adapter comments, fixtures, scripts, tests and every doc: **219 matching
-lines in 22 files** (grep over `src/ tests/ docs/ config.yaml README.md
-COMMANDS.md AGENTS.md scripts/ .github/`).
+**Symptom.** The two authorized targets used for the real verification runs (a
+university domain and a bank domain) and the mock fixture name had leaked into
+adapter comments, fixtures, scripts, tests and every doc: **219 matching lines
+in 22 files** (grep over `src/ tests/ docs/ config.yaml README.md COMMANDS.md
+AGENTS.md scripts/ .github/`).
 
 **Fix.** Text-only replacement, no code logic touched:
 
 | Before | After |
 |---|---|
-| `sakec.ac.in`, `www.sakec.ac.in`, `admission.sakec.in` | `example.com`, `www.example.com`, `admission.example.com` |
-| `slice.bank.in`, `api/b/blog/nb/assets/temp.slice.bank.in` | `target.com`, same labels (`api.target.com`, ...) |
-| `slice.test` (six mock fixtures) | `example.test` |
-| `scripts/capture_sakec.sh` | `scripts/capture_example.sh` |
-| `captures/sakec`, `v4-sakec.db`, `reconkit-sakec-config.yaml` | `captures/example`, `v4-example.db`, `reconkit-example-config.yaml` |
-| fixture title `Slice Bank` | `Example Bank` |
+| university domain, its `www` and `admission` subdomains | `example.com`, `www.example.com`, `admission.example.com` |
+| bank domain, same labels (`api`, `b`, `blog`, `nb`, `assets`, `temp`) | `target.com`, same labels (`api.target.com`, ...) |
+| mock fixture name (six files) | `example.test` |
+| capture script name | `scripts/capture_example.sh` |
+| capture dir and scratch DB/config names | `captures/example`, `v4-example.db`, `reconkit-example-config.yaml` |
+| fixture title | `Example Bank` |
 
 The six fixtures were renamed with `git mv`:
 `tests/fixtures/{gau,waybackurls,unfurl,urlfinder}/example.test.txt` and
@@ -141,14 +215,12 @@ The six fixtures were renamed with `git mv`:
 `<fixtures>/<tool>/<target>.*` with a "single file in the directory" fallback,
 so the rename does not break a test that targets another name.
 
-**Deviation from the batch.** It named
-`tests/fixtures/pyprobe/sakec.ac.in.synthetic.json`; that file never existed.
-The real pyprobe fixture was `slice.test.json`, renamed to `example.test.json`.
+**Deviation from the batch.** It named a pyprobe fixture that never existed;
+the real pyprobe fixture was the mock one, now `example.test.json`.
 
-**Verification.** Before: 219 lines / 22 files. After:
-`grep -rn -i "sakec\|slice\.bank" ...` prints nothing (the batch's `Clean`).
-Suite 1023 passed, ruff/format/mypy clean, `scope.yaml` unchanged
-(`d45a3c90...eeee8b`), no network.
+**Verification.** Before: 219 lines / 22 files. After: the batch's acceptance
+grep prints nothing (the batch's `Clean`). Suite 1023 passed, ruff/format/mypy
+clean, `scope.yaml` unchanged (`d45a3c90...eeee8b`), no network.
 
 ## 2026-11-19 - loop retry: `live --urls-file` still stops at the same wall
 

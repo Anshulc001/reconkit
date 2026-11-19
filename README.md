@@ -55,6 +55,8 @@ reconkit diff -d <authorized-domain>
 | `report` | Rebuild `report.txt`/`report.json` from stored rows (`--target`, `--run`, `--out`); read-only, no network |
 | `doctor` | Tool, version, path, per-stage coverage, system packages, key names |
 | `scope check -d X` | Show whether a target is allowed by `scope.yaml` |
+| `db delete --target X` | Delete one target, every row that belongs to it, and its `results/X/` folder (asks first; `--yes` skips) |
+| `db wipe` | Delete every row and recreate the schema (asks first; `--yes` skips); `results/` is kept |
 | `db list`, `db export` | **Phase 3 stub**: exits `1`; no data is read |
 | `export -d X --format json\|md\|html` | **Phase 3 stub**: exits `1`; no report is written |
 | `scope import` | **Phase 3 stub**: exits `1` |
@@ -101,6 +103,28 @@ never create a `hosts/` folder. A `hosts/<hostname>/` folder exists only for an
 in-scope host that has at least one stored URL. `report.urls_max` is `0` in
 `config.yaml`, so every stored URL is listed (`0` = no cap); set a number to
 cap the whole report.
+
+## Cleanup
+
+```bash
+reconkit db delete --target example.com          # shows counts, then asks [Y/n]
+reconkit db delete --target example.com --yes    # target + rows + results/example.com/
+reconkit db wipe --yes                           # all rows, fresh schema; results/ kept
+```
+
+`db delete` removes the target's `scan_runs`, `tool_runs`, `subdomains`,
+`subdomain_sources`, `host_status_history`, `ports`, `port_sources` and `urls`
+in one transaction, then removes `results/<target>/` (and
+`results/mock/<target>/` when present). `db wipe` drops every table and
+recreates the current schema, but never deletes `results/`; it prints the
+manual reset line instead. Both commands read the root `--db`/`--config`
+options, which go **before** `db`:
+
+```bash
+reconkit --db /tmp/copy.db db delete --target example.com --yes
+```
+
+`db list` and `db export` remain Phase 3 stubs.
 
 ## Documentation
 

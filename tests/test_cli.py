@@ -16,7 +16,7 @@ from typer.testing import CliRunner
 
 from reconkit import ui
 from reconkit.cli import app
-from reconkit.core.store import configure_redaction
+from reconkit.core.store import SCHEMA_VERSION, Store, configure_redaction
 from reconkit.engine import MODE_STAGES, Engine, HostSnapshot, ScanOptions, ScanSummary
 from reconkit.errors import ConfigError, ScopeError
 from reconkit.models import Confidence, HostState, Tier
@@ -1678,6 +1678,139 @@ def test_report_from_db_nonexistent_run_errors_cleanly(tmp_path: Path) -> None:
     assert result.exit_code == 2
     assert "run 999999 does not belong to example.com" in result.stderr
     assert not out.exists()
+
+
+def _seed_target(tmp_path: Path, domain: str = "example.com") -> Path:
+    """One target with a run, source, status, port and URL, for D81."""
+    database = tmp_path / "recon.db"
+    with Store(database) as store:
+        target_id = store.create_target(domain)
+        run_id = store.create_scan_run(target_id, "subs")
+        store.record_tool_run(run_id, "crtsh", "ok", item_count=1)
+        subdomain_id = store.upsert_subdomain(target_id, f"www.{domain}", run_id=run_id)
+        store.add_subdomain_source(subdomain_id, run_id, "crtsh")
+        store.append_host_status(subdomain_id, run_id, "ALIVE", status_code=200)
+        port_id = store.upsert_port(subdomain_id, "203.0.113.7", 443, run_id=run_id, state="open")
+        store.add_port_source(port_id, run_id, "pyscan", "open")
+        store.upsert_url(target_id, f"https://www.{domain}/admin", run_id=run_id)
+    return database
+
+
+def _db_config(tmp_path: Path) -> Path:
+    config = make_config(tmp_path)
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    raw["results_dir"] = str(tmp_path / "results")
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return config
+
+
+def test_db_delete_removes_target_and_cascades(tmp_path: Path) -> None:
+    config = _db_config(tmp_path)
+    database = _seed_target(tmp_path)
+    folder = tmp_path / "results" / "example.com" / "20260101T000000Z"
+    folder.mkdir(parents=True)
+    (folder / "report.txt").write_text("x", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app, ["--config", str(config), "db", "delete", "--target", "example.com", "--yes"]
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert "Deleted 1 target, 1 subdomain, 1 URL, 1 tool run, 1 stage run." in result.output
+    assert "Removed " in result.output
+    assert not folder.exists()
+    conn = sqlite3.connect(database)
+    try:
+        counts = {
+            "targets": "SELECT COUNT(*) FROM targets",
+            "scan_runs": "SELECT COUNT(*) FROM scan_runs",
+            "tool_runs": "SELECT COUNT(*) FROM tool_runs",
+            "subdomains": "SELECT COUNT(*) FROM subdomains",
+            "subdomain_sources": "SELECT COUNT(*) FROM subdomain_sources",
+            "host_status_history": "SELECT COUNT(*) FROM host_status_history",
+            "ports": "SELECT COUNT(*) FROM ports",
+            "port_sources": "SELECT COUNT(*) FROM port_sources",
+            "urls": "SELECT COUNT(*) FROM urls",
+        }
+        for table, sql in counts.items():
+            assert conn.execute(sql).fetchone()[0] == 0, table
+    finally:
+        conn.close()
+
+
+def test_db_delete_requires_yes_when_interactive(tmp_path: Path) -> None:
+    config = _db_config(tmp_path)
+    database = _seed_target(tmp_path)
+
+    declined = CliRunner().invoke(
+        app, ["--config", str(config), "db", "delete", "--target", "example.com"], input="n\n"
+    )
+
+    assert declined.exit_code == 2
+    assert "Are you sure" not in declined.output
+    assert "cancelled; nothing was deleted." in declined.output
+    with Store(database) as store:
+        assert store.get_target("example.com") is not None
+
+    accepted = CliRunner().invoke(
+        app, ["--config", str(config), "db", "delete", "--target", "example.com"], input="y\n"
+    )
+    assert accepted.exit_code == 0, accepted.stderr
+    with Store(database) as store:
+        assert store.get_target("example.com") is None
+
+
+def test_db_delete_nonexistent_target_errors_cleanly(tmp_path: Path) -> None:
+    config = _db_config(tmp_path)
+
+    result = CliRunner().invoke(
+        app, ["--config", str(config), "db", "delete", "--target", "missing.com", "--yes"]
+    )
+
+    assert result.exit_code == 2
+    assert "target missing.com is not in" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_db_wipe_removes_all_data_and_recreates_schema(tmp_path: Path) -> None:
+    config = _db_config(tmp_path)
+    database = _seed_target(tmp_path, "example.com")
+    with Store(database) as store:
+        other = store.create_target("other.com")
+        store.create_scan_run(other, "dns")
+    folder = tmp_path / "results" / "example.com"
+    folder.mkdir(parents=True)
+
+    result = CliRunner().invoke(app, ["--config", str(config), "db", "wipe", "--yes"])
+
+    assert result.exit_code == 0, result.stderr
+    assert database.is_file()
+    assert "Wiped " in result.output
+    assert "results/ folders are untouched" in result.output
+    assert folder.is_dir()
+    with Store(database) as store:
+        assert store.schema_version == SCHEMA_VERSION
+        assert store.get_target("example.com") is None
+        assert store.get_target("other.com") is None
+        assert all(count == 0 for count in store.database_counts().values())
+
+
+def test_db_wipe_requires_yes_when_interactive(tmp_path: Path) -> None:
+    config = _db_config(tmp_path)
+    database = _seed_target(tmp_path)
+
+    declined = CliRunner().invoke(app, ["--config", str(config), "db", "wipe"], input="n\n")
+
+    assert declined.exit_code == 2
+    assert "This will delete ALL targets and data" in declined.output
+    assert "cancelled; nothing was deleted." in declined.output
+    with Store(database) as store:
+        assert store.get_target("example.com") is not None
+
+    accepted = CliRunner().invoke(app, ["--config", str(config), "db", "wipe"], input="y\n")
+    assert accepted.exit_code == 0, accepted.stderr
+    with Store(database) as store:
+        assert store.get_target("example.com") is None
 
 
 def test_report_from_db_is_read_only(tmp_path: Path) -> None:

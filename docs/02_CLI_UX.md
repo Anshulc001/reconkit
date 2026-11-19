@@ -162,10 +162,65 @@ The `--active` `--help` text says this in one sentence: `A scope.yaml, when pres
 | `diff -d X` | New / changed / gone items since the previous run; `GONE` needs two consecutive misses |
 | `status [--json]` | Progress of running or finished scans |
 | `report --target X [--run ID] [--out DIR]` | Rebuild a saved `report.txt`/`report.json` from stored rows; read-only connection, no network, no adapter (D65, section 5) |
+| `db delete --target X [--yes]` | Delete one target, all its rows and `results/X/`; asks first (D81) |
+| `db wipe [--yes]` | Delete every row, recreate the current schema; `results/` is kept (D81) |
 | `db list\|export -d X [--new-only]` | **Phase 3 stub** in this build: exits 1 with a clear message; no data is read |
 | `export -d X --format json\|md\|html` | **Phase 3 stub** in this build: exits 1 with a clear message; no report is written |
 
 **`diff` semantics.** `diff` compares the two latest completed discovery runs for the target: `scan_runs` rows for the `subs` stage whose status is `completed` or `partial`, newest first. Resume does not change which runs these are (a resumed stage produces its own row like any other run); no other stage takes part in the comparison. A host is **`GONE` only after two consecutive misses**: it must have been seen in the run *before* the previous one and be missing from both the previous run and the latest run. One miss is not a change and is never reported as `GONE`, because a single flaky passive source (a CT log timing out, a subfinder run returning fewer names) is indistinguishable from a real removal in one run. Consequences a user will see: a host that is missing from only the latest run is silent in the table and is listed once under `Not reported as GONE yet (needs two consecutive misses)`; a host that comes back after one miss is neither `NEW` (its first sighting is not reset) nor `GONE`; a real removal appears as `GONE` on the run after the second consecutive miss; and with fewer than three completed discovery runs nothing can be confirmed gone, so `gone` is empty and `diff` says so. A host is **`NEW`** when the latest completed discovery run is its first sighting by any discovery tool: a host that the `dns` stage resolved before any discovery tool returned it is stored with `provenance` `dns`, appears in `status` with no sources, and is never reported NEW - the first discovery run that returns it is the run that reports it new.
+
+### Database management (D81, 2026-11-20)
+
+```
+reconkit db delete --target <domain> [--yes]
+reconkit db wipe [--yes]
+```
+
+**`db delete`** removes one target and everything that hangs off it. Without
+`--yes` it prints the counts it is about to delete and asks, default **yes**:
+
+```
+Delete example.com from recon.db:
+  1 target, 15 subdomains, 3161 URLs, 190 tool runs, 31 stage runs
+  results/example.com/ (will be removed)
+This cannot be undone. Delete this target? [Y/n]:
+```
+
+Answering `n` prints `cancelled; nothing was deleted.` and exits `2`. The rows
+are removed in one transaction, children first (`port_sources`,
+`host_status_history`, `ports`, `subdomain_sources`, `tool_runs`, `urls`,
+`subdomains`, `scan_runs`, `targets`), so a failure cannot leave half a target
+behind. `results/<domain>/` and `results/mock/<domain>/` are removed after the
+commit, and the summary names what went:
+
+```
+Deleted 1 target, 15 subdomains, 3161 URLs, 190 tool runs, 31 stage runs. Removed results/example.com/
+```
+
+A target that is not in the database is exit `2` with
+`target <domain> is not in <db>`; nothing is written and no folder is removed.
+
+**`db wipe`** is the whole-database reset. It always prints the loud warning,
+then asks (default **no** unless `--yes`):
+
+```
+⚠ This will delete ALL targets and data from recon.db. Are you sure?
+  6 targets, 27631 subdomains, 10181 URLs, 1077 tool runs, 182 stage runs
+Wipe the database? [y/N]:
+```
+
+It drops every table and recreates the current schema, so `schema_version` is
+current and the next scan starts clean. It deliberately **does not** touch
+`results/` - deleting report folders is a separate filesystem decision - and
+prints:
+
+```
+Note: results/ folders are untouched; use "rm -rf results/" manually if you want a full reset.
+```
+
+Both commands take the root `--db`/`--config` options, which must come **before**
+the `db` subcommand (`reconkit --db /tmp/copy.db db wipe --yes`). `db list` and
+`db export` stay Phase 3 stubs (exit 1).
 
 ### Existing list: which hosts are live? (D59, 2026-11-19)
 

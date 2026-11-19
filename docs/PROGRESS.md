@@ -4,6 +4,22 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D81): **`reconkit db delete` and `reconkit db wipe` exist.**
+  `db delete --target X [--yes]` counts the target's rows, asks (default yes),
+  then removes `port_sources`, `host_status_history`, `ports`,
+  `subdomain_sources`, `tool_runs`, `urls`, `subdomains`, `scan_runs` and the
+  target in one transaction, and removes `results/<domain>/` plus
+  `results/mock/<domain>/`; the summary is
+  `Deleted 1 target, 13 subdomains, 1177 URLs, 33 tool runs, 6 stage runs. Removed ...`.
+  A missing target is exit 2. `db wipe [--yes]` prints the ALL-data warning,
+  drops every table, recreates the current schema (12) and leaves `results/`
+  untouched with the manual `rm -rf results/` note. Both use the root
+  `--config`/`--db` options before `db`. **Found and fixed a latent store bug:**
+  `Store.transaction()` never committed the outermost block (`_commit()` declines
+  because `_batch_depth == 1`), so a transaction followed only by `close()`
+  rolled back; it now commits explicitly and a reopen test guards it. Suite
+  1023 -> 1029. Acceptance on `/tmp` copies only; real `recon.db` and `results/`
+  untouched. See D81 in REVIEW_LOG.
 - Status (2026-11-20, D80): **README, COMMANDS.md and docs/02 match the CLI as
   shipped through D78.** Checked against raw `reconkit --help`, `run --help` and
   `report --help`: `report` was missing from both command tables, the `active`
@@ -16,16 +32,15 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
   folders, so it was verified, not rewritten. Docs only; suite stays 1023.
   See D80 in REVIEW_LOG.
 - Status (2026-11-20, D79): **no real target names remain in the repo.** The two
-  targets used for real verification (`sakec.ac.in`, `slice.bank.in`) and the mock
-  name `slice.test` leaked into comments, fixtures, scripts and docs: 219 matching
-  lines in 22 files. All are now `example.com` / `target.com` / `example.test`
-  (subdomains keep their label: `b.target.com`, `www.example.com`). The six
-  `slice.test.*` fixtures are `example.test.*`, `scripts/capture_sakec.sh` is
-  `scripts/capture_example.sh`, and the fixture title is `Example Bank`. No code
-  logic changed; suite stays 1023. The batch named a
-  `tests/fixtures/pyprobe/sakec.ac.in.synthetic.json` that does not exist - the
-  pyprobe fixture was `slice.test.json`, now `example.test.json`. See D79 in
-  REVIEW_LOG.
+  targets used for real verification (a university domain and a bank domain) and
+  the mock fixture name leaked into comments, fixtures, scripts and docs: 219
+  matching lines in 22 files. All are now `example.com` / `target.com` /
+  `example.test` (subdomains keep their label: `b.target.com`,
+  `www.example.com`). The six mock fixtures are `example.test.*`, the capture
+  script is `scripts/capture_example.sh`, and the fixture title is `Example
+  Bank`. No code logic changed; suite stays 1023. The batch named a pyprobe
+  fixture that does not exist - the real pyprobe fixture was the mock one, now
+  `example.test.json`. See D79 in REVIEW_LOG.
 - Status (2026-11-20, D76-D78): **third-party URLs no longer make hosts, folders or
   URL groups.** `Engine._within_scope()` decides target or `*.target`;
   `_persist_urls` tags every other URL `urls.source = 'external'` (schema 12), and
