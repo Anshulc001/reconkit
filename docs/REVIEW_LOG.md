@@ -7161,3 +7161,19 @@ scan had 4 DNS_ONLY hosts and no ALIVE host. Every later stage then reported `fa
 pushed the run to nine "failed" tools (exit 5) although no tool was broken: they had no input. Whether "no hosts to
 <verb>" should stay `failed` or become a skip is a status/exit-code rule change, so it was only recorded here. The
 120 s run in the first scan (subs completed, 8 ALIVE) is the representative one.
+
+## 2026-11-19 (close-out) N.1 - reconciliation of the 2026-11-18b batch (D41)
+
+Docs only (`docs/PROGRESS.md` D41, `docs/09_TOOL_CONTRACTS.md` 4b). Three facts recorded, nothing re-implemented:
+
+1. **Baseline correction.** The previous prompt named 903 tests at `6d77834`; the checkout was at 908 (verified by the
+   gate at the start of this batch: `928 passed` from `7983974`). Part I renamed/adjusted the four acceptance tests
+   already shipped in `7cf1b20` and added the `COMMANDS.md` note - net +0 tests.
+2. **B1/D34 stands.** `gap` is R8's "degraded"; the observable contract (429/quota/in-context 5xx -> gap -> excluded
+   from the failure total -> exit 0) is what the ruling asked for, so no `ToolStatus.DEGRADED` member and no schema 11.
+   Tradeoff disclosed in D41(b): `--json` `tools_gap` cannot separate a provider throttle from a structural gap; the
+   reason is in `stages[].results[].error`.
+3. **Mock caveat.** `tests/fixtures/pyprobe/testfire.net.synthetic.json` says 200 where the real host says `-2`; docs/09
+   now says fixture statuses are synthetic and not evidence.
+
+Also removed a duplicated truncated D38 paragraph left by the previous batch. Suite unchanged (928).
