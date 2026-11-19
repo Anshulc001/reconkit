@@ -632,6 +632,15 @@ script can tell "the run found nothing" from "the run did not write this file".
   `urls: 200 of 300 shown (report.urls_max 200)` instead of leaving a short list
   looking complete. `hosts/<hostname>/urls.txt` is never capped: it is that
   host's own list.
+- **A repeat scan says how many URL answers came from earlier runs (added
+  2026-11-19, D73).** `url_probe` never re-checks a stored answer, so after the
+  first scan most of a URL list is already known. When the target had non-NULL
+  `urls.status_code` values **before this run started** (`K`), `report.txt`
+  prints `urls: 3124 total, 3124 shown (2856 already probed in earlier runs; use
+  --reprobe-urls to re-check)` and `report.json` gains
+  `"urls_already_probed": 2856` beside `urls_total`/`urls_shown`. `K = 0`
+  writes neither: the key is absent and the header keeps its old form. A
+  `report` rebuild has no run context and omits it.
 - **The text file gets the same two blocks.** After the hosts table,
   `=== Domains ===` lists the root and then one `  <host>   <STATE>  <CONFIDENCE>`
   line per subdomain (a single `69 subdomains, see hosts table` line past 50,

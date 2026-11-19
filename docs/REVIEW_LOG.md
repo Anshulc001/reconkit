@@ -77,6 +77,35 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 | PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `slice.bank.in` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.slice.bank.in/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
 
+## 2026-11-19 (D73) - a repeat scan says how much of the URL list was already answered
+
+`url_probe` stores one answer per URL and never re-checks it (D23), so a second
+scan's report could look like it had probed 3,124 URLs when 2,856 of them were
+answered days earlier. The count of non-NULL `urls.status_code` rows is now read
+**once before any stage runs** (`Engine.run`, right after `ScanSummary` is
+built) and carried as `summary.urls_already_probed`; `report_document` adds
+`urls_already_probed` and `report_text` prints the parenthetical.
+
+Acceptance (`--mock` against a copy of the slice DB, no network):
+
+```
+$ cp recon.db /tmp/item5.db
+$ reconkit run -d slice.bank.in --active --mock --db /tmp/item5.db --scope /tmp/scope-d73.yaml
+report: results/mock/slice.bank.in/20261119T205138Z/report.txt ...
+$ grep '^urls:' report.txt
+urls: 3124 total, 3124 shown (2856 already probed in earlier runs; use --reprobe-urls to re-check)
+$ python -c '...urls_already_probed...'
+urls_total 3124 shown 3124 already 2856
+$ sqlite3 /tmp/item5.db "SELECT count(*) FROM urls WHERE ... status_code IS NOT NULL"
+2856
+```
+
+The DB count equals `K` exactly, because it was taken before the mock run wrote
+anything. `K = 0` omits the key and the sentence (`test_report_omits_already_probed_when_zero`).
+A `reconkit report` rebuild has no "before this run" point and leaves the key
+out. Suite 1010 -> 1012. Four non-doc files (`engine.py`, `ui.py`, `cli.py`,
+`tests/test_ui.py`).
+
 ## 2026-11-19 (D72) - a referral URL ranks last, and is still reported
 
 Before, `/product?utm_source=x` sorted by the depth of its path and its status,

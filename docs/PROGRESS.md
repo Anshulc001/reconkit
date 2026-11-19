@@ -4,6 +4,11 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-19, D73): **a repeat scan says how many URL answers came from earlier runs.**
+  `url_probe` never re-checks a stored answer, so the report now carries `urls_already_probed` (JSON) and
+  `urls: N total, M shown (K already probed in earlier runs; use --reprobe-urls to re-check)` (text).
+  `K` is counted once before any stage runs; `K = 0` writes neither. Verified on a mock run over a slice DB
+  copy: K = 2856, matching the stored non-NULL count. Suite 1010 -> 1012. See D73 in REVIEW_LOG.
 - Status (2026-11-19, D72): **marketing/referral URLs rank below clean ones, and are never dropped.**
   `ui.NOISE_PARAM_RE` (utm_*, fbclid, gclid, rc, ic, _branch_*, af_xp, pid, deep_link_*) is the
   second sort key after "interesting path", so `/admin?utm_source=x` keeps tier 1 while `/product?utm_source=x`

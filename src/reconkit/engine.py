@@ -601,6 +601,9 @@ class ScanSummary:
     # D56: scope facts a reader must see after the run (the report carries them
     # too, because a warning that only scrolls off is not a safety warning).
     scope_warnings: list[str] = field(default_factory=list)
+    # D73: URLs that already carried a status when this run started, so the
+    # report can say how much of its URL list came from earlier runs.
+    urls_already_probed: int = 0
 
     @property
     def completion_status(self) -> str:
@@ -975,6 +978,11 @@ class Engine:
         )
         for note in cidr_warnings:
             self._progress(note)
+        # D73: counted before any stage runs, so a `url_probe` pass this run
+        # cannot inflate the number the report calls "earlier runs".
+        summary.urls_already_probed = sum(
+            1 for row in self.store.url_report_rows(target_id) if row["status_code"] is not None
+        )
         discovered: set[str] = set()
         alive: set[str] = set()
         if resumed:

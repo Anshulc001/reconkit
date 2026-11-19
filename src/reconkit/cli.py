@@ -1088,6 +1088,9 @@ def _run_scan(
                 urls=engine.url_rows(summary.target_id),
                 urls_max=config.report.urls_max,
                 noise_params=config.report.noise_params,
+                # D73: counted before any stage ran, so a repeat scan says how
+                # many URL answers came from earlier runs.
+                urls_already_probed=summary.urls_already_probed,
                 # D63: the artifact records the mode the run actually used.
                 mode="active (forced by --include)" if forced_contact else None,
                 # D64: a requested active run whose active stages the scope gate

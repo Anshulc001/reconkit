@@ -645,6 +645,7 @@ def report_document(
     urls: Sequence[UrlSnapshot] = (),
     urls_max: int = 0,
     noise_params: Sequence[str] = (),
+    urls_already_probed: int = 0,
     mode: str | None = None,
     scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
@@ -672,6 +673,10 @@ def report_document(
         "urls_shown": shown,
         "urls_truncated": len(urls) > shown,
     }
+    if urls_already_probed:
+        # D73: says how much of the list was answered before this run, so a
+        # repeat scan does not read as if it had re-probed everything.
+        document["urls_already_probed"] = urls_already_probed
     if mode is not None:
         # D63: a run whose mode `--include` changed says so in the artifact.
         document["mode"] = mode
@@ -721,6 +726,7 @@ def report_text(
     urls: Sequence[UrlSnapshot] = (),
     urls_max: int = 0,
     noise_params: Sequence[str] = (),
+    urls_already_probed: int = 0,
     mode: str | None = None,
     scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
@@ -755,7 +761,11 @@ def report_text(
         lines.append("  ".join(cell.ljust(width) for cell, width in zip(line, widths, strict=True)))
     if not table and "hosts" not in hidden:
         lines.append("(no hosts)")
-    lines.extend(_report_tree_sections(target, rows, urls, urls_max, hidden, noise_params))
+    lines.extend(
+        _report_tree_sections(
+            target, rows, urls, urls_max, hidden, noise_params, urls_already_probed
+        )
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -771,6 +781,7 @@ def _report_tree_sections(
     urls_max: int,
     hidden: frozenset[str] = frozenset(),
     noise_params: Sequence[str] = (),
+    urls_already_probed: int = 0,
 ) -> list[str]:
     """The two D62 sections, minus any D63-hidden one, or nothing without URLs."""
 
@@ -788,7 +799,15 @@ def _report_tree_sections(
         grouped, shown = report_urls(urls, urls_max, noise_params)
         lines.extend(["", "=== URLs by host ==="])
         if shown < len(urls):
-            lines.append(f"urls: {shown} of {len(urls)} shown (report.urls_max {urls_max})")
+            head = f"urls: {shown} of {len(urls)} shown (report.urls_max {urls_max})"
+        else:
+            head = f"urls: {len(urls)} total, {shown} shown"
+        if urls_already_probed:
+            head += (
+                f" ({urls_already_probed} already probed in earlier runs;"
+                " use --reprobe-urls to re-check)"
+            )
+        lines.append(head)
         for host, items in grouped.items():
             lines.append(f"{host}  ({items[0]['host_state']})")
             for item in items:
@@ -904,6 +923,7 @@ def write_field_report(
     urls: Sequence[UrlSnapshot] = (),
     urls_max: int = 0,
     noise_params: Sequence[str] = (),
+    urls_already_probed: int = 0,
     mode: str | None = None,
     scope_limited: bool = False,
     hidden: frozenset[str] = frozenset(),
@@ -931,6 +951,7 @@ def write_field_report(
         urls=urls,
         urls_max=urls_max,
         noise_params=noise_params,
+        urls_already_probed=urls_already_probed,
         mode=mode,
         scope_limited=scope_limited,
         hidden=hidden,
@@ -948,6 +969,7 @@ def write_field_report(
             urls=urls,
             urls_max=urls_max,
             noise_params=noise_params,
+            urls_already_probed=urls_already_probed,
             mode=mode,
             scope_limited=scope_limited,
             hidden=hidden,

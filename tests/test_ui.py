@@ -991,3 +991,38 @@ def test_noise_params_config_extends_builtin() -> None:
         "https://example.com/a?campaign=spring",
         "https://example.com/a?gclid=x",
     ]
+
+
+# ------------------------------- (D73) how many URLs were probed before
+
+
+def _repeat_document(urls: list[UrlSnapshot], already: int) -> tuple[dict[str, object], str]:
+    kwargs = {
+        "run_at": datetime(2026, 11, 19, 12, 0, 0, tzinfo=UTC),
+        "urls_already_probed": already,
+    }
+    document = ui.report_document(
+        "example.com", [_snapshot("example.com")], ui.REPORT_FIELDS, urls=urls, **kwargs
+    )
+    text = ui.report_text(
+        "example.com", [_snapshot("example.com")], ui.REPORT_FIELDS, urls=urls, **kwargs
+    )
+    return document, text
+
+
+def test_report_surfaces_already_probed_count_on_repeat_runs() -> None:
+    """D73: a repeat scan says how many URL answers came from earlier runs."""
+    urls = [_url("https://example.com/a", 200), _url("https://example.com/b", None)]
+    document, text = _repeat_document(urls, 1)
+    assert document["urls_already_probed"] == 1
+    assert (
+        "urls: 2 total, 2 shown (1 already probed in earlier runs; "
+        "use --reprobe-urls to re-check)" in text
+    )
+
+
+def test_report_omits_already_probed_when_zero() -> None:
+    """D73: nothing was probed before, so neither file mentions it."""
+    document, text = _repeat_document([_url("https://example.com/a", 200)], 0)
+    assert "urls_already_probed" not in document
+    assert "already probed" not in text
