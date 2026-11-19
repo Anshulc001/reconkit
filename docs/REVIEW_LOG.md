@@ -169,7 +169,43 @@ allowed "the stage subcommands if they share the option group"). The bare
 Gate: `990 passed`, `ruff check .` clean, `ruff format --check .` 96 files,
 `mypy src/reconkit` clean (62 source files). No scan was run.
 
+## 2026-11-19 - state check: `api`/`assets.slice.bank.in` never held DNS_ONLY
+
+Reported as a DNS_ONLY -> UNKNOWN regression between the 18:36 passive run and
+the 19:13 active run. The stored rows say otherwise:
+
+```
+subdomains: api.slice.bank.in    UNKNOWN  source_count=1  provenance=dns  first_seen_run=181  last_seen_run=181
+            assets.slice.bank.in UNKNOWN  source_count=1  provenance=dns  first_seen_run=181  last_seen_run=181
+subdomain_sources: (api.slice.bank.in, run 181, 'url-derived')
+                   (assets.slice.bank.in, run 181, 'url-derived')
+host_status_history: no row for either host
+slice history at run 180 (dns): 13 rows, all DNS_ONLY except temp.slice.bank.in DEAD
+slice history at run 191 (live): 12 rows, the same hosts, 9 ALIVE + 3 DNS_ONLY
+```
+
+Both names were created by the `urls` stage's D58 second resolve in run 181
+(passive, 18:33-18:36Z), which labels a URL-only name with the `url-derived`
+sentinel; `dnspython` returned no record for either, so `_persist_dns` wrote no
+state and the row kept the column default `UNKNOWN`. No later run touched them
+(`last_seen_run` stays 181: the 19:04 `subs` pass did not report them, so the
+19:05 `live` pass never had them in its host list). The only state these two
+hosts have ever had in this DB is `UNKNOWN`; the active run at 19:13 is not
+implicated.
+
+The transition table is not the cause either: `DNS_ONLY` + timeout keeps
+`DNS_ONLY` (engine.py transition comment, `decide_host_state`), and
+`_second_resolve_live` only reaches `UNKNOWN` for a host with no previous
+state, or keeps the previous state when one exists. No code change.
+
 ## 2026-11-19 (D62) - a saved report carries a domain tree and its URLs
+
+**Real-run check (2026-11-19, loop item 1):** not confirmed yet. Every report
+on disk predates `0062f11` (19:08:14Z): `sakec.ac.in` has 15:06:46Z, 16:52:32Z
+and 18:50:30Z, all with the old 7 keys and 0 `===` headings, and
+`results/slice.bank.in/` contains no report at all (its 19:09-19:13Z active
+run wrote none). Verification is deferred to the next run that saves a report;
+the shape itself is covered by the mock tests named below.
 
 Before: `report.json` had 7 top-level keys (`type`, `target`, `generated_at`,
 `selection`, `scope_warnings`, `fields`, `hosts`) and `report.txt` had **no**
