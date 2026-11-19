@@ -3,7 +3,7 @@
 A command-line reconnaissance orchestrator for **authorized** security testing. It runs several tools per stage, cross-checks their results, scores confidence by how many tools agree, and tracks what changed between scans in SQLite.
 
 - Natural pace: no speed preset, delay or artificial throttling; tools run at their own rate
-- Passive first: `passive` (subs+dns+urls, passive tools only) by default; `--active` adds `live` and `tech`; `--full` runs every stage. A `scope.yaml`, when present, is enforced - with no scope file (or with `--no-scope`) active scanning runs unrestricted
+- Passive first: `passive` (subs+dns+urls, passive tools only) by default; `--active` adds `live` and `tech`; `--full` runs every stage. A `scope.yaml` is required for active scans; without one, active scanning is refused unless `--no-scope` is passed explicitly
 - Multi-tool stages with source attribution (HIGH / MEDIUM / LOW)
 - Host states: ALIVE, DNS_ONLY, SHUT_DOWN, DEAD, tracked across scans
 - Tool inventory, not installation: `reconkit doctor` lists what is installed and what is missing; per-tool sources are in [docs/10_TOOL_SOURCES.md](docs/10_TOOL_SOURCES.md)

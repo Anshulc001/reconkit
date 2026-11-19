@@ -210,7 +210,7 @@ def test_the_mode_is_asked_until_a_valid_answer_is_typed(
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
         app,
-        interactive_args(config),
+        interactive_args(config, "--no-scope"),
         input="example.com\nn\nsideways\n\nactive\nall\nn\n\nall\n\nn\nn\nn\n",
     )
     assert result.exit_code == 0, result.stderr
@@ -361,6 +361,7 @@ def test_aggressive_yes_adds_the_ports_stages(
         app,
         interactive_args(
             config,
+            "--no-scope",
         ),
         input="example.com\nn\npassive\nall\ny\n",
     )
@@ -412,7 +413,7 @@ def test_aggressive_no_leaves_the_plan_alone(
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
         app,
-        interactive_args(config),
+        interactive_args(config, "--no-scope"),
         input="example.com\nn\nactive\nall\nn\n\nall\n\nn\nn\nn\n",
     )
     assert (
@@ -472,7 +473,7 @@ def test_full_mode_requests_every_stage_including_vulns(
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(
         app,
-        ["passive", "--mock", "--config", str(config)],
+        ["passive", "--mock", "--config", str(config), "--no-scope"],
         input="example.com\nn\nfull\nall\nn\n\nall\n\nn\nn\n",
     )
     assert result.exit_code == 0, result.stderr
@@ -796,7 +797,8 @@ def test_interactive_passive_active_full_match_cli(
     monkeypatch.setattr(Engine, "run", fake_run)
     as_tty(monkeypatch)
     monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(app, interactive_args(config), input=MODE_ANSWERS[mode])
+    extra = ("--no-scope",) if mode != "passive" else ()
+    result = CliRunner().invoke(app, interactive_args(config, *extra), input=MODE_ANSWERS[mode])
     assert result.exit_code == 0, result.stderr
     (options,) = calls
     assert options.stages == MODE_STAGES[mode]

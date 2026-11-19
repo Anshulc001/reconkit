@@ -4,6 +4,17 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D82): **active/full scans now fail closed when no
+  `scope.yaml` is present.** The CLI refuses before `Engine.open` with exit 3 and
+  the exact message `Error: No scope.yaml found. Active scanning requires a scope
+  file. If you intend to scan without scope restrictions, you must explicitly
+  pass --no-scope.` `--no-scope` remains the explicit opt-out and records
+  `unrestricted_flag`; passive runs still need no file. The engine `_active_hosts`
+  keeps the same guard for direct callers. This supersedes D1's fail-open rule.
+  Docs/02, 03, 05, 08, 09, README, AGENTS and the naabu/ports notes were updated.
+  Tests 1029 -> 1032 (three D82 CLI tests; old no-file tests now assert refusal
+  or use the explicit flag). Gate: 1032 passed, ruff and mypy clean. See D82 in
+  REVIEW_LOG.
 - Status (2026-11-20, vulns docs): **the documented state of `vulns` now matches
   the code.** The stage needs `--active` (or `--full`); `nuclei`/`subzy` are
   core, `nikto`/`ffuf` opt_in, `dnsreaper` has no adapter, and the three

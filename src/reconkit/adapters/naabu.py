@@ -3,7 +3,7 @@
 Connect scan only (`-scan-type c`), so it works without root. Port order is the
 engine's; naabu receives one validated input list and one port list.
 
-Input is scope-mode dependent (docs/05 rule 6, 2026-11-17): with no scope file
+Input is scope-mode dependent (docs/05 rule 6): with --no-scope
 the engine passes the ordinary hostnames; with a scope file present it passes
 only IP addresses it resolved and verified itself, never a bare domain. The
 adapter accepts both forms because both are legitimate, and `-host` takes a

@@ -19,6 +19,7 @@ from dotenv import dotenv_values
 from reconkit.config import AppConfig, load_config
 from reconkit.core.runner import terminate_all_live, validate_target
 from reconkit.core.scope import (
+    NO_SCOPE_MESSAGE,
     check_target,
     preflight_warning,
     scope_present,
@@ -152,8 +153,8 @@ def _stage_list(mode: str) -> str:
 _ACTIVE_HELP = (
     f"Run active stages: {_stage_list('active')}. The passive stages "
     "still run. Uses passive and active tools; no intrusive/aggressive tools. "
-    "A scope.yaml, when present, is enforced; with no scope file, active "
-    "scanning is unrestricted."
+    "A scope.yaml is required; without one, active scanning is refused unless "
+    "--no-scope is passed explicitly."
 )
 _FULL_HELP = (
     f"Run a full scan: all stages ({_stage_list('full')}). Uses passive, active, "
@@ -937,6 +938,11 @@ def _run_scan(
                 console=progress_console,
                 no_color=no_color,
             )
+        if is_active and not no_scope and not scope_present(scope_path):
+            # D82: fail closed. A missing scope file is no longer an implicit
+            # unrestricted run; the operator must opt out explicitly.
+            render_error(NO_SCOPE_MESSAGE, console=progress_console, no_color=no_color)
+            return int(ExitCode.SCOPE)
         if no_scope and not is_active:
             render_message(
                 "warning: --no-scope has no effect on a passive run; continuing",

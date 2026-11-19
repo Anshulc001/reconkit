@@ -556,7 +556,7 @@ These are explicit owner requests made after the plan above was saved. They
 take precedence over the rules they touch; each is recorded here with its date
 and reason, and mirrored in docs/PROGRESS.md "Deviations".
 
-D1. 2026-11-17 - No scope file means unrestricted active scanning.
+D1. 2026-11-17 - No scope file means unrestricted active scanning. Superseded by D82 (2026-11-19): a missing file now refuses active runs unless `--no-scope` is passed.
     Reason: "user-requested: no scope file should mean unrestricted scanning of
     operator-specified targets, not auto-derived restricted scope."
     A run with no scope file at the resolved path (default `./scope.yaml`,
@@ -969,7 +969,7 @@ D23. 2026-11-18 - URL liveness probe (`url_probe` stage, owner-requested after
     Scope: it is an active stage, so it goes through `_active_hosts()` like
     every other one - with a scope file present, only URLs whose host the gate
     allows are probed, and a denial is exit 3 with the usual block. `--no-scope`
-    behaves exactly as if no scope file existed (docs/05 section 3).
+    is the explicit opt-out; a missing scope file now refuses active runs unless it is passed (D82, docs/05 section 2).
 
     Frozen rules untouched: no change to host-state definitions, to the
     confidence formula, to `decide_host_state`, or to `diff`. The probe writes

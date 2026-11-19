@@ -235,7 +235,7 @@ The connect scan (`-scan-type c`) ran as a normal user with no root and no
 
 **`reconkit` runs this tool scope-mode dependently** (owner decision
 2026-11-17, docs/MASTER_PLAN.md D2, superseding the 11c-G-7/12i permanent
-block): with no scope file `naabu` runs like any other active tool on the
+block): with `--no-scope` `naabu` runs like any other active tool on the
 discovered hostnames; with a scope file present the engine resolves each target
 itself and passes only the address(es) verified against `in_scope_cidrs`,
 skipping a target whose resolution fails or resolves out of scope, and records

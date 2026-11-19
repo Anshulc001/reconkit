@@ -210,7 +210,7 @@ tables, which is why the three surfaces cannot disagree.
 ## 6. Data Flow (example: `reconkit live -d example.com --active`)
 
 1. CLI parses flags and loads `config.yaml`.
-2. Scope gate: with `--no-scope` the file is ignored (`scope_mode` `unrestricted_flag`); otherwise, if `scope.yaml` exists it must not be expired, must allow active and must match `example.com` (exit code 3 otherwise). With no scope file at the resolved path the active stages run unrestricted against the named target (docs/05 rule 2).
+2. Scope gate: with `--no-scope` the file is ignored (`scope_mode` `unrestricted_flag`); otherwise a `scope.yaml` is required for active/full runs, must not be expired, must allow active and must match `example.com` (exit code 3 otherwise). With no scope file at the resolved path the run is refused with exit 3 before traffic (docs/05 rule 2, D82).
 3. Engine reads known subdomains for the target from SQLite; each host is checked against scope again (out-of-scope removed).
 4. Engine selects adapters for stage `live` that are installed and allowed by `MODE_TOOLS` (section 5b) plus the `exploitation` rule.
 5. Every selected adapter for the stage starts together; each one runs at its own natural pace.
@@ -304,7 +304,7 @@ Single machine, thousands of hosts per target. Beyond that is out of scope (see 
 | What if | Expected behavior |
 |---|---|
 | Tool missing | Skip, report `skipped (not installed)`; stage continues. This is the selection-time rule; a binary that was found at selection but cannot be spawned at run time is `failed` with its message instead |
-| Adapter resolver lives inside the tool (`naabu`) | Scope-mode branch (docs/05 rule 6, 2026-11-17): no scope file - it runs unrestricted on hostnames; scope file present - the engine resolves and verifies each target itself and hands it only in-scope IPs, omitting targets whose resolution fails or resolves out of scope (all omitted = `blocked:` skip, stage continues) |
+| Adapter resolver lives inside the tool (`naabu`) | Scope-mode branch (docs/05 rule 6): `--no-scope` - it runs unrestricted on hostnames; scope file present - the engine resolves and verifies each target itself and hands it only in-scope IPs, omitting targets whose resolution fails or resolves out of scope (all omitted = `blocked:` skip, stage continues) |
 | Tool crashes or exits non-zero | Record `failed` with stderr summary; keep other results |
 | Tool timeout | Kill process group, keep partial output if parseable, record `timeout` (exit `5`, R13) |
 | Tool idle past its class window (D52) | Stop the child via its stop event, keep the partial output, record `killed` (exit `0`) |

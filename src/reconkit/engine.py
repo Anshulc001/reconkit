@@ -36,6 +36,7 @@ from reconkit.adapters.registry import ToolSpec, load_tools
 from reconkit.config import AppConfig, UrlProbeConfig
 from reconkit.core.runner import validate_host, validate_target
 from reconkit.core.scope import (
+    NO_SCOPE_MESSAGE,
     ScopeGate,
     load_scope,
     passive_warning,
@@ -241,9 +242,9 @@ def _completed(status: ToolStatus) -> bool:
 
 
 def allow_all_ip(_ip: str) -> bool:
-    """The docs/05 rule 6 predicate when there is no scope file (2026-11-17).
+    """The docs/05 rule 6 predicate under `--no-scope`.
 
-    No scope file means no CIDR list, so there is nothing to restrict: active
+    The explicit opt-out means no CIDR list, so there is nothing to restrict: active
     scanning of the operator's targets is unrestricted. With a scope file the
     predicate is the loaded scope's `ip_allowed` instead.
     """
@@ -1056,7 +1057,7 @@ class Engine:
                 else:
                     ip_allowed = await asyncio.to_thread(self._ip_allowed, opts)
             # docs/05 rule 6: with a scope file present, naabu receives only
-            # addresses the engine resolved and verified; with no scope file it
+            # addresses the engine resolved and verified; under --no-scope it
             # runs unrestricted like every other active tool.
             tool_hosts: dict[str, list[str]] = {}
             # A `mode: passive` urls tool queries an archive by domain, so it gets
@@ -1414,7 +1415,9 @@ class Engine:
 
     def _note_scope_refusal(self, target: str, reason: str) -> None:
         """docs/02 section 6: the exit-3 sentence an operator can act on."""
-        if "not in scope" in reason or "out of scope" in reason:
+        if reason == NO_SCOPE_MESSAGE:
+            note = reason
+        elif "not in scope" in reason or "out of scope" in reason:
             note = (
                 f"active scan refused: {target} not in scope.yaml. "
                 f"Re-run with --no-scope or add {target} to scope.yaml."
@@ -1427,12 +1430,15 @@ class Engine:
     def _active_hosts(
         self, target: str, hosts: list[str], opts: ScanOptions
     ) -> tuple[list[str], list[str], str | None]:
-        if opts.no_scope or not scope_present(self.scope_path):
-            # docs/05 rule 2 (2026-11-17): no scope file means unrestricted
-            # active scanning of the operator's targets and everything
-            # discovered under them. `--no-scope` behaves exactly as if the file
-            # were absent (docs/05 section 3). No scope object is loaded.
+        if opts.no_scope:
+            # docs/05 rule 2 (2026-11-17, amended by D82 2026-11-19): no file
+            # means active scanning is refused; only the explicit --no-scope
+            # opt-out returns the host list untouched.
             return hosts, [], None
+        if not scope_present(self.scope_path):
+            # D82: fail closed. The CLI refuses before the engine starts; this
+            # guard covers direct Engine callers and any future path.
+            return hosts, [], NO_SCOPE_MESSAGE
         try:
             gate = load_scope(self.scope_path)
             allowed = [host for host in hosts if gate.allows(host)]

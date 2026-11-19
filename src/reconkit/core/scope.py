@@ -18,6 +18,10 @@ from reconkit.errors import ConfigError, ScopeError
 
 DEFAULT_SCOPE_PATH = Path("scope.yaml")
 MAX_PATTERN_LEN = 200
+NO_SCOPE_MESSAGE = (
+    "Error: No scope.yaml found. Active scanning requires a scope file. "
+    "If you intend to scan without scope restrictions, you must explicitly pass --no-scope."
+)
 _SCOPE_KEYS = frozenset(
     {
         "program",
@@ -144,8 +148,8 @@ def scope_present(path: Path | str | None = None) -> bool:
     """True when a scope file exists at the resolved location.
 
     This is the one decision the active path makes about scope mode: no file
-    means unrestricted active scanning of the operator's targets (docs/05 rule
-    2, 2026-11-17); a file present means the unchanged gate runs.
+    means active scanning is refused unless `--no-scope` was given (D82,
+    2026-11-19); a file present means the unchanged gate runs.
     """
     return _path(path).exists()
 

@@ -83,6 +83,15 @@ def make_config(tmp_path: Path) -> Path:
     raw["db_path"] = str(tmp_path / "recon.db")
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    # D82: an active run now needs a scope file. Give every test that asks for
+    # one a permissive local scope; tests that exercise a missing or denying
+    # scope pass --scope explicitly or chdir to a scope-free directory.
+    (tmp_path / "scope.yaml").write_text(
+        "authorization: test engagement\nin_scope:\n  - example.com\n"
+        '  - "*.example.com"\n  - testfire.net\n  - "*.testfire.net"\n'
+        "allow_active: true\n",
+        encoding="utf-8",
+    )
     return path
 
 
@@ -276,15 +285,8 @@ def test_a_filtered_run_writes_only_what_it_showed_and_says_so(tmp_path: Path) -
     assert "UNKNOWN" in result.stderr or "ALIVE" in result.stderr
 
 
-def test_mock_run_without_a_scope_file_is_unrestricted(tmp_path: Path) -> None:
-    """Regression: 2026-11-17 - a missing scope file is not a refusal.
-
-    Changed from `test_mock_scope_denial_returns_three`, which asserted exit 3 for
-    an absent scope file. That behaviour was replaced by the owner request: no
-    scope file means unrestricted active scanning of the operator's target. The
-    exit-3 path is still covered, against a real scope file, by
-    `test_mock_scope_file_denial_returns_three` below.
-    """
+def test_mock_run_with_an_explicit_missing_scope_file_is_refused(tmp_path: Path) -> None:
+    """D82: `--scope PATH` pointing at a missing file also fails closed."""
     config = make_config(tmp_path)
     missing_scope = tmp_path / "missing.yaml"
     result = CliRunner().invoke(
@@ -298,11 +300,9 @@ def test_mock_run_without_a_scope_file_is_unrestricted(tmp_path: Path) -> None:
             "--json",
         ),
     )
-    assert result.exit_code != 3
-    assert "subs: running" in result.stderr
-    document = json.loads(result.stdout)
-    assert document["scope_denied"] is False
-    assert document["exit_code"] != 3
+    assert result.exit_code == 3
+    assert "No scope.yaml found" in " ".join(result.stderr.split())
+    assert result.stdout == ""
 
 
 def test_mock_scope_file_denial_returns_three(tmp_path: Path) -> None:
@@ -1187,6 +1187,51 @@ def test_ports_injection_reaches_the_port_stage(
     # fixture output is parsed unchanged, so the proof is the run params.
     document = json.loads(result.stdout)
     assert document["injections"]["ports"] == [80, 443]
+
+
+def test_active_scan_fails_without_scope_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D82: a missing scope file is not an implicit unrestricted run."""
+    config = make_config(tmp_path)
+    no_scope_dir = tmp_path / "no-scope"
+    no_scope_dir.mkdir()
+    monkeypatch.chdir(no_scope_dir)
+    result = CliRunner().invoke(app, mode_args(config, "--active"))
+    assert result.exit_code == 3, result.stderr
+    message = " ".join(result.stderr.split())
+    assert (
+        "Error: No scope.yaml found. Active scanning requires a scope file. "
+        "If you intend to scan without scope restrictions, you must explicitly "
+        "pass --no-scope."
+    ) in message
+    assert "Traceback" not in result.stderr
+
+
+def test_active_scan_succeeds_with_no_scope_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D82: --no-scope remains the explicit opt-out when no scope file exists."""
+    config = make_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, mode_args(config, "--active", "--no-scope", "--json"))
+    assert result.exit_code == 0, result.stderr
+    assert "--no-scope given" in result.stderr
+    document = json.loads(result.stdout)
+    assert document["scope_mode"] == "unrestricted_flag"
+    assert document["scope_denied"] is False
+
+
+def test_passive_scan_still_works_without_scope_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D82 narrows active scans only; passive discovery needs no scope file."""
+    config = make_config(tmp_path)
+    no_scope_dir = tmp_path / "no-scope"
+    no_scope_dir.mkdir()
+    monkeypatch.chdir(no_scope_dir)
+    result = CliRunner().invoke(app, scan_args(config, "passive"))
+    assert result.exit_code == 0, result.stderr
 
 
 def test_no_scope_flag_overrides_a_scope_path_and_records_the_flag(tmp_path: Path) -> None:

@@ -176,12 +176,12 @@ selection skip, and a stage left with none is a completion gap (exit `0`).
 
 **What `--active` needs depends on whether a scope file exists.** With `--scope PATH` (default `./scope.yaml`):
 
-- **No scope file at that path** - active and full scanning run **unrestricted** against the target(s) given with `-d`/`-l` and every host discovered under them. Nothing is derived from the target, no implicit scope is built, and the run is not refused (docs/05 rule 2). "No scope file" means "scan freely, I know what I typed"; exit code 3 is not produced for a missing file.
+- **No scope file at that path** - active and full runs are **refused before any traffic** with exit code 3: `Error: No scope.yaml found. Active scanning requires a scope file. If you intend to scan without scope restrictions, you must explicitly pass --no-scope.` Passive stages still work. `--no-scope` is the only way to run actively without a file (docs/05 rule 2, D82).
 - **A scope file is present** - it is enforced exactly as before (`authorization`, `expires`, `allow_active`, `in_scope`, `out_of_scope`); a violation exits 3 and the file is only ever read, never rewritten or deleted.
 
-The `--active` `--help` text says this in one sentence: `A scope.yaml, when present, is enforced; with no scope file, active scanning is unrestricted.` The interactive mode asks the scope question before the mode question, so the same branch applies there (section 2b).
+The `--active` `--help` text says this in one sentence: `A scope.yaml is required; without one, active scanning is refused unless --no-scope is passed explicitly.` The interactive mode asks the scope question before the mode question, so the same branch applies there (section 2b).
 
-**Ports run `pyscan`, `naabu`, `nmap`, `rustscan`, `smap` and `masscan` (wave 6).** `naabu` is scope-mode dependent (owner decision 2026-11-17, superseding the 12i permanent block): with **no scope file** it runs unrestricted like any other active tool, receiving the discovered hostnames; with a **scope file present** the engine resolves each in-scope target itself, verifies every address against `in_scope_cidrs`, and passes `naabu` only those verified IPs - never a bare domain - skipping any target whose resolution fails or resolves out of scope (docs/05 rule 6, docs/09 section 4). Because two port adapters can now run, a port both report can reach `MEDIUM` confidence; a single-scanner result stays `LOW` and the open/closed disagreement rule only fires when both report. When `naabu` is absent or its targets cannot be verified, `pyscan` alone is the fallback and the ceiling is `LOW` again. `nmap` adds a `-sV` service/version fingerprint, `rustscan` a fast greppable sweep, and `smap` passive Shodan data filtered to `--ports`. `masscan` is `opt_in` **and needs root**: as a normal user it is `skipped (requires root / sudo)` and the stage continues; `sudo reconkit run ...` or `setcap cap_net_raw+ep` on the binary is the operator's call, never something the adapter does (docs/09 section 4a6).
+**Ports run `pyscan`, `naabu`, `nmap`, `rustscan`, `smap` and `masscan` (wave 6).** `naabu` is scope-mode dependent (owner decision 2026-11-17, superseding the 12i permanent block): with **`--no-scope`** it runs unrestricted like any other active tool, receiving the discovered hostnames; with a **scope file present** the engine resolves each in-scope target itself, verifies every address against `in_scope_cidrs`, and passes `naabu` only those verified IPs - never a bare domain - skipping any target whose resolution fails or resolves out of scope (docs/05 rule 6, docs/09 section 4). Because two port adapters can now run, a port both report can reach `MEDIUM` confidence; a single-scanner result stays `LOW` and the open/closed disagreement rule only fires when both report. When `naabu` is absent or its targets cannot be verified, `pyscan` alone is the fallback and the ceiling is `LOW` again. `nmap` adds a `-sV` service/version fingerprint, `rustscan` a fast greppable sweep, and `smap` passive Shodan data filtered to `--ports`. `masscan` is `opt_in` **and needs root**: as a normal user it is `skipped (requires root / sudo)` and the stage continues; `sudo reconkit run ...` or `setcap cap_net_raw+ep` on the binary is the operator's call, never something the adapter does (docs/09 section 4a6).
 
 ### State and output
 | Command | Purpose |
@@ -322,10 +322,9 @@ The questions:
    otherwise no scope file). A scope file that **is present** is enforced exactly
    as today: active stages need `allow_active`, a live `authorization`, an
    unexpired `expires`, and the target in `in_scope`/not in `out_of_scope` (exit
-   `3` otherwise). With **no scope file**, active and full scanning proceed
-   unrestricted against the target(s) you named and everything discovered under
-   them (docs/05 rule 2) - answering `no` is not a bypass of a real file, it is
-   the documented meaning of having none.
+   `3` otherwise). With **no scope file**, an active or full plan is refused
+   with exit `3` before any traffic (docs/05 rule 2, D82); answer the scope
+   question with a real file, or pass `--no-scope` explicitly on the command.
 3. **Scan mode.** No default: the question is asked and re-asked until one of the
    three words is typed (an empty line or any other word prints
    `invalid scan mode '...'` and asks again). The scan never starts on an
@@ -361,7 +360,7 @@ The questions:
    `passive` or `active` (a `full` run already includes every stage).
    `yes` adds the active `live` and `ports` stages (and sets `--active`), and it
    states plainly what that means in this build: TCP connect scanning by
-   `pyscan` and (`naabu` when installed) - with no scope file `naabu` runs on the
+   `pyscan` and (`naabu` when installed) - with `--no-scope` `naabu` runs on the
    hostnames, with a scope file it runs only on IPs the engine resolved and
    verified against `in_scope_cidrs`; **service/version detection is not wired**
    (`nmap -sV` has no adapter). `no` changes nothing.
@@ -414,7 +413,7 @@ text the CLI prints (typer renders a yes/no question as `[Y/n]` or `[y/N]`).
    explicit `y`.
 10. **Run.** The ordinary engine runs once per target, results are stored, and a
     report folder per domain is written (section 5).
-11. **Scope branch at run time.** With **no scope file**, or with `--no-scope`,
+11. **Scope branch at run time.** With **`--no-scope`**,
     the active/full stages run unrestricted against the target(s) the operator
     named and everything discovered under them (docs/05 rule 2 and section 3).
     With a scope file **present** and `--no-scope` absent, the unchanged gate
@@ -433,7 +432,7 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | Flag | Meaning |
 |---|---|
 | `-d, --domain` / `-l, --list` | Target or file of targets. Omitting both on a scan command starts the interactive mode (section 2b); that is the only trigger and it adds no flag |
-| `--active` | Run active stages: `subs`, `dns`, `live`, `tech`, `urls`, `url_probe`. Passive stages still run. Uses passive and active tools; no intrusive/aggressive tools. A `scope.yaml`, when present, is enforced; with no scope file, active scanning is unrestricted. Full rule: section 2 |
+| `--active` | Run active stages: `subs`, `dns`, `live`, `tech`, `urls`, `url_probe`. Passive stages still run. Uses passive and active tools; no intrusive/aggressive tools. A `scope.yaml` is required; without one, active scanning is refused unless `--no-scope` is passed explicitly. Full rule: section 2 |
 | `--full` | Run a full scan: all stages (`subs`, `dns`, `live`, `ports`, `tech`, `urls`, `shots`, `vulns`), using passive, active and intrusive-tier tools (exploitation-class tools still need `--tools`). Implies `--active` and `--include-noisy`, so `opt_in` tools run, `shots`/`gowitness` included. `shots` is full-only: no other mode and no stage command requests it |
 | `--no-scope` | Ignore any scope file and behave as if none existed: active stages run unrestricted, a loud warning is printed, the run records `scope_mode = unrestricted_flag`, and scope.yaml is never modified. If `--scope PATH` is also given, `--no-scope` wins and a warning says `--scope PATH` was ignored. On a passive run it only warns and continues. Section 3.1 |
 | `--tools a,b` | Run only these adapters. A named tool bypasses tier gating but not the mode gate |
@@ -786,7 +785,7 @@ script can tell "the run found nothing" from "the run did not write this file".
 | 0 | Success |
 | 1 | Unexpected error |
 | 2 | Usage error (bad flags) |
-| 3 | Scope violation when a scope file is present (target not allowed, unauthorized, or expired). A **missing** scope file is not a violation: it means unrestricted active scanning of the operator's targets (section 2) |
+| 3 | Scope violation: a present scope file refuses the target, or an active/full run has no scope file (D82). A **missing** scope file is a refusal, not an implicit permission (section 2) |
 | 4 | No usable tool for the stage |
 | 5 | Partial success (some tools failed or timed out, or a requested stage executed no tools because deliberate rules excluded every tool). An **external-service** outcome (429, quota, 5xx, or a request that never answered, from a third party) is a completion gap, not a failure, and never produces 5 on its own |
 | 6 | Retired 2026-11-17: was "every requested tool failed to install or update" |

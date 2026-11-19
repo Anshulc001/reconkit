@@ -60,7 +60,7 @@ reconkit installs nothing: `install`, `update` and `doctor --fix` were removed o
 ## Flow 5 - Live and shut-down detection (active)
 
 1. `reconkit live -d example.com --active`
-2. Scope gate runs first when `scope.yaml` is present and `--no-scope` was not given; a blocked target gets the pre-flight warning and exit `3` (`active scan refused: ... not in scope.yaml`), and no active traffic is sent. With no scope file, or with `--no-scope`, the stage runs unrestricted against the target (docs/05 rules 2 and 9).
+2. Scope gate runs first. With a `scope.yaml` and no `--no-scope`, a blocked target gets the pre-flight warning and exit `3` (`active scan refused: ... not in scope.yaml`), and no active traffic is sent. With no scope file, an active/full run is refused with exit `3` before traffic; only `--no-scope` runs unrestricted (docs/05 rules 2 and 9, D82).
 3. No speed preset: every selected tool starts together and runs at its own pace.
 4. Table columns: `Subdomain`, `State` (ALIVE / DNS_ONLY / SHUT_DOWN / DEAD), `Status`, `Ports`, `Sources`, `Trust`. Title and tech are not rendered in this build.
 5. State changes are not flagged in the stage table; `diff` shows them later as `STATE` rows (`old -> new`).

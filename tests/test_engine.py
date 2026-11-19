@@ -431,7 +431,7 @@ async def test_an_uninstalled_tool_is_skipped_and_the_others_still_run(tmp_path:
     )
     summary = await engine.run(
         "example.com",
-        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True),
+        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, no_scope=True),
     )
     assert rec.names == ["subs-fake", "live-fake", "naabu"]
     assert [(skip.tool, skip.reason) for skip in summary.skipped] == [("pyscan", "not installed")]
@@ -645,7 +645,7 @@ async def test_tlsx_sans_enter_discovered_and_reach_subdomains_table(tmp_path: P
     engine = make_engine(tmp_path, specs, adapters, store=store, scope_text=None)
     await engine.run(
         "testfire.net",
-        ScanOptions(stages=(Stage.LIVE, Stage.URLS), active=True, mock=True),
+        ScanOptions(stages=(Stage.LIVE, Stage.URLS), active=True, mock=True, no_scope=True),
     )
     assert set(rec.hosts[-1]) == {"testfire.net", "www.testfire.net"}
     persisted = {
@@ -1834,7 +1834,7 @@ def _dedup_run(
         "dns-fake": adapter("dns-fake", Stage.DNS, rec, records=dns_records),
         "live-fake": adapter("live-fake", Stage.LIVE, rec, records=live_records),
     }
-    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+    engine = make_engine(tmp_path, specs, adapters, scope_text=SCOPE)
     summary = asyncio.run(
         engine.run(
             "example.com",
@@ -2818,12 +2818,12 @@ async def test_raw_output_keeps_nul_and_ansi_bytes_verbatim(tmp_path: Path) -> N
 # ---------------------------------------- no scope file (docs/05 rule 2, 2026-11-17)
 
 
-async def test_no_scope_file_runs_active_stages_unrestricted(tmp_path: Path) -> None:
-    """Regression: 2026-11-17 - no scope file means unrestricted active scanning.
+async def test_no_scope_file_refuses_active_stages(tmp_path: Path) -> None:
+    """D82: no scope file is a refusal, not an implicit unrestricted run.
 
-    The operator named the target explicitly; a missing scope file is not a
-    restriction and not a refusal. Active stages run against the target and the
-    hosts discovered under it, with no exit 3.
+    Passive stages still run; every active stage is skipped and the run exits 3.
+    The CLI refuses earlier, but the engine keeps the same guard for direct
+    callers.
     """
     rec = Recorder()
     specs = {
@@ -2850,14 +2850,13 @@ async def test_no_scope_file_runs_active_stages_unrestricted(tmp_path: Path) -> 
         ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, mock=True),
     )
 
-    assert rec.names == ["subs", "live", "ports"]
-    live_hosts = rec.hosts[rec.names.index("live")]
-    assert "www.example.com" in live_hosts
-    assert "api.example.com" in live_hosts
-    assert summary.scope_denied is False
-    assert summary.exit_code is not ExitCode.SCOPE
-    stage = next(item for item in summary.stages if item.stage is Stage.LIVE)
-    assert stage.dropped_hosts == []
+    assert rec.names == ["subs"]
+    assert summary.scope_denied is True
+    assert summary.exit_code is ExitCode.SCOPE
+    assert any("No scope.yaml found" in note for note in summary.warnings)
+    live_stage = next(item for item in summary.stages if item.stage is Stage.LIVE)
+    assert live_stage.skipped
+    assert all("No scope.yaml found" in skip.reason for skip in live_stage.skipped)
 
 
 async def test_a_present_scope_file_is_enforced_exactly_as_before(tmp_path: Path) -> None:
@@ -2881,8 +2880,8 @@ async def test_no_scope_file_never_loads_or_derives_a_scope_object(
 
     `load_scope` is made fatal for the duration of the run: if the no-file path
     loaded a scope (or derived one from `example.com`) the run would raise here.
-    The same run must also hand the active stage an allow-all `ip_allowed`,
-    because there is no CIDR list to restrict against.
+    D82 then skips every active stage, so no adapter should receive an IP
+    predicate at all.
     """
     rec = Recorder()
     predicates: list[Callable[[str], bool] | None] = []
@@ -2922,12 +2921,9 @@ async def test_no_scope_file_never_loads_or_derives_a_scope_object(
         ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, mock=True),
     )
 
-    assert summary.exit_code is not ExitCode.SCOPE
-    assert rec.names == ["subs", "live"]
-    assert len(predicates) == 1
-    assert predicates[0] is not None
-    assert predicates[0]("203.0.113.9") is True
-    assert predicates[0]("10.0.0.1") is True
+    assert summary.exit_code is ExitCode.SCOPE
+    assert rec.names == ["subs"]
+    assert predicates == []
     assert not (tmp_path / "scope.yaml").exists()
 
 
@@ -2975,8 +2971,8 @@ def ports_engine(
     )
 
 
-async def test_no_scope_file_runs_naabu_on_hostnames_unrestricted(tmp_path: Path) -> None:
-    """(a) No scope file: naabu is an ordinary active tool, no resolve step."""
+async def test_no_scope_flag_runs_naabu_on_hostnames_unrestricted(tmp_path: Path) -> None:
+    """(a) With --no-scope: naabu is an ordinary active tool, no resolve step."""
     rec = Recorder()
     resolved: list[str] = []
 
@@ -2987,7 +2983,12 @@ async def test_no_scope_file_runs_naabu_on_hostnames_unrestricted(tmp_path: Path
     engine = ports_engine(tmp_path, rec, scope_text=None, resolve=resolve)
     summary = await engine.run(
         "example.com",
-        ScanOptions(stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS), active=True, mock=True),
+        ScanOptions(
+            stages=(Stage.SUBS, Stage.LIVE, Stage.PORTS),
+            active=True,
+            mock=True,
+            no_scope=True,
+        ),
     )
 
     assert "naabu" in rec.names
@@ -3204,7 +3205,7 @@ async def test_active_mode_runs_urls_and_tech_stages(tmp_path: Path) -> None:
         "cdncheck-like": adapter("cdncheck-like", Stage.TECH, rec, records=[]),
         "katana-like": adapter("katana-like", Stage.URLS, rec, records=[]),
     }
-    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+    engine = make_engine(tmp_path, specs, adapters, scope_text=SCOPE)
 
     summary = await engine.run("example.com", ScanOptions(active=True))
 
@@ -3238,7 +3239,7 @@ async def test_active_mode_urls_stage_runs_after_live(tmp_path: Path) -> None:
         "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("www.example.com")]),
         "katana-like": adapter("katana-like", Stage.URLS, rec, records=[]),
     }
-    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+    engine = make_engine(tmp_path, specs, adapters, scope_text=SCOPE)
 
     summary = await engine.run("example.com", ScanOptions(active=True))
 
@@ -3402,7 +3403,7 @@ async def test_tech_stage_annotates_the_latest_host_row(tmp_path: Path) -> None:
         ),
         "cdncheck-like": adapter("cdncheck-like", Stage.TECH, rec, records=[]),
     }
-    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+    engine = make_engine(tmp_path, specs, adapters, scope_text=SCOPE)
     store = engine.store
 
     await engine.run("example.com", ScanOptions(active=True))
@@ -3442,7 +3443,7 @@ async def test_tech_stage_drops_a_host_outside_the_target(tmp_path: Path) -> Non
             ],
         ),
     }
-    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+    engine = make_engine(tmp_path, specs, adapters, scope_text=SCOPE)
 
     await engine.run("example.com", ScanOptions(active=True))
 
@@ -3699,7 +3700,6 @@ async def test_url_probe_stores_status_codes_and_marks_unreachable(tmp_path: Pat
             "https://www.example.com/c",
         ],
         transport=transport,
-        scope_text=None,
     )
     summary = await engine.run("example.com", ScanOptions(active=True))
     stored = {
@@ -3726,9 +3726,7 @@ async def test_url_probe_never_reprobes_a_stored_answer(tmp_path: Path) -> None:
     """`NULL` alone means "not probed"; `-1` is an answer and is never retried."""
     calls: list[str] = []
     transport = _probe_transport({}, calls)
-    engine = _probe_engine(
-        tmp_path, ["https://www.example.com/a"], transport=transport, scope_text=None
-    )
+    engine = _probe_engine(tmp_path, ["https://www.example.com/a"], transport=transport)
     first = await engine.run("example.com", ScanOptions(active=True))
     assert calls == ["https://www.example.com/a"]
     assert first.urls_probed_this_run == 1
@@ -3751,7 +3749,6 @@ async def test_reprobe_urls_probes_urls_that_already_carry_an_answer(tmp_path: P
         tmp_path,
         ["https://www.example.com/a", "https://www.example.com/b"],
         transport=transport,
-        scope_text=None,
     )
     await engine.run("example.com", ScanOptions(active=True))
     assert sorted(calls) == ["https://www.example.com/a", "https://www.example.com/b"]
@@ -3767,9 +3764,7 @@ async def test_reprobe_urls_probes_urls_that_already_carry_an_answer(tmp_path: P
 async def test_url_probe_records_the_reprobe_flag_on_the_run(tmp_path: Path) -> None:
     """The probe run records `reprobe` so the pass is auditable afterwards."""
     transport = _probe_transport({}, [])
-    engine = _probe_engine(
-        tmp_path, ["https://www.example.com/a"], transport=transport, scope_text=None
-    )
+    engine = _probe_engine(tmp_path, ["https://www.example.com/a"], transport=transport)
     await engine.run("example.com", ScanOptions(active=True, reprobe_urls=True))
     params = [
         json.loads(str(row["params_json"]))
@@ -3788,7 +3783,6 @@ async def test_url_probe_uses_the_url_probe_config_bounds(tmp_path: Path) -> Non
         tmp_path,
         [f"https://www.example.com/{index}" for index in range(5)],
         transport=transport,
-        scope_text=None,
     )
     engine.config.url_probe.max_urls = 2
     summary = await engine.run("example.com", ScanOptions(active=True))
@@ -3802,9 +3796,7 @@ async def test_url_probe_is_skipped_in_mock_mode(tmp_path: Path) -> None:
     """`--mock` sends no traffic and leaves every status NULL, saying so."""
     calls: list[str] = []
     transport = _probe_transport({}, calls)
-    engine = _probe_engine(
-        tmp_path, ["https://www.example.com/a"], transport=transport, scope_text=None
-    )
+    engine = _probe_engine(tmp_path, ["https://www.example.com/a"], transport=transport)
     summary = await engine.run("example.com", ScanOptions(active=True, mock=True))
     assert calls == []
     assert [row["status_code"] for row in rows(engine.store, "SELECT status_code FROM urls")] == [
@@ -3825,9 +3817,7 @@ async def test_probe_candidates_logs_unreachable_skip_count(tmp_path: Path) -> N
         + [f"https://dead.example.com/{index}" for index in range(4)]
         + [f"https://dns-only.example.com/{index}" for index in range(2)]
     )
-    engine = _probe_engine(
-        tmp_path, urls, transport=transport, scope_text=None, progress=lines.append
-    )
+    engine = _probe_engine(tmp_path, urls, transport=transport, progress=lines.append)
     target_id = engine.store.create_target("example.com")
     dns_run = engine.store.create_scan_run(target_id, "dns")
     engine.store.upsert_subdomain(target_id, "dead.example.com", run_id=dns_run, state="DEAD")
@@ -3846,9 +3836,7 @@ async def test_skipping_the_url_probe_stage_leaves_every_status_null(tmp_path: P
     """`--skip-url-probe` narrows the stage list; nothing is probed."""
     calls: list[str] = []
     transport = _probe_transport({}, calls)
-    engine = _probe_engine(
-        tmp_path, ["https://www.example.com/a"], transport=transport, scope_text=None
-    )
+    engine = _probe_engine(tmp_path, ["https://www.example.com/a"], transport=transport)
     stages = tuple(stage for stage in STAGE_ORDER if stage is not Stage.URL_PROBE)
     summary = await engine.run("example.com", ScanOptions(stages=stages, active=True))
     assert calls == []
@@ -3950,9 +3938,7 @@ async def test_url_probe_respects_phase_timeout(tmp_path: Path) -> None:
     """D26: the probe pass is bounded by --phase-timeout and keeps exit 0."""
     calls: list[str] = []
     transport = _slow_transport({"https://www.example.com/slow": 30.0}, calls)
-    engine = _probe_engine(
-        tmp_path, ["https://www.example.com/slow"], transport=transport, scope_text=None
-    )
+    engine = _probe_engine(tmp_path, ["https://www.example.com/slow"], transport=transport)
     summary = await engine.run("example.com", ScanOptions(active=True, phase_timeout=0.3))
     assert summary.exit_code is ExitCode.SUCCESS
     assert any("url_probe: timed out after 0.3s" in note for note in summary.warnings)
@@ -3981,7 +3967,6 @@ async def test_url_probe_timeout_keeps_the_batches_it_finished(tmp_path: Path) -
         tmp_path,
         ["https://www.example.com/fast", "https://www.example.com/slow"],
         transport=transport,
-        scope_text=None,
     )
     engine.config.url_probe.batch_size = 1
     summary = await engine.run("example.com", ScanOptions(active=True, phase_timeout=0.5))
@@ -3998,9 +3983,7 @@ async def test_url_probe_uses_the_config_timeout_when_no_flag_is_given(tmp_path:
     """No --phase-timeout: `timeouts.url_probe` from config.yaml is the deadline."""
     calls: list[str] = []
     transport = _slow_transport({"https://www.example.com/slow": 30.0}, calls)
-    engine = _probe_engine(
-        tmp_path, ["https://www.example.com/slow"], transport=transport, scope_text=None
-    )
+    engine = _probe_engine(tmp_path, ["https://www.example.com/slow"], transport=transport)
     engine.config.timeouts.url_probe = 1
     summary = await engine.run("example.com", ScanOptions(active=True))
     assert any("url_probe: timed out after 1s" in note for note in summary.warnings)
@@ -4970,7 +4953,7 @@ async def test_third_party_hosts_are_not_added_to_subdomains(tmp_path: Path) -> 
             ],
         )
     }
-    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+    engine = make_engine(tmp_path, specs, adapters)
     await engine.run("example.com", ScanOptions(stages=(Stage.URLS,)))
 
     sources = {
@@ -5005,7 +4988,7 @@ async def test_unique_count_is_zero_for_all_duplicate_tool(tmp_path: Path) -> No
             records=[UrlRecord(url="https://www.example.com/a", source="fake")],
         )
     }
-    engine = make_engine(tmp_path, specs, adapters, scope_text=None)
+    engine = make_engine(tmp_path, specs, adapters)
     first = await engine.run("example.com", ScanOptions(stages=(Stage.URLS,)))
     assert first.stages[0].results[0].unique_count == 1
 
