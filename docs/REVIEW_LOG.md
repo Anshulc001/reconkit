@@ -353,12 +353,28 @@ state, or keeps the previous state when one exists. No code change.
 
 ## 2026-11-19 (D62) - a saved report carries a domain tree and its URLs
 
-**Real-run check (2026-11-19, loop item 1):** not confirmed yet. Every report
-on disk predates `0062f11` (19:08:14Z): `sakec.ac.in` has 15:06:46Z, 16:52:32Z
-and 18:50:30Z, all with the old 7 keys and 0 `===` headings, and
-`results/slice.bank.in/` contains no report at all (its 19:09-19:13Z active
-run wrote none). Verification is deferred to the next run that saves a report;
-the shape itself is covered by the mock tests named below.
+**Real-run check (2026-11-19, loop item 1): CONFIRMED.** A report written
+during the loop, `results/slice.bank.in/20261119T193822Z/`, is the first one
+saved after `0062f11` (19:08:14Z), and it has the new shape:
+
+```
+$ grep -c '=== Domains ===\|=== URLs by host ===' results/slice.bank.in/20261119T193822Z/report.txt
+2
+$ jq 'keys' results/slice.bank.in/20261119T193822Z/report.json
+['type','target','generated_at','selection','scope_warnings','fields','hosts',
+ 'urls_total','urls_shown','urls_truncated','roots','urls_by_host']
+$ jq '.urls_total, .urls_shown, .urls_truncated' .../report.json
+3061 200 true
+$ jq '.roots[0].host_count, (.hosts|length)' .../report.json
+15 15
+```
+
+Before that report appeared, every report on disk predated D62: `sakec.ac.in`
+has 15:06:46Z, 16:52:32Z and 18:50:30Z, all with the old 7 keys and 0 `===`
+headings, and `results/slice.bank.in/` held no report until 19:38Z. The same
+real report also shows `api.slice.bank.in` / `assets.slice.bank.in` as
+`UNKNOWN`, `url-derived`, source count 1 - the D63 loop note's finding,
+confirmed on a live artifact rather than only in the DB.
 
 Before: `report.json` had 7 top-level keys (`type`, `target`, `generated_at`,
 `selection`, `scope_warnings`, `fields`, `hosts`) and `report.txt` had **no**
