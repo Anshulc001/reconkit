@@ -7137,3 +7137,27 @@ stage is `NO_TOOL` (4), not 5. Suite stays 928 (one existing test extended).
 - Real-world `urls` tools are the slow stage: `unfurl` produced 74 URLs while katana/gospider/hakrawler/urlfinder were
   still working at 120 s. The default stage timeout, not the tool set, decides whether `urls` completes.
 - Both free subdomain APIs (`hackertarget`, `otx`) refused this run; `subs` still completed on crtsh/subfinder.
+
+### Verification of D38 (second real run, 30 s/stage)
+
+```bash
+reconkit run -d testfire.net --active --phase-timeout 30 --no-color --config /tmp/pm/config.yaml
+```
+
+```
+4 hosts: 0 ALIVE, 4 DNS_ONLY, 0 SHUT_DOWN, 0 DEAD, 0 UNKNOWN | tools: 15 ok, 1
+gap, 9 failed, 3 skipped, 5 timeout
+EXIT=5
+```
+
+The five `timeout` rows in `tool_runs` (crtsh, subfinder, findomain, gau, urlfinder) are now the same five the summary
+line counts, so the line and the exit code agree. `scan_runs`: `subs partial`, `dns completed`, `live completed`,
+`tech partial`, `urls partial`, `url_probe completed`.
+
+### Observation for the owner (not changed - no encoded ruling)
+
+At 30 s the `subs` stage itself ran out of time (crtsh/subfinder/findomain killed), leaving only the `otx` gap, so the
+scan had 4 DNS_ONLY hosts and no ALIVE host. Every later stage then reported `failed ... no hosts to scan/crawl`, which
+pushed the run to nine "failed" tools (exit 5) although no tool was broken: they had no input. Whether "no hosts to
+<verb>" should stay `failed` or become a skip is a status/exit-code rule change, so it was only recorded here. The
+120 s run in the first scan (subs completed, 8 ALIVE) is the representative one.
