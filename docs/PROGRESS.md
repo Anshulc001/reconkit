@@ -4,7 +4,15 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status: **Project code work complete at `9dfbeec`; the capstone exited 5 for one measured reason.** `reconkit run -d testfire.net --active --phase-timeout 300` (temp config, `url_probe.max_urls: 20`) finished `36 hosts: 8 ALIVE, 26 DEAD, 2 UNKNOWN | tools: 29 ok, 1 gap, 0 failed, 2 skipped, 1 timeout` and exit **5**: `gau` was still running when the `urls` stage hit its 300 s deadline, and a timeout is a hard failure by ruling. Every other non-ok row was a gap (`otx: rate limited (HTTP 429)`) or a selection skip (`chaos`, `github_subdomains`: no API key). Remaining work is owner decisions, not code: see "Open risks" and the three questions before "Notes for later tasks".
+- Status: **PROJECT CODE WORK COMPLETE at `c6a2150` after Part Q (2026-11-19).** 939 tests, `ruff`/`format`/`mypy` clean,
+  tree clean, 37 commits ahead of `reconkit/main`, `scope.yaml` byte-identical (sha256 `d45a3c90...eeee8b`). Final capstone
+  (`reconkit run -d testfire.net --active --phase-timeout 600`, temp config with `url_probe.max_urls: 20`):
+  `36 hosts: 8 ALIVE, 27 DEAD, 1 UNKNOWN | tools: 29 ok, 1 gap, 1 failed, 2 skipped, 0 timeout`, exit **5** - and this
+  time the reason is **not** R13: `gau` finished (`ok 1042`) because 600 s was enough, while `crtsh` answered **HTTP 404**
+  and a 404 is a real failure by rule. Recorded as a new open item for the owner. The six closing rulings are D45 and the
+  probe retry is D46; what remains is owner decisions, listed under "What is explicitly open and why".
+- Previous status: **Project code work complete at `9dfbeec`; the capstone exited 5 for one measured reason.** `reconkit run -d testfire.net --active --phase-timeout 300` (temp config, `url_probe.max_urls: 20`) finished `36 hosts: 8 ALIVE, 26 DEAD, 2 UNKNOWN | tools: 29 ok, 1 gap, 0 failed, 2 skipped, 1 timeout` and exit **5**: `gau` was still running when the `urls` stage hit its 300 s deadline, and a timeout is a hard failure by ruling. Every other non-ok row was a gap (`otx: rate limited (HTTP 429)`) or a selection skip (`chaos`, `github_subdomains`: no API key). Remaining work was owner decisions, not code: see "What is explicitly open and why" and the three questions before
+  "Notes for later tasks".
 - Previous status: **BATCH 2026-11-18 COMPLETE (Parts D-H) + acceptance follow-up.** Suite 908. The follow-up added the three D30 tests and the missing D29 stage-budget test, the missing `COMMANDS.md` probe-only note, and fixed a real bug the missing tests hid: the mock DB default did not create `~/.reconkit`, so a fresh machine failed with `unable to open database file`. Evidence in REVIEW_LOG "follow-up".
 - Previous status: **BATCH 2026-11-18 COMPLETE (Parts D-H).** D28 rulings recorded, D29 double-ceiling cleanup, D30 mock isolation, D31 withdrawn (premise disproved), D32 redaction routing. Suite 898 -> 903. Next action: none; report.
 - Previous status: **BATCH 2026-11-18 (Part F) DONE: D30 mock isolation.** Suite 899. Next action: Part G (mock ALIVE).
@@ -652,21 +660,36 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   tuples and the aggressive `{LIVE, PORTS}` addition - all deliberate, none a
   per-mode rule.
 
-## Open risks
+## What is finished
 
-Real, current items only. Everything else this file used to list is either closed (see the dated notes in
-`docs/REVIEW_LOG.md`) or is one of the three owner questions below.
+- **B1-B4** (external-service gaps, the `gap` status, the five exit-code cases proven raw) and **D38** (stage budgets).
+- **D34 stands:** R8's "degraded" is the existing `gap`; no enum or schema churn (D41).
+- **R10 / D43:** a tool with no input hosts is `skipped / no input hosts`, its stage becomes a completion gap, and a
+  starved scan exits 0 instead of reporting nine broken tools.
+- **R12 / D44:** every stage's child process is registered, so Ctrl+C reaches it and the CLI exits 130; **F8 closed**.
+- **R17 / D46:** the identity probe retries once, so a transient failure can no longer drop a working tool from every
+  scan; **D42 closed**.
+- **R13, R14, R15, R16, R18** recorded as D45: the slow-`gau` exit 5 is correct, the CIDR and masscan questions are
+  deferred, one historical pty run is the interactive evidence standard, and the browser/`libpcap` gaps are environment.
 
-- **The `urls` stage deadline decides whether a real scan exits 0 - accepted behaviour (R13, D45).** Capstone 2026-11-19
-  (`--phase-timeout 300`, testfire.net): 29 tools `ok`, 1 gap (`otx` 429), 2 selection skips, and `gau` still running
-  when the stage hit 300 s -> `timeout` -> exit **5**. `gau` normally answers in ~31 s (D20), so this is archive.org
-  latency; the exit code is right and the operator raises `--phase-timeout` for a slow target. Not a defect, not fixed.
-- **Out-of-scope CIDRs cannot be expressed (R14, D45).** `scope.yaml` has no exclusion field, so an authorization that
-  names a range cannot be written down. The owner's schema question is exact: does the field read
+## What is explicitly open and why
+
+Three owner decisions and one newly observed upstream answer. Nothing here is a code defect waiting to be found.
+
+- **R14 - out-of-scope CIDRs cannot be expressed.** Needs a schema decision: does the field read
   `exclude_cidrs: [10.0.0.0/8, ...]` beside `in_scope_cidrs`, and does an exclusion override an inclusion? Answering it
   is schema v8 plus a scope-gate change.
-- **masscan/smap are untested on ranges larger than the box's own /24 (R15, D45).** A real test requires an
-  authorization naming the target block; nothing in `scope.yaml` can express one today (see the item above).
+- **R15 - masscan/smap are untested above the box's own /24.** Needs a written authorization naming the target block;
+  nothing in `scope.yaml` can express one today (R14).
+- **R13 - a slow upstream exits 5, and that is correct.** Not a defect: a stage killed at `--phase-timeout` is a real
+  signal, and the operator raises the deadline for a slow target.
+- **`crtsh` answered HTTP 404 on the final capstone (new, 2026-11-19).** The `subs` stage failed one tool
+  (`crtsh failed 0 - crtsh: HTTP 404`) and the run exited 5 for it. A 404 is a real failure by rule
+  (`test_a_404_is_still_a_failure_not_a_gap`), and the gap classifier covers 429/quota/5xx, not 4xx-not-found; whether
+  crt.sh's 404 should count as an external-service gap is a question for the owner, not something this batch changed.
+
+**For the reviewer:** tree clean at `c6a2150` (code) / this docs commit, **37 commits ahead of `reconkit/main`**,
+**939 tests**, `scope.yaml` byte-identical.
 
 ## Three questions for the owner (2026-11-19)
 

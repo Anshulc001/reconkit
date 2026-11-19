@@ -7544,3 +7544,63 @@ outlier (network probes inside `doctor`), and the medians are 1.60 s -> 1.58 s (
   `check_installed` and `installed_version` name it in their source.
 
 Suite `939 passed`; `ruff check .` clean; `ruff format --check .` 92 files; `mypy src/reconkit` clean. PIT-63 added.
+
+## 2026-11-19 (final) Q - the project is declared finished (D45 final)
+
+### The capstone, bounded, not chased
+
+```bash
+reconkit run -d testfire.net --active --phase-timeout 600 --no-color --config capstone/config.yaml
+# capstone/config.yaml: db_path=capstone/recon.db, workspace_dir=capstone/workspaces,
+#                       url_probe.max_urls=20, everything else copied from config.yaml
+```
+
+Raw tail:
+
+```
+│ gospider          │ urls  │ ok      │ 529   │ -                              │
+│ gau               │ urls  │ ok      │ 1042  │ -                              │
+│ urlfinder         │ urls  │ ok      │ 195   │ idle for 60s; kept partial     │
+│                   │       │         │       │ output                         │
+36 hosts: 8 ALIVE, 0 DNS_ONLY, 0 SHUT_DOWN, 27 DEAD, 1 UNKNOWN | tools: 29 ok, 1
+gap, 1 failed, 2 skipped, 0 timeout
+warning: url_probe: probed the first 20 URL(s) only; re-run to probe the rest
+⚠ active scan completed with gaps — 1 stage(s) incomplete
+  subs: otx: rate limited (HTTP 429)
+report: results/testfire.net/20261119T113828Z/report.txt and .../report.json
+EXIT=5
+```
+
+`scan_runs`: `subs partial`, `dns completed`, `live completed`, `tech completed`, `urls completed`, `url_probe completed`.
+
+Non-ok `tool_runs`:
+
+```
+otx               gap      otx: rate limited (HTTP 429)
+crtsh             failed   crtsh: HTTP 404
+chaos             skipped  requires PDCP_API_KEY
+github_subdomains skipped  requires GITHUB_TOKEN
+```
+
+### Classification
+
+**Exited 5 because `crtsh` answered HTTP 404**, and a 404 is a real failure under the documented rule
+(`test_a_404_is_still_a_failure_not_a_gap`; `classify_external_gap()` covers 429/quota/5xx). That is **not** R13: the
+600 s budget did its job and `gau` finished (`ok 1042` items, where the 300 s capstone killed it), so R13's slow-upstream
+case did not fire this time. It is **not** a defect found in this batch either - the failed tool is an external service
+answering not-found, and whether that should be a `gap` is a ruling, not a change to make here. Not chased, not re-run;
+recorded as a new open item.
+
+### What else the run shows
+
+Every other row behaved per the rulings: `otx` 429 -> `gap` -> excluded from the failure total; `chaos`/
+`github_subdomains` skipped at selection for a missing key; `urlfinder` capped itself and kept 195 URLs; R10's skip path
+was not needed because 8 hosts came back ALIVE; R12 was not exercised (no Ctrl+C). `url_probe` probed 20 URLs and said so.
+
+### Docs
+
+`docs/PROGRESS.md`: the RESUME status line is the final state (with the crtsh 404 named), the old Open risks section is
+replaced by "What is finished" / "What is explicitly open and why" (R14, R15, R13, crtsh 404), and a reviewer line names
+the hash, the commit count, the test count and the untouched `scope.yaml`.
+
+Suite unchanged (939); gate green (see the report).
