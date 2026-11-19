@@ -99,3 +99,15 @@ This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 fla
 - [ ] `--no-scope` prints its warning and records `scope_mode = unrestricted_flag`
 - [ ] HTML export escapes content
 - [ ] Dependencies reviewed and pinned in `pyproject.toml`
+## Rule 6 addendum (D56, 2026-11-19): excluded CIDRs
+
+`scope.yaml` may list `exclude_cidrs` beside `in_scope_cidrs`. An exclusion wins over an inclusion: the IP predicate is
+true only inside an included range **and** outside every excluded range, and a malformed CIDR is a `ConfigError` before
+any traffic is sent. Name precedence is unchanged (`out_of_scope` still wins over any wildcard in `in_scope`).
+
+Enforcement is partial by construction, and the run says so: only `pyscan` and the engine's pre-resolved `naabu` input
+are handed addresses reconkit verified, while every other active tool resolves hostnames inside its own child and never
+shows reconkit the address it connected to. With a non-empty `exclude_cidrs` the engine prints one warning at run start
+naming the selected tools it cannot gate, and carries the same text into `report.txt`, `report.json` and `--json`
+(`scope_warnings`), so the limitation survives after the terminal output is gone. A flag that refuses to run in that
+configuration (`--strict-cidr`) is a future decision, deliberately not built (PROGRESS, Open risks).

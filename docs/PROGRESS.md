@@ -4,7 +4,13 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status (2026-11-19, D55): **the url_probe's 4 982 `-1` answers are DNS_ONLY hosts, not a probe bug - the unreachable
+- Status (2026-11-19, D56): **R14 closed - `scope.yaml` can exclude CIDRs, and the run reports where it cannot enforce
+  them.** 973 tests, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (`d45a3c90...eeee8b`).
+  `pyscan` and the engine's pre-resolved `naabu` input honour `exclude_cidrs`; every other active tool resolves inside
+  its own child, so a non-empty `exclude_cidrs` produces one warning at run start and the same `scope_warnings` entry
+  in `report.txt`/`report.json` and `--json`. No migration (`scope.yaml` is runtime; `scan_runs.scope_mode` unchanged).
+  `--strict-cidr` is a future decision, recorded under Open risks. See D56 and the Part R14 entry in REVIEW_LOG.
+- Previous status (2026-11-19, D55): **the url_probe's 4 982 `-1` answers are DNS_ONLY hosts, not a probe bug - the unreachable
   filter now covers DNS_ONLY too.** 966 tests, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical
   (`d45a3c90...eeee8b`). On the sakec.ac.in DB 4 916 of the 4 982 `-1` rows (98.7%) sit on DNS_ONLY hosts - 4 861 on
   `www.sakec.ac.in` alone - and 0 of the 20 sampled rows is "ALIVE host, wrong scheme"; the change takes unprobed
@@ -269,6 +275,20 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   `subs: quiet killed 0 item(s)`, Tools row `quiet | subs | killed | 0 | 0.6s | 0s ago | killed after 0.3s idle at
   stage 0.3s, 0 partial`, summary `..., 1 killed, 0 timeout`, the `⚠ 1 tool(s) stopped early — partial output kept`
   block, **exit 0**. A run where every tool is stopped is still a completed run; only the budget (`timeout`) exits 5.
+
+- **D56 (2026-11-19): `scope.yaml` can exclude CIDRs; the gate refuses them and the run says where the exclusion is
+  partial (R14).** As ruled: `exclude_cidrs` is a new list beside `in_scope_cidrs`, and exclusion beats inclusion -
+  `ScopeGate.ip_allowed` is true only inside an included range **and** outside every excluded one, the precedence
+  `out_of_scope` already has for names (a name exclusion still wins over any wildcard). No migration: `scope.yaml` is
+  read at run time, and only `scan_runs.scope_mode` is persisted. Only `pyscan` and the engine's pre-resolved `naabu`
+  input are handed addresses, so only they can honour an excluded range; every other active tool resolves the
+  hostname inside its own child. When `exclude_cidrs` is non-empty the engine emits **one** warning at run start naming
+  the selected tools it cannot gate, and the same text is carried into `report.txt`, `report.json` and `--json` as the
+  new `scope_warnings` list - a warning that only scrolls off is not a safety warning (ruling 2). A malformed CIDR is a
+  `ConfigError`; `--no-scope` and a missing file stay silent. `--strict-cidr` (refuse to run with in-child resolvers)
+  is deliberately **not** built - future, not now, under Open risks. Deleting the check from `ip_allowed`'s name into a
+  second predicate was rejected: reusing it keeps `RunContext` stable, so no adapter and no dependency changed.
+  Suite 966 -> 973 (+7: 4 scope, 2 engine, 1 pyscan; `test_ui`'s exact-shape assertion got stricter, not weaker).
 
 - **D55 (2026-11-19): the url_probe also skips DNS_ONLY hosts; the filter is now "unreachable".** The 4 982 `-1`
   answers on the sakec.ac.in DB were investigated (Part X) and **4 916 of them (98.7%) sit on DNS_ONLY hosts** - 4 861 on
@@ -838,6 +858,11 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
 ## What is explicitly open and why
 
 Three owner decisions. Nothing here is a code defect waiting to be found.
+
+**R14 closed 2026-11-19 (D56).** `exclude_cidrs` exists and wins over `in_scope_cidrs`; the run reports which selected
+  tools cannot honour it, because they resolve inside the child. **Future, not now:** a `--strict-cidr` flag that refuses
+  to run when such a tool is selected is a separate batch and is deliberately not implemented - the two-surface warning
+  is the whole safety surface of this build. The bullet below stays as the record of what was asked.
 
 - **R14 - out-of-scope CIDRs cannot be expressed.** Needs a schema decision: does the field read
   `exclude_cidrs: [10.0.0.0/8, ...]` beside `in_scope_cidrs`, and does an exclusion override an inclusion? Answering it

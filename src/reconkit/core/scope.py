@@ -26,6 +26,7 @@ _SCOPE_KEYS = frozenset(
         "in_scope",
         "out_of_scope",
         "in_scope_cidrs",
+        "exclude_cidrs",
         "allow_active",
         "allow_intrusive",
         "max_speed",
@@ -45,6 +46,9 @@ class Scope(BaseModel):
     in_scope: list[str] = Field(default_factory=list)
     out_of_scope: list[str] = Field(default_factory=list)
     in_scope_cidrs: list[str] = Field(default_factory=list)
+    # D56: ranges that win over `in_scope_cidrs` (and over any name match, since
+    # an excluded address is excluded: docs/05 rule 6).
+    exclude_cidrs: list[str] = Field(default_factory=list)
     allow_active: bool = False
     allow_intrusive: bool = False
     # Accepted for compatibility with existing scope files, and no longer
@@ -90,12 +94,14 @@ class ScopeGate:
         in_rules: tuple[_Rule, ...],
         out_rules: tuple[_Rule, ...],
         networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...],
+        excluded_networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...],
         path: Path,
     ) -> None:
         self.scope = scope
         self._in_rules = in_rules
         self._out_rules = out_rules
         self._networks = networks
+        self._excluded_networks = excluded_networks
         self.path = path
 
     def in_rule(self, host: str) -> _Rule | None:
@@ -110,8 +116,14 @@ class ScopeGate:
             return False
         return any(rule.matches(normalized) for rule in self._in_rules)
 
+    def has_cidr_exclusions(self) -> bool:
+        return bool(self._excluded_networks)
+
     def ip_allowed(self, ip: str) -> bool:
+        """Inside `in_scope_cidrs` and not inside `exclude_cidrs` (D56)."""
         address = ipaddress.ip_address(ip)
+        if any(address in network for network in self._excluded_networks):
+            return False
         return any(address in network for network in self._networks)
 
 
@@ -170,7 +182,8 @@ def load_scope(path: Path | str | None = None) -> ScopeGate:
     in_rules = tuple(_compile_entry(entry) for entry in scope.in_scope)
     out_rules = tuple(_compile_entry(entry) for entry in scope.out_of_scope)
     networks = tuple(_compile_cidr(cidr) for cidr in scope.in_scope_cidrs)
-    return ScopeGate(scope, in_rules, out_rules, networks, scope_path)
+    excluded = tuple(_compile_cidr(cidr) for cidr in scope.exclude_cidrs)
+    return ScopeGate(scope, in_rules, out_rules, networks, excluded, scope_path)
 
 
 def _compile_entry(entry: str) -> _Rule:
@@ -304,7 +317,10 @@ def require_active(
 
 
 def ip_allowed(ip: str, *, path: Path | str | None = None) -> bool:
-    """True only when the IP is inside in_scope_cidrs; no CIDRs means no IPs."""
+    """True only when the IP is inside in_scope_cidrs and not in exclude_cidrs.
+
+    No CIDRs means no IPs; an excluded range wins over an included one (D56).
+    """
     return load_scope(path).ip_allowed(ip)
 
 

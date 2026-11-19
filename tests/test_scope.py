@@ -50,6 +50,46 @@ def test_example_scope_loads() -> None:
     )
 
 
+def test_an_excluded_name_loses_to_an_in_scope_wildcard(tmp_path: Path) -> None:
+    """D56 ruling 1: a name in `out_of_scope` wins over the wildcard that includes it."""
+    path = write_scope(tmp_path, out_of_scope=["admin.example.com"])
+    check = require_active(
+        "example.com", ["admin.example.com", "www.example.com"], TODAY, path=path
+    )
+    assert check.hosts == ["www.example.com"]
+    assert check.dropped == 1
+
+
+def test_an_excluded_cidr_refuses_an_otherwise_allowed_address(tmp_path: Path) -> None:
+    """D56 ruling 1: `exclude_cidrs` wins over `in_scope_cidrs` for an address in both."""
+    path = write_scope(
+        tmp_path,
+        in_scope_cidrs=["203.0.113.0/24"],
+        exclude_cidrs=["203.0.113.128/25"],
+    )
+    gate = load_scope(path)
+    assert gate.has_cidr_exclusions() is True
+    assert gate.ip_allowed("203.0.113.5") is True
+    assert gate.ip_allowed("203.0.113.200") is False
+    assert gate.ip_allowed("198.51.100.5") is False
+
+
+def test_empty_exclude_cidrs_changes_nothing(tmp_path: Path) -> None:
+    """No exclusions means the documented `in_scope_cidrs` rule, exactly as before."""
+    path = write_scope(tmp_path)
+    gate = load_scope(path)
+    assert gate.scope.exclude_cidrs == []
+    assert gate.has_cidr_exclusions() is False
+    assert gate.ip_allowed("203.0.113.5") is True
+    assert gate.ip_allowed("198.51.100.5") is False
+
+
+def test_a_malformed_excluded_cidr_is_a_config_error(tmp_path: Path) -> None:
+    path = write_scope(tmp_path, exclude_cidrs=["203.0.113.0/33"])
+    with pytest.raises(ConfigError, match="invalid CIDR in scope"):
+        load_scope(path)
+
+
 def test_missing_scope_file(tmp_path: Path) -> None:
     with pytest.raises(ScopeError, match="not found"):
         require_active("example.com", [], TODAY, path=tmp_path / "missing-scope.yaml")

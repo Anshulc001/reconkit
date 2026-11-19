@@ -76,6 +76,92 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
+## 2026-11-19 (R14) - scope excludes CIDRs, and the run says where that is partial (D56)
+
+Owner rulings: exclusion beats inclusion (both CIDRs and names), and a partial exclusion is warned on **two** surfaces
+(stderr at run start plus `scope_warnings` in the report and `--json`), with no `--strict-cidr` flag in this build.
+No migration: `scope.yaml` is read at run time; `scan_runs.scope_mode` is untouched.
+
+Code, as ruled:
+
+- `core/scope.py`: `exclude_cidrs` on `Scope` and in `_SCOPE_KEYS`; `ScopeGate` compiles a second network tuple and
+  `ip_allowed` is "inside an included range **and** outside every excluded one"; `has_cidr_exclusions()` lets the engine
+  ask whether there is anything to enforce; `allows()` (names) is unchanged, because `out_of_scope` already wins.
+- `engine.py`: `_scope_gate()` (one load, `None` for `--no-scope`/no file/unreadable), `_cidr_ungated_tools()` (the
+  active tools that will run and resolve inside the child - `pyscan` and `naabu` are the two that are gated),
+  `_cidr_scope_warnings()`; `ScanSummary.scope_warnings`; the warning is pushed once through the progress channel at
+  run start. `_ip_allowed` now returns `gate.ip_allowed` through the same helper, so there is one scope load shape.
+- `ui.py` / `cli.py`: `scope_warnings` in the `--json` summary document, in `report.json`, and as a `scope warnings:`
+  block in `report.txt`; the CLI passes `summary.scope_warnings` into the report writer.
+
+Raw evidence, mock run (no traffic, scratch scope file in `/tmp`, temp DB, so neither `scope.yaml` nor `recon.db` was
+touched):
+
+```
+$ reconkit run -d testfire.net --active --mock --scope /tmp/r14-scope.yaml --tools httpx --db /tmp/r14-evidence.db
+run_exit=0
+--- stderr ---
+exclude_cidrs is set, but 1 selected tool(s) resolve hostnames inside the child and cannot be CIDR-gated: httpx
+(pyscan and naabu are gated)
+--- results/mock/testfire.net/20261119T163427Z/report.txt (first 8 lines) ---
+reconkit report
+target: testfire.net
+generated: 2026-11-19T16:34:27+00:00
+hosts: 1
+scope warnings:
+  - exclude_cidrs is set, but 1 selected tool(s) resolve hostnames inside the child and cannot be CIDR-gated: httpx
+    (pyscan and naabu are gated)
+
+--- report.json ---
+['exclude_cidrs is set, but 1 selected tool(s) resolve hostnames inside the child and cannot be CIDR-gated: httpx
+  (pyscan and naabu are gated)']
+```
+
+The two surfaces carry the identical sentence (the text report wraps it at the table width; the stored string is one
+line), and the scratch scope file put `203.0.113.128/25` inside `in_scope_cidrs` `203.0.113.0/24`, so the predicate
+really had both halves.
+
+Tests (966 -> 973, +7; `test_ui`'s exact-shape assertion updated in place, not weakened - it now also requires
+`scope_warnings`):
+
+```
+$ pytest -q -v <the six new tests>
+tests/test_scope.py ....                                                 [ 66%]
+tests/test_engine.py ..                                                  [100%]
+============================== 6 passed in 0.19s ===============================
+```
+
+- `test_an_excluded_cidr_refuses_an_otherwise_allowed_address` - `203.0.113.5` True, `203.0.113.200` False (in both
+  ranges), `198.51.100.5` False (outside the inclusion); `has_cidr_exclusions()` True.
+- `test_a_malformed_excluded_cidr_is_a_config_error` - `203.0.113.0/33` raises `ConfigError("invalid CIDR in scope")`
+  from the same `_compile_cidr` the inclusions use, before any traffic.
+- `test_empty_exclude_cidrs_changes_nothing` - default is `[]`, `has_cidr_exclusions()` False, and the old
+  include/exclude-by-absence answers are unchanged.
+- `test_an_excluded_name_loses_to_an_in_scope_wildcard` - `admin.example.com` is dropped from an active gate even though
+  `*.example.com` includes it (`hosts == ["www.example.com"]`, `dropped == 1`).
+- `test_an_excluded_cidr_is_refused_by_the_ports_predicate` - the predicate the ports stage receives answers True for
+  `203.0.113.5`, False for `203.0.113.200` and `198.51.100.5`.
+- `test_scope_warnings_name_the_tools_that_resolve_in_the_child` - exactly one `summary.scope_warnings` entry, it
+  names `live-fake`, it is the only progress line mentioning `exclude_cidrs`, the JSON document carries it, and the
+  written `report.txt`/`report.json` contain the same text.
+- `test_pyscan_refuses_an_address_inside_an_excluded_cidr` - the real gate predicate from a scratch scope file
+  (`203.0.113.128/25` excluded inside `203.0.113.0/24`) is handed to `pyscan`; the resolver answers the excluded
+  address first, so `probed == ["203.0.113.5"]` can only hold when the exclusion refused the first one. Raw:
+
+```
+$ pytest -q -v tests/test_python_adapters.py::test_pyscan_refuses_an_address_inside_an_excluded_cidr
+tests/test_python_adapters.py .                                          [100%]
+============================== 1 passed in 0.18s ===============================
+```
+
+Gate after the change: `972 passed in 28.21s`, `ruff check .` all checks passed, `ruff format --check .` 96 files,
+`mypy src/reconkit` clean (62 source files).
+
+Deviations: (1) the warning is emitted through the progress channel, so `--silent` suppresses the stderr copy while the
+report still carries it - the artifact is the surface that cannot be silenced; (2) `_cidr_ungated_tools` repeats the
+selection rules instead of refactoring `_select`, with a comment pointing at it (a tool that will not run is not
+named); (3) no `--strict-cidr`, as ruled - recorded as future work in PROGRESS Open risks.
+
 ## 2026-11-19 (Parts X-Y) - the 4 982 `-1` answers are DNS_ONLY hosts (D55)
 
 Part X, on a copy of `recon.db` (target_id 6), no code change. Sample (`ORDER BY RANDOM() LIMIT 20`) with the parsed

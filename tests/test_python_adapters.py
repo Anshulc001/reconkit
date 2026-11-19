@@ -586,6 +586,41 @@ async def test_pyscan_probes_only_an_address_inside_in_scope_cidrs() -> None:
     assert result.error is None
 
 
+async def test_pyscan_refuses_an_address_inside_an_excluded_cidr(tmp_path: Path) -> None:
+    """D56: allowed by `in_scope_cidrs` but inside `exclude_cidrs` means no connection."""
+    from reconkit.core.scope import load_scope
+
+    probed: list[str] = []
+
+    async def connect(ip: str, port: int) -> tuple[None, FakeWriter]:
+        probed.append(ip)
+        raise ConnectionRefusedError(port)
+
+    scope_file = tmp_path / "scope.yaml"
+    scope_file.write_text(
+        "authorization: 'test'\n"
+        "expires: 2099-01-01\n"
+        "in_scope: [example.com]\n"
+        "in_scope_cidrs: ['203.0.113.0/24']\n"
+        "exclude_cidrs: ['203.0.113.128/25']\n"
+        "allow_active: true\n",
+        encoding="utf-8",
+    )
+    gate = load_scope(scope_file)
+    adapter = PyscanAdapter(
+        connect=connect,
+        resolve=lambda _host: asyncio.sleep(0, result=["203.0.113.200", "203.0.113.5"]),
+    )
+    result = await adapter.run(
+        make_ctx(hosts=["www.example.com"], ports=[443], ip_allowed=gate.ip_allowed)
+    )
+    assert probed == ["203.0.113.5"]
+    assert [(row.ip, row.port, row.state) for row in result.records] == [
+        ("203.0.113.5", 443, "closed")
+    ]
+    assert result.error is None
+
+
 async def test_pyscan_skips_a_host_whose_address_is_outside_in_scope_cidrs() -> None:
     """Regression: 11c-G-7. No connection, no invented `closed` row, counted once."""
     probed: list[str] = []

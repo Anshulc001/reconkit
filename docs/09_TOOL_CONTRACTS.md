@@ -169,6 +169,20 @@ Selection rules (2026-11-17: the mode tables in docs/02 section 2 and `MODE_STAG
 - **Passive mode** - `naabu` does not run, like every other active tool (`tool mode not included in passive mode`).
 - `--mock` skips the resolve step because it connects to nothing.
 
+**Excluded ranges (D56, 2026-11-19).** `scope.yaml` may now carry
+`exclude_cidrs`, and it wins over `in_scope_cidrs`: `ScopeGate.ip_allowed` is
+true only inside an included range **and** outside every excluded one, so an
+address in both is refused (the same precedence `out_of_scope` already has over
+`in_scope` for names). Only `pyscan` and the engine's pre-resolved `naabu` input
+receive verified addresses, so only they can honour an excluded range; every
+other active tool resolves hostnames inside its own child and never shows
+reconkit the address. When `exclude_cidrs` is non-empty, the engine says so once
+at run start on stderr and in the same words in the run's report and `--json`
+(`scope_warnings`), naming the selected tools it cannot gate. `--no-scope` and a
+missing file have nothing to enforce and stay silent. A `--strict-cidr` flag
+that refuses to run with in-child resolvers selected is a future decision, not
+part of this build (PROGRESS, Open risks).
+
 There is no speed control: every selected adapter of a stage starts together and runs at its own natural pace (2026-11-17, docs/MASTER_PLAN.md D3).
 
 ### 4a. Adapter wave 1 (2026-11-17): dnsx, tlsx, katana, gau

@@ -34,7 +34,13 @@ from reconkit.adapters.pyscan import default_resolve
 from reconkit.adapters.registry import ToolSpec, load_tools
 from reconkit.config import AppConfig, UrlProbeConfig
 from reconkit.core.runner import validate_host, validate_target
-from reconkit.core.scope import load_scope, passive_warning, require_active, scope_present
+from reconkit.core.scope import (
+    ScopeGate,
+    load_scope,
+    passive_warning,
+    require_active,
+    scope_present,
+)
 from reconkit.core.store import Store, redact, utc_now
 from reconkit.core.wildcard import WildcardDetector, WildcardResult, WildcardStatus
 from reconkit.core.workspace import Workspace
@@ -543,6 +549,9 @@ class ScanSummary:
     mode: str = "passive"
     # Requested stages that ran nothing because no tool exists or none is installed.
     gaps: list[CompletionGap] = field(default_factory=list)
+    # D56: scope facts a reader must see after the run (the report carries them
+    # too, because a warning that only scrolls off is not a safety warning).
+    scope_warnings: list[str] = field(default_factory=list)
 
     @property
     def completion_status(self) -> str:
@@ -799,6 +808,7 @@ class Engine:
         self._url_probe_timeout = None
         if not opts.active or opts.no_scope:
             self._note_passive_warning(target, opts)
+        cidr_warnings = await asyncio.to_thread(self._cidr_scope_warnings, opts)
 
         scan_key, completed, resumed = self._resume_plan(target_id, opts)
         summary = ScanSummary(
@@ -807,7 +817,10 @@ class Engine:
             resumed=resumed,
             scope_mode=self._scope_mode(opts),
             mode=opts.mode,
+            scope_warnings=cidr_warnings,
         )
+        for note in cidr_warnings:
+            self._progress(note)
         discovered: set[str] = set()
         alive: set[str] = set()
         if resumed:
@@ -1314,19 +1327,77 @@ class Engine:
             if note and note not in self._warnings:
                 self._warnings.append(note)
 
+    #: Tools whose child is handed addresses reconkit itself verified (docs/05
+    #: rule 6). Every other active tool receives hostnames and resolves them
+    #: inside the child, so an excluded CIDR cannot be applied to it (D56).
+    _CIDR_GATED_TOOLS = frozenset({"pyscan", "naabu"})
+
+    def _scope_gate(self, opts: ScanOptions) -> ScopeGate | None:
+        """The scope file's gate, or `None` when there is nothing to enforce."""
+        if opts.no_scope or not scope_present(self.scope_path):
+            return None
+        try:
+            return load_scope(self.scope_path)
+        except (ConfigError, ScopeError):
+            return None
+
+    def _cidr_ungated_tools(self, opts: ScanOptions) -> list[str]:
+        """Active tools this run could select that resolve hostnames themselves.
+
+        The rules mirror `_select` (tools, exclude, tier, tool mode, exploitation
+        pre-ruling), because naming a tool that will not run would be noise.
+        """
+        tiers = allowed_tiers(opts.mode, include_noisy=opts.include_noisy)
+        tool_modes = MODE_TOOLS[opts.mode].tool_modes
+        names: list[str] = []
+        for name, spec in self.specs.items():
+            if spec.stage not in opts.stages or spec.mode is not Mode.ACTIVE:
+                continue
+            if name in self._CIDR_GATED_TOOLS or name in opts.exclude:
+                continue
+            if name not in self.adapters:
+                continue
+            if opts.tools and name not in opts.tools:
+                continue
+            if spec.exploitation and name not in opts.tools:
+                continue
+            if spec.tier not in tiers and name not in opts.tools:
+                continue
+            if spec.mode not in tool_modes:
+                continue
+            names.append(name)
+        return sorted(names)
+
+    def _cidr_scope_warnings(self, opts: ScanOptions) -> list[str]:
+        """D56: say which selected tools cannot honour `exclude_cidrs`.
+
+        Only a scope file with `exclude_cidrs` can produce this; `--no-scope` and
+        a missing file have nothing to enforce and stay silent.
+        """
+        gate = self._scope_gate(opts)
+        if gate is None or not gate.has_cidr_exclusions():
+            return []
+        tools = self._cidr_ungated_tools(opts)
+        if not tools:
+            return []
+        return [
+            f"exclude_cidrs is set, but {len(tools)} selected tool(s) resolve hostnames "
+            f"inside the child and cannot be CIDR-gated: {', '.join(tools)} "
+            "(pyscan and naabu are gated)"
+        ]
+
     def _ip_allowed(self, opts: ScanOptions) -> Callable[[str], bool] | None:
         """docs/05 rule 6 predicate, from the same scope file the active gate read.
 
         `None` means "no permission": an adapter that connects to a resolved
         address must treat it as a block, so an unreadable scope can only narrow
-        what may be contacted, never widen it.
+        what may be contacted, never widen it. D56: the predicate is true only
+        inside `in_scope_cidrs` and outside `exclude_cidrs`.
         """
         if opts.no_scope or not scope_present(self.scope_path):
             return allow_all_ip
-        try:
-            return load_scope(self.scope_path).ip_allowed
-        except (ConfigError, ScopeError):
-            return None
+        gate = self._scope_gate(opts)
+        return None if gate is None else gate.ip_allowed
 
     def _skip_active(
         self, selected: Selected, skipped: Skipped, reason: str

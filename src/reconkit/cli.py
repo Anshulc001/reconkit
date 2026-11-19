@@ -947,6 +947,9 @@ def _run_scan(
                 report_fields_for_run,
                 run_at=run_at,
                 selection=selection,
+                # D56: the report carries the same warning stderr showed, so a
+                # partial CIDR exclusion is visible after the fact.
+                scope_warnings=summary.scope_warnings,
             )
             render_progress(
                 f"report: {report_text_path} and {report_json_path}",

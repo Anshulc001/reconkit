@@ -124,12 +124,16 @@ def test_json_output_is_one_valid_document_with_documented_schema() -> None:
         "scope_mode",
         "completion",
         "warnings",
+        # Added 2026-11-19 (D56): scope facts worth keeping after the terminal
+        # (a partial CIDR exclusion), always present even when empty.
+        "scope_warnings",
         # Added 2026-11-18 (D22): the www/non-www pairs, always present.
         "www_dedup",
         "hosts",
         "stages",
         "summary",
     }
+    assert document["scope_warnings"] == []
     assert document["www_dedup"] == {"applied": False, "pairs": []}
     # Added 2026-11-17 with the owner's completion ruling: a run with no gaps
     # still carries the key, so consumers never branch on its absence.

@@ -417,7 +417,7 @@ line gains the unique count when any duplicate exists:
 One JSON document is written to stdout; tables and progress stay on stderr. The fixed shape is:
 
 ```json
-{"type":"summary","target":"example.com","exit_code":0,"resumed":false,"scope_denied":false,"scope_mode":"enforced","completion":{"status":"complete","gaps":[]},"warnings":[],"hosts":[{"fqdn":"api.example.com","state":"ALIVE","confidence":"HIGH","sources":["crtsh","subfinder","otx"],"status_code":200,"ports":[80,443],"detail":null,"duplicate_of":null,"www_note":null}],"www_dedup":{"applied":false,"pairs":[]},"stages":[{"stage":"subs","run_id":1,"resumed":false,"dropped_hosts":[],"results":[],"skipped":[]}],"summary":{"hosts":1,"alive":1,"dns_only":0,"shut_down":0,"dead":0,"unknown":0,"tools_ok":1,"tools_failed":0,"tools_skipped":0,"tools_timeout":0}}
+{"type":"summary","target":"example.com","exit_code":0,"resumed":false,"scope_denied":false,"scope_mode":"enforced","completion":{"status":"complete","gaps":[]},"warnings":[],"scope_warnings":[],"hosts":[{"fqdn":"api.example.com","state":"ALIVE","confidence":"HIGH","sources":["crtsh","subfinder","otx"],"status_code":200,"ports":[80,443],"detail":null,"duplicate_of":null,"www_note":null}],"www_dedup":{"applied":false,"pairs":[]},"stages":[{"stage":"subs","run_id":1,"resumed":false,"dropped_hosts":[],"results":[],"skipped":[]}],"summary":{"hosts":1,"alive":1,"dns_only":0,"shut_down":0,"dead":0,"unknown":0,"tools_ok":1,"tools_failed":0,"tools_skipped":0,"tools_timeout":0}}
 ```
 
 The `hosts` objects always carry `state`, `confidence` and `sources`; the top-level `summary` object carries the counts. `scope_mode` is the same value written to `scan_runs` (section 3.1).
@@ -620,3 +620,11 @@ If passive stages have already completed and an active stage is denied by scope,
 - Readable with `--no-color`; no information carried only by color.
 - Stable column order and plain-text output when piped.
 - `--json` output uses fixed field names (see docs/09_TOOL_CONTRACTS.md).
+## Scope exclusions and `scope_warnings` (D56, 2026-11-19)
+
+`scope.yaml` accepts `exclude_cidrs`, and an excluded range wins over `in_scope_cidrs`. Because only the
+engine-resolved tools (`pyscan`, `naabu`) can honour it, a non-empty `exclude_cidrs` produces one warning at run start
+naming the selected tools that resolve inside their own child. The same sentence is stored in the run's artifacts: a
+top-level `scope_warnings` array in the `--json` summary document and in `report.json`, and a `scope warnings:` block
+in `report.txt`. The key is always present (empty when there is nothing to report), so a consumer never branches on its
+absence.

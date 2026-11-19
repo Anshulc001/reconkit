@@ -230,6 +230,8 @@ def summary_document(
             "gaps": [{"stage": gap.stage.value, "reason": gap.reason} for gap in summary.gaps],
         },
         "warnings": list(summary.warnings),
+        # D56: scope facts that outlive the terminal (partial CIDR enforcement).
+        "scope_warnings": list(summary.scope_warnings),
         # docs/02 section 5 (D22): every detected www/non-www duplicate pair, so
         # a consumer never has to re-derive it from the hosts array.
         "www_dedup": {"applied": bool(pairs), "pairs": pairs},
@@ -533,6 +535,7 @@ def report_document(
     *,
     run_at: datetime,
     selection: ReportSelection | None = None,
+    scope_warnings: Sequence[str] = (),
 ) -> dict[str, object]:
     """Build the report's JSON document from stored values only."""
 
@@ -541,6 +544,9 @@ def report_document(
         "target": target,
         "generated_at": run_at.astimezone(UTC).isoformat(timespec="seconds"),
         "selection": None if selection is None else selection.as_document(),
+        # D56: the same warning stderr showed at run start, so a reader of the
+        # artifact learns the exclusion was partial.
+        "scope_warnings": list(scope_warnings),
         "fields": [field.key for field in fields],
         "hosts": [{field.key: field_value(row, field) for field in fields} for row in rows],
     }
@@ -565,6 +571,7 @@ def report_text(
     *,
     run_at: datetime,
     selection: ReportSelection | None = None,
+    scope_warnings: Sequence[str] = (),
 ) -> str:
     """Build the report's plain-text table from stored values only."""
 
@@ -579,6 +586,11 @@ def report_text(
         f"generated: {run_at.astimezone(UTC).isoformat(timespec='seconds')}",
         f"hosts: {len(rows)}",
         *([selection.as_line()] if selection is not None else []),
+        *(
+            ["scope warnings:", *(f"  - {note}" for note in scope_warnings)]
+            if scope_warnings
+            else []
+        ),
         "",
         "  ".join(label.ljust(width) for label, width in zip(header, widths, strict=True)),
     ]
@@ -597,6 +609,7 @@ def write_field_report(
     *,
     run_at: datetime,
     selection: ReportSelection | None = None,
+    scope_warnings: Sequence[str] = (),
 ) -> tuple[Path, Path]:
     """Write `report.txt` and `report.json` into this run's folder.
 
@@ -607,10 +620,15 @@ def write_field_report(
 
     json_path = directory / "report.json"
     text_path = directory / "report.txt"
-    document = report_document(target, rows, fields, run_at=run_at, selection=selection)
+    document = report_document(
+        target, rows, fields, run_at=run_at, selection=selection, scope_warnings=scope_warnings
+    )
     _write_atomically(json_path, json.dumps(document, indent=2, sort_keys=False) + "\n")
     _write_atomically(
-        text_path, report_text(target, rows, fields, run_at=run_at, selection=selection)
+        text_path,
+        report_text(
+            target, rows, fields, run_at=run_at, selection=selection, scope_warnings=scope_warnings
+        ),
     )
     return text_path, json_path
 

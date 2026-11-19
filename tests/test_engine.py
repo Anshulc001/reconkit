@@ -76,6 +76,11 @@ allow_active: true
 max_speed: fast
 """
 
+# D56: an included range with one excluded half, so one predicate answers both.
+SCOPE_WITH_EXCLUSIONS = (
+    SCOPE + "in_scope_cidrs:\n  - 203.0.113.0/24\nexclude_cidrs:\n  - 203.0.113.128/25\n"
+)
+
 
 class SilentRng:
     def __init__(self) -> None:
@@ -480,6 +485,94 @@ async def test_active_ports_stage_receives_the_cidr_predicate(tmp_path: Path) ->
     assert predicate is not None, "the active ports stage must get a CIDR predicate"
     assert predicate("203.0.113.5") is True
     assert predicate("198.51.100.5") is False
+
+
+async def test_an_excluded_cidr_is_refused_by_the_ports_predicate(tmp_path: Path) -> None:
+    """D56: the predicate handed down refuses an address inside `exclude_cidrs`."""
+    seen: list[Callable[[str], bool] | None] = []
+    rec = Recorder()
+
+    class FakePorts(BaseToolAdapter):
+        name = "ports-fake"
+        stage = Stage.PORTS
+
+        async def run(self, ctx: RunContext) -> ToolResult:
+            seen.append(ctx.ip_allowed)
+            return ToolResult(tool=self.name, status=ToolStatus.OK, records=[])
+
+        def build_command(self, ctx: RunContext) -> list[str]:
+            raise AssertionError("build_command must not be called")
+
+        def parse_output(self, raw: str) -> list[object]:
+            return []
+
+    specs = {
+        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
+        "ports-fake": tool("ports-fake", Stage.PORTS, mode=Mode.ACTIVE),
+    }
+    adapters: dict[str, type[BaseToolAdapter]] = {
+        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("example.com")]),
+        "ports-fake": FakePorts,
+    }
+    engine = make_engine(
+        tmp_path,
+        specs,
+        adapters,
+        scope_text=SCOPE_WITH_EXCLUSIONS,
+        installed=lambda _adapter: True,
+    )
+    await engine.run("example.com", ScanOptions(stages=(Stage.LIVE, Stage.PORTS), active=True))
+    predicate = seen[0]
+    assert predicate is not None
+    assert predicate("203.0.113.5") is True
+    assert predicate("203.0.113.200") is False
+    assert predicate("198.51.100.5") is False
+
+
+async def test_scope_warnings_name_the_tools_that_resolve_in_the_child(
+    tmp_path: Path,
+) -> None:
+    """D56 ruling 2: a partial CIDR exclusion is announced once and reaches the report."""
+    import json
+    from datetime import UTC, datetime
+
+    from reconkit import ui as ui_module
+
+    rec = Recorder()
+    lines: list[str] = []
+    specs = {"live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE)}
+    adapters: dict[str, type[BaseToolAdapter]] = {
+        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("example.com")])
+    }
+    engine = make_engine(
+        tmp_path,
+        specs,
+        adapters,
+        scope_text=SCOPE_WITH_EXCLUSIONS,
+        installed=lambda _adapter: True,
+        progress=lines.append,
+    )
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.LIVE,), active=True))
+    assert len(summary.scope_warnings) == 1
+    note = summary.scope_warnings[0]
+    assert "exclude_cidrs" in note
+    assert "live-fake" in note
+    assert [line for line in lines if "exclude_cidrs" in line] == [note]
+    document = ui_module.summary_document(summary)
+    assert document["scope_warnings"] == [note]
+    directory = tmp_path / "report"
+    directory.mkdir()
+    ui_module.write_field_report(
+        directory,
+        "example.com",
+        (),
+        (),
+        run_at=datetime.now(UTC),
+        scope_warnings=[note],
+    )
+    assert note in (directory / "report.txt").read_text(encoding="utf-8")
+    written = json.loads((directory / "report.json").read_text(encoding="utf-8"))
+    assert written["scope_warnings"] == [note]
 
 
 async def test_regression_live_discovered_subdomain_reaches_the_subdomains_table(
