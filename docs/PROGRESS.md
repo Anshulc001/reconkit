@@ -4,6 +4,8 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Analysis (2026-11-19, no code): **a passive run stores URLs and never reads them back** - nothing in-run consumes them, so the 3 hosts that only the `slice.bank.in` archives revealed (`nb.slice.bank.in` 40 URLs, `api.slice.bank.in` 2, `assets.slice.bank.in` 1) have no row, no state and no report line; `url_probe` is its own stage after `urls`, absent from `MODE_STAGES["passive"]`. Liveness of a prepared hostname list works today via `reconkit live -l hosts.txt --active --scope ...` (each line is its own target; URLs are rejected by `validate_target`), while `export`, `db list` and `db export` are Part-8 stubs. Four stage-order options and a recommendation (Option 4 now, Option 2 as a separate dated decision) are in REVIEW_LOG and await an owner ruling; no flag, order or code changed.
+
 - Status (2026-11-19, D57): **a timeout from an external API is a gap, so one slow third party no longer exits 5.**
   The final run's only failure was `crtsh: request timed out` (30.71 s); `HttpAdapter._request` now raises
   `ExternalServiceGap` for a timeout when the adapter is `external: true`, and keeps `FetchFailed` otherwise. A refused

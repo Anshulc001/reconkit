@@ -76,6 +76,317 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
+## 2026-11-19 (analysis) - what consumes URLs in a passive run, and four stage-order options
+
+Investigation only. No `src/`/`tests/` change, no stage reordering, no new flag, no scan, no network request to
+`slice.bank.in` or `sakec.ac.in`. Baseline `d5caeed`, 974 tests, tree clean, `scope.yaml` sha256
+`d45a3c90...eeee8b` before and after. All run evidence is read from `results/slice.bank.in/20261119T170839Z/` and
+`recon.db` (target 7). MASTER_PLAN holds no D52-D57 entry (they live in PROGRESS); the D52-D57 rulings were re-read
+there.
+
+### Part A - what actually happens to URLs in passive mode
+
+`src/reconkit/engine.py`, raw:
+
+```python
+STAGE_ORDER: tuple[Stage, ...] = (
+    Stage.SUBS,
+    Stage.DNS,
+    Stage.LIVE,
+    Stage.PORTS,
+    Stage.TECH,
+    Stage.URLS,
+    # The liveness probe follows the crawl: it needs the stored URLs (D23).
+    Stage.URL_PROBE,
+    # Screenshots come after URL discovery (they need alive hosts and the crawl
+    # has already run) and before vulns, so a slow browser never delays the
+    # findings stage (D19).
+    Stage.SHOTS,
+    Stage.VULNS,
+)
+
+# Scan-mode stages, the first of the two mode tables (docs/02 section 2).
+# Every surface that needs "which stages does mode X run" reads this dict.
+MODE_STAGES: dict[str, tuple[Stage, ...]] = {
+    "passive": (Stage.SUBS, Stage.DNS, Stage.URLS),
+    "active": (
+        Stage.SUBS,
+        Stage.DNS,
+        Stage.LIVE,
+        Stage.TECH,
+        Stage.URLS,
+        # Sends HTTP, so it is never a passive stage (D23).
+        Stage.URL_PROBE,
+    ),
+    # `shots` is full-only (D19): it is in STAGE_ORDER, and therefore here, but
+    # in neither tuple above. gowitness is `opt_in`/`active`, so the tier and
+    # tool-mode rules in MODE_TOOLS still decide whether it runs.
+    "full": STAGE_ORDER,
+}
+```
+
+`Stage.URL_PROBE` is **not** in passive's tuple, and it is **not inside** the `urls` stage: it is its own stage in
+`STAGE_ORDER`, engine-owned (no adapters), invoked in the engine's stage loop. Raw call site:
+
+```python
+        for stage in STAGE_ORDER:
+            if stage not in opts.stages:
+                continue
+            if stage in completed:
+                summary.stages.append(StageOutcome(stage, completed[stage], resumed=True))
+                continue
+            if stage is Stage.URL_PROBE:
+                # Engine-owned, so it never goes through tool selection (D23).
+                # D26: it gets the same deadline every tool stage has, from
+                # --phase-timeout or `timeouts.url_probe` in config.yaml.
+                probe_timeout = opts.phase_timeout or self._stage_timeout(Stage.URL_PROBE)
+                try:
+                    probe, scope_error = await asyncio.wait_for(
+                        self._run_url_probe(target, target_id, opts, scan_key=scan_key),
+                        timeout=probe_timeout,
+                    )
+```
+
+So with `--passive`, `opts.stages` is the passive tuple, `stage is Stage.URL_PROBE` never becomes reachable, and the
+selector `Store.probe_candidates()` is never called. Nothing else consumes URLs: `_persist_urls()` writes the rows and
+touches no other table.
+
+The run, raw (SQLite, target 7):
+
+```
+=== url count for run 178 ===
+2253
+=== status_code distribution ===
+status_code  urls
+-----------  ----
+NULL         2253
+
+=== scan_runs for target 7 ===
+id   stage   status         started_at           finished_at       scope_mode
+---  -----  ---------  --------------------  --------------------  ----------
+176  subs   completed  2026-11-19T17:02:16Z  2026-11-19T17:05:16Z  enforced
+177  dns    completed  2026-11-19T17:05:16Z  2026-11-19T17:05:20Z  enforced
+178  urls   completed  2026-11-19T17:05:20Z  2026-11-19T17:08:39Z  enforced
+
+=== distinct URL hosts, split on which side of subdomains ===
+url_hosts  in_subdomains  url_only  root_itself
+---------  -------------  --------  -----------
+       15             12         3            1
+
+=== the three URL-only hosts, by URL count ===
+        fqdn          urls
+--------------------  ----
+nb.slice.bank.in        40
+api.slice.bank.in        2
+assets.slice.bank.in     1
+```
+
+**The A.3 number: 3 URL-only hostnames, carrying 43 of the 2 253 URLs** (`nb.slice.bank.in` 40, `api.slice.bank.in` 2,
+`assets.slice.bank.in` 1). None of them has a `subdomains` row, so none was ever resolved, none has a host state, and
+none appears in `report.json` or `report.txt` (grep count 0 for all three in both files). The `subdomains` table for the
+target holds 12 rows (11 DNS_ONLY, 1 DEAD) - the 12 "in_subdomains" hosts including the root.
+
+**What consumes the URLs in a passive run: nothing.** They are stored with `status_code IS NULL` and no stage ever
+reads them back; only a later active or full run reaches `url_probe`, which calls `probe_candidates()` and sends an HTTP
+request per URL - subject to the D55 filter, which skips a URL only when its host is **already known** DEAD or DNS_ONLY.
+The three hosts above have no state row at all, so the filter keeps all 43 of their URLs; an active run on this target
+would therefore spend 43 of its probes on hosts that no DNS source ever confirmed (2 253 - 43 = 2 210 would be skipped).
+Note also that URL hostnames never enter the `subdomains` table in any mode: `_persist_urls()` writes only `urls`, and
+the `discovered` set the DNS stage receives is fed by subdomain records, not URL records.
+
+### Part B - can the owner check an arbitrary list they already have?
+
+Four `--help` outputs, raw (box art as printed):
+
+```
+$ reconkit live --help
+ Usage: reconkit live [OPTIONS]
+ --domain -d <str>                Root domain to scan.
+ --list -l <path>                 File with one root domain per line.
+ --json <bool>                    Write one JSON document to stdout.
+ --silent -q <bool>               Suppress tables and progress.
+ --min-sources <int>              Hide results below this many sources. [default: 1]
+ --tools <str>                    Comma-separated adapters to run.
+ --exclude <str>                  Comma-separated adapters to skip.
+ --include-noisy <bool>           Allow opt_in tier tools.
+ --phase-timeout <float>          Stage time limit in seconds.
+ --mock <bool>                    Use fixtures; no network or external processes.
+ --active <bool>                  Run active stages: subs, dns, live, tech, urls,
+                                  url_probe. The passive stages still run. Uses
+                                  passive and active tools; no intrusive/aggress...
+                                  tools. A scope.yaml, when present, is
+                                  enforced; with no scope file, active scanning
+                                  is unrestricted.
+ --full <bool>                    Run a full scan: all stages (subs, dns, live,
+                                  ports, tech, urls, url_probe, shots, vulns).
+                                  Uses passive, active, and intrusive-tier tools
+                                  (exploitation-cla... tools still require an
+                                  explicit --tools). Implies --active and
+                                  --include-noisy.
+ --no-scope <bool>                Ignore any scope file and behave as if none
+                                  existed. Active stages run unrestricted; a
+                                  loud warning is printed and the run records
+                                  scope_mode = unrestricted_flag. scope.yaml is
+                                  never modified.
+ --only-alive <bool>              Print only hosts whose state is ALIVE. If
+                                  none match, print "no ALIVE hosts (N
+                                  scanned)".
+ --only-states <str>              Print only hosts matching one of these
+                                  comma-separated states: ALIVE, DNS_ONLY,
+                                  SHUT_DOWN, DEAD, UNKNOWN.
+ --ports <str>                    Override the default port list for naabu and
+                                  pyscan. Format: 80,443,8000-8100.
+ --status-codes <str>             Only keep hosts that respond with one of these
+                                  HTTP status codes. Format: 200,301,302.
+ --header <list[str]>             Add an HTTP header to every request made by
+                                  httpx and pyprobe. Repeatable. Format: "Name:
+                                  Value".
+ --user-agent <str>               Override the default User-Agent for httpx and
+                                  pyprobe.
+ --redact-headers/--show-headers   Hide header values in JSON and UI output
+                                  (default on). [default: redact-headers]
+ --ffuf-wordlist <path>           Wordlist for ffuf content discovery. Default:
+                                  the packaged common.txt (about 110 paths). The
+                                  file must exist and be readable.
+ --resolvers <path>               Resolver list for massdns and puredns.
+                                  Default: the packaged resolvers.txt (16 public
+                                  resolvers). The file must exist and be
+                                  readable.
+ --skip-url-probe <bool>          Skip the url_probe stage: leave every stored
+                                  URL without an HTTP status (D23). It runs
+                                  after urls in --active and --full.
+ --reprobe-urls <bool>            Probe every stored URL again, not only the
+                                  ones with no status yet, so a URL that has
+                                  since gone dead is found (D24). It needs the
+                                  url_probe stage.
+ --no-keys <bool>                 Force free mode.
+ --resume <bool>                  Continue the latest unfinished run.
+ --no-color <bool>                Disable colors.
+ --verbose -v <bool>              Show a traceback for unexpected errors.
+ --config <path>                  Config file path.
+ --scope <path>                   Scope file path.
+ --db <path>                      SQLite database path.
+ --help <bool>                    Show this message and exit.
+
+$ reconkit export --help
+ Usage: reconkit export [OPTIONS]
+ *  --domain  -d      <str>   Target to export. [required]
+    --format          <str>   Report format: json, md or html. [default: json]
+    --help            <bool>  Show this message and exit.
+
+$ reconkit db --help
+ Usage: reconkit db [OPTIONS] COMMAND [ARGS]...
+ Query stored assets.
+ Commands: list, export
+
+$ reconkit db list --help
+ Usage: reconkit db list [OPTIONS]
+ *  --domain  -d      <str>   Target to list. [required]
+
+$ reconkit db export --help
+ Usage: reconkit db export [OPTIONS]
+ *  --domain    -d      <str>   Target to export. [required]
+    --new-only          <bool>  Only items new since the previous run.
+
+$ reconkit scope --help
+ Usage: reconkit scope [OPTIONS] COMMAND [ARGS]...
+ Inspect or import scope.yaml.
+ Commands: check, import
+
+$ reconkit scope check --help
+ Usage: reconkit scope check [OPTIONS]
+ *  --domain    -d      <str>   Domain to check. [required]
+    --scope             <path>  Scope file path.
+    --no-color          <bool>  Disable colors.
+
+$ reconkit scope import --help
+ Usage: reconkit scope import [OPTIONS]
+```
+
+Every file-reading option in `cli.py` (`grep -n 'Path'` / `read_text`): `-l/--list` (target file), `--ffuf-wordlist`,
+`--resolvers`, `--config`, `--scope`, `--db`. Only `--list` is a user data file, and `_targets()` parses it with
+**`validate_target()`**, one root domain per line. It is not a hosts file and not a URLs file: a line like
+`https://nb.slice.bank.in/x` is rejected before any run (`invalid domain label: 'https://nb'`, observed with `--mock`
+against a throwaway `--db /tmp/d57probe.db`).
+
+Three of the four pasted commands do not work at all yet: `export`, `db list` and `db export` are Part-8 stubs that
+print `... is not wired in Part 8; no ...` and exit with `ExitCode.ERROR` - so there is no CLI export to feed a list
+back in. The only export that exists is the `report.json` / `report.txt` a run writes itself (hosts only; it does not
+contain URL-only hosts, as Part A shows).
+
+**Answer: partly.** No command accepts a file of URLs and checks liveness, and no command accepts a list of hosts *as a
+hosts file* - but a list of **hostnames** works today through `-l`, because each line is treated as its own target and
+each target is probed by the live stage. Exact command, one hostname per line, every name listed in the scope file:
+
+```bash
+reconkit live -l hosts.txt --active --scope scope.yaml
+```
+
+Proven end to end with `--mock` (no network, throwaway DB and a temp scope file in `/tmp`): the file
+`nb.slice.bank.in` produced `1 hosts: ... 3 ok, 1 failed` with `pyprobe`, `httpx`, `httprobe`, `tlsx` selected for it;
+the same command against the real `scope.yaml` refused it with exit 3, exactly as the gate should, because `scope.yaml`
+lists only testfire.net and friends. Caveats to state plainly: each line becomes a separate target row, the run is
+per-host (one report per hostname), URLs are not accepted, and no liveness result is written back to the original
+target's history. The smallest thing that would make the URL case work is a single new option that reads a file, sends
+each line through `validate_host()` (not `validate_target()`), and queues `probe_candidates`-style requests for it -
+a new flag, so it needs an owner ruling before any code.
+
+### Part C - stage-order options
+
+Current order, from `MODE_STAGES` above:
+
+| mode | stages in order | where `url_probe` runs |
+|---|---|---|
+| passive | subs, dns, urls | nowhere (not in the tuple) |
+| active | subs, dns, live, tech, urls, url_probe | its own stage, last |
+| full | subs, dns, live, ports, tech, urls, url_probe, shots, vulns | its own stage, after urls |
+
+The `urls` pool is 4 passive tools (`gau`, `waybackurls`, `unfurl`, `urlfinder` - all `mode: passive`, `tier: core`)
+and 4 active crawlers (`katana`, `hakrawler`, `gospider`, `subjs` - `mode: active`). Crawlers are handed
+`_stage_hosts(Stage.URLS)` = **alive** hosts; the archive tools are handed the discovered names.
+
+**Option 1 - move `urls` before `dns` in passive (`subs -> urls -> dns`).** Safe for the archive tools, which take
+domain names and never need a resolved host; the crawl tools would break, but none of them is in the passive pool, so
+passive is the only mode where this is even coherent (active `urls` needs `alive`, which needs `live`, which needs
+`dns`). What it does **not** do on its own: make anything resolve the URL hosts. `_persist_urls()` writes only the
+`urls` table, and the `discovered` set the DNS stage reads is built from subdomain records, so a reordering alone still
+leaves `nb.slice.bank.in` without a row. It also moves a 3-minute stage in front of a 4-second one and would need an
+extraction step (URL host -> `validate_host()` -> subdomain row) to be worth anything.
+
+**Option 2 - one bounded second resolve pass after `urls`, then stop.** After `urls`, extract distinct hosts from the
+URL rows, keep the ones with no `subdomains` row, resolve those, and in active/full run one more live check on the
+newly resolved hosts; no third pass, and the pass is idempotent so a resume does not repeat it. Cost on
+`slice.bank.in`: **3 DNS names** (two of them one label deep) and, if active, 3 live probes - on the order of a couple of
+seconds, versus the 488 s full run. What it would surface: `nb.slice.bank.in` (40 URLs, archive paths that look like a
+real corporate site), `api.slice.bank.in`, `assets.slice.bank.in`. Whether `nb.slice.bank.in` answers today is not
+knowable without traffic, which this batch did not send; the value is that the host would gain a row, a state and a
+report line, and any ALIVE result would then hand its 40 URLs to `url_probe` as a normal live host instead of the
+"unreachable filter keeps it because nothing is known" path. The real cost is behavioural, not CPU: a passive run would
+start resolving names that only third-party archives mentioned, which is one more step from "archives say so" toward
+producing traffic (still no traffic in passive, since resolving is what `dns` already does for every discovered name).
+
+**Option 3 - add `url_probe` to passive.** Probing is **active contact**: an HTTP request per stored URL to the target
+itself, which is exactly what passive mode promises not to do. This changes what the word means, not just a table row.
+It would need docs/02 section 2 (mode table and the mode prose), the `--active`/`--passive` help strings and the
+interactive legend (all generated from `MODE_STAGES`, so they would change themselves), the `--skip-url-probe` help
+("it runs after urls in --active and --full"), docs/09's stage table and D23 note, the exit-3 scope rule (passive would
+now be gateable and could refuse), and D55's meaning (a passive run now sends the 43 URL requests). Recommend
+**against**: it would make `--passive` a mode that contacts the target, and every operator's mental model of "passive"
+in a scope document would be wrong.
+
+**Option 4 - do nothing in-run; document the existing workflow.** Today: run passive, then feed the hostnames you care
+about to `reconkit live -l hosts.txt --active --scope ...` (Part B), which is a real liveness check with the real scope
+gate. It costs the operator one copy/paste and one command, adds no traffic the owner did not ask for at that moment,
+and needs no engine change. Its gap is the URL list itself: the report has no URL-only hosts, so the operator must get
+those hostnames from somewhere else (the `urls` table, or `--json`... which is also hosts-only), which is the honest
+version of the same limitation Part A describes.
+
+**Recommendation for the owner to rule on: Option 4 now, with Option 2 named as the follow-up if the in-run coverage is
+wanted.** Option 4 uses machinery that already exists and is already gate-correct, changes no semantics, and answers
+the owner's actual question ("which of my hosts are live") without inventing traffic in a mode that promises none;
+Option 2 is the only one of the four that would fix the missing host rows automatically, and it should be a separate,
+dated decision with its own D-number because it changes what a passive run discovers.
+
 ## 2026-11-19 (D57) - a timeout from an external API is a gap, not a failure
 
 Owner ruling after the final run: the 488 s `sakec.ac.in` run exited 5 over exactly one row,
