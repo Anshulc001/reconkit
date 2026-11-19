@@ -1,5 +1,7 @@
 # reconkit
 
+[![tests](https://github.com/Anshulc001/reconkit/actions/workflows/test.yml/badge.svg)](https://github.com/Anshulc001/reconkit/actions/workflows/test.yml)
+
 A command-line reconnaissance orchestrator for **authorized** security testing. It runs several tools per stage, cross-checks their results, scores confidence by how many tools agree, and tracks what changed between scans in SQLite.
 
 - Natural pace: no speed preset, delay or artificial throttling; tools run at their own rate

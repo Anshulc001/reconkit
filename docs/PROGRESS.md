@@ -4,6 +4,11 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D86): **CI exists.** `.github/workflows/test.yml` runs on
+  every push and pull request to `main`, with a Python 3.11/3.12/3.13 matrix;
+  each job installs `.[dev]` and runs `pytest -q`, `ruff check .`,
+  `ruff format --check .` and `mypy src/reconkit`. The README carries the
+  workflow badge. No source or test change; suite stays 1040.
 - Status (2026-11-20, D85): **`db delete` now defaults to no, and both
   destructive db commands fail cleanly on a locked database.** The prompt is
   `[y/N]`; Enter cancels with exit 2. `core.store` translates
