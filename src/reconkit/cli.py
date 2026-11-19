@@ -950,6 +950,11 @@ def _run_scan(
                 # D56: the report carries the same warning stderr showed, so a
                 # partial CIDR exclusion is visible after the fact.
                 scope_warnings=summary.scope_warnings,
+                # D62: the stored URLs travel with the report, capped by
+                # config.yaml `report.urls_max`, so the tree and the URL block
+                # come from the same rows as the hosts table.
+                urls=engine.url_rows(summary.target_id),
+                urls_max=config.report.urls_max,
             )
             render_progress(
                 f"report: {report_text_path} and {report_json_path}",

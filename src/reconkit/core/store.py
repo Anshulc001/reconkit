@@ -939,6 +939,40 @@ class Store:
                 unknown.add(host)
         return sorted(unknown)
 
+    def url_report_rows(self, target_id: int) -> list[dict[str, object]]:
+        """Every stored URL of a target, with its host and that host's state (D62).
+
+        Read-only: one row per URL with the URL as stored, its `status_code`
+        (`None` when never probed), the hostname from the same `_url_host()`
+        parser the D55 filter uses, and the host's latest `subdomains.state`
+        (`UNKNOWN` when the host has no row at all). A URL whose host cannot be
+        parsed contributes nothing, exactly like `url_only_hosts()`.
+        """
+        states = {
+            str(row["fqdn"]): str(row["state"])
+            for row in self._conn.execute(
+                "SELECT fqdn, state FROM subdomains WHERE target_id = ?", (target_id,)
+            )
+        }
+        rows: list[dict[str, object]] = []
+        for row in self._conn.execute(
+            "SELECT url, status_code FROM urls WHERE target_id = ? ORDER BY url", (target_id,)
+        ):
+            url = str(row["url"])
+            host = _url_host(url)
+            if not host:
+                continue
+            status = row["status_code"]
+            rows.append(
+                {
+                    "url": url,
+                    "host": host,
+                    "status_code": status if isinstance(status, int) else None,
+                    "host_state": states.get(host, "UNKNOWN"),
+                }
+            )
+        return rows
+
     def _unreachable_fqdns(self, target_id: int) -> set[str]:
         """Hosts the latest state pass recorded as `DEAD` or `DNS_ONLY` (D54, D55)."""
         rows = self._conn.execute(

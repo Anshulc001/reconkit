@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
 
@@ -12,7 +13,14 @@ from rich.console import Console
 from rich.text import Text
 
 import reconkit.ui as ui
-from reconkit.engine import CompletionGap, ExitCode, ScanSummary, StageOutcome
+from reconkit.engine import (
+    CompletionGap,
+    ExitCode,
+    HostSnapshot,
+    ScanSummary,
+    StageOutcome,
+    UrlSnapshot,
+)
 from reconkit.models import (
     Confidence,
     HostState,
@@ -631,3 +639,157 @@ def test_ui_does_not_import_store_scope_adapters_or_cli() -> None:
     assert not any(module == name for module in modules for name in forbidden)
     assert not any(module.startswith("reconkit.adapters") for module in modules)
     assert "reconkit.engine" in modules
+
+
+# ------------------------------- (D62) report domain tree and URLs by host
+
+
+def _snapshot(
+    fqdn: str,
+    state: HostState = HostState.ALIVE,
+    confidence: Confidence = Confidence.HIGH,
+) -> HostSnapshot:
+    return HostSnapshot(
+        fqdn=fqdn,
+        state=state,
+        confidence=confidence,
+        sources=("crtsh",),
+        status_code=200 if state is HostState.ALIVE else None,
+        ports=(),
+    )
+
+
+def _url(url: str, status_code: int | None = None, host_state: str = "ALIVE") -> UrlSnapshot:
+    host = url.split("//", 1)[1].split("/", 1)[0]
+    return UrlSnapshot(url=url, host=host, status_code=status_code, host_state=host_state)
+
+
+def _document(
+    rows: list[HostSnapshot], urls: list[UrlSnapshot], *, urls_max: int = 200
+) -> dict[str, object]:
+    return ui.report_document(
+        "example.com",
+        rows,
+        ui.REPORT_FIELDS,
+        run_at=datetime(2026, 11, 19, 12, 0, 0, tzinfo=UTC),
+        urls=urls,
+        urls_max=urls_max,
+    )
+
+
+def test_report_json_has_roots_and_urls_by_host() -> None:
+    """D62: the tree and the URL block live beside the unchanged hosts table."""
+    rows = [_snapshot("www.example.com"), _snapshot("api.example.com", HostState.DNS_ONLY)]
+    urls = [
+        _url("https://www.example.com/admin/login.php", None),
+        _url("https://api.example.com/v1/users?id=1", 200, "DNS_ONLY"),
+    ]
+    document = _document(rows, urls)
+    assert document["roots"] == [
+        {
+            "domain": "example.com",
+            "subdomains": ["www.example.com", "api.example.com"],
+            "host_count": 2,
+        }
+    ]
+    grouped = document["urls_by_host"]
+    assert isinstance(grouped, dict)
+    assert set(grouped) == {"www.example.com", "api.example.com"}
+    assert grouped["api.example.com"] == [
+        {
+            "url": "https://api.example.com/v1/users?id=1",
+            "status_code": 200,
+            "host_state": "DNS_ONLY",
+        }
+    ]
+    assert document["urls_total"] == 2
+    assert document["urls_shown"] == 2
+    assert document["urls_truncated"] is False
+    # The hosts table keeps its shape.
+    assert [host["hostname"] for host in document["hosts"]] == [
+        "www.example.com",
+        "api.example.com",
+    ]
+
+
+def test_urls_by_host_ranks_interesting_paths_first() -> None:
+    """docs/02 s5: path, then query, then a live status decides the order."""
+    urls = [
+        _url("https://example.com/about", 404),
+        _url("https://example.com/plain?page=2", None),
+        _url("https://example.com/index.php", 200),
+        _url("https://example.com/.env", None),
+    ]
+    document = _document([_snapshot("example.com")], urls)
+    grouped = document["urls_by_host"]
+    assert isinstance(grouped, dict)
+    assert [item["url"] for item in grouped["example.com"]] == [
+        "https://example.com/.env",  # interesting path
+        "https://example.com/plain?page=2",  # query string
+        "https://example.com/index.php",  # a live status
+        "https://example.com/about",  # the rest
+    ]
+
+
+def test_urls_cap_is_per_report_and_says_so() -> None:
+    """D62: `report.urls_max` bounds the whole report, and the cut is visible."""
+    rows = [_snapshot(f"h{index}.example.com") for index in range(5)]
+    urls = [
+        _url(f"https://h{index}.example.com/page{page}", 404)
+        for index in range(5)
+        for page in range(60)
+    ]
+    document = _document(rows, urls, urls_max=200)
+    assert document["urls_total"] == 300
+    assert document["urls_shown"] == 200
+    assert document["urls_truncated"] is True
+    grouped = document["urls_by_host"]
+    assert isinstance(grouped, dict)
+    assert sum(len(items) for items in grouped.values()) == 200
+
+
+def test_report_txt_has_domains_and_urls_by_host_sections() -> None:
+    """D62: both sections follow the hosts table, with state and status shown."""
+    rows = [_snapshot("www.example.com"), _snapshot("api.example.com", HostState.DNS_ONLY)]
+    urls = [_url("https://www.example.com/admin/login.php", None, "ALIVE")]
+    text = ui.report_text(
+        "example.com",
+        rows,
+        ui.REPORT_FIELDS,
+        run_at=datetime(2026, 11, 19, 12, 0, 0, tzinfo=UTC),
+        urls=urls,
+    )
+    assert "=== Domains ===" in text
+    assert "example.com  -  2 host(s)" in text
+    assert "  api.example.com   DNS_ONLY  HIGH" in text
+    assert "=== URLs by host ===" in text
+    assert "www.example.com  (ALIVE)" in text
+    assert "  https://www.example.com/admin/login.php  null" in text
+
+
+def test_report_with_no_urls_omits_both_new_sections() -> None:
+    """D62: no stored URLs means no tree and no URL block, in either file."""
+    rows = [_snapshot("www.example.com")]
+    document = _document(rows, [])
+    assert "urls_by_host" not in document
+    assert document["urls_total"] == 0
+    assert document["urls_shown"] == 0
+    assert document["urls_truncated"] is False
+    text = ui.report_text(
+        "example.com",
+        rows,
+        ui.REPORT_FIELDS,
+        run_at=datetime(2026, 11, 19, 12, 0, 0, tzinfo=UTC),
+        urls=[],
+    )
+    assert "=== Domains ===" not in text
+    assert "=== URLs by host ===" not in text
+
+
+def test_roots_has_one_entry_for_single_target() -> None:
+    """A report covers one target, so `roots` is one entry (docs/02 s5)."""
+    document = _document([_snapshot("a.example.com"), _snapshot("b.example.com")], [])
+    roots = document["roots"]
+    assert isinstance(roots, list) and len(roots) == 1
+    assert roots[0]["domain"] == "example.com"
+    assert roots[0]["host_count"] == 2

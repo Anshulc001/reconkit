@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import sys
 from collections import Counter
@@ -13,13 +14,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, TextIO
+from urllib.parse import urlsplit
 
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
 from reconkit.doctor import YES, DoctorReport, KeyCheck
-from reconkit.engine import DiffSnapshot, HostSnapshot, RunSnapshot, ScanSummary
+from reconkit.engine import DiffSnapshot, HostSnapshot, RunSnapshot, ScanSummary, UrlSnapshot
 from reconkit.models import Confidence, HostState, ToolResult, ToolStatus
 
 _STATE_STYLES: dict[HostState, str] = {
@@ -528,6 +530,57 @@ class ReportSelection:
         return f"selection: {self.matched} of {self.total} hosts ({self.description})"
 
 
+# D62: the paths an operator opens first. Matched against `urlsplit(url).path`
+# only, so a hit is about the resource and not about a hostname or a token.
+_INTERESTING_PATH = re.compile(
+    r"(admin|login|api|\.git|\.env|backup|config|upload|debug|phpinfo|swagger"
+    r"|graphql|\.sql|\.zip|\.bak|dashboard|panel|test|dev)",
+    re.IGNORECASE,
+)
+
+
+def _url_rank(item: UrlSnapshot) -> tuple[int, int, int, str, str]:
+    """docs/02 section 5: interesting path, then a query, then a live status.
+
+    Ascending, so the most useful URL sorts first; `host`/`url` make the order
+    total, which is what keeps two runs byte-identical.
+    """
+
+    parsed = urlsplit(item.url)
+    return (
+        0 if _INTERESTING_PATH.search(parsed.path) else 1,
+        0 if parsed.query else 1,
+        0 if item.status_code in (200, 301, 302) else 1,
+        item.host,
+        item.url,
+    )
+
+
+def report_urls(
+    urls: Sequence[UrlSnapshot], urls_max: int
+) -> tuple[dict[str, list[dict[str, object]]], int]:
+    """Group the report's URLs by host, best first, capped across the report.
+
+    `urls_max` is the whole report's budget, not a per-host one; `0` means no
+    cap. Returns the groups (hosts that lost every URL to the cap are absent)
+    and how many URLs were kept, which is what `urls_shown` reports.
+    """
+
+    ordered = sorted(urls, key=_url_rank)
+    if urls_max > 0:
+        ordered = ordered[:urls_max]
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for item in ordered:
+        grouped.setdefault(item.host, []).append(
+            {
+                "url": item.url,
+                "status_code": item.status_code,
+                "host_state": item.host_state,
+            }
+        )
+    return grouped, len(ordered)
+
+
 def report_document(
     target: str,
     rows: Sequence[HostSnapshot],
@@ -536,10 +589,13 @@ def report_document(
     run_at: datetime,
     selection: ReportSelection | None = None,
     scope_warnings: Sequence[str] = (),
+    urls: Sequence[UrlSnapshot] = (),
+    urls_max: int = 200,
 ) -> dict[str, object]:
     """Build the report's JSON document from stored values only."""
 
-    return {
+    grouped, shown = report_urls(urls, urls_max)
+    document: dict[str, object] = {
         "type": "report",
         "target": target,
         "generated_at": run_at.astimezone(UTC).isoformat(timespec="seconds"),
@@ -547,9 +603,26 @@ def report_document(
         # D56: the same warning stderr showed at run start, so a reader of the
         # artifact learns the exclusion was partial.
         "scope_warnings": list(scope_warnings),
+        # D62: one root per report, because one report covers one target
+        # (docs/02 section 5); the hosts table itself is unchanged.
+        "roots": [
+            {
+                "domain": target,
+                "subdomains": [row.fqdn for row in rows],
+                "host_count": len(rows),
+            }
+        ],
         "fields": [field.key for field in fields],
         "hosts": [{field.key: field_value(row, field) for field in fields} for row in rows],
+        "urls_total": len(urls),
+        "urls_shown": shown,
+        "urls_truncated": len(urls) > shown,
     }
+    # docs/02 section 5: a report with no URLs has no URL block at all, rather
+    # than an empty one a reader has to interpret.
+    if grouped:
+        document["urls_by_host"] = grouped
+    return document
 
 
 # One cell of the text table stays readable: a host with twelve IPv6 addresses
@@ -572,6 +645,8 @@ def report_text(
     run_at: datetime,
     selection: ReportSelection | None = None,
     scope_warnings: Sequence[str] = (),
+    urls: Sequence[UrlSnapshot] = (),
+    urls_max: int = 200,
 ) -> str:
     """Build the report's plain-text table from stored values only."""
 
@@ -598,7 +673,41 @@ def report_text(
         lines.append("  ".join(cell.ljust(width) for cell, width in zip(line, widths, strict=True)))
     if not table:
         lines.append("(no hosts)")
+    lines.extend(_report_tree_sections(target, rows, urls, urls_max))
     return "\n".join(lines) + "\n"
+
+
+# docs/02 section 5: past this many names one line each is noise, so the
+# section points at the table that already lists them.
+_TREE_LIST_MAX = 50
+
+
+def _report_tree_sections(
+    target: str,
+    rows: Sequence[HostSnapshot],
+    urls: Sequence[UrlSnapshot],
+    urls_max: int,
+) -> list[str]:
+    """The two D62 sections, or nothing when the report has no URLs."""
+
+    if not urls:
+        return []
+    lines = ["", "=== Domains ===", f"{target}  -  {len(rows)} host(s)"]
+    if len(rows) > _TREE_LIST_MAX:
+        lines.append(f"  {len(rows)} subdomains, see hosts table")
+    else:
+        for row in rows:
+            lines.append(f"  {row.fqdn}   {row.state.value}  {row.confidence.value}")
+    grouped, shown = report_urls(urls, urls_max)
+    lines.extend(["", "=== URLs by host ==="])
+    if shown < len(urls):
+        lines.append(f"urls: {shown} of {len(urls)} shown (report.urls_max {urls_max})")
+    for host, items in grouped.items():
+        lines.append(f"{host}  ({items[0]['host_state']})")
+        for item in items:
+            status = "null" if item["status_code"] is None else str(item["status_code"])
+            lines.append(f"  {item['url']}  {status}")
+    return lines
 
 
 def write_field_report(
@@ -610,6 +719,8 @@ def write_field_report(
     run_at: datetime,
     selection: ReportSelection | None = None,
     scope_warnings: Sequence[str] = (),
+    urls: Sequence[UrlSnapshot] = (),
+    urls_max: int = 200,
 ) -> tuple[Path, Path]:
     """Write `report.txt` and `report.json` into this run's folder.
 
@@ -621,13 +732,27 @@ def write_field_report(
     json_path = directory / "report.json"
     text_path = directory / "report.txt"
     document = report_document(
-        target, rows, fields, run_at=run_at, selection=selection, scope_warnings=scope_warnings
+        target,
+        rows,
+        fields,
+        run_at=run_at,
+        selection=selection,
+        scope_warnings=scope_warnings,
+        urls=urls,
+        urls_max=urls_max,
     )
     _write_atomically(json_path, json.dumps(document, indent=2, sort_keys=False) + "\n")
     _write_atomically(
         text_path,
         report_text(
-            target, rows, fields, run_at=run_at, selection=selection, scope_warnings=scope_warnings
+            target,
+            rows,
+            fields,
+            run_at=run_at,
+            selection=selection,
+            scope_warnings=scope_warnings,
+            urls=urls,
+            urls_max=urls_max,
         ),
     )
     return text_path, json_path

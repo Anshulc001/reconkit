@@ -598,6 +598,20 @@ class HostSnapshot:
 
 
 @dataclass(frozen=True)
+class UrlSnapshot:
+    """One stored URL with the state of the host that names it (D62).
+
+    `host_state` is the host's latest stored state, or `UNKNOWN` when the host
+    has no `subdomains` row at all (`Store.url_report_rows`).
+    """
+
+    url: str
+    host: str
+    status_code: int | None
+    host_state: str
+
+
+@dataclass(frozen=True)
 class DiffSnapshot:
     """Latest two same-kind runs; empty tuples mean nothing to compare."""
 
@@ -746,6 +760,18 @@ class Engine:
                 )
             )
         return rows
+
+    def url_rows(self, target_id: int) -> list[UrlSnapshot]:
+        """Read the stored URLs for a report without exposing Store to the CLI."""
+        return [
+            UrlSnapshot(
+                url=str(row["url"]),
+                host=str(row["host"]),
+                status_code=(row["status_code"] if isinstance(row["status_code"], int) else None),
+                host_state=str(row["host_state"]),
+            )
+            for row in self.store.url_report_rows(target_id)
+        ]
 
     def recent_runs(self, limit: int = 20) -> list[RunSnapshot]:
         """Read recent stage runs for the status command."""

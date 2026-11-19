@@ -76,6 +76,86 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 
+## 2026-11-19 (D62) - a saved report carries a domain tree and its URLs
+
+Before: `report.json` had 7 top-level keys (`type`, `target`, `generated_at`,
+`selection`, `scope_warnings`, `fields`, `hosts`) and `report.txt` had **no**
+section headings at all - one header block and one table, 0 occurrences of
+`http`. The 69-host `sakec.ac.in` report therefore showed which hosts exist and
+nothing about the 2 253 URLs stored beside them.
+
+After, read from what the run already stored (`Store.url_report_rows()`; no
+request, no schema change, no new module):
+
+- `report.json` keeps `hosts` unchanged and adds `roots`, `urls_by_host`,
+  `urls_total`, `urls_shown`, `urls_truncated`.
+- `report.txt` appends `=== Domains ===` and `=== URLs by host ===` after the
+  hosts table, and writes neither when the run stored no URL.
+- Ranking inside a host: interesting path (`admin|login|api|\.git|\.env|backup|
+  config|upload|debug|phpinfo|swagger|graphql|\.sql|\.zip|\.bak|dashboard|panel|
+  test|dev`), then a query string, then `200`/`301`/`302`, then the rest; the
+  total order is completed by host and URL so two runs are byte-identical.
+- The cap is `config.yaml` `report.urls_max` (default 200, `0` = no cap) across
+  the whole report, and both files state the cut.
+
+Raw proof, mock run (`reconkit run -d testfire.net --mock --active --no-scope
+--db /tmp/d62.db --no-color`), 24 stored URLs, none capped:
+
+```
+=== Domains ===
+testfire.net  -  16 host(s)
+  api.example.com   UNKNOWN  MEDIUM
+  api.testfire.net   UNKNOWN  LOW
+  ...
+  www.testfire.net   ALIVE  HIGH
+
+=== URLs by host ===
+testfire.net  (ALIVE)
+  https://testfire.net/login.jsp?uid=1&pw=2  null
+  http://testfire.net/login.jsp  null
+  https://testfire.net/login.jsp  null
+  http://testfire.net/index.jsp?content=inside_contact.htm  null
+  ...
+www.testfire.net  (ALIVE)
+  https://www.testfire.net/admin/admin.aspx  null
+  https://www.testfire.net/logout.jsp  null
+demo.testfire.net  (DNS_ONLY)
+  https://demo.testfire.net/bank/queryxpath.jsp?query=1  null
+  ...
+```
+
+and the JSON side of the same run:
+
+```
+keys: ['type', 'target', 'generated_at', 'selection', 'scope_warnings', 'roots', 'fields', 'hosts', 'urls_total', 'urls_shown', 'urls_truncated', 'urls_by_host']
+roots: [{"domain": "testfire.net", "subdomains": ["api.example.com", "api.testfire.net", ...], "host_count": 16}]
+total/shown/truncated: 24 24 False
+```
+
+Note the ranking did its job on real-shaped data: `login.jsp?uid=1&pw=2` sorts
+first, and the plain `js/`, `style.css` and `jquery.min.js` files sort last.
+
+Zero-URL case (`--tools pyprobe`, so the run stores no URL):
+
+```
+$ grep -c '=== Domains ===\|=== URLs by host ===' results/mock/testfire.net/20261119T190641Z/report.txt
+0
+has urls_by_host: False total: 0
+```
+
+Six tests (`pytest -q tests/test_ui.py` -> `36 passed`):
+
+- `test_report_json_has_roots_and_urls_by_host`
+- `test_urls_by_host_ranks_interesting_paths_first`
+- `test_urls_cap_is_per_report_and_says_so` (300 URLs over 5 hosts, cap 200 ->
+  `urls_shown=200`, `urls_truncated=True`)
+- `test_report_txt_has_domains_and_urls_by_host_sections`
+- `test_report_with_no_urls_omits_both_new_sections`
+- `test_roots_has_one_entry_for_single_target`
+
+Gate: `984 passed`, `ruff check .` clean, `ruff format --check .` 96 files,
+`mypy src/reconkit` clean (62 source files). No scan was run.
+
 ## 2026-11-19 (D59) - the list-check workflow, documented with its two gaps
 
 Docs only, no `src/`/`tests/` change. The owner asked how to check a list they already have; the answer is "hostnames

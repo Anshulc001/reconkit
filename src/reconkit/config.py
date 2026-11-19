@@ -103,6 +103,17 @@ class UrlProbeConfig(_StrictModel):
     timeout_s: int = Field(default=10, gt=0)
 
 
+class ReportConfig(_StrictModel):
+    """How much one saved report lists (D62, docs/02 section 5).
+
+    `urls_max` caps the `urls_by_host` block across the whole report, not per
+    host; `0` means no cap. A cut is always stated in the report
+    (`urls_shown` / `urls_truncated`).
+    """
+
+    urls_max: int = Field(default=200, ge=0)
+
+
 class WildcardCheck(_StrictModel):
     enabled: bool
     probes: int = Field(ge=1)
@@ -134,6 +145,9 @@ class AppConfig(_StrictModel):
         default_factory=lambda: dict(DEFAULT_RUNTIME_IDLE)
     )
     url_probe: UrlProbeConfig = Field(default_factory=UrlProbeConfig)
+    # D62: defaulted, so a config written before this block existed loads with
+    # the documented 200-URL report cap.
+    report: ReportConfig = Field(default_factory=ReportConfig)
     confidence: ConfidenceConfig
     wildcard_check: WildcardCheck
     install: InstallConfig

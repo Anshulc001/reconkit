@@ -1112,6 +1112,20 @@ Rules that keep it bounded and honest:
   network, no subprocess. A missing fixture means no records and the found count
   is still reported.
 
+### What a saved report reads back (D62, 2026-11-19)
+
+A report never asks a tool for anything. The domain tree and the URL block are
+read from what the run already stored, through `Store.url_report_rows()`:
+`urls.url` (as stored) and `urls.status_code` (`NULL` = never probed) joined in
+Python with `subdomains.state` by the same `_url_host()` parser the D55 filter
+uses; a host with no `subdomains` row reports `UNKNOWN`. `Engine.url_rows()` is
+the only door for it, so `ui` still sees no `Store`. The cap is a report
+setting (`config.yaml` `report.urls_max`), never a stage or probe bound: it
+changes what is printed, never what is stored, and `urls_total` /
+`urls_shown` / `urls_truncated` make a cut visible. Order inside a host:
+interesting path, then a query string, then a `200`/`301`/`302`, then the rest
+(docs/02 section 5).
+
 ### URL liveness probe (D23, 2026-11-18)
 
 The `urls` stage records what the archives and the crawler returned; it never

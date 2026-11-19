@@ -559,6 +559,32 @@ One folder per domain per run, never reused:
   `report.txt` carries `selection: 8 of 42 hosts (ALIVE)`, and `report.json`
   carries `"selection": {"filter": "ALIVE", "matched": 8, "total": 42}`;
   without filters the key is `null` and every stored row is written.
+- **A domain tree and the URLs it carries (added 2026-11-19, D62).** The hosts
+  table is unchanged; two blocks are added beside it, both read from rows the
+  run already stored (no request is made for them). `report.json` gains
+  `roots` - one entry per target, because one report covers one target:
+  `[{"domain": "sakec.ac.in", "subdomains": ["a.sakec.ac.in", ...],
+  "host_count": 69}]` - plus `urls_by_host` (`{"<host>": [{"url": ...,
+  "status_code": 200|null, "host_state": "ALIVE"}]}`, only for hosts with at
+  least one URL), `urls_total`, `urls_shown` and `urls_truncated`.
+- **Which URLs a report lists, and how many.** Inside each host the order is
+  (1) an interesting path (`admin`, `login`, `api`, `.git`, `.env`, `backup`,
+  `config`, `upload`, `debug`, `phpinfo`, `swagger`, `graphql`, `.sql`, `.zip`,
+  `.bak`, `dashboard`, `panel`, `test`, `dev`), (2) a URL with a query string,
+  (3) a URL that answered `200`/`301`/`302`, (4) everything else. The cap is the
+  `config.yaml` key `report.urls_max` (default `200`, `0` = no cap) and it
+  applies to the **whole report**, not per host: `urls_shown` and
+  `urls_truncated` say exactly what was cut, and `report.txt` prints
+  `urls: 200 of 300 shown (report.urls_max 200)` instead of leaving a short list
+  looking complete.
+- **The text file gets the same two blocks.** After the hosts table,
+  `=== Domains ===` lists the root and then one `  <host>   <STATE>  <CONFIDENCE>`
+  line per subdomain (a single `69 subdomains, see hosts table` line past 50,
+  which is the length at which one line each stops being readable), then
+  `=== URLs by host ===` lists each host with its state and its URLs with their
+  stored status (`null` = never probed). A report with **no** stored URLs writes
+  neither block, and `report.json` omits `urls_by_host` entirely, so an empty
+  section is never something a reader has to interpret.
 - The same `report: <txt> and <json>` line on stderr announces the files, so a
   run always says where its report went; `--silent` suppresses that line only.
 - A report that can not be written is a run error (exit 1), never a silent

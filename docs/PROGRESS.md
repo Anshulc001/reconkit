@@ -4,6 +4,16 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-19, D62): **a saved report now carries a domain tree and its URLs, grouped by host.**
+  `report.json` keeps `hosts` byte-for-byte and adds `roots` (one entry: target, subdomains, host_count),
+  `urls_by_host` (`url` / `status_code` / `host_state`, omitted when the run stored no URL), `urls_total`,
+  `urls_shown`, `urls_truncated`; `report.txt` appends `=== Domains ===` and `=== URLs by host ===` after the
+  hosts table. URLs rank by interesting path, then query string, then 200/301/302, then the rest, and the whole
+  report is capped by `config.yaml` `report.urls_max` (default 200, 0 = no cap), with the cut stated in both files.
+  Both blocks are read from `urls`/`subdomains` only (`Store.url_report_rows()`, no request, no schema change);
+  the tree is one entry because one report covers one target (measured: 69 hosts in 20261119T185030Z's report,
+  whose `report.json` had 7 keys and whose `report.txt` had 0 section headings and 0 URLs before this). Suite
+  978 -> 984, `ruff`/`format`/`mypy` clean, `scope.yaml` unchanged, no scan run. See D62 and its REVIEW_LOG entry.
 - Status (2026-11-19, D59): **the list-check workflow is documented; the two gaps are recorded, not fixed.** docs/02
   section 2 now shows the working hostname command (`reconkit live -l hosts.txt --active --scope scope.yaml`, each line
   its own target, gate enforced), states plainly that URL lists are rejected by `validate_target()` and that the

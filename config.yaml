@@ -40,6 +40,12 @@ url_probe:
   threads: 100        # concurrent requests (raised from 50 on 2026-11-18, D24)
   timeout_s: 10       # per-request HTTP timeout
 
+# Saved reports (D62, docs/02 section 5). urls_max caps how many URLs one
+# report lists across all hosts; 0 means no cap. A cut is always stated in the
+# report itself (urls_shown / urls_truncated), so a short list is never silent.
+report:
+  urls_max: 200
+
 confidence:
   high_min_sources: 3
   medium_min_sources: 2
