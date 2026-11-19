@@ -66,6 +66,15 @@ class ToolSpec:
     # cannot change it. 0 = the tool makes no claim (every tool but the four
     # WAF-capable ones).
     waf_priority: int = 0
+    # D48: the tool's runtime class (`crawler`, `scanner`, `api`, `archive`).
+    # `config.yaml` `runtime_caps:` gives each class a floor, a per-host scale and
+    # an idle kill, so a new tool gets a cap from its yaml row alone. `None`
+    # means "no cap", which is what every tool had before D48.
+    class_: str | None = None
+    # D47, moved here from an adapter ClassVar: every request goes to a third
+    # party's API, so a whole-response 404 is that service being wrong (a gap),
+    # never a failure of this scan.
+    external: bool = False
 
 
 def _document(file: Path) -> dict[str, Any]:
@@ -110,6 +119,16 @@ def get_spec(name: str, *, path: str | Path | None = None) -> ToolSpec:
     if spec is None:
         raise ConfigError(f"unknown tool {name!r}: it is not listed in tools.yaml")
     return spec
+
+
+def external_tools(path: str | Path | None = None) -> frozenset[str]:
+    """Every tool marked `external: true` in tools.yaml (D47, docs/09 section 4).
+
+    The HTTP base adapter asks this per request, so the answer lives in the
+    registry and not in a per-adapter ClassVar: one yaml field marks a tool whose
+    whole-response 404 is a gap, and a new API tool needs no class edit.
+    """
+    return frozenset(name for name, spec in load_tools(path).items() if spec.external)
 
 
 def get_adapter(name: str, *, path: str | Path | None = None) -> type[BaseToolAdapter]:
@@ -164,6 +183,8 @@ def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
         needs_root=_flag(name, entry, "needs_root"),
         manual=_flag(name, entry, "manual"),
         waf_priority=_waf_priority(name, entry),
+        class_=_optional_text(name, entry, "class"),
+        external=_flag(name, entry, "external"),
     )
 
 

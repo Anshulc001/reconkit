@@ -21,6 +21,7 @@ skipped, not stored: it is not a URL and it is not ours to interpret.
 from __future__ import annotations
 
 from reconkit.adapters.base import BinaryAdapter, is_non_web_reference, normalize_url, strip_ansi
+from reconkit.config import class_cap
 from reconkit.core.runner import validate_host
 from reconkit.errors import ParseError, ToolFailed
 from reconkit.models import Record, RunContext, Stage, UrlRecord
@@ -56,21 +57,27 @@ def enumeration_cap_s(
 ) -> float:
     """The whole-enumeration cap for one run (D27, docs/09 section 4a2b).
 
-    `min(stage_budget, max(180, 4 * host_count))`, then additionally clipped by
-    `urls.urlfinder_max_s` only when that value is non-zero. A positive `override`
-    (`urlfinder.max_enumeration_s`) replaces the formula outright, for debugging
-    and CI. Pure: the host count and the stage budget are handed in by the
-    engine, which is the only place that knows them; the adapter never reads
-    `config.yaml`.
+    This tool is the `archive` runtime class (D48), so the numbers are that
+    class's: `min(stage_budget, max(180, 4 * host_count))`, additionally clipped
+    by `urls.urlfinder_max_s` only when that value is non-zero. A positive
+    `override` (`urlfinder.max_enumeration_s`) replaces the formula outright, for
+    debugging and CI. The arithmetic is `config.class_cap`, shared with every
+    other classed tool; the host count and stage budget are still handed in by
+    the engine, because the adapter never reads `config.yaml`.
     """
     if override > 0:
         cap = float(override)
-    else:
-        scaled = ENUMERATION_PER_HOST_S * max(0, host_count)
-        cap = min(float(stage_budget), float(max(MIN_ENUMERATION_S, scaled)))
-    if ceiling > 0:
-        cap = min(cap, float(ceiling))
-    return max(1.0, cap)
+        if ceiling > 0:
+            cap = min(cap, float(ceiling))
+        return max(1.0, cap)
+    cap, _note = class_cap(
+        MIN_ENUMERATION_S,
+        ENUMERATION_PER_HOST_S,
+        host_count,
+        stage_budget,
+        ceiling=ceiling,
+    )
+    return cap
 
 
 class UrlfinderAdapter(BinaryAdapter):

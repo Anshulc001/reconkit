@@ -1049,10 +1049,38 @@ scope, see that README) and this section says nothing about it.
 **A 404 from an external API is a gap, not a failure (D47, 2026-11-19).** crt.sh is a free third party with no SLA: on
 2026-11-19 its front end answered **404** to a query it had served a second earlier (1 of 10 identical calls for
 `example.com`, 0 of 10 for `testfire.net`, plus **502** on its own root), and the closing capstone exited 5 because that
-404 was read as a broken tool. `HttpAdapter.external_api` (a class flag, `False` by default) marks adapters whose every
-request goes to somebody else's API; `crtsh` sets it (`tools.yaml`: `crtsh`, `kind: http`, tier `core`, passive). For
+404 was read as a broken tool. `external: true` in `tools.yaml` marks a tool whose every request goes to somebody else's
+API (`registry.external_tools()` answers it, so there is no per-adapter flag as of D48); `crtsh`, `certspotter`, `otx`,
+`hackertarget`, `urlscan`, `chaos` and `github_subdomains` carry it. For
 such an adapter a whole-response 404 raises `ExternalServiceGap` -> `ToolResult(status=GAP, error="crtsh: HTTP 404")`,
 so the engine records a completion gap and the run can exit 0. Nothing else moves: a 404 from a local binary or a
 non-API adapter is still `failed`, a 404 inside a parsed body (a crawler's page-not-found) is untouched, and the 404 is
 **not** retried - the retry in `probe_with_retry()` is for identity probes (D46), not for HTTP status.
+
+**Tool classes and per-tool runtime caps (D48, 2026-11-19).** A tool's runtime cap used to be a per-adapter constant
+(`urlfinder.runtime_cap_s`, `hakrawler.runtime_cap_s`) plus three hard-coded names in the engine's limits dict, so a new
+slow tool needed a code edit. Now the shape lives in the registry: `tools.yaml` gives a tool a `class:` (`crawler`,
+`scanner`, `api`, `archive`, or any name `config.yaml` defines) and `config.yaml` `runtime_caps:` gives that class a
+`floor`, a `per_host` scale and an `idle` silence kill:
+
+```
+cap_s = min(stage budget, max(class.floor, class.per_host * hosts))
+ToolLimits(max_s=cap_s, idle_s=class.idle, min_s=min(class.floor, cap_s), note=...)
+```
+
+| class | floor | per_host | idle | members today |
+|---|---|---|---|---|
+| `crawler` | 90 s | 2 s/host | 60 s | `gau`, `katana`, `hakrawler`, `gospider` |
+| `scanner` | 300 s | 30 s/host | 120 s | `nikto` |
+| `api` | 60 s | 1 s/host | 30 s | `crtsh`, `certspotter`, `otx`, `hackertarget`, `urlscan`, `chaos`, `github_subdomains` |
+| `archive` | 180 s | 4 s/host | 60 s | `urlfinder` |
+
+It is a **ceiling, not a timer**: nothing waits, sleeps or pads a run, a tool that finishes early exits immediately, and
+the cap only decides when a tool that is *still running* is stopped (its partial output is kept and the row says
+`capped at Ns`). A tool with no `class:` gets no cap, exactly as before. The formula is clipped by the stage deadline and
+the row names the clip (`formula 2000s clipped to stage budget 1800s`), so saturation is never silent (D29). The three
+explicit `urls:` entries (`urlfinder_*`, `hakrawler_max_s`, `subjs_max_s`) still win over a class for those three tools,
+which is why D27's numbers did not move. **A new tool is one `tools.yaml` row** - `class: crawler` and the adapter file -
+with no `engine.py` edit; `tests/test_engine.py::test_a_new_tool_with_class_in_tools_yaml_needs_no_engine_edit` proves
+it against a synthetic registry.
 

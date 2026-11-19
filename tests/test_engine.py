@@ -4050,3 +4050,162 @@ async def test_live_still_scans_the_apex_when_nothing_was_discovered(tmp_path: P
     ]
     assert rec.hosts == [["example.com"]]
     assert summary.exit_code is ExitCode.SUCCESS
+
+
+# ---- D48: runtime classes drive per-tool caps ---------------------------------
+
+
+def class_spec(name: str, class_: str | None, stage: Stage = Stage.URLS) -> ToolSpec:
+    """A registry row of the shape the class system reads."""
+    return ToolSpec(
+        name=name,
+        stage=stage,
+        kind="binary",
+        tier=Tier.CORE,
+        mode=Mode.ACTIVE,
+        phase=3,
+        class_=class_,
+    )
+
+
+class NoopAdapter(BaseToolAdapter):
+    """Never instantiated by these tests; `_limits` only reads the spec."""
+
+    name = "noop"
+
+    def parse_output(self, raw: str) -> list[Record]:
+        return []
+
+
+def limits_for(
+    tmp_path: Path,
+    specs: Mapping[str, ToolSpec],
+    hosts: list[str],
+    *,
+    budget: float = 1800.0,
+    tool_hosts: dict[str, list[str]] | None = None,
+) -> dict[str, object]:
+    engine = make_engine(tmp_path, specs, {})
+    selected = [(spec, NoopAdapter) for spec in specs.values()]
+    return engine._limits(selected, tool_hosts or {}, hosts, budget, {})
+
+
+def test_gau_cap_scales_with_class_config(tmp_path: Path) -> None:
+    """D48: `class: crawler` -> min(budget, max(90, 2 * hosts)), announced when clipped."""
+    specs = {"gau": class_spec("gau", "crawler")}
+    eight = limits_for(tmp_path, specs, [f"h{i}.example.com" for i in range(8)])
+    assert eight["gau"].max_s == 90  # the floor wins on a small target
+    assert eight["gau"].idle_s == 60
+
+    many = limits_for(tmp_path, specs, [f"h{i}.example.com" for i in range(500)])
+    assert many["gau"].max_s == 1000  # 2 s per host, past the floor
+
+    huge = limits_for(tmp_path, specs, [f"h{i}.example.com" for i in range(1000)])
+    assert huge["gau"].max_s == 1800  # 2000 wanted, clipped to the stage budget
+    assert huge["gau"].note == "formula 2000s clipped to stage budget 1800s"
+
+
+def test_nikto_cap_uses_scanner_class(tmp_path: Path) -> None:
+    """D48: `class: scanner` -> floor 300 s, idle kill 120 s."""
+    specs = {"nikto": class_spec("nikto", "scanner", Stage.VULNS)}
+    limits = limits_for(tmp_path, specs, ["example.com"], budget=7200.0)
+    assert limits["nikto"].max_s == 300
+    assert limits["nikto"].idle_s == 120
+    assert limits["nikto"].min_s == 300
+
+
+def test_a_tool_with_no_class_gets_no_cap(tmp_path: Path) -> None:
+    """D48: an unclassed tool is not capped, exactly as before this change."""
+    limits = limits_for(tmp_path, {"waybackurls": class_spec("waybackurls", None)}, ["example.com"])
+    assert limits == {}
+
+
+async def test_a_tool_that_exits_early_is_not_delayed_by_the_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Acceptance for "a ceiling, not a timer": a fast tool pays nothing.
+
+    The tool is classed `crawler` (a 90 s ceiling), runs for ~0.2 s and must
+    finish in well under a second: the cap never sleeps, waits or pads a run.
+    """
+
+    class Quick(BaseToolAdapter):
+        name = "quick"
+        stage = Stage.URLS
+        stage_spec = class_spec("quick", "crawler")
+
+        async def run(self, ctx: RunContext) -> ToolResult:
+            await asyncio.sleep(0.2)
+            return ToolResult(tool=self.name, status=ToolStatus.OK, records=[])
+
+    specs = {"quick": Quick.stage_spec}
+    engine = make_engine(tmp_path, specs, {"quick": Quick})
+    started = time.perf_counter()
+    limits = engine._limits([(specs["quick"], Quick)], {}, ["example.com"], 1800.0, {})
+    await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), active=True, mock=True))
+    elapsed = time.perf_counter() - started
+    assert limits["quick"].max_s == 90
+    assert elapsed < 2.0, f"a 0.2 s tool took {elapsed:.2f}s with a 90 s ceiling in place"
+
+
+def test_urlfinder_cap_unchanged_by_the_refactor(tmp_path: Path) -> None:
+    """D27/D29's five cases still hold, and the archive class mirrors them."""
+    from reconkit.adapters.urlfinder import (
+        ENUMERATION_PER_HOST_S,
+        IDLE_ENUMERATION_S,
+        MIN_ENUMERATION_S,
+        enumeration_cap_s,
+    )
+    from reconkit.config import DEFAULT_RUNTIME_CAPS
+
+    assert enumeration_cap_s(43, 1800) == 180
+    assert enumeration_cap_s(100, 1800) == 400
+    assert enumeration_cap_s(500, 1800) == 1800
+    assert enumeration_cap_s(2000, 3600, ceiling=1800) == 1800
+    assert enumeration_cap_s(2000, 3600) == 3600
+
+    archive = DEFAULT_RUNTIME_CAPS["archive"]
+    assert (archive.floor, archive.per_host, archive.idle) == (
+        MIN_ENUMERATION_S,
+        ENUMERATION_PER_HOST_S,
+        IDLE_ENUMERATION_S,
+    )
+    # The explicit `urls:` entry still wins for urlfinder itself (same numbers).
+    urlfinder_spec = class_spec("urlfinder", "archive")
+    engine = make_engine(tmp_path, {"urlfinder": urlfinder_spec}, {})
+    limits = engine._limits(
+        [(urlfinder_spec, NoopAdapter)],
+        {},
+        [f"h{i}.example.com" for i in range(43)],
+        1800.0,
+        {"urlfinder": engine_module.ToolLimits(max_s=180.0)},
+    )
+    assert limits["urlfinder"].max_s == 180
+
+
+def test_a_new_tool_with_class_in_tools_yaml_needs_no_engine_edit(tmp_path: Path) -> None:
+    """D48's zero-edit claim: a new crawler is a tools.yaml row, not a code change."""
+    from reconkit.adapters.registry import load_tools
+
+    registry = tmp_path / "tools.yaml"
+    registry.write_text(
+        "version: 1\n"
+        "stages: {urls: {mode: active, desc: 'x'}}\n"
+        "tools:\n"
+        "  newcrawl:\n"
+        "    stage: urls\n"
+        "    kind: binary\n"
+        "    tier: core\n"
+        "    mode: active\n"
+        "    phase: 3\n"
+        "    class: crawler\n"
+        "    binary: newcrawl\n",
+        encoding="utf-8",
+    )
+    specs = load_tools(registry)
+    assert specs["newcrawl"].class_ == "crawler"
+
+    limits = limits_for(tmp_path, specs, [f"h{i}.example.com" for i in range(10)])
+    assert limits["newcrawl"].max_s == 90  # crawler floor, no code naming the tool
+    source = Path(engine_module.__file__).read_text(encoding="utf-8")
+    assert "newcrawl" not in source

@@ -231,16 +231,22 @@ async def test_a_404_from_a_local_binary_is_still_a_failure() -> None:
             return []
 
     adapter = LocalAdapter(transport=httpx.MockTransport(lambda _r: httpx.Response(404)))
-    assert LocalAdapter.external_api is False
+    # D48: the answer comes from tools.yaml (`external: true`), and this synthetic
+    # tool is not listed there, so the 404 keeps its old meaning.
+    assert adapter._is_external_api() is False
     result = await adapter.run(make_ctx())
     assert result.status == ToolStatus.FAILED
     assert result.error == "localhttp: HTTP 404"
 
 
-async def test_crtsh_404_is_a_gap_not_a_retry() -> None:
-    """The 404 fix is a classification, not the identity retry (D46) leaking in."""
-    assert CrtshAdapter.external_api is True
-    assert HttpAdapter.external_api is False
+async def test_crtsh_404_is_still_a_gap() -> None:
+    """D47 survives the move to tools.yaml: `external: true` still means gap."""
+    from reconkit.adapters.registry import external_tools
+
+    # D48: one yaml field, no per-adapter flag left anywhere.
+    assert "crtsh" in external_tools()
+    assert not hasattr(HttpAdapter, "external_api")
+    assert CrtshAdapter()._is_external_api() is True
 
     calls: list[httpx.Request] = []
 
@@ -254,6 +260,7 @@ async def test_crtsh_404_is_a_gap_not_a_retry() -> None:
     adapter = CrtshAdapter(transport=httpx.MockTransport(handler), sleep=no_sleep)
     result = await adapter.run(make_ctx())
     assert result.status == ToolStatus.GAP
+    assert result.error == "crtsh: HTTP 404"
     assert len(calls) == 1
 
 

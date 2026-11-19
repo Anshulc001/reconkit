@@ -7742,3 +7742,125 @@ Notes, stated plainly rather than explained away:
 
 `git status --short` empty; `pytest -q` 941 passed; `ruff check .` clean; `ruff format --check .` 92 files;
 `mypy src/reconkit` clean; `sha256sum scope.yaml` = `d45a3c90...eeee8b` (unchanged since the baseline).
+
+## 2026-11-19 (scalability) A - hardcoding inventory and edge-case matrix
+
+### A.1 Hardcoding inventory
+
+Greps run (raw, `src/reconkit/` only):
+
+```
+grep -rn 'name == "\|== "gau"\|== "nikto"\|== "katana"\|== "hakrawler"\|== "gospider"\|== "crtsh"\|== "otx"\|== "hackertarget"\|== "urlfinder"' src/reconkit/
+  src/reconkit/engine.py:832:                and any(spec.name == "naabu" for spec, _ in selected)
+  src/reconkit/engine.py:1197:  naabu = next(((spec, adapter) for spec, adapter in selected if spec.name == "naabu"), None)
+  src/reconkit/adapters/base.py:537:  ... if os.name == "nt" ...        # not a tool name
+grep -rn 'ClassVar\|IDENTITY_TIMEOUT\|MAX_ENUMERATION_S\|HOST_INPUT_STAGES\|MAX_URLS\|_MAX_\|runtime_cap_s\|enumeration_cap_s'
+grep -rnE '^[A-Z][A-Z0-9_]* = [0-9]' src/reconkit/
+```
+
+tools.yaml fields the registry knows today (parsed with PyYAML, 48 tools): `stage, kind, tier, mode,
+phase` (all 48), `binary, source` (40), `notes` (29), `version_cmd` (28), `version_regex` (16), `keys` (7),
+`waf_priority` (4), `exploitation` (3), `requires_apt` (1), `needs_root` (1), `manual` (1). There is no
+`class`, no `external`, and no cap field.
+
+| file:line | what is hardcoded | kind | has config path? | proposed home |
+|---|---|---|---|---|
+| `engine.py:206` | `HOST_INPUT_STAGES = frozenset({LIVE, TECH, URLS, VULNS})` | product | no | stays code (stage architecture) |
+| `engine.py:832` | `spec.name == "naabu"` (raw-socket port scan needs its own pass) | per-tool | no | tools.yaml attribute (`feeds_ports: true`) |
+| `engine.py:1197` | `spec.name == "naabu"` again, in the ports stage | per-tool | no | same attribute, one lookup |
+| `adapters/base.py:596` + `crtsh.py:18` | `external_api: ClassVar[bool]`, True on crtsh only (D47) | per-tool | no | `external: true` in tools.yaml (B does this) |
+| `adapters/base.py:235` | `runtime_cap_s` / `idle_timeout_s` / `min_runtime_s` ClassVars | per-tool | partly (`urls:`) | runtime class from tools.yaml `class:` (B) |
+| `adapters/urlfinder.py:81` | `runtime_cap_s = MAX_ENUMERATION_S` (1800) on one adapter | per-tool | `urls.urlfinder_max_s` | `runtime_caps.archive` (B) |
+| `adapters/urlfinder.py:40-47` | floor 180 s, 4 s/host, 1800 s ceiling | tuning (per-tool) | `urls.urlfinder_*`, `urlfinder.max_enumeration_s` | `runtime_caps.archive` (B), function kept |
+| `adapters/hakrawler.py:49` | `runtime_cap_s = MAX_CRAWL_S` (120) | per-tool | `urls.hakrawler_max_s` | `runtime_caps.crawler` (B) |
+| `adapters/subjs.py:36` | `runtime_cap_s = MAX_RUN_S` (60) | per-tool | `urls.subjs_max_s` | left as is (not in this batch's class list) |
+| `engine.py:1435-1446` | limits dict naming urlfinder/hakrawler/subjs | per-tool | yes, by name | one loop over `spec.class_` (B) |
+| `adapters/hakrawler.py:33` | `CRAWL_DEPTH = 2` | tuning (per-tool) | no | tools.yaml `args`-style field (later) |
+| `adapters/gau.py:27`, `gospider.py:31`, `ffuf.py:46`, `subjs.py:29` | threads/workers 5/10/50/10 | tuning | no | config `threads:` or tools.yaml (later) |
+| `adapters/gau.py:26`, `urlfinder.py:34` | per-request HTTP timeouts 45 s / 30 s | tuning | no | tools.yaml (later) |
+| `adapters/base.py:42`, `core/toolcheck.py:24` | `IDENTITY_TIMEOUT`/`VERSION_TIMEOUT_S` = 10 s | tuning | no | config (later) |
+| `adapters/base.py:38`, `runner.py:22` | `MAX_BODY_BYTES` 10 MB, `MAX_OUTPUT_BYTES` 1 MB | tuning | no | config (later) |
+| `core/store.py:22`, `ui.py:531`, `scope.py:20` | `DETAIL_MAX_CHARS`, `_MAX_CELL`, `MAX_PATTERN_LEN` | tuning | no | code is fine (presentation/safety) |
+| `adapters/subfinder.py:39` | `STALE_AFTER_S = 900` | tuning (per-tool) | no | tools.yaml (later) |
+| `adapters/pyprobe.py:31-32`, `nikto.py:31` | title/error truncation | tuning | no | code is fine |
+| `engine.py:68` | `UNTRUSTED = -2` (and `-1`) status sentinels | product | no | stays code (verdict rules) |
+| `config.py:34-52` | stage timeouts, confidence thresholds | tuning | yes | already config - the model to copy |
+
+Top three `per-tool` rows to rule on next: the two `naabu` name checks (`engine.py:832`, `:1197`) should
+become one `feeds_ports` attribute; `subjs`/`hakrawler` adapter constants should fold into their class
+rows; thread counts (5/10/50/10) are the most likely next "why is it slow" question and still need a code
+edit to change.
+
+### A.2 Edge-case matrix
+
+| Edge case | Status | Evidence |
+|---|---|---|
+| Huge target - 5k hosts / 50k URLs | config (URLs only) | `url_probe.max_urls: 5000` cuts and says so (`tests/test_engine.py:3680`); host side has no cap and no test above 43 hosts; each tool's stdout is bounded at 1 MB (`core/runner.py:22`) |
+| Tool produces garbage - partial JSONL, truncated line, >1 MB | tested | `test_crawler_parsers_skip_unusable_lines` (`test_binary_adapters.py:1282`), `test_run_truncated_output_is_reported` (`:756`); PIT-58 counts unusable lines |
+| Empty stage - no input | tested | R10: `tests/test_engine.py:3979` (`no input hosts`), `:4003` (completion gap) |
+| Stalled tool - silent but running | tested (urlfinder only) | `test_urlfinder_idle_timeout_kills_stuck_source` (`test_binary_adapters.py:1787`); other tools have only a max cap, no idle kill, and no test |
+| Interrupted run - Ctrl+C mid-stage, resume | tested (Ctrl+C), untested (resume) | `test_ctrl_c_in_a_stage_kills_the_child_and_exits_130` (`test_cli.py:1340`); no test resumes a half-written stage |
+| Network weirdness - cert -2, redirects, CDN IP collapse | partly | `UNTRUSTED = -2` (`engine.py:68`, store tests); redirects never followed (`pyprobe.py:89`, `engine.py:1939`); CDN IP collapse has no test |
+| Odd input - IDN/unicode, IPv6, non-standard ports, 10 KB URLs | partly | non-ASCII rejected by `_HOST_LABEL_RE` (`runner.py:29`) with no IDN test; IPv6 rejected as a host (colon is not a label char), only parsed from naabu (`:1088`); ports: `test_regression_a_nuclei_host_with_a_port_keeps_its_name` (`:2251`); URL length has no limit and no test |
+
+## 2026-11-19 (scalability) B - per-tool caps from a tools.yaml class (D48)
+
+### Registry shape, before and after
+
+```
+# before
+ToolSpec(name, stage, kind, tier, mode, phase, keys, requires_apt, binary,
+         version_cmd, version_regex, source, exploitation, needs_root, manual, waf_priority)
+# after (+2)
+         ..., waf_priority, class_: str | None = None, external: bool = False)
+```
+
+`tools.yaml` diff (one line per tool, no adapter edits):
+
+```
+ crtsh            class: api, external: true            gau        class: crawler
+ certspotter      class: api / external: true           katana     class: crawler
+ otx              class: api / external: true           hakrawler  class: crawler
+ hackertarget     class: api, external: true            gospider   class: crawler
+ urlscan          class: api / external: true           urlfinder  class: archive
+ chaos            class: api / external: true           nikto      class: scanner
+ github_subdomains class: api / external: true
+```
+
+`config.yaml` gained the five-line block (`crawler 90/2/60`, `scanner 300/30/120`, `api 60/1/30`,
+`archive 180/4/60`), and `config.py` gained `RuntimeClassConfig`, `DEFAULT_RUNTIME_CAPS` and the pure
+`class_cap()`. `engine.cap_for_tool()` is the single registry lookup; `Engine._limits()` builds the dict
+(`_limits` is the loop that replaced the three hard-coded names), and the three explicit `urls:` entries
+still win for their three tools.
+
+### Formula and the note
+
+```
+cap = min(stage budget, max(class.floor, class.per_host * hosts))     # override/ceiling still apply
+note = "formula 2000s clipped to stage budget 1800s"                  # only when the budget binds
+```
+
+### Measured risk, stated plainly
+
+One bounded testfire.net run with the new defaults (600 s phase deadline, temp config, `url_probe.max_urls: 20`):
+
+```
+37 hosts: 8 ALIVE, 0 DNS_ONLY, 0 SHUT_DOWN, 26 DEAD, 3 UNKNOWN | tools: 28 ok, 3
+gap, 0 failed, 2 skipped, 0 timeout
+│ gau               │ urls  │ ok      │ 466   │ capped at 90s; kept partial    │
+│ urlfinder         │ urls  │ ok      │ 71    │ idle for 60s; kept partial     │
+│ crtsh             │ subs  │ gap     │ 0     │ crtsh: server error (HTTP 502) │
+⚠ subs: crtsh: server error (HTTP 502), hackertarget: free quota exceeded, otx: rate limited (HTTP 429)
+EXIT=0
+```
+
+`gau` returned 466 URLs against 1042 (Part Q) and 1508 (Part T) with no cap, because the crawler floor of
+90 s is below what gau actually needs on this target (the `urls` stage took 107 s in Part T with no cap).
+The cap works exactly as designed - `ok`, partial output kept, the row names the ceiling - but the *number*
+is too low for gau. It is one config line, not a code change: `runtime_caps.crawler.floor` should go to
+120-180 (or gau needs its own class) after the owner sees this. Everything else in the run was correct:
+three gaps (502 / quota / 429), zero failures, exit 0, `urlfinder` unchanged at `idle for 60s`.
+
+Suite `941 -> 948` (+7: six named tests plus `test_a_tool_with_no_class_gets_no_cap`), and the D47 tests
+stayed green through the `external:` migration. `ruff check .` clean, `ruff format --check .` 92 files,
+`mypy src/reconkit` clean.

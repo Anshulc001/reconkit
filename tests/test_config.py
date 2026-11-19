@@ -131,3 +131,25 @@ def test_unknown_nested_key_is_rejected(tmp_path: Path) -> None:
 def test_missing_config_file() -> None:
     with pytest.raises(ConfigError):
         load_config(CONFIG.parent / "missing-config.yaml")
+
+
+def test_config_without_runtime_caps_still_loads(tmp_path: Path) -> None:
+    """D48: a config.yaml written before `runtime_caps:` keeps working."""
+    import yaml
+
+    from reconkit.config import DEFAULT_RUNTIME_CAPS
+
+    real = load_config(CONFIG)
+    assert real.runtime_caps["crawler"].floor == 90
+    assert real.runtime_caps["scanner"].per_host == 30
+    assert real.runtime_caps["api"].idle == 30
+    assert real.runtime_caps["archive"].floor == 180
+
+    legacy = tmp_path / "legacy.yaml"
+    raw = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    raw.pop("runtime_caps")
+    legacy.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    loaded = load_config(legacy)
+    assert {
+        name: (cfg.floor, cfg.per_host, cfg.idle) for name, cfg in loaded.runtime_caps.items()
+    } == {name: (cfg.floor, cfg.per_host, cfg.idle) for name, cfg in DEFAULT_RUNTIME_CAPS.items()}

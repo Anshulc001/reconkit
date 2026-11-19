@@ -181,6 +181,23 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   encoded the old rule and became `test_a_404_from_a_local_binary_is_still_a_failure`). Deviations: the brief's preferred
   `external: true` in `tools.yaml` would have needed `registry.py`, `tools.yaml` and one edit per API adapter - more than
   the three-file budget - so the scoped per-adapter flag was used, with `crtsh` as the only wearer.
+- **D48 (2026-11-19): a tool's runtime cap comes from its `class:` in tools.yaml, not from a code edit.** The audit
+  (REVIEW_LOG "A") found the shape: two `spec.name == "naabu"` checks in `engine.py`, `runtime_cap_s` constants on
+  `urlfinder`/`hakrawler`/`subjs`, and a limits dict that named three tools. `tools.yaml` gained `class:` (`crawler` for
+  gau/katana/hakrawler/gospider, `scanner` for nikto, `api` for the seven API tools, `archive` for urlfinder) and
+  `registry.ToolSpec` gained `class_: str | None`; `config.yaml` gained `runtime_caps:` (floor/per_host/idle per class,
+  defaulted so an old config loads) and `engine.cap_for_tool` is the single lookup (the formula is
+  `min(stage budget, max(floor, per_host * hosts))`, clipped with a note when the deadline is what binds). A tool with no
+  `class:` gets no cap, and the
+  three explicit `urls:` entries still win for their three tools, so D27's numbers (180/400/1800/3600/1800) did not
+  move. `urlfinder.enumeration_cap_s` now calls the same `config.class_cap`. None of this is a timer: a tool that
+  finishes early exits immediately (`test_a_tool_that_exits_early_is_not_delayed_by_the_cap`). Suite 941 -> 948.
+- **D48 addendum: the D47 `external_api` ClassVar is gone.** `tools.yaml` now carries `external: true` on the seven API
+  tools, `ToolSpec.external` reads it, `registry.external_tools()` answers it, and `HttpAdapter._is_external_api()`
+  looks itself up by name (deferred import, because the registry imports the adapter package). This closes the D47
+  deviation properly: one yaml field, no per-adapter flag, and the S-batch's "would have been ten files" note no longer
+  applies. `test_crtsh_404_is_still_a_gap` asserts the field and the gap, and a synthetic unlisted adapter still fails
+  on 404.
 
 
 

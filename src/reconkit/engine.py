@@ -31,7 +31,7 @@ from reconkit.adapters.base import USER_AGENT, BaseToolAdapter, running_as_root
 from reconkit.adapters.pyscan import default_resolve
 from reconkit.adapters.registry import ToolSpec, load_tools
 from reconkit.adapters.urlfinder import ENUMERATION_PER_HOST_S, enumeration_cap_s
-from reconkit.config import AppConfig, UrlProbeConfig
+from reconkit.config import AppConfig, UrlProbeConfig, class_cap
 from reconkit.core.runner import validate_host, validate_target
 from reconkit.core.scope import load_scope, passive_warning, require_active, scope_present
 from reconkit.core.store import Store, redact, utc_now
@@ -205,6 +205,41 @@ def allow_all_ip(_ip: str) -> bool:
 # `[target, *discovered]` - never empty, so the rule can never skip the apex.
 HOST_INPUT_STAGES = frozenset({Stage.LIVE, Stage.TECH, Stage.URLS, Stage.VULNS})
 NO_INPUT_HOSTS = "no input hosts"
+
+
+def cap_for_tool(
+    tool_name: str,
+    host_count: int,
+    stage_budget: float,
+    config: AppConfig,
+    *,
+    specs: Mapping[str, ToolSpec] | None = None,
+) -> tuple[float, str] | None:
+    """`(cap_s, note)` for a tool whose tools.yaml row names a `class:`, else None.
+
+    One lookup, one formula (D48): the tool's class comes from the registry, the
+    class's floor/per_host/idle from `config.yaml` `runtime_caps:`, and
+    `min(stage budget, max(floor, per_host * hosts))` from `config.class_cap`. A
+    tool with no class gets no cap, exactly as before D48; a class the config does
+    not describe is a ConfigError, not a silent no-cap (docs/09 section 4a2b).
+    """
+    loaded = specs if specs is not None else load_tools()
+    spec = loaded.get(tool_name)
+    if spec is None or spec.class_ is None:
+        return None
+    runtime_class = config.runtime_caps.get(spec.class_)
+    if runtime_class is None:
+        raise ConfigError(
+            f"tool {tool_name!r} uses runtime class {spec.class_!r}, "
+            "which config.yaml does not define under runtime_caps"
+        )
+    return class_cap(
+        runtime_class.floor,
+        runtime_class.per_host,
+        host_count,
+        stage_budget,
+    )
+
 
 Now = Callable[[], str]
 # One short progress line for the CLI to render on stderr (docs/03 section 5).
@@ -1419,6 +1454,20 @@ class Engine:
             else:
                 clip = f"urls.urlfinder_max_s {urlfinder_ceiling:g}s"
             urlfinder_note = f"formula {scaled}s clipped to {clip}"
+        # The three explicit `urls:` entries stay exactly as they were (D27/D29:
+        # their numbers are asserted in tests); every other tool with a `class:`
+        # in tools.yaml gets that class's formula instead (D48).
+        legacy_limits: dict[str, ToolLimits] = {
+            "urlfinder": ToolLimits(
+                max_s=urlfinder_cap,
+                idle_s=float(urls_config.urlfinder_idle_s),
+                # The inactivity floor cannot outlive the cap itself.
+                min_s=min(float(urls_config.urlfinder_min_s), urlfinder_cap),
+                note=urlfinder_note,
+            ),
+            "hakrawler": ToolLimits(max_s=float(urls_config.hakrawler_max_s)),
+            "subjs": ToolLimits(max_s=float(urls_config.subjs_max_s)),
+        }
         ctx = RunContext(
             target=target,
             hosts=hosts,
@@ -1433,17 +1482,7 @@ class Engine:
             resolvers=opts.resolvers,
             results_dir=Path(self.config.results_dir),
             # Per-tool runtime bounds from `config.yaml` `urls:` (docs/09 4a2b).
-            limits={
-                "urlfinder": ToolLimits(
-                    max_s=urlfinder_cap,
-                    idle_s=float(urls_config.urlfinder_idle_s),
-                    # The inactivity floor cannot outlive the cap itself.
-                    min_s=min(float(urls_config.urlfinder_min_s), urlfinder_cap),
-                    note=urlfinder_note,
-                ),
-                "hakrawler": ToolLimits(max_s=float(urls_config.hakrawler_max_s)),
-                "subjs": ToolLimits(max_s=float(urls_config.subjs_max_s)),
-            },
+            limits=self._limits(selected, tool_hosts, hosts, stage_budget, legacy_limits),
         )
 
         total = len(selected)
@@ -1484,6 +1523,47 @@ class Engine:
 
         await asyncio.gather(*(one(spec, adapter) for spec, adapter in selected))
         return ctx
+
+    def _limits(
+        self,
+        selected: Selected,
+        tool_hosts: dict[str, list[str]],
+        hosts: list[str],
+        stage_budget: float,
+        explicit: dict[str, ToolLimits],
+    ) -> dict[str, ToolLimits]:
+        """Per-tool runtime bounds for one stage (docs/09 4a2b, D27/D29/D48).
+
+        An explicit `config.yaml urls:` entry wins over the tool's class; every
+        other tool with a `class:` in tools.yaml gets that class's formula from
+        `cap_for_tool`. A tool with neither keeps no entry and no cap, exactly as
+        before D48. This is a ceiling, not a timer: it only decides when a tool
+        that is still running is stopped, and a tool that finishes early never
+        sees it.
+        """
+        limits = dict(explicit)
+        for spec, _adapter in selected:
+            if spec.name in limits or spec.class_ is None:
+                continue
+            computed = cap_for_tool(
+                spec.name,
+                len(tool_hosts.get(spec.name, hosts)),
+                stage_budget,
+                self.config,
+                specs=self.specs,
+            )
+            if computed is None:
+                continue
+            cap, note = computed
+            runtime_class = self.config.runtime_caps[spec.class_]
+            limits[spec.name] = ToolLimits(
+                max_s=cap,
+                idle_s=float(runtime_class.idle),
+                # The inactivity floor cannot outlive the cap itself.
+                min_s=min(float(runtime_class.floor), cap),
+                note=note,
+            )
+        return limits
 
     async def _run_one(
         self,

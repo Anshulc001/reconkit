@@ -78,6 +78,65 @@ class UrlfinderConfig(_StrictModel):
     max_enumeration_s: int = Field(default=0, ge=0)
 
 
+class RuntimeClassConfig(_StrictModel):
+    """One runtime class from `runtime_caps:` (D48, docs/09 section 4a2b).
+
+    A class is a shape of tool, not a tool: every member gets the same formula
+    `min(stage budget, max(floor, per_host * hosts))`, a silence kill at `idle`
+    seconds and nothing else. A tool joins a class with one `class:` field in
+    `tools.yaml`, so a new crawler needs no engine or adapter edit.
+    """
+
+    floor: float = Field(gt=0)
+    per_host: float = Field(ge=0)
+    idle: float = Field(gt=0)
+
+
+# Educated guesses, tunable in config.yaml without a code change (D48): the
+# floor is what a large target's tool gets before `per_host` scales it up, and
+# the whole thing is still intersected with the stage deadline. `archive`
+# mirrors urlfinder's measured constants (180 s / 4 s per host / 60 s idle).
+DEFAULT_RUNTIME_CAPS: dict[str, RuntimeClassConfig] = {
+    "crawler": RuntimeClassConfig(floor=90, per_host=2, idle=60),
+    "scanner": RuntimeClassConfig(floor=300, per_host=30, idle=120),
+    "api": RuntimeClassConfig(floor=60, per_host=1, idle=30),
+    "archive": RuntimeClassConfig(floor=180, per_host=4, idle=60),
+}
+
+
+def class_cap(
+    floor: float,
+    per_host: float,
+    host_count: int,
+    stage_budget: float,
+    *,
+    override: float = 0.0,
+    ceiling: float = 0.0,
+) -> tuple[float, str]:
+    """The `(cap_s, note)` a class gives one tool run (D48, D27's formula).
+
+    `min(stage budget, max(floor, per_host * hosts))`: a ceiling, never a timer -
+    a tool that finishes early exits immediately and nothing here waits. A
+    positive `override` replaces the formula (urlfinder's debugging knob); a
+    positive `ceiling` clips the result afterwards (`urls.urlfinder_max_s`).
+    The note is non-empty only when the formula wanted more than the deadline,
+    so a capped row says which one clipped it.
+    """
+    budget = float(stage_budget)
+    if override > 0:
+        cap = float(override)
+        note = ""
+    else:
+        wanted = max(float(floor), float(per_host) * max(0, int(host_count)))
+        cap = min(budget, wanted)
+        note = (
+            "" if wanted <= budget else f"formula {wanted:g}s clipped to stage budget {budget:g}s"
+        )
+    if ceiling > 0:
+        cap = min(cap, float(ceiling))
+    return max(1.0, cap), note
+
+
 class UrlProbeConfig(_StrictModel):
     """Bounds for the engine-owned `url_probe` stage (D23, docs/09 section 5).
 
@@ -119,6 +178,11 @@ class AppConfig(_StrictModel):
     timeouts: Timeouts
     # Defaulted so a config file written before this key existed still loads.
     urls: UrlsConfig = Field(default_factory=UrlsConfig)
+    # D48: per-class runtime caps. Defaulted, so a config written before this
+    # block existed keeps loading with today's numbers.
+    runtime_caps: dict[str, RuntimeClassConfig] = Field(
+        default_factory=lambda: dict(DEFAULT_RUNTIME_CAPS)
+    )
     url_probe: UrlProbeConfig = Field(default_factory=UrlProbeConfig)
     urlfinder: UrlfinderConfig = Field(default_factory=UrlfinderConfig)
     confidence: ConfidenceConfig
