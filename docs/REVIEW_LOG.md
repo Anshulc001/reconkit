@@ -7278,3 +7278,53 @@ EXIT=0
 - `tests/test_binary_adapters.py` - the stderr/exit-code path of the same classifier.
 
 No test was added: all five cases were already pinned.
+
+## 2026-11-19 (close-out) N.3 - amass: installed, and why doctor once said otherwise
+
+### Raw, now
+
+```
+$ reconkit doctor --no-color
+┃ Tool            ┃ Stage ┃ Tier      ┃ Installed ┃ Path            ┃ Identity ┃
+│ amass           │ subs  │ core      │ yes       │ /usr/bin/amass  │ ok       │
+47 installed, 1 manual (dnsreaper). Scans will use the tools that are installed
+and skip the rest.
+
+$ reconkit doctor --json
+{'installed': 47, 'manual': ['dnsreaper'], 'chromium': 'missing'}
+[{'tool': 'amass', 'stage': 'subs', 'tier': 'core', 'kind': 'binary',
+  'installed': 'yes', 'path': '/usr/bin/amass', 'identity': 'ok'}]
+```
+
+The registry probe itself, ten times in a row:
+
+```
+[(True, '/usr/bin/amass'), (True, '/usr/bin/amass'), ... ]   # 10/10, 0.03-0.06 s each
+```
+
+The binary's own answer (note the stream):
+
+```
+$ amass -version
+v5.1.3                      # on stderr, stdout empty, exit 0
+$ amass enum -h 2>&1 | grep -i "OWASP Amass Project"
+OWASP Amass Project - @owaspamass          # the adapter's identity_markers hit
+```
+
+`/usr/bin/amass` is a 328-byte shell wrapper that `exec /usr/lib/amass/amass "$@"` after checking
+`/usr/share/libpostal/transliteration` (present here, dated 2017). `AmassAdapter().check_installed()` runs
+`amass enum -h` with `HOME` only and matches `owasp amass project`; it returned `installed=True, version='v5.1.3'`
+on every run.
+
+### What happened at the top of this batch
+
+The first `reconkit doctor` of the session printed `amass | wrong program | /usr/bin/amá | failed` and the footer
+`46 installed, 1 manual (dnsreaper), 1 needs attention (amass).`, and `reconkit subs --tools amass` skipped it as
+`not installed`. That reading is not reproducible now: ten consecutive adapter probes, five `doctor` runs and both
+output modes all say `yes / ok`, and the probe takes 0.03 s against a 10 s `IDENTITY_TIMEOUT`.
+
+**Verdict:** B3's `manual: true`/count change did **not** misclassify amass (it was never in `manual`; the footer's
+"needs attention" was the existing `wrong program` bucket fed by that one failed identity probe). amass is really
+installed. The single failure is an unexplained, transient identity-probe result — the same class as PIT-30/PIT-35 in
+consequence: a tool that fails its probe is silently left out of every scan. No code change: a retry or a longer
+timeout is a behaviour change and needs a ruling. Recorded as D42 and as an open risk.
