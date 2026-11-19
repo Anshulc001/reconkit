@@ -32,8 +32,9 @@ from reconkit.models import Record, RunContext, Stage, UrlRecord
 
 CRAWL_DEPTH = 2
 # On the sakec.ac.in scan hakrawler hit the phase budget with 0 items and owned
-# the whole urls stage, so it gets a hard cap and keeps what it found (2.2).
-MAX_CRAWL_S = 120
+# the whole urls stage. D52: no hard cap - it carries `class: crawler`, so a
+# 60 s silence ends it and a productive crawl keeps going until it exits or the
+# stage budget fires.
 
 
 def crawl_urls(hosts: list[str]) -> list[str]:
@@ -46,7 +47,6 @@ def crawl_urls(hosts: list[str]) -> list[str]:
 
 
 class HakrawlerAdapter(BinaryAdapter):
-    runtime_cap_s = MAX_CRAWL_S
     name = "hakrawler"
     stage = Stage.URLS
     binary = "hakrawler"

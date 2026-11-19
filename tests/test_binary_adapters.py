@@ -21,7 +21,6 @@ from reconkit.adapters import ADAPTERS
 from reconkit.adapters import base as base_module
 from reconkit.adapters import nikto as nikto_module
 from reconkit.adapters import subfinder as subfinder_module
-from reconkit.adapters import urlfinder as urlfinder_module
 from reconkit.adapters.assetfinder import AssetfinderAdapter
 from reconkit.adapters.base import BinaryAdapter
 from reconkit.adapters.cdncheck import CdncheckAdapter
@@ -46,12 +45,12 @@ from reconkit.adapters.subjs import SubjsAdapter
 from reconkit.adapters.subzy import SubzyAdapter
 from reconkit.adapters.tlsx import TlsxAdapter
 from reconkit.adapters.unfurl import UnfurlAdapter
-from reconkit.adapters.urlfinder import UrlfinderAdapter, enumeration_cap_s
+from reconkit.adapters.urlfinder import UrlfinderAdapter
 from reconkit.adapters.wafw00f import Wafw00fAdapter
 from reconkit.adapters.waybackurls import WaybackurlsAdapter
 from reconkit.adapters.webanalyze import WebanalyzeAdapter
 from reconkit.adapters.whatweb import WhatwebAdapter
-from reconkit.config import UrlsConfig, load_config
+from reconkit.config import load_config
 from reconkit.core.runner import ExecResult
 from reconkit.core.store import Store
 from reconkit.engine import Engine
@@ -114,6 +113,8 @@ def outcome(
     returncode: int | None = 0,
     timed_out: bool = False,
     truncated: bool = False,
+    idle_killed: bool = False,
+    last_output_s: float = 0.0,
 ) -> ExecResult:
     return ExecResult(
         returncode=returncode,
@@ -121,6 +122,8 @@ def outcome(
         stderr=stderr,
         timed_out=timed_out,
         truncated=truncated,
+        idle_killed=idle_killed,
+        last_output_s=last_output_s,
     )
 
 
@@ -732,10 +735,11 @@ async def test_run_normal_uses_fixture_stdout(monkeypatch: pytest.MonkeyPatch) -
 
 
 async def test_run_timeout_is_distinct(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D52: reaching the stage budget is still `timeout`, not `failed`."""
     fake_exec(monkeypatch, outcome(timed_out=True, returncode=None))
     result = await HttpxAdapter().run(make_ctx(hosts=["www.example.com"]))
     assert result.status is ToolStatus.TIMEOUT
-    assert result.error == "timed out"
+    assert result.error is not None and "timed out at stage budget" in result.error
 
 
 async def test_run_nonzero_exit_is_distinct(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1116,9 +1120,11 @@ async def test_binary_failed_run_captures_its_output(monkeypatch: pytest.MonkeyP
 
 
 async def test_binary_timeout_captures_partial_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D52: a stopped run keeps what arrived, whatever stopped it."""
     fake_exec(monkeypatch, outcome(stdout="a.example.com\n", timed_out=True))
     result = await SubfinderAdapter().run(make_ctx())
     assert result.status is ToolStatus.TIMEOUT
+    assert [record.fqdn for record in result.records] == ["a.example.com"]
     assert result.raw_text == "a.example.com\n"
 
 
@@ -1287,39 +1293,53 @@ def test_crawler_parsers_skip_unusable_lines(adapter: BinaryAdapter, junk: str, 
     assert adapter.skipped_lines == [junk]
 
 
-def test_hakrawler_runtime_cap_parses_partial(monkeypatch: pytest.MonkeyPatch) -> None:
-    """2.2: a capped hakrawler keeps what it crawled instead of `timeout 0`."""
+def test_hakrawler_idle_window_is_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D52: hakrawler runs until it exits; silence past its window kills it."""
     adapter = HakrawlerAdapter(finder=lambda _name: "/usr/bin/hakrawler")
     calls = fake_exec(
         monkeypatch,
-        outcome(stdout="http://testfire.net/a\nhttp://testfire.net/b\n", timed_out=True),
+        outcome(
+            stdout="http://testfire.net/a\nhttp://testfire.net/b\n",
+            timed_out=True,
+            idle_killed=True,
+            last_output_s=60.0,
+        ),
     )
     ctx = make_ctx(hosts=["testfire.net"])
-    ctx.timeout = 600.0  # the real per-tool budget
+    ctx.timeout = 600.0  # the real stage budget
+    ctx.limits = {"hakrawler": ToolLimits(idle_s=60.0)}
     result = asyncio.run(adapter.run(ctx))
-    assert calls[0][1]["timeout"] == float(HakrawlerAdapter.runtime_cap_s)
-    assert result.status is ToolStatus.OK
+    assert calls[0][1]["timeout"] == 600.0
+    assert calls[0][1]["idle_timeout"] == 60.0
+    assert result.status is ToolStatus.KILLED
     assert [record.url for record in result.records] == [
         "http://testfire.net/a",
         "http://testfire.net/b",
     ]
-    assert "capped at 120s" in (result.error or "")
+    assert "idle" in (result.error or "")
 
 
-def test_subjs_runtime_cap_parses_partial(monkeypatch: pytest.MonkeyPatch) -> None:
-    """2.2: same for subjs, with its own one-minute cap."""
+def test_subjs_idle_window_is_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D52: same for subjs, with its own one-minute window."""
     adapter = SubjsAdapter(finder=lambda _name: "/usr/bin/subjs")
     calls = fake_exec(
         monkeypatch,
-        outcome(stdout="https://testfire.net/app.js\n", timed_out=True),
+        outcome(
+            stdout="https://testfire.net/app.js\n",
+            timed_out=True,
+            idle_killed=True,
+            last_output_s=60.0,
+        ),
     )
     ctx = make_ctx(hosts=["testfire.net"])
     ctx.timeout = 600.0
+    ctx.limits = {"subjs": ToolLimits(idle_s=60.0)}
     result = asyncio.run(adapter.run(ctx))
-    assert calls[0][1]["timeout"] == float(SubjsAdapter.runtime_cap_s)
-    assert result.status is ToolStatus.OK
+    assert calls[0][1]["timeout"] == 600.0
+    assert calls[0][1]["idle_timeout"] == 60.0
+    assert result.status is ToolStatus.KILLED
     assert [record.url for record in result.records] == ["https://testfire.net/app.js"]
-    assert "capped at 60s" in (result.error or "")
+    assert "idle" in (result.error or "")
 
 
 def test_gau_adapter_parses_plain_urls() -> None:
@@ -1736,188 +1756,130 @@ def test_urlfinder_skips_archived_junk_and_feeds_domains(monkeypatch: pytest.Mon
     adapter = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder")
     ctx = make_ctx(hosts=["testfire.net", "www.testfire.net"])
     # 2026-11-18: `-timeout` is the per-request timeout (capped at 30 s, its own
-    # default) and `-max-time` the whole enumeration in minutes; the per-tool
-    # budget used to be passed as `-timeout`, which gave every slow source ten
-    # minutes to answer one request.
+    # default); the per-tool budget used to be passed as `-timeout`, which gave
+    # every slow source ten minutes to answer one request. D52: `-max-time` is
+    # gone entirely - the binary ignores it and there is no runtime cap left.
     assert adapter.build_command(ctx)[1:] == [
         "-all",
         "-silent",
         "-nc",
         "-timeout",
         "5",
-        "-max-time",
-        "1",
     ]
-    # `-max-time` never exceeds the 30-minute ceiling, whatever the stage budget
-    # is: the flat 180 s cap became an inactivity kill with a floor and a
-    # ceiling in the 2026-11-18 batch (docs/09 section 4a2b).
     big = make_ctx(hosts=["testfire.net"])
     big.timeout = 7200.0
-    capped = adapter.build_command(big)
-    assert capped[capped.index("-max-time") + 1] == "30"
+    # A longer stage budget raises the per-request timeout only to its own 30 s
+    # ceiling; the whole run is bounded by the stage budget and the idle window.
+    assert "-max-time" not in adapter.build_command(big)
+    assert adapter.build_command(big)[-1] == "30"
     assert adapter.stdin_text(ctx) == "testfire.net\nwww.testfire.net\n"
     assert calls == []
 
 
-def test_urlfinder_keeps_partial_urls_when_the_runtime_cap_fires(
+def test_urlfinder_keeps_partial_urls_when_the_idle_watchdog_kills_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression: PIT-56 a capped run must not throw away what it found."""
+    """PIT-56, D52: an idle kill keeps what the tool found before it went quiet."""
     adapter = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder")
     ctx = make_ctx(hosts=["testfire.net"])
     ctx.timeout = 1800.0  # the real `urls` stage budget
+    ctx.limits = {"urlfinder": ToolLimits(idle_s=180.0)}
     calls = fake_exec(
         monkeypatch,
         outcome(
             stdout="https://testfire.net/login.jsp\nhttps://testfire.net/admin\n",
             timed_out=True,
+            idle_killed=True,
+            last_output_s=180.0,
         ),
     )
     result = asyncio.run(adapter.run(ctx))
 
-    assert calls[0][1]["timeout"] == float(urlfinder_module.MAX_ENUMERATION_S)
-    assert result.status is ToolStatus.OK
+    # D52: the only hard wall is the stage budget; the early stop is the window.
+    assert calls[0][1]["timeout"] == 1800.0
+    assert calls[0][1]["idle_timeout"] == 180.0
+    assert result.status is ToolStatus.KILLED
     assert [record.url for record in result.records] == [
         "https://testfire.net/login.jsp",
         "https://testfire.net/admin",
     ]
-    assert result.error is not None and "capped at" in result.error
+    assert result.error is not None and "idle" in result.error
 
 
 def test_urlfinder_idle_timeout_kills_stuck_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    """2.3: a source that stopped answering is killed 60 s after its last URL.
+    """D52: a source that stopped answering is killed after its idle window.
 
-    The flat 180 s cap became an inactivity kill with a 180 s floor and a 1800 s
-    ceiling (docs/09 section 4a2b).
+    The window comes from `runtime_idle` / the tool's `class:`, never from a
+    runtime cap: there is no `max_s` and no floor any more.
     """
     adapter = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder")
     ctx = make_ctx(hosts=["testfire.net"])
     ctx.timeout = 600.0
-    ctx.limits = {
-        "urlfinder": ToolLimits(max_s=1800.0, idle_s=60.0, min_s=180.0),
-    }
+    ctx.limits = {"urlfinder": ToolLimits(idle_s=60.0)}
     calls = fake_exec(
         monkeypatch,
         outcome(
             stdout="https://testfire.net/login.jsp\nhttps://testfire.net/admin\n",
             timed_out=True,
+            idle_killed=True,
+            last_output_s=60.0,
         ),
     )
     result = asyncio.run(adapter.run(ctx))
 
     kwargs = calls[0][1]
-    assert kwargs["timeout"] == 1800.0  # the ceiling wins over the 600 s budget
+    assert kwargs["timeout"] == 600.0  # the stage budget is the hard wall
     assert kwargs["idle_timeout"] == 60.0
-    assert kwargs["min_runtime"] == 180.0
-    assert result.status is ToolStatus.OK
+    assert result.status is ToolStatus.KILLED
     assert [record.url for record in result.records] == [
         "https://testfire.net/login.jsp",
         "https://testfire.net/admin",
     ]
 
 
-def test_urlfinder_runs_to_stage_budget_if_productive(
+def test_urlfinder_runs_until_it_exits_if_productive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """2.3: a tool that keeps answering uses the ceiling, not the idle clock."""
+    """D52: a tool that keeps producing is never cut short by a cap."""
     adapter = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder")
     ctx = make_ctx(hosts=["testfire.net"])
     ctx.timeout = 600.0
-    ctx.limits = {"urlfinder": ToolLimits(max_s=1800.0, idle_s=60.0, min_s=180.0)}
+    ctx.limits = {"urlfinder": ToolLimits(idle_s=60.0)}
     urls = "".join(f"https://testfire.net/p{index}\n" for index in range(50))
     calls = fake_exec(monkeypatch, outcome(stdout=urls))
     result = asyncio.run(adapter.run(ctx))
 
-    assert calls[0][1]["timeout"] == 1800.0
+    assert calls[0][1]["timeout"] == 600.0
     assert calls[0][1]["idle_timeout"] == 60.0
     # Not capped, not killed: everything the tool printed is kept.
     assert result.status is ToolStatus.OK
     assert len(result.records) == 50
-    assert "capped at" not in (result.error or "")
-    assert "idle for" not in (result.error or "")
+    assert result.error is None
 
 
-def test_urlfinder_cap_scales_with_host_count() -> None:
-    """D27: cap = min(stage_budget, max(180, 4 * hosts))."""
-    assert enumeration_cap_s(500, 1800) == 1800  # 2000 scaled, clipped to the stage
-    assert enumeration_cap_s(43, 1800) == 180  # testfire.net, unchanged
-    assert enumeration_cap_s(100, 1800) == 400
-
-
-def test_urlfinder_cap_floor_is_180() -> None:
-    """D27: a small target keeps the proven 180 s, not 4 * 10 = 40."""
-    assert enumeration_cap_s(10, 1800) == 180
-    assert enumeration_cap_s(0, 1800) == 180
-
-
-def test_urlfinder_cap_respects_stage_budget() -> None:
-    """D27: the stage deadline wins, so --phase-timeout still bounds the run."""
-    assert enumeration_cap_s(500, 600) == 600
-    assert enumeration_cap_s(43, 120) == 120
-
-
-def test_urlfinder_cap_config_override() -> None:
-    """D27: `urlfinder.max_enumeration_s` replaces the formula when non-zero."""
-    assert enumeration_cap_s(10, 1800, override=300) == 300
-    assert enumeration_cap_s(500, 1800, override=300) == 300
-    assert enumeration_cap_s(10, 1800, override=0) == 180
-
-
-def test_urlfinder_cap_3600_when_only_the_stage_budget_is_raised() -> None:
-    """D29: with urlfinder_max_s = 0, raising --phase-timeout alone raises the cap.
-
-    Before D29 the 1800 s `urls.urlfinder_max_s` ceiling was applied after the
-    formula, so `--phase-timeout 3600` on 2000 hosts still gave 1800 s.
-    """
-    assert UrlsConfig().urlfinder_max_s == 0
-    assert enumeration_cap_s(2000, 3600, ceiling=0) == 3600
-    assert enumeration_cap_s(2000, 3600, ceiling=1800) == 1800
-
-
-def test_urlfinder_partial_output_line_includes_cap_and_host_count(
+def test_urlfinder_stage_budget_timeout_says_it_was_the_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """D27: a capped run says which cap and how many hosts produced it."""
+    """D52: a budget kill reports the budget and how stale the last output was."""
     adapter = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder")
-    ctx = make_ctx(hosts=[f"h{index}.testfire.net" for index in range(43)])
-    ctx.timeout = 600.0
-    ctx.limits = {"urlfinder": ToolLimits(max_s=180.0, idle_s=60.0, min_s=180.0)}
-    calls = fake_exec(
-        monkeypatch,
-        outcome(stdout="https://testfire.net/login.jsp\n", timed_out=True),
-    )
-    result = asyncio.run(adapter.run(ctx))
-
-    assert calls[0][1]["timeout"] == 180.0
-    assert result.error == "capped at 180s (hosts=43); kept partial output"
-    assert [record.url for record in result.records] == ["https://testfire.net/login.jsp"]
-
-
-def test_urlfinder_cap_saturation_is_logged_with_the_reason(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """D29: a saturated run names why the formula was clipped."""
-    adapter = UrlfinderAdapter(finder=lambda _name: "/usr/bin/urlfinder")
-    ctx = make_ctx(hosts=[f"h{index}.testfire.net" for index in range(2000)])
+    ctx = make_ctx(hosts=["testfire.net"])
     ctx.timeout = 1800.0
-    ctx.limits = {
-        "urlfinder": ToolLimits(
-            max_s=1800.0,
-            idle_s=60.0,
-            min_s=180.0,
-            note="formula 8000s clipped to stage budget 1800s",
-        )
-    }
+    ctx.limits = {"urlfinder": ToolLimits(idle_s=180.0)}
     fake_exec(
         monkeypatch,
-        outcome(stdout="https://testfire.net/login.jsp\n", timed_out=True),
+        outcome(
+            stdout="https://testfire.net/login.jsp\n",
+            timed_out=True,
+            last_output_s=400.0,
+        ),
     )
     result = asyncio.run(adapter.run(ctx))
 
-    assert result.error == (
-        "capped at 1800s (hosts=2000; formula 8000s clipped to stage budget 1800s); "
-        "kept partial output"
-    )
+    # D52: an idle kill is `killed` and exits 0; the stage budget is `timeout`
+    # (R13/D45), and both keep the partial output.
+    assert result.status is ToolStatus.TIMEOUT
+    assert result.error == ("timed out at stage budget 1800s, 1 partial, last output 400s ago")
+    assert [record.url for record in result.records] == ["https://testfire.net/login.jsp"]
 
 
 def test_urlfinder_identity_rejects_wrong_program(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -7,9 +7,11 @@
 # `source` is provenance only - where this tool's upstream project lives. reconkit does not
 # install or download anything; `source` is never executed and is shown only in
 # docs/10_TOOL_SOURCES.md.
-# `class` (D48) names the tool's runtime class; config.yaml `runtime_caps:` gives that class a
-#   floor, a per-host scale and an idle kill. No class = no cap. A new tool of an existing class
-#   needs this one field and nothing in engine.py.
+# `class` (D48/D52) names the tool's runtime class; config.yaml `runtime_idle:` gives that class
+#   its idle window - how long the tool may stay silent before the engine stops it and keeps its
+#   partial output. There is no runtime cap (D52): a class carries one number, and a tool with no
+#   class is bounded by the stage budget alone. `idle_s:` on a tool's own row overrides its class.
+#   A new tool of an existing class needs this one field and nothing in engine.py.
 # `external: true` (D47) marks a tool whose requests all go to a third party's API, so a
 #   whole-response HTTP 404 is that service being wrong (a gap), never a failure of the scan.
 version: 1
@@ -169,7 +171,7 @@ tools:
   katana:       {stage: urls, kind: binary, tier: core, mode: active, phase: 3, class: crawler, binary: katana, version_cmd: [katana, -version], version_regex: 'Current version: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/katana/releases (or: go install github.com/projectdiscovery/katana/cmd/katana@latest)"}
   hakrawler:    {stage: urls, kind: binary, tier: core, mode: active, phase: 3, class: crawler, binary: hakrawler, source: "go install github.com/hakluke/hakrawler@latest"}
   gospider:     {stage: urls, kind: binary, tier: core, mode: active, phase: 3, class: crawler, binary: gospider, version_cmd: [gospider, --version], version_regex: 'Version: (\S+)', source: "go install github.com/jaeles-project/gospider@latest"}
-  subjs:        {stage: urls, kind: binary, tier: core, mode: active, phase: 3, binary: subjs, version_cmd: [subjs, -version], version_regex: 'subjs version: (\S+)', source: "go install github.com/lc/subjs@latest", notes: "JS file discovery."}
+  subjs:        {stage: urls, kind: binary, tier: core, mode: active, phase: 3, class: crawler, binary: subjs, version_cmd: [subjs, -version], version_regex: 'subjs version: (\S+)', source: "go install github.com/lc/subjs@latest", notes: "JS file discovery."}
   unfurl:       {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: unfurl, source: "go install github.com/tomnomnom/unfurl@latest", notes: "Parameter/path extraction. Pattern sorting (xss/sqli/ssrf/lfi/redirect candidates) is done in Python, no traffic."}
   urlfinder:    {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, class: archive, binary: urlfinder, version_cmd: [urlfinder, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/urlfinder/releases (or: go install github.com/projectdiscovery/urlfinder/cmd/urlfinder@latest)"}
 

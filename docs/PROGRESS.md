@@ -4,7 +4,11 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status: **Queued code work complete at `3d79524`; scalability phase open - see D48-D50.** 951 tests,
+- Status: **D52 done at HEAD: the per-tool runtime caps are deleted, runtime is idle-only.** 950 tests,
+  `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (sha256 `d45a3c90...eeee8b`). D48 and its
+  addendum are superseded by D52 (the classes stay, every cap goes); D51 does not exist. R13/R14/R15 and the Part C
+  dedup question are still open exactly as recorded. See D52 and its addendum below for the model, the scale numbers
+  and the sakec.ac.in replay. Previous status: **Queued code work complete at `3d79524`; scalability phase open - see D48-D50.** 951 tests,
   `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (sha256 `d45a3c90...eeee8b`). This batch added
   D48 (per-tool caps from a tools.yaml `class:`), the D48 addendum (the D47 `external_api` ClassVar moved into
   `external: true`), D50 (per-tool heartbeat) and stopped Part C by its own rule (no D49; the live record has no
@@ -210,6 +214,33 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   guess, and the part's stop rule forbids exactly that. The fix needs the URL to travel with the record (models + three
   adapters + engine, five files, four tests); recorded in REVIEW_LOG "C" for the owner to schedule. The duplicate
   itself is real: crawler rows like `https://host/` are probed again by `url_probe` after `live` already answered.
+- **D52 (2026-11-19): the per-tool runtime caps are deleted; runtime is idle-only (owner batch, S1-S3).** A tool now runs
+  until it exits, until the engine's idle watchdog sees it silent past its class window, or until the stage budget fires.
+  There is no per-tool runtime cap left anywhere: `BinaryAdapter.runtime_cap_s`/`min_runtime_s`, `RuntimeClassConfig.floor`/
+  `per_host`, `UrlsConfig`, `UrlfinderConfig`, `config.class_cap()`, `ToolLimits.max_s`/`min_s`/`note`, the `urls:` and
+  `urlfinder:` blocks of `config.yaml`, `urlfinder`'s `-max-time` argv entry and the runner's `min_runtime` are all gone.
+  `config.yaml` `runtime_idle:` is the only runtime bound (crawler 60, scanner 120, archive 180, api 60; a bare number is
+  accepted as `{idle: n}`), `ToolLimits` holds `idle_s` alone, and a tool with neither a class nor `idle_s:` is bounded by
+  the stage budget only. `subjs` gained `class: crawler` (it used to carry its own 60 s cap) and a typo in `class:` is a
+  `ConfigError`, never a silent no-window.
+  **Two statuses, two meanings.** The watchdog (`IDLE_WATCH_TICK_S` 0.1 s, `KILL_GRACE_S` 0.25 s, `STAGE_KILL_GRACE_S` 2.0 s)
+  sets a per-tool `threading.Event` that `run_exec` watches, so the child exits with its partial stdout, and a pure-Python
+  adapter is cancelled after the grace; that run is the new `ToolStatus.KILLED` (`killed after 60s idle at stage 412.3s,
+  1042 partial`), keeps its records, counts as complete and exits **0**. Reaching the stage budget stays `TIMEOUT`
+  (`timed out at stage budget 1800s, N partial, last output Xs ago`, exit 5): R13/D45 were open, not withdrawn, so this
+  batch does not change what a phase timeout means. `RunContext.timeout` is now the stage budget, `RunContext` gained
+  `stage_started`/`activity`/`stop`, `ToolResult` and `ExecResult` gained `last_output_s`, `run_exec` gained `stop_event`/
+  `on_output`, and the engine's backstop sits at the budget plus `STAGE_KILL_GRACE_S` so the per-tool path reports first.
+  **Reporting.** The Tools table gained `Time` and `Last output` (`N s ago` on a killed row, `-` otherwise), the summary
+  line gains `N killed` only when N > 0, stderr gains a "stopped early" block (`⚠ N tool(s) stopped early — partial output
+  kept`, one line per kill), and `--json` gained `summary.tools_killed`; `ToolStatus.KILLED` renders yellow, not red.
+  **Schema 11** rebuilds `tool_runs` so its CHECK accepts `killed` (same in-place rebuild as schema 8, every row copied
+  unchanged). **Tests:** the cap tests that encoded the removed behaviour are deleted (their names are listed in
+  REVIEW_LOG), replaced by seven idle-model tests in `test_engine.py`, a schema-11 migration test, two UI tests and
+  rewritten urlfinder/hakrawler/subjs adapter tests. **Disclosed deviation:** `subjs` gained a `class:` in `tools.yaml` - the
+  only way to keep a 60 s early stop without a cap - and `urlfinder` lost `-max-time` entirely (the binary never enforced
+  it; measured still running at 5m52s with `-max-time 3`). S1/S3 measurements are in the D52 addendum.
+
 - **D50 (2026-11-19): a running tool says so, once, on stderr.** The stage spinner was the only sign of life and it
   needs a terminal; a piped stderr saw nothing between "running N tool(s)" and the first finished-tool line. Now every
   tool still running after `HEARTBEAT_AFTER_S` (10 s) gets one durable line, `<stage>: <tool> running (<n>s)`, emitted

@@ -227,31 +227,17 @@ class BaseToolAdapter(ABC):
     # that can only fail (pre-approved, D18). Unlike `tools.yaml` `keys`, which
     # describes an optional upgrade, this is a hard requirement.
     requires_env: ClassVar[tuple[str, ...]] = ()
-    # A tool whose own time flags are not enforced (urlfinder runs past
-    # `-max-time`) gets a hard cap here instead of the whole phase budget. On a
-    # capped timeout the partial output is still parsed, so the URLs found
-    # before the cap are kept (2026-11-18).
-
-    runtime_cap_s: ClassVar[float | None] = None
-
-    # A tool killed by its own cap keeps its partial output; these are the
-    # activity clock's defaults when config.yaml supplies none (docs/09 4a2b).
-    idle_timeout_s: ClassVar[float | None] = None
-    min_runtime_s: ClassVar[float] = 0.0
+    # D52: there is no per-tool runtime cap. A tool runs until it exits, until
+    # the engine's idle watchdog kills it (silent past its class window), or
+    # until the stage budget fires; a killed run keeps its partial output. The
+    # window reaches the adapter through `ctx.limits`, never as a ClassVar: the
+    # class lives in tools.yaml and the number in config.yaml `runtime_idle:`.
 
     def __init__(self, *, fixtures_dir: Path | None = None) -> None:
         self._fixtures_dir = fixtures_dir if fixtures_dir is not None else FIXTURES
         # Unusable lines a parser skipped instead of failing the tool (PIT-58).
         # Per run; `_skip_note()` turns the list into the detail line.
         self.skipped_lines: list[str] = []
-
-    def cap_suffix(self, ctx: RunContext) -> str:
-        """Extra words for the `capped at <n>s` detail line (D27).
-
-        Default: nothing. `urlfinder` names the host count it scaled the cap
-        from, so a capped run says why it was given that many seconds.
-        """
-        return ""
 
     def _skip_note(self) -> str | None:
         """One detail line for the lines a parser could not use, or None.
@@ -338,21 +324,12 @@ class BaseToolAdapter(ABC):
         raw_text = ""
         self.skipped_lines = []
         limits = ctx.limits.get(self.name)
-        # An explicit ceiling in config.yaml wins over the per-tool budget (a
-        # productive urlfinder may use the whole stage budget); otherwise the
-        # class cap is intersected with the budget (docs/09 sections 4a2b/4a3).
-        cap = self.runtime_cap_s
-        if limits is not None and limits.max_s:
-            cap = float(limits.max_s)
-            budget = cap
-        elif cap is not None:
-            budget = min(ctx.timeout, cap)
-        else:
-            budget = ctx.timeout
-        idle = limits.idle_s if limits is not None and limits.idle_s else self.idle_timeout_s
-        minimum = float(
-            limits.min_s if limits is not None and limits.min_s is not None else self.min_runtime_s
-        )
+        # D52: no runtime cap. The only hard wall is the stage budget the engine
+        # put in `ctx.timeout`; `idle` is the silence window after which the tool
+        # is assumed stuck. `run_exec` kills the child for either reason and keeps
+        # the partial stdout, which is parsed below.
+        budget = ctx.timeout
+        idle = limits.idle_s if limits is not None and limits.idle_s else None
         try:
             if ctx.mock:
                 raw_text = self._read_fixture(ctx)
@@ -366,36 +343,44 @@ class BaseToolAdapter(ABC):
                         env=self.child_env(ctx),
                         stdin_text=self.stdin_text(ctx),
                         idle_timeout=idle,
-                        min_runtime=minimum,
+                        stop_event=ctx.stop,
+                        on_output=ctx.activity,
                     )
                     duration = outcome.duration_s
                     raw_text = capture_output(outcome.stdout, outcome.stderr)
                     if outcome.timed_out:
-                        if cap is not None or idle is not None:
-                            # A capped run keeps what arrived; a kille tool that
-                            # found nothing is still `ok 0 (capped)`, because the
-                            # tool worked and we stopped it (2026-11-18).
-                            partial = self.parse_output(outcome.stdout)
+                        # A stopped run keeps what arrived, either way. D52 draws
+                        # the line: silence past the class window is a deliberate
+                        # `killed` (the engine ended a stuck tool, the run is
+                        # still a completion); the stage budget firing is the old
+                        # `timeout`, because a tool that did not finish in the
+                        # stage's time is a real signal (R13, D45 stands).
+                        partial = self.parse_output(outcome.stdout)
+                        elapsed = (
+                            time.perf_counter() - ctx.stage_started
+                            if ctx.stage_started
+                            else duration
+                        )
+                        idle_kill = outcome.idle_killed and idle is not None
+                        if idle_kill:
                             note = (
-                                f"idle for {idle:g}s; kept partial output"
-                                if outcome.idle_killed and idle is not None
-                                else f"capped at {budget:g}s{self.cap_suffix(ctx)};"
-                                " kept partial output"
+                                f"killed after {idle:g}s idle at stage {elapsed:.1f}s, "
+                                f"{len(partial)} partial"
                             )
-                            detail = "; ".join(part for part in (note, self._skip_note()) if part)
-                            return ToolResult(
-                                tool=self.name,
-                                status=ToolStatus.OK,
-                                records=partial,
-                                duration_s=duration,
-                                error=detail,
-                                raw_text=raw_text,
+                        else:
+                            note = (
+                                f"timed out at stage budget {budget:g}s, "
+                                f"{len(partial)} partial, last output "
+                                f"{outcome.last_output_s:g}s ago"
                             )
+                        detail = "; ".join(part for part in (note, self._skip_note()) if part)
                         return ToolResult(
                             tool=self.name,
-                            status=ToolStatus.TIMEOUT,
-                            error="timed out",
+                            status=ToolStatus.KILLED if idle_kill else ToolStatus.TIMEOUT,
+                            records=partial,
                             duration_s=duration,
+                            error=detail,
+                            last_output_s=outcome.last_output_s,
                             raw_text=raw_text,
                         )
                     detail = outcome.stderr.strip()[:MAX_ERROR_CHARS] or "no output"
@@ -685,10 +670,9 @@ class HttpAdapter(BaseToolAdapter):
             raise FetchFailed(f"{self.name}: {type(exc).__name__}") from None
 
     async def _attempt(self, ctx: RunContext) -> str:
-        # D48: a tool with a `class:` in tools.yaml gets that class's cap as its
-        # request timeout; everything else keeps the per-tool budget.
-        limits = ctx.limits.get(self.name)
-        timeout = float(limits.max_s) if limits is not None and limits.max_s else ctx.timeout
+        # D52: there is no per-tool cap left to borrow, so an HTTP tool's request
+        # timeout is the stage budget. A stalled request is caught there.
+        timeout = ctx.timeout
         async with httpx.AsyncClient(
             timeout=timeout,
             headers=self.headers(ctx),

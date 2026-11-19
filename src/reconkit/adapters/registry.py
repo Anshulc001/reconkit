@@ -66,11 +66,16 @@ class ToolSpec:
     # cannot change it. 0 = the tool makes no claim (every tool but the four
     # WAF-capable ones).
     waf_priority: int = 0
-    # D48: the tool's runtime class (`crawler`, `scanner`, `api`, `archive`).
-    # `config.yaml` `runtime_caps:` gives each class a floor, a per-host scale and
-    # an idle kill, so a new tool gets a cap from its yaml row alone. `None`
-    # means "no cap", which is what every tool had before D48.
+    # D52: the tool's runtime class (`crawler`, `scanner`, `api`, `archive`).
+    # `config.yaml` `runtime_idle:` gives each class one number - how long the
+    # tool may stay silent before it is assumed stuck - so a new tool gets its
+    # idle window from its yaml row alone. `None` means "no idle window", so
+    # only the stage budget bounds it.
     class_: str | None = None
+    # D52: a single tool's own silence window, overriding its class. No tool
+    # needs it today (the four classes cover every classed tool); it exists so a
+    # tool with a genuinely different shape is a yaml edit, not a code edit.
+    idle_s: float | None = None
     # D47, moved here from an adapter ClassVar: every request goes to a third
     # party's API, so a whole-response 404 is that service being wrong (a gap),
     # never a failure of this scan.
@@ -184,8 +189,19 @@ def _spec(name: str, entry: dict[str, Any]) -> ToolSpec:
         manual=_flag(name, entry, "manual"),
         waf_priority=_waf_priority(name, entry),
         class_=_optional_text(name, entry, "class"),
+        idle_s=_optional_seconds(name, entry, "idle_s"),
         external=_flag(name, entry, "external"),
     )
+
+
+def _optional_seconds(name: str, entry: dict[str, Any], field: str) -> float | None:
+    """A positive number of seconds, or None; anything else is a ConfigError."""
+    value = entry.get(field)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+        raise ConfigError(f"tool {name!r} in tools.yaml has an invalid {field!r}")
+    return float(value)
 
 
 def _flag(name: str, entry: dict[str, Any], field: str) -> bool:

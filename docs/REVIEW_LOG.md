@@ -7988,3 +7988,86 @@ The intervals are patched in the tests (0.15 s instead of 10 s) so the suite doe
 seconds; the production constant is 10 s and the fast-tool test uses it unpatched.
 
 `ruff check .` clean; `ruff format --check .` 92 files; `mypy src/reconkit` clean.
+
+## 2026-11-19 (D52): per-tool runtime caps deleted; idle-only runtime and killed-tool report
+
+**Batch:** S1 measure at scale -> S2 delete the caps -> S3 re-verify at scale. One code commit plus one
+docs commit; nothing pushed, no dependency added, F1/F2 and `scope.yaml` untouched
+(sha256 `d45a3c903c7417cf73115d4a7b73ab4ccf43509656d30414bd89e1a368eeee8b` before and after).
+
+**Baseline at `36bf2c9`** (this checkout, one command at a time):
+
+```
+PASS pytest  951 passed in 27.6s
+PASS ruff    All checks passed!
+PASS format  92 files already formatted
+PASS mypy    Success: no issues found in 62 source files
+```
+
+**What the audit found.** Three different cap mechanisms had grown in parallel: per-adapter `runtime_cap_s`
+constants (`urlfinder`, `hakrawler`, `subjs`), three hard-coded tool names in `engine._limits`, and the D48
+class formula `min(budget, max(floor, per_host * hosts))`. All three are gone: `grep -rn
+'runtime_cap_s\|class_cap\|runtime_caps\|max_enumeration' src/ config.yaml tools.yaml` returns nothing, and the
+only `max_s`/`min_s` left in `src/` are comments explaining that they no longer exist.
+
+**What replaced them.** One number per class (`config.yaml` `runtime_idle:`), one watchdog in `_run_tools`, one new
+status. A tool runs until it exits, until it is silent past its window, or until the stage budget; `killed` is the
+idle case (partial output kept, exit 0) and `timeout` stays the budget case (exit 5, R13/D45 unchanged). Details:
+`docs/09_TOOL_CONTRACTS.md` 4a2c, `docs/PROGRESS.md` D52.
+
+**Removed test names (they encoded the deleted behaviour; deleted, not kept):**
+
+- `tests/test_engine.py`: `test_gau_cap_scales_with_class_config`, `test_nikto_cap_uses_scanner_class`,
+  `test_a_tool_with_no_class_gets_no_cap`, `test_a_tool_that_exits_early_is_not_delayed_by_the_cap`,
+  `test_urlfinder_cap_unchanged_by_the_refactor`.
+- `tests/test_binary_adapters.py`: `test_urlfinder_cap_scales_with_host_count`, `test_urlfinder_cap_floor_is_180`,
+  `test_urlfinder_cap_respects_stage_budget`, `test_urlfinder_cap_config_override`,
+  `test_urlfinder_cap_3600_when_only_the_stage_budget_is_raised`,
+  `test_urlfinder_partial_output_line_includes_cap_and_host_count`,
+  `test_urlfinder_cap_saturation_is_logged_with_the_reason`,
+  `test_urlfinder_keeps_partial_urls_when_the_runtime_cap_fires`,
+  `test_hakrawler_runtime_cap_parses_partial`, `test_subjs_runtime_cap_parses_partial`.
+- `tests/test_config.py`: `test_the_urls_runtime_bounds_load_and_default`,
+  `test_urlfinder_cap_override_defaults_to_the_formula`, `test_config_without_runtime_caps_still_loads`.
+
+**New tests (seven in `test_engine.py`, plus schema/UI coverage):** `test_tools_receive_the_configured_idle_windows`,
+`test_a_classed_tool_gets_its_class_idle_window`, `test_a_tool_with_no_class_gets_no_idle_window`,
+`test_a_tool_idle_s_entry_wins_over_its_class`, `test_an_unknown_class_is_a_config_error`,
+`test_a_silent_tool_is_killed_and_reported`, `test_a_productive_tool_is_not_killed_at_its_idle_window`,
+`test_a_new_tool_with_class_in_tools_yaml_needs_no_engine_edit`; `tests/test_store.py::test_v10_database_accepts_the_killed_status`;
+`tests/test_ui.py::test_a_killed_tool_is_counted_named_and_given_a_stale_output_column`,
+`tests/test_ui.py::test_a_run_with_no_kill_prints_no_stopped_early_block`.
+
+```
+tests/test_engine.py::test_tools_receive_the_configured_idle_windows PASSED
+tests/test_engine.py::test_a_classed_tool_gets_its_class_idle_window PASSED
+tests/test_engine.py::test_a_tool_with_no_class_gets_no_idle_window PASSED
+tests/test_engine.py::test_an_unknown_class_is_a_config_error PASSED
+tests/test_engine.py::test_a_silent_tool_is_killed_and_reported PASSED
+tests/test_engine.py::test_a_productive_tool_is_not_killed_at_its_idle_window PASSED
+tests/test_engine.py::test_a_new_tool_with_class_in_tools_yaml_needs_no_engine_edit PASSED
+====== 7 passed, 149 deselected in 1.44s ======
+tests/test_store.py::test_v10_database_accepts_the_killed_status PASSED
+tests/test_ui.py::test_a_killed_tool_is_counted_named_and_given_a_stale_output_column PASSED
+tests/test_ui.py::test_a_run_with_no_kill_prints_no_stopped_early_block PASSED
+====== 3 passed in 0.18s ======
+```
+
+**Gate after the change:** `950 passed`, `ruff check .` clean, `96 files already formatted`,
+`mypy src/reconkit` clean.
+
+**S1 (measured before the refactor, same box, same fixtures):** `bench/scale_20k.db` = 20 000 hosts /
+200 000 URLs (160 000 NULL), 23.7 MB -> `probe_candidates 162.59 ms`, `1000 set_url_status 333.36 ms`,
+`limits 0.01 ms`, `stage loop (4 tools) 2.89 ms`, peak RSS 122.0 MB. `bench/scale_50k.db` = 50 000 hosts /
+500 000 URLs (400 000 NULL), 59.7 MB -> `456.71 ms`, `336.76 ms`, `0.01 ms`, `4.40 ms`, peak RSS 224.9 MB.
+Sakec capture (one 2m40s run, never scanned by the engine): subfinder 36.83 s/67, assetfinder 4.53 s/105,
+crtsh 3.25 s/37, gau 70.39 s/6227, katana 10.64 s/1, httprobe 34.99 s/18. 10x replay of the gau+katana rows:
+62 280 -> padded to 200 000, `200000 probed: 16.36 s, 12,227 URL/s, peak RSS 153.2 MB`.
+
+**Disclosed deviations:** (1) `subjs` gained `class: crawler` in `tools.yaml` - the only way to keep a 60 s early
+stop once its own cap was deleted; it is a registry field, not code. (2) `urlfinder` lost `-max-time` entirely:
+the real binary never enforced it (still running at 5m52s with `-max-time 3`) and there is no cap left to convert
+into minutes. (3) `RunContext.timeout` now carries the stage budget instead of `timeouts.per_tool_default`; every
+adapter's budget therefore changes from a per-tool default to the stage's remaining time (the intended shape: the
+stage budget is the only hard wall). (4) A stage-budget stop keeps `TIMEOUT` and exit 5: R13/D45 are open, so this
+batch did not touch their meaning.

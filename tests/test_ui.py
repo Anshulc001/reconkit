@@ -164,6 +164,8 @@ def test_json_output_is_one_valid_document_with_documented_schema() -> None:
         "tools_failed",
         "tools_skipped",
         "tools_timeout",
+        # D52: stopped by the engine, partial output kept.
+        "tools_killed",
     }
     assert document["summary"]["hosts"] == 5
     assert document["summary"]["tools_ok"] == 1
@@ -569,6 +571,48 @@ def test_a_complete_run_prints_no_gaps_block() -> None:
     _, raw, err = render_text(json_output=True)
     assert "completed with gaps" not in err
     assert json.loads(raw)["completion"]["status"] == "complete"
+
+
+def test_a_killed_tool_is_counted_named_and_given_a_stale_output_column() -> None:
+    """D52: a kill shows up in the summary line, the table and "what got stuck"."""
+    summary = make_summary(
+        stages=[
+            StageOutcome(
+                Stage.URLS,
+                1,
+                results=[
+                    ToolResult(
+                        tool="gau",
+                        status=ToolStatus.KILLED,
+                        duration_s=412.3,
+                        last_output_s=60.0,
+                        error="killed after 60s idle at stage 412.3s, 1042 partial",
+                    ),
+                    ToolResult(tool="katana", status=ToolStatus.OK, duration_s=8.0),
+                ],
+            )
+        ]
+    )
+    code, _, err = render_text(summary=summary)
+    assert code == int(ExitCode.SUCCESS)
+    assert "1 killed" in err
+    assert "60s ago" in err  # the `Last output` column, killed rows only
+    assert "⚠ 1 tool(s) stopped early — partial output kept" in err
+    assert "gau: killed after 60s idle at stage 412.3s, 1042 partial" in err
+    assert "412.3s" in err  # the `Time` column
+
+    _, raw, _ = render_text(summary=summary, json_output=True)
+    document = json.loads(raw)
+    assert document["summary"]["tools_killed"] == 1
+    assert document["summary"]["tools_timeout"] == 0
+    assert document["stages"][0]["results"][0]["last_output_s"] == 60.0
+
+
+def test_a_run_with_no_kill_prints_no_stopped_early_block() -> None:
+    """The block is silent unless something was stopped (byte-identical output)."""
+    _, _, err = render_text()
+    assert "stopped early" not in err
+    assert "killed" not in err
 
 
 def test_ui_does_not_import_store_scope_adapters_or_cli() -> None:

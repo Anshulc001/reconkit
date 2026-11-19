@@ -20,36 +20,25 @@ def test_load_real_config() -> None:
     assert config.user_agent
 
 
-def test_the_urls_runtime_bounds_load_and_default(tmp_path: Path) -> None:
-    """2026-11-18 (2.2/2.3): the per-tool caps live in config.yaml `urls:`."""
+def test_runtime_idle_windows_load_from_the_real_config() -> None:
+    """D52: `runtime_idle:` is the only runtime bound, and it holds windows."""
     config = load_config(CONFIG)
-    assert config.urls.urlfinder_min_s == 180
-    assert config.urls.urlfinder_max_s == 0
-    assert config.urls.urlfinder_idle_s == 60
-    assert config.urls.hakrawler_max_s == 120
-    assert config.urls.subjs_max_s == 60
+    assert config.runtime_idle["crawler"].idle == 60
+    assert config.runtime_idle["scanner"].idle == 120
+    assert config.runtime_idle["archive"].idle == 180
+    assert config.runtime_idle["api"].idle == 60
 
-    # A config file written before the block still loads, with the defaults.
+
+@pytest.mark.parametrize("shape", ["bare", "nested"])
+def test_a_runtime_idle_class_accepts_bare_or_nested_seconds(tmp_path: Path, shape: str) -> None:
+    """`crawler: 60` and `crawler: {idle: 60}` are the same class (D52)."""
     import yaml
 
-    legacy = tmp_path / "legacy.yaml"
     raw = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-    raw.pop("urls")
-    legacy.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    assert load_config(legacy).urls.urlfinder_idle_s == 60
-
-
-def test_urlfinder_cap_override_defaults_to_the_formula(tmp_path: Path) -> None:
-    """D27: 0 means "compute from the host count"; an older file without it loads."""
-    import yaml
-
-    assert load_config(CONFIG).urlfinder.max_enumeration_s == 0
-
-    legacy = tmp_path / "legacy.yaml"
-    raw = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-    raw.pop("urlfinder")
-    legacy.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    assert load_config(legacy).urlfinder.max_enumeration_s == 0
+    raw["runtime_idle"] = {"crawler": 45} if shape == "bare" else {"crawler": {"idle": 45}}
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    assert load_config(path).runtime_idle["crawler"].idle == 45
 
 
 def test_a_config_without_timeouts_url_probe_still_loads(tmp_path: Path) -> None:
@@ -133,23 +122,17 @@ def test_missing_config_file() -> None:
         load_config(CONFIG.parent / "missing-config.yaml")
 
 
-def test_config_without_runtime_caps_still_loads(tmp_path: Path) -> None:
-    """D48: a config.yaml written before `runtime_caps:` keeps working."""
+def test_config_without_runtime_idle_still_loads(tmp_path: Path) -> None:
+    """D52: a config.yaml written before `runtime_idle:` keeps working."""
     import yaml
 
-    from reconkit.config import DEFAULT_RUNTIME_CAPS
-
-    real = load_config(CONFIG)
-    assert real.runtime_caps["crawler"].floor == 90
-    assert real.runtime_caps["scanner"].per_host == 30
-    assert real.runtime_caps["api"].idle == 30
-    assert real.runtime_caps["archive"].floor == 180
+    from reconkit.config import DEFAULT_RUNTIME_IDLE
 
     legacy = tmp_path / "legacy.yaml"
     raw = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-    raw.pop("runtime_caps")
+    raw.pop("runtime_idle")
     legacy.write_text(yaml.safe_dump(raw), encoding="utf-8")
     loaded = load_config(legacy)
-    assert {
-        name: (cfg.floor, cfg.per_host, cfg.idle) for name, cfg in loaded.runtime_caps.items()
-    } == {name: (cfg.floor, cfg.per_host, cfg.idle) for name, cfg in DEFAULT_RUNTIME_CAPS.items()}
+    assert {name: cfg.idle for name, cfg in loaded.runtime_idle.items()} == {
+        name: cfg.idle for name, cfg in DEFAULT_RUNTIME_IDLE.items()
+    }

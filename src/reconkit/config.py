@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from reconkit.errors import ConfigError
 
@@ -52,89 +52,41 @@ class ConfidenceConfig(_StrictModel):
     medium_min_sources: int = Field(ge=1)
 
 
-class UrlsConfig(_StrictModel):
-    """Per-tool runtime bounds for the urls stage (docs/09 sections 4a2b/4a3).
-
-    `urlfinder` gets a floor, an inactivity kill and a ceiling; `hakrawler` and
-    `subjs` get a hard cap. The engine passes them down as
-    `RunContext.limits`, so an adapter never reads this file itself.
-    """
-
-    urlfinder_min_s: int = Field(default=180, gt=0)
-    urlfinder_max_s: int = Field(default=0, ge=0)
-    urlfinder_idle_s: int = Field(default=60, gt=0)
-    hakrawler_max_s: int = Field(default=120, gt=0)
-    subjs_max_s: int = Field(default=60, gt=0)
-
-
-class UrlfinderConfig(_StrictModel):
-    """`urlfinder`'s own knobs (D27).
-
-    `max_enumeration_s = 0` means "compute the cap from the host count":
-    `min(stage deadline, max(180, 4 * hosts))`. A non-zero value replaces that
-    formula with one fixed number, for debugging and CI.
-    """
-
-    max_enumeration_s: int = Field(default=0, ge=0)
-
-
 class RuntimeClassConfig(_StrictModel):
-    """One runtime class from `runtime_caps:` (D48, docs/09 section 4a2b).
+    """One runtime class from `runtime_idle:` (D52, docs/09 section 4a2b).
 
-    A class is a shape of tool, not a tool: every member gets the same formula
-    `min(stage budget, max(floor, per_host * hosts))`, a silence kill at `idle`
-    seconds and nothing else. A tool joins a class with one `class:` field in
-    `tools.yaml`, so a new crawler needs no engine or adapter edit.
+    A class is a shape of tool, not a tool, and it now carries **one** number:
+    how long the tool may stay silent before the engine assumes it is stuck.
+    There is no runtime cap and no floor - a tool that keeps producing runs
+    until it exits or the stage budget fires. A tool joins a class with one
+    `class:` field in `tools.yaml`, and a single tool may override the window
+    with `idle_s:` in its own row.
     """
 
-    floor: float = Field(gt=0)
-    per_host: float = Field(ge=0)
     idle: float = Field(gt=0)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _bare_seconds(cls, value: object) -> object:
+        """`crawler: 60` is the same class as `crawler: {idle: 60}` (D52).
 
-# Educated guesses, tunable in config.yaml without a code change (D48): the
-# floor is what a large target's tool gets before `per_host` scales it up, and
-# the whole thing is still intersected with the stage deadline. `archive`
-# mirrors urlfinder's measured constants (180 s / 4 s per host / 60 s idle).
-DEFAULT_RUNTIME_CAPS: dict[str, RuntimeClassConfig] = {
-    "crawler": RuntimeClassConfig(floor=90, per_host=2, idle=60),
-    "scanner": RuntimeClassConfig(floor=300, per_host=30, idle=120),
-    "api": RuntimeClassConfig(floor=60, per_host=1, idle=30),
-    "archive": RuntimeClassConfig(floor=180, per_host=4, idle=60),
+        The window is the only field a class has, so a bare number in
+        config.yaml is unambiguous and is what the file uses.
+        """
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return {"idle": value}
+        return value
+
+
+# D52: generous windows, because the idle clock is "how long silent before we
+# assume it is stuck", not "how long may it run". `archive` is the largest on
+# purpose: gau and urlfinder compute for a while and then print in one block.
+DEFAULT_RUNTIME_IDLE: dict[str, RuntimeClassConfig] = {
+    "crawler": RuntimeClassConfig(idle=60),
+    "scanner": RuntimeClassConfig(idle=120),
+    "api": RuntimeClassConfig(idle=60),
+    "archive": RuntimeClassConfig(idle=180),
 }
-
-
-def class_cap(
-    floor: float,
-    per_host: float,
-    host_count: int,
-    stage_budget: float,
-    *,
-    override: float = 0.0,
-    ceiling: float = 0.0,
-) -> tuple[float, str]:
-    """The `(cap_s, note)` a class gives one tool run (D48, D27's formula).
-
-    `min(stage budget, max(floor, per_host * hosts))`: a ceiling, never a timer -
-    a tool that finishes early exits immediately and nothing here waits. A
-    positive `override` replaces the formula (urlfinder's debugging knob); a
-    positive `ceiling` clips the result afterwards (`urls.urlfinder_max_s`).
-    The note is non-empty only when the formula wanted more than the deadline,
-    so a capped row says which one clipped it.
-    """
-    budget = float(stage_budget)
-    if override > 0:
-        cap = float(override)
-        note = ""
-    else:
-        wanted = max(float(floor), float(per_host) * max(0, int(host_count)))
-        cap = min(budget, wanted)
-        note = (
-            "" if wanted <= budget else f"formula {wanted:g}s clipped to stage budget {budget:g}s"
-        )
-    if ceiling > 0:
-        cap = min(cap, float(ceiling))
-    return max(1.0, cap), note
 
 
 class UrlProbeConfig(_StrictModel):
@@ -176,15 +128,12 @@ class AppConfig(_StrictModel):
     results_dir: str = "results"
     user_agent: str
     timeouts: Timeouts
-    # Defaulted so a config file written before this key existed still loads.
-    urls: UrlsConfig = Field(default_factory=UrlsConfig)
-    # D48: per-class runtime caps. Defaulted, so a config written before this
+    # D52: per-class idle windows. Defaulted, so a config written before this
     # block existed keeps loading with today's numbers.
-    runtime_caps: dict[str, RuntimeClassConfig] = Field(
-        default_factory=lambda: dict(DEFAULT_RUNTIME_CAPS)
+    runtime_idle: dict[str, RuntimeClassConfig] = Field(
+        default_factory=lambda: dict(DEFAULT_RUNTIME_IDLE)
     )
     url_probe: UrlProbeConfig = Field(default_factory=UrlProbeConfig)
-    urlfinder: UrlfinderConfig = Field(default_factory=UrlfinderConfig)
     confidence: ConfidenceConfig
     wildcard_check: WildcardCheck
     install: InstallConfig

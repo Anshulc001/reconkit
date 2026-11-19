@@ -12,8 +12,10 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import math
 import secrets
 import ssl
+import threading
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
@@ -30,8 +32,7 @@ from reconkit.adapters import ADAPTERS
 from reconkit.adapters.base import USER_AGENT, BaseToolAdapter, running_as_root
 from reconkit.adapters.pyscan import default_resolve
 from reconkit.adapters.registry import ToolSpec, load_tools
-from reconkit.adapters.urlfinder import ENUMERATION_PER_HOST_S, enumeration_cap_s
-from reconkit.config import AppConfig, UrlProbeConfig, class_cap
+from reconkit.config import AppConfig, UrlProbeConfig
 from reconkit.core.runner import validate_host, validate_target
 from reconkit.core.scope import load_scope, passive_warning, require_active, scope_present
 from reconkit.core.store import Store, redact, utc_now
@@ -186,7 +187,10 @@ def _completed(status: ToolStatus) -> bool:
     A skip is not a failure: it is the engine declining to run a tool against an
     empty list. The stage becomes a completion gap instead (exit 0).
     """
-    return status in (ToolStatus.OK, ToolStatus.GAP, ToolStatus.SKIPPED)
+    # A `killed` tool is a deliberate stop (D52): it was silent past its idle or
+    # the stage budget fired, and what it produced is kept. Like a skip, it is
+    # not a failure and must not make a run exit 5.
+    return status in (ToolStatus.OK, ToolStatus.GAP, ToolStatus.SKIPPED, ToolStatus.KILLED)
 
 
 def allow_all_ip(_ip: str) -> bool:
@@ -206,43 +210,48 @@ def allow_all_ip(_ip: str) -> bool:
 HOST_INPUT_STAGES = frozenset({Stage.LIVE, Stage.TECH, Stage.URLS, Stage.VULNS})
 NO_INPUT_HOSTS = "no input hosts"
 # D50: seconds a tool must be running before its one "still running" line is
-# printed. A tool that finishes sooner never produces one, and a tool that is
-# killed on its cap produces no extra line either.
+# printed. A tool that finishes sooner never produces one.
 HEARTBEAT_AFTER_S = 10.0
+# D52: how often the idle watchdog looks at the running tools, and how long a
+# tool that was told to stop gets to return its partial output before its task is
+# cancelled (an adapter that ignores the stop flag, e.g. a pure-Python one).
+IDLE_WATCH_TICK_S = 0.1
+KILL_GRACE_S = 0.25
+# D52: the stage `asyncio.wait_for` keeps a small grace past the stage budget so
+# the per-tool kill (which returns the partial output) fires first. The stage
+# budget is still the bound; this only decides who reports it.
+STAGE_KILL_GRACE_S = 2.0
 
 
-def cap_for_tool(
+def idle_for_tool(
     tool_name: str,
-    host_count: int,
-    stage_budget: float,
     config: AppConfig,
     *,
     specs: Mapping[str, ToolSpec] | None = None,
-) -> tuple[float, str] | None:
-    """`(cap_s, note)` for a tool whose tools.yaml row names a `class:`, else None.
+) -> float | None:
+    """The silence window for one tool, or None when it has none (D52).
 
-    One lookup, one formula (D48): the tool's class comes from the registry, the
-    class's floor/per_host/idle from `config.yaml` `runtime_caps:`, and
-    `min(stage budget, max(floor, per_host * hosts))` from `config.class_cap`. A
-    tool with no class gets no cap, exactly as before D48; a class the config does
-    not describe is a ConfigError, not a silent no-cap (docs/09 section 4a2b).
+    One lookup, one number: a tool's own `idle_s:` in `tools.yaml` wins, else its
+    `class:` window from `config.yaml` `runtime_idle:`. There is no runtime cap
+    and no floor to intersect. A tool with neither runs until the stage budget
+    fires. A class the config does not describe is a ConfigError, not a silent
+    no-idle (docs/09 section 4a2b).
     """
     loaded = specs if specs is not None else load_tools()
     spec = loaded.get(tool_name)
-    if spec is None or spec.class_ is None:
+    if spec is None:
         return None
-    runtime_class = config.runtime_caps.get(spec.class_)
+    if spec.idle_s is not None:
+        return float(spec.idle_s)
+    if spec.class_ is None:
+        return None
+    runtime_class = config.runtime_idle.get(spec.class_)
     if runtime_class is None:
         raise ConfigError(
             f"tool {tool_name!r} uses runtime class {spec.class_!r}, "
-            "which config.yaml does not define under runtime_caps"
+            "which config.yaml does not define under runtime_idle"
         )
-    return class_cap(
-        runtime_class.floor,
-        runtime_class.per_host,
-        host_count,
-        stage_budget,
-    )
+    return float(runtime_class.idle)
 
 
 Now = Callable[[], str]
@@ -916,22 +925,26 @@ class Engine:
                         done,
                         stage_budget=timeout,
                     ),
-                    timeout=timeout,
+                    # D52: the per-tool kill (idle or stage budget) fires first
+                    # and returns the tool's partial output; this wait_for is the
+                    # backstop for an adapter that ignores both, so it gets a
+                    # small grace rather than racing the tool's own deadline.
+                    timeout=timeout + STAGE_KILL_GRACE_S,
                 )
             except TimeoutError:
                 for spec, _ in selected:
                     if spec.name not in done:
-                        self._record(run_id, spec.name, ToolStatus.TIMEOUT, error="phase timeout")
+                        detail = "phase timeout"
+                        self._record(run_id, spec.name, ToolStatus.TIMEOUT, error=detail)
                         done.add(spec.name)
                         # The DB row alone is not enough: the summary counters and
                         # `--json` are built from `results`, so a tool killed by
-                        # the phase deadline used to leave `0 timeout` on screen
-                        # while the run exited 5 (real testfire.net run, Part M).
+                        # the stage deadline must appear there too.
                         results.append(
                             ToolResult(
                                 tool=spec.name,
                                 status=ToolStatus.TIMEOUT,
-                                error="phase timeout",
+                                error=detail,
                             )
                         )
             except asyncio.CancelledError:
@@ -1427,56 +1440,18 @@ class Engine:
         stage_budget: float,
     ) -> RunContext:
         # Every tool in the stage starts at once and runs at its own natural
-        # pace (2026-11-17, MASTER_PLAN D3).
-        urls_config = self.config.urls
-        # D27: urlfinder's whole-enumeration cap scales with the size of the list
-        # it was given (the stdin rows), inside the stage deadline that is already
-        # in force. `max_enumeration_s` replaces the formula when non-zero.
-        urlfinder_host_count = len(tool_hosts.get("urlfinder", hosts))
-        urlfinder_override = float(self.config.urlfinder.max_enumeration_s)
-        urlfinder_ceiling = float(urls_config.urlfinder_max_s)
-        urlfinder_cap = enumeration_cap_s(
-            urlfinder_host_count,
-            stage_budget,
-            override=urlfinder_override,
-            ceiling=urlfinder_ceiling,
-        )
-        # Saturation note for the capped detail line (D29): only when the formula
-        # wanted more than the final cap. Override mode replaces the formula, so
-        # it never produces a "formula ... clipped" note.
-        urlfinder_note = ""
-        scaled = ENUMERATION_PER_HOST_S * max(0, urlfinder_host_count)
-        if urlfinder_override <= 0 and scaled > urlfinder_cap:
-            if (
-                urlfinder_ceiling > 0
-                and urlfinder_cap == urlfinder_ceiling
-                and urlfinder_ceiling < min(float(stage_budget), float(max(180, scaled)))
-            ):
-                clip = f"urls.urlfinder_max_s {urlfinder_ceiling:g}s"
-            elif float(stage_budget) < float(max(180, scaled)):
-                clip = f"stage budget {stage_budget:g}s"
-            else:
-                clip = f"urls.urlfinder_max_s {urlfinder_ceiling:g}s"
-            urlfinder_note = f"formula {scaled}s clipped to {clip}"
-        # The three explicit `urls:` entries stay exactly as they were (D27/D29:
-        # their numbers are asserted in tests); every other tool with a `class:`
-        # in tools.yaml gets that class's formula instead (D48).
-        legacy_limits: dict[str, ToolLimits] = {
-            "urlfinder": ToolLimits(
-                max_s=urlfinder_cap,
-                idle_s=float(urls_config.urlfinder_idle_s),
-                # The inactivity floor cannot outlive the cap itself.
-                min_s=min(float(urls_config.urlfinder_min_s), urlfinder_cap),
-                note=urlfinder_note,
-            ),
-            "hakrawler": ToolLimits(max_s=float(urls_config.hakrawler_max_s)),
-            "subjs": ToolLimits(max_s=float(urls_config.subjs_max_s)),
-        }
+        # pace (2026-11-17, MASTER_PLAN D3). D52: no tool gets a runtime cap. It
+        # runs until it exits, until it has been silent past its class window
+        # (killed, partial output kept), or until the stage budget fires.
+        started_at = time.perf_counter()
         ctx = RunContext(
             target=target,
             hosts=hosts,
             ports=list(opts.ports),
-            timeout=self.config.timeouts.per_tool_default,
+            # D52: the stage budget is the only hard wall, so a tool's watchdog
+            # ceiling is the time the stage has left, not a per-tool default.
+            timeout=max(1.0, stage_budget),
+            stage_started=started_at,
             workspace=workspace.directory,
             mock=opts.mock,
             ip_allowed=ip_allowed,
@@ -1485,13 +1460,23 @@ class Engine:
             ffuf_wordlist=opts.ffuf_wordlist,
             resolvers=opts.resolvers,
             results_dir=Path(self.config.results_dir),
-            # Per-tool runtime bounds from `config.yaml` `urls:` (docs/09 4a2b).
-            limits=self._limits(selected, tool_hosts, hosts, stage_budget, legacy_limits),
+            # D52: an idle window per classed tool; no max_s, no floor.
+            limits=self._limits(selected),
         )
 
         total = len(selected)
         running: set[str] = set()
-        started_at = time.perf_counter()
+        # D52: idle bookkeeping. `last_output` is touched by the adapter (through
+        # `RunContext.activity`) every time its child prints; `windows` is the
+        # class idle for that tool; `killed` holds the sentence a killed tool
+        # reports. `stops` is the flag a binary child watches so it can exit
+        # with its partial output instead of being cancelled outright.
+        last_output: dict[str, float] = {}
+        windows: dict[str, float] = {}
+        stops: dict[str, threading.Event] = {}
+        tasks: dict[str, asyncio.Task[None]] = {}
+        killed: dict[str, str] = {}
+        stop_watch = asyncio.Event()
         # D50: one line per tool that is still running after this many seconds.
         # It is a "still working" signal, not progress: gau printing 1042 URLs in
         # one block has no meaningful percentage, and nothing here parses output.
@@ -1529,18 +1514,108 @@ class Engine:
                 f"{elapsed:.0f}s elapsed - running: {names}"
             )
 
+        def touch(name: str) -> None:
+            """Record that a tool produced output (called from its child's thread)."""
+            last_output[name] = time.perf_counter()
+
+        def request_kill(name: str, elapsed: float) -> None:
+            """Mark a tool for an idle kill and let a binary child exit cleanly.
+
+            The stop flag is what a subprocess sees; an adapter that never looks
+            at it (a pure-Python one) is cancelled after `KILL_GRACE_S`, so the
+            stage still advances. Both paths produce a `killed` result with the
+            same sentence.
+            """
+            if name in killed:
+                return
+            killed[name] = (
+                f"killed after {windows[name]:g}s idle at stage {elapsed:.1f}s, 0 partial"
+            )
+            stop = stops.get(name)
+            if stop is not None:
+                stop.set()
+            asyncio.create_task(cancel_later(name))
+
+        async def cancel_later(name: str) -> None:
+            await asyncio.sleep(KILL_GRACE_S)
+            task = tasks.get(name)
+            if task is not None and not task.done():
+                task.cancel()
+
+        async def watch_idle() -> None:
+            """Kill tools that have gone quiet (D52).
+
+            Two cases matter and neither needs a runtime cap: every running tool
+            silent past its own window (nothing is producing - stop them all at
+            the first window), and one running tool silent with every other tool
+            in the stage already finished (it is alone and stuck).
+            """
+            while not stop_watch.is_set():
+                try:
+                    await asyncio.wait_for(stop_watch.wait(), timeout=IDLE_WATCH_TICK_S)
+                except TimeoutError:
+                    pass
+                else:
+                    return
+                now = time.perf_counter()
+                pending = [name for name in sorted(running) if name not in killed]
+                if not pending:
+                    continue
+                silent = {name: now - last_output.get(name, now) for name in pending}
+                all_idle = all(silent[name] >= windows[name] for name in pending)
+                alone = len(pending) == 1 and silent[pending[0]] >= windows[pending[0]]
+                if not (all_idle or alone):
+                    continue
+                for name in pending:
+                    if silent[name] >= windows[name]:
+                        request_kill(name, now - started_at)
+
         async def one(spec: ToolSpec, adapter: type[BaseToolAdapter]) -> None:
-            overrides: dict[str, object] = {"env": self._tool_env(spec, opts)}
+            stop = threading.Event()
+            stops[spec.name] = stop
+            overrides: dict[str, object] = {
+                "env": self._tool_env(spec, opts),
+                "stop": stop,
+                "activity": partial(touch, spec.name),
+            }
             if spec.name in tool_hosts:
                 # docs/05 rule 6: naabu's verified IPs replace the name list.
                 overrides["hosts"] = tool_hosts[spec.name]
             tool_ctx = ctx.model_copy(update=overrides)
             running.add(spec.name)
+            last_output[spec.name] = time.perf_counter()
+            idle = idle_for_tool(spec.name, self.config, specs=self.specs)
+            windows[spec.name] = float(idle) if idle is not None else math.inf
             heartbeat_started[spec.name] = time.perf_counter()
+            tasks[spec.name] = asyncio.current_task()  # type: ignore[assignment]
             snapshot()
             finished = False
             try:
                 result = await self._run_one(run_id, adapter, tool_ctx, workspace)
+                finished = True
+            except asyncio.CancelledError:
+                detail = killed.get(spec.name)
+                if detail is None:
+                    raise
+                # The watchdog stopped this tool; it never produced a result of
+                # its own, so the engine writes the row and reports the kill.
+                duration = time.perf_counter() - started_at
+                result = ToolResult(
+                    tool=adapter.name,
+                    status=ToolStatus.KILLED,
+                    error=detail,
+                    duration_s=duration,
+                    last_output_s=last_output.get(spec.name, started_at) - started_at,
+                )
+                self._record(
+                    run_id,
+                    adapter.name,
+                    ToolStatus.KILLED,
+                    item_count=0,
+                    duration_s=duration,
+                    error=detail,
+                )
+                self._progress(f"{stage.value}: {adapter.name} killed 0 item(s)")
                 finished = True
             finally:
                 # Both sets move before the snapshot, or the line a finished tool
@@ -1555,53 +1630,31 @@ class Engine:
 
         # No durable-line sink (`--silent`) means no heartbeat task at all.
         beat_task = asyncio.create_task(heartbeat()) if self._progress_cb is not None else None
+        watch_task = asyncio.create_task(watch_idle())
         try:
             await asyncio.gather(*(one(spec, adapter) for spec, adapter in selected))
         finally:
             stop_heartbeat.set()
+            stop_watch.set()
             if beat_task is not None:
                 await asyncio.gather(beat_task, return_exceptions=True)
+            await asyncio.gather(watch_task, return_exceptions=True)
         return ctx
 
-    def _limits(
-        self,
-        selected: Selected,
-        tool_hosts: dict[str, list[str]],
-        hosts: list[str],
-        stage_budget: float,
-        explicit: dict[str, ToolLimits],
-    ) -> dict[str, ToolLimits]:
-        """Per-tool runtime bounds for one stage (docs/09 4a2b, D27/D29/D48).
+    def _limits(self, selected: Selected) -> dict[str, ToolLimits]:
+        """The idle window per tool for one stage (docs/09 4a2b, D52).
 
-        An explicit `config.yaml urls:` entry wins over the tool's class; every
-        other tool with a `class:` in tools.yaml gets that class's formula from
-        `cap_for_tool`. A tool with neither keeps no entry and no cap, exactly as
-        before D48. This is a ceiling, not a timer: it only decides when a tool
-        that is still running is stopped, and a tool that finishes early never
-        sees it.
+        No `max_s` and no `min_s`: a tool runs until it exits, until it is silent
+        past its window, or until the stage budget. A tool with no class and no
+        `idle_s:` entry gets no window at all, so only the stage budget bounds
+        it - the same shape every tool had before any of this existed.
         """
-        limits = dict(explicit)
+        limits: dict[str, ToolLimits] = {}
         for spec, _adapter in selected:
-            if spec.name in limits or spec.class_ is None:
+            idle = idle_for_tool(spec.name, self.config, specs=self.specs)
+            if idle is None:
                 continue
-            computed = cap_for_tool(
-                spec.name,
-                len(tool_hosts.get(spec.name, hosts)),
-                stage_budget,
-                self.config,
-                specs=self.specs,
-            )
-            if computed is None:
-                continue
-            cap, note = computed
-            runtime_class = self.config.runtime_caps[spec.class_]
-            limits[spec.name] = ToolLimits(
-                max_s=cap,
-                idle_s=float(runtime_class.idle),
-                # The inactivity floor cannot outlive the cap itself.
-                min_s=min(float(runtime_class.floor), cap),
-                note=note,
-            )
+            limits[spec.name] = ToolLimits(idle_s=idle)
         return limits
 
     async def _run_one(
@@ -1626,7 +1679,14 @@ class Engine:
             try:
                 result = await asyncio.wait_for(adapter().run(ctx), timeout=ctx.timeout)
             except TimeoutError:
-                result = ToolResult(tool=adapter.name, status=ToolStatus.TIMEOUT, error="timed out")
+                # D52: the budget is the only hard wall left, and reaching it is
+                # still `timeout` (R13/D45): a tool that did not finish in the
+                # stage's time is a real signal. Only an idle kill is `killed`.
+                result = ToolResult(
+                    tool=adapter.name,
+                    status=ToolStatus.TIMEOUT,
+                    error=f"timed out at stage budget {ctx.timeout:g}s",
+                )
             except Exception as exc:
                 result = ToolResult(
                     tool=adapter.name,

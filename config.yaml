@@ -21,32 +21,16 @@ timeouts:
   url_probe: 600      # D26: the probe's own deadline; --phase-timeout overrides it
   vulns: 7200
 
-# Per-tool runtime bounds for the urls stage (docs/09 sections 4a2b and 4a3).
-# urlfinder: never killed before min, killed after `idle` seconds of silent
-# stdout, and never held past max. A capped run keeps the URLs it already found.
-urls:
-  urlfinder_min_s: 180
-  urlfinder_max_s: 0       # 0 = no extra ceiling; stage budget (timeouts.urls / --phase-timeout) is the only bound
-  urlfinder_idle_s: 60
-  hakrawler_max_s: 120
-  subjs_max_s: 60
-
-# urlfinder's whole-enumeration cap scales with the host count (D27):
-#   cap = min(stage deadline, max(180, 4 * hosts))
-# 0 means "use that formula"; a non-zero value replaces it (debugging/CI).
-urlfinder:
-  max_enumeration_s: 0
-
-# Per-class runtime caps (D48). A tool joins a class with one `class:` field in
-# tools.yaml; every member gets min(stage budget, max(floor, per_host * hosts))
-# plus an idle kill after `idle` seconds of silence. A ceiling, not a timer: a
-# tool that finishes early exits immediately. Numbers are educated guesses.
-# `archive` mirrors urlfinder's measured 180 s / 4 s per host / 60 s.
-runtime_caps:
-  crawler: {floor: 90,  per_host: 2,  idle: 60}
-  scanner: {floor: 300, per_host: 30, idle: 120}
-  api:     {floor: 60,  per_host: 1,  idle: 30}
-  archive: {floor: 180, per_host: 4,  idle: 60}
+# Per-class idle windows, in seconds (D52). A tool joins a class with one
+# `class:` field in tools.yaml. There is no runtime cap: a tool runs until it
+# finishes on its own, until it has been silent for its window (probably stuck,
+# so it is killed and its partial output kept), or until the stage budget fires.
+# A single tool overrides its class with `idle_s:` in tools.yaml.
+runtime_idle:
+  crawler: 60
+  scanner: 120
+  archive: 180
+  api: 60
 
 # URL liveness probe (D23, docs/09 section 5). One GET per stored URL that has
 # no status yet; a URL that does not answer is stored as -1 and never retried.

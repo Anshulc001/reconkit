@@ -21,7 +21,6 @@ skipped, not stored: it is not a URL and it is not ours to interpret.
 from __future__ import annotations
 
 from reconkit.adapters.base import BinaryAdapter, is_non_web_reference, normalize_url, strip_ansi
-from reconkit.config import class_cap
 from reconkit.core.runner import validate_host
 from reconkit.errors import ParseError, ToolFailed
 from reconkit.models import Record, RunContext, Stage, UrlRecord
@@ -33,61 +32,14 @@ from reconkit.models import Record, RunContext, Stage, UrlRecord
 # values against testfire.net: 996 URLs in 15 s, against 932 URLs in 554 s for the
 # old command - faster and no worse. `-max-time` still comes from the run budget.
 REQUEST_TIMEOUT_S = 30
-# One slow source can hold the whole enumeration: measured 506 s and 525 s on
-# testfire.net where the same command finished in 15 s once. The bounds are an
-# inactivity kill with a floor and a ceiling, not a flat cap: a target with
-# hundreds of hosts can still be productive at three minutes, while a stuck
-# source is killed 60 s after its last URL (2026-11-18, docs/09 section 4a2b).
-MIN_ENUMERATION_S = 180
-IDLE_ENUMERATION_S = 60
-MAX_ENUMERATION_S = 1800
-# D27: the cap scales with the size of the input list. Four seconds per host,
-# never below the 180 s `testfire.net` was tuned at, never past the stage
-# deadline. 43 hosts -> 180 s (unchanged), 100 -> 400 s, 500 -> 2000 s clipped
-# to the stage budget (and, only when non-zero, to urls.urlfinder_max_s).
-ENUMERATION_PER_HOST_S = 4
-
-
-def enumeration_cap_s(
-    host_count: int,
-    stage_budget: float,
-    *,
-    override: float = 0.0,
-    ceiling: float = 0.0,
-) -> float:
-    """The whole-enumeration cap for one run (D27, docs/09 section 4a2b).
-
-    This tool is the `archive` runtime class (D48), so the numbers are that
-    class's: `min(stage_budget, max(180, 4 * host_count))`, additionally clipped
-    by `urls.urlfinder_max_s` only when that value is non-zero. A positive
-    `override` (`urlfinder.max_enumeration_s`) replaces the formula outright, for
-    debugging and CI. The arithmetic is `config.class_cap`, shared with every
-    other classed tool; the host count and stage budget are still handed in by
-    the engine, because the adapter never reads `config.yaml`.
-    """
-    if override > 0:
-        cap = float(override)
-        if ceiling > 0:
-            cap = min(cap, float(ceiling))
-        return max(1.0, cap)
-    cap, _note = class_cap(
-        MIN_ENUMERATION_S,
-        ENUMERATION_PER_HOST_S,
-        host_count,
-        stage_budget,
-        ceiling=ceiling,
-    )
-    return cap
 
 
 class UrlfinderAdapter(BinaryAdapter):
     # `-max-time` is not enforced by the real binary (measured: still running at
-    # 5m52s with `-max-time 3`), so the adapter bounds the process itself and
-    # keeps whatever arrived. These defaults apply when `config.yaml` supplies no
-    # `urls:` block; the engine's values normally win (docs/09 4a2b/4a3).
-    runtime_cap_s = MAX_ENUMERATION_S
-    idle_timeout_s = IDLE_ENUMERATION_S
-    min_runtime_s = MIN_ENUMERATION_S
+    # 5m52s with `-max-time 3`), so the engine bounds the process and keeps
+    # whatever arrived. D52: there is no runtime cap; the tool carries
+    # `class: archive`, so the engine's 180 s idle window is the only early stop
+    # and a productive enumeration keeps going until it exits or the budget fires.
     name = "urlfinder"
     stage = Stage.URLS
     binary = "urlfinder"
@@ -111,12 +63,12 @@ class UrlfinderAdapter(BinaryAdapter):
     def build_command(self, ctx: RunContext) -> list[str]:
         if not self._hosts(ctx):
             raise ToolFailed("urlfinder: no hosts to query")
-        # Verified: `-all`, `-silent`, `-timeout int`, `-max-time int`, `-nc`.
-        # Both timeouts are capped by the run budget so `--phase-timeout` still
-        # wins; `-max-time` never exceeds MAX_ENUMERATION_S.
+        # Verified on this box (`urlfinder -h`): `-all`, `-silent`, `-nc`,
+        # `-timeout int` (seconds per request), `-max-time int` (minutes for the
+        # whole enumeration). D52: `-max-time` is gone from the argv - the binary
+        # ignores it (measured running at 5m52s with `-max-time 3`) and there is
+        # no runtime cap any more; the stage budget and the idle window bound it.
         budget = max(1, int(ctx.timeout))
-        limits = ctx.limits.get(self.name)
-        ceiling = int(limits.max_s) if limits is not None and limits.max_s else budget
         return [
             self.binary_path() or self.binary,
             "-all",
@@ -124,18 +76,7 @@ class UrlfinderAdapter(BinaryAdapter):
             "-nc",
             "-timeout",
             str(min(REQUEST_TIMEOUT_S, budget)),
-            "-max-time",
-            str(max(1, min(ceiling, MAX_ENUMERATION_S) // 60)),
         ]
-
-    def cap_suffix(self, ctx: RunContext) -> str:
-        """Name the input size (and any saturation reason) on the capped line."""
-        hosts = len(self._hosts(ctx))
-        limits = ctx.limits.get(self.name)
-        note = (limits.note if limits is not None else "") or ""
-        if note:
-            return f" (hosts={hosts}; {note})"
-        return f" (hosts={hosts})"
 
     def stdin_text(self, ctx: RunContext) -> str | None:
         hosts = self._hosts(ctx)

@@ -27,13 +27,13 @@ from reconkit.errors import ToolFailed
 from reconkit.models import Record, RunContext, Stage, UrlRecord
 
 WORKERS = 10
-# One minute: subjs fetches a handful of pages and prints script URLs; on the
-# sakec.ac.in scan it hit the phase budget with 0 items (2.2).
-MAX_RUN_S = 60
+# subjs fetches a handful of pages and prints script URLs; on the sakec.ac.in
+# scan it hit the phase budget with 0 items (2.2). D52: no hard cap - it carries
+# `class: crawler`, so one minute of silence means it is stuck and a productive
+# run is never cut short.
 
 
 class SubjsAdapter(BinaryAdapter):
-    runtime_cap_s = MAX_RUN_S
     name = "subjs"
     stage = Stage.URLS
     binary = "subjs"

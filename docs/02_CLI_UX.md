@@ -321,7 +321,7 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 | `--resolvers PATH` | Resolver list for `massdns` and `puredns`, replacing the packaged `src/reconkit/data/resolvers.txt` (16 public resolvers, D16). The file must exist and be readable; a missing file is a failed `massdns`/`puredns` result, never a silent fallback to the system resolver |
 | `--redact-headers` / `--show-headers` | Hide (default) or reveal header values in JSON and UI output |
 | `--min-sources N` | Hide results confirmed by fewer than N tools |
-| `--phase-timeout SEC` | Stage time limit, applied to **every** stage including the engine-owned `url_probe` (D26). `--timeout-<stage>` is deferred; `--phase-timeout` is the only stage-timeout control in this build. Without it, each stage uses its `timeouts:` entry (`timeouts.url_probe` is 600 s). A stage killed at that deadline is a hard failure and the run exits **5** by design (R13, D45): a tool that did not finish is a real signal, so raise the deadline for a slow target rather than expect a gap. Per-tool caps from a tool's `class:` in `tools.yaml` (D48, `config.yaml` `runtime_caps:`) also apply inside this deadline; they are ceilings, not timers, so a tool that finishes early is never delayed. |
+| `--phase-timeout SEC` | Stage time limit, applied to **every** stage including the engine-owned `url_probe` (D26). `--timeout-<stage>` is deferred; `--phase-timeout` is the only stage-timeout control in this build. Without it, each stage uses its `timeouts:` entry (`timeouts.url_probe` is 600 s). A stage killed at that deadline is a hard failure and the run exits **5** by design (R13, D45): a tool that did not finish is a real signal, so raise the deadline for a slow target rather than expect a gap. There is no per-tool runtime cap (D52): a tool runs until it exits, until it has been silent past its class's idle window (`config.yaml` `runtime_idle:`, the `class:` in `tools.yaml`), or until this deadline. An idle kill is `killed` (exit 0, partial output kept); reaching the deadline is `timeout` (exit 5, as R13/D45 require). A tool that finishes early is never delayed by either. |
 | `--mock` | Use fixtures instead of real tools/network. A mock run is isolated: it stores under the `mock:<target>` target namespace, writes its DB to `~/.reconkit/mock.db` unless `--db` is given, and writes its report under `results/mock/<target>/`, so it can never pollute or overwrite a real run (D30). |
 | `--resume` | Continue the latest unfinished run for the target; completed stages are not repeated |
 | `--no-keys` | Force free mode on the scan commands: ignore API keys from `.env` (policy in docs/05 §6.1) |
@@ -403,7 +403,8 @@ line gains the unique count when any duplicate exists:
 `20 hosts (18 unique after www-dedup): 12 ALIVE, ...`.
 
 - A final summary line: counts per state and tool statuses. New items are shown by `diff`, not in the stage summary.
-- A "Tools" table lists each adapter with stage, status (`ok`, `gap`, `skipped`, `failed`, `timeout`), item count and a short detail.
+- A "Tools" table lists each adapter with stage, status (`ok`, `gap`, `skipped`, `failed`, `timeout`, `killed`), item count, time taken, how stale its last output was and a short detail. The `Last output` column is `-` except for a `killed` row, where it is the number of seconds since the tool last printed anything - what tells a stuck tool apart from a slow one that is still working (D52).
+- A stop is not a failure: a tool the idle watchdog killed keeps every record it had already produced, the summary line gains `N killed` only when N is above zero, and stderr gains the block below. A run whose tools were all killed still exits `0`.
 
 **`gap` is a tool status, not a failure (owner ruling 2026-11-18).** An adapter whose upstream refused the request for a reason that is not about the tool - HTTP 429/rate limiting, a free-quota message, or an HTTP 5xx from the service it calls - is recorded `gap` with the service's own message in the detail column. It keeps whatever data it did return (usually none), it does **not** make the run partial (exit `5`), and it appears in the completion gaps block: the scan used every tool that was available, the third party simply did not answer. Every other non-zero outcome stays `failed`/`timeout` and still exits `5`.
 
@@ -423,7 +424,7 @@ The `hosts` objects always carry `state`, `confidence` and `sources`; the top-le
 
 `completion` is always present (section 6): `status` is `complete` or `complete_with_gaps`, and `gaps` lists one object per incomplete stage: either a requested stage that had no runnable tool, `{"stage": "urls", "reason": "no adapter yet (phase 3)"}`, or a stage where an executed tool hit an external-service problem, `{"stage": "subs", "reason": "otx: rate limited (HTTP 429)"}`. A consumer that only cares whether the run was usable reads `status`; one that wants to explain the shortfall reads `gaps`.
 
-The `summary` object also carries `tools_gap`, the number of executed tools with the `gap` status, beside `tools_ok`/`tools_failed`/`tools_skipped`/`tools_timeout`. `tools_timeout` counts the tools the phase deadline killed (`--phase-timeout`, D38), which is why it can be non-zero even when `records` are empty.
+The `summary` object also carries `tools_gap`, the number of executed tools with the `gap` status, beside `tools_ok`/`tools_failed`/`tools_skipped`/`tools_timeout`, and `tools_killed` (D52), the tools the idle watchdog stopped with their partial output kept. `tools_timeout` counts the tools the phase deadline stopped (`--phase-timeout`, D38), which is why it can be non-zero even when `records` are empty; a `killed` row carries `last_output_s`, the seconds since it last produced output.
 
 With a filter flag (`--only-alive`, `--only-states`, `--status-codes`) the
 `hosts` array is already filtered and a top-level `filter` object is added:
@@ -586,6 +587,23 @@ skip count, because nothing was skipped:
 ```
 
 The count on each line is the number of tools skipped for an absence reason, so a stage whose pool also contains exploitation-class tools reports only the absent ones (that is why `vulns` reads 5, not 8). The same data is in `--json` as `completion` (section 5). This replaced the 2026-11-17 rule that made every zero-tool stage exit 5 (owner ruling, `docs/MASTER_PLAN.md` D9).
+
+**The "stopped early" block (D52, 2026-11-19).** A tool the idle watchdog stopped is not a
+failure, so it gets its own stderr-only block instead of a gap - the run did use the
+tool, it just went quiet. `ui.render_killed_tools()` prints it, nothing at all when
+nothing was killed, `--silent` suppresses it, and the exit code stays `0`. A stage
+budget timeout is **not** in this block: it keeps `status: timeout` and exit `5`
+(R13/D45).
+
+```text
+⚠ 2 tool(s) stopped early — partial output kept
+  gau: killed after 60s idle at stage 412.3s, 1042 partial
+  urlfinder: killed after 180s idle at stage 611.0s, 996 partial
+  raise that class's window under runtime_idle: in config.yaml, or the stage budget with --phase-timeout.
+```
+
+The same data is in `--json` as `summary.tools_killed` plus one `results[]` object per
+tool with `status: "killed"`, `last_output_s` and the detail in `error`.
 
 **Precedence, highest first** (one decision site, `Engine._exit_code`):
 

@@ -688,10 +688,11 @@ async def test_phase_timeout_records_a_timeout_row(tmp_path: Path) -> None:
         ("slow", ToolStatus.TIMEOUT)
     ]
     # Every selected tool timed out, so this is "nothing usable" (4), not 5 -
-    # the documented all-failed boundary (D34).
+    # the documented all-failed boundary (D34). D52 keeps this exactly: only an
+    # idle kill is `killed` and exits 0.
     assert summary.exit_code is ExitCode.NO_TOOL
     row = engine.store._conn.execute("SELECT status, error FROM tool_runs").fetchone()
-    assert (row["status"], row["error"]) == ("timeout", "phase timeout")
+    assert (row["status"], row["error"]) == ("timeout", "timed out at stage budget 1s")
 
 
 async def test_tool_error_is_redacted_before_storage(tmp_path: Path) -> None:
@@ -1651,23 +1652,23 @@ async def test_exit_code_clean_is_success(tmp_path: Path) -> None:
     specs = {"a": tool("a", Stage.SUBS)}
     adapters = {"a": adapter("a", Stage.SUBS, rec, records=[])}
     summary = await make_engine(tmp_path, specs, adapters).run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True)
+        "example.com", ScanOptions(stages=(Stage.SUBS,), active=True, mock=True)
     )
     assert summary.exit_code is ExitCode.SUCCESS
 
 
-async def test_url_tools_receive_the_configured_runtime_bounds(tmp_path: Path) -> None:
-    """2.2/2.3/D27: the engine hands `config.yaml` `urls:` down as RunContext.limits.
+async def test_tools_receive_the_configured_idle_windows(tmp_path: Path) -> None:
+    """D52: the engine hands `runtime_idle` down as `RunContext.limits`.
 
-    An adapter never reads config.yaml itself (docs/09 section 4a2b). D27 makes
-    urlfinder's ceiling a function of the input size: one host is the 180 s floor,
-    not the old flat 1800 s.
+    An adapter never reads config.yaml itself (docs/09 section 4a2b). A tool gets
+    the window of its own `class:` and nothing else - no cap, no floor. The urls
+    tools are the ones that used to carry caps, so their classes are pinned too.
     """
     seen: dict[str, object] = {}
 
     class Urls(BaseToolAdapter):
         name = "urls-fake"
-        stage = Stage.URLS
+        stage = Stage.SUBS
 
         async def run(self, ctx: RunContext) -> ToolResult:
             seen.update(ctx.limits)
@@ -1676,15 +1677,22 @@ async def test_url_tools_receive_the_configured_runtime_bounds(tmp_path: Path) -
         def parse_output(self, raw: str) -> list[Record]:
             return []
 
-    specs = {"urls-fake": tool("urls-fake", Stage.URLS)}
+    # A python-kind row, so the run does not need an installed binary; the class
+    # is what this test is about.
+    from dataclasses import replace
+
+    spec = replace(tool("urls-fake", Stage.SUBS, mode=Mode.ACTIVE), class_="archive")
+    specs = {"urls-fake": spec}
     summary = await make_engine(tmp_path, specs, {"urls-fake": Urls}).run(
-        "example.com", ScanOptions(stages=(Stage.URLS,), active=True, mock=True)
+        "example.com", ScanOptions(stages=(Stage.SUBS,), active=True, mock=True)
     )
     assert summary.exit_code is ExitCode.SUCCESS
-    urlfinder = seen["urlfinder"]
-    assert (urlfinder.max_s, urlfinder.idle_s, urlfinder.min_s) == (180.0, 60.0, 180.0)
-    assert seen["hakrawler"].max_s == 120.0
-    assert seen["subjs"].max_s == 60.0
+    assert seen["urls-fake"].idle_s == 180.0  # class: archive
+    assert set(seen["urls-fake"].model_dump()) == {"idle_s"}
+    # The real registry rows the urls stage selects, and the class each carries.
+    assert get_spec("urlfinder").class_ == "archive"
+    assert get_spec("hakrawler").class_ == "crawler"
+    assert get_spec("subjs").class_ == "crawler"
 
 
 def _dedup_run(
@@ -1879,7 +1887,7 @@ async def test_exit_code_all_tools_failed_is_no_tool(tmp_path: Path) -> None:
         "b": adapter("b", Stage.SUBS, rec, error=RuntimeError("b")),
     }
     summary = await make_engine(tmp_path, specs, adapters).run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True)
+        "example.com", ScanOptions(stages=(Stage.SUBS,), active=True, mock=True)
     )
     assert summary.exit_code is ExitCode.NO_TOOL
 
@@ -1892,7 +1900,7 @@ async def test_exit_code_partial_success(tmp_path: Path) -> None:
         "b": adapter("b", Stage.SUBS, rec, error=RuntimeError("b")),
     }
     summary = await make_engine(tmp_path, specs, adapters).run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True)
+        "example.com", ScanOptions(stages=(Stage.SUBS,), active=True, mock=True)
     )
     assert summary.exit_code is ExitCode.PARTIAL
 
@@ -1956,7 +1964,7 @@ async def test_a_gap_never_masks_a_real_failure(tmp_path: Path) -> None:
         "crtsh": adapter("crtsh", Stage.SUBS, rec, error=RuntimeError("boom")),
     }
     summary = await make_engine(tmp_path, specs, adapters).run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True)
+        "example.com", ScanOptions(stages=(Stage.SUBS,), active=True, mock=True)
     )
     assert summary.exit_code is ExitCode.PARTIAL
     assert [gap.stage for gap in summary.gaps] == [Stage.SUBS]
@@ -1970,7 +1978,7 @@ async def test_exit_code_tool_crash_is_partial(tmp_path: Path) -> None:
         "b": adapter("b", Stage.SUBS, rec, error=RuntimeError("crash")),
     }
     summary = await make_engine(tmp_path, specs, adapters).run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True)
+        "example.com", ScanOptions(stages=(Stage.SUBS,), active=True, mock=True)
     )
     assert summary.exit_code is ExitCode.PARTIAL
     assert any(result.status is ToolStatus.FAILED for result in summary.results)
@@ -3890,7 +3898,7 @@ async def test_degraded_tools_never_exit_five_but_a_local_fault_does(tmp_path: P
     }
     specs = {name: tool(name, Stage.SUBS) for name in upstream}
     summary = await make_engine(tmp_path, specs, upstream).run(
-        "example.com", ScanOptions(stages=(Stage.SUBS,), mock=True)
+        "example.com", ScanOptions(stages=(Stage.SUBS,), active=True, mock=True)
     )
     assert summary.exit_code is ExitCode.SUCCESS
     assert summary.completion_status == "complete_with_gaps"
@@ -4054,7 +4062,7 @@ async def test_live_still_scans_the_apex_when_nothing_was_discovered(tmp_path: P
     assert summary.exit_code is ExitCode.SUCCESS
 
 
-# ---- D48: runtime classes drive per-tool caps ---------------------------------
+# ---- D52: runtime classes drive idle windows, never caps -----------------------
 
 
 def class_spec(name: str, class_: str | None, stage: Stage = Stage.URLS) -> ToolSpec:
@@ -4082,111 +4090,117 @@ class NoopAdapter(BaseToolAdapter):
 def limits_for(
     tmp_path: Path,
     specs: Mapping[str, ToolSpec],
-    hosts: list[str],
-    *,
-    budget: float = 1800.0,
-    tool_hosts: dict[str, list[str]] | None = None,
 ) -> dict[str, object]:
     engine = make_engine(tmp_path, specs, {})
     selected = [(spec, NoopAdapter) for spec in specs.values()]
-    return engine._limits(selected, tool_hosts or {}, hosts, budget, {})
+    return engine._limits(selected)
 
 
-def test_gau_cap_scales_with_class_config(tmp_path: Path) -> None:
-    """D48: `class: crawler` -> min(budget, max(90, 2 * hosts)), announced when clipped."""
-    specs = {"gau": class_spec("gau", "crawler")}
-    eight = limits_for(tmp_path, specs, [f"h{i}.example.com" for i in range(8)])
-    assert eight["gau"].max_s == 90  # the floor wins on a small target
-    assert eight["gau"].idle_s == 60
-
-    many = limits_for(tmp_path, specs, [f"h{i}.example.com" for i in range(500)])
-    assert many["gau"].max_s == 1000  # 2 s per host, past the floor
-
-    huge = limits_for(tmp_path, specs, [f"h{i}.example.com" for i in range(1000)])
-    assert huge["gau"].max_s == 1800  # 2000 wanted, clipped to the stage budget
-    assert huge["gau"].note == "formula 2000s clipped to stage budget 1800s"
+def test_a_classed_tool_gets_its_class_idle_window(tmp_path: Path) -> None:
+    """D52: `class: crawler` -> 60 s of silence, and nothing else."""
+    limits = limits_for(tmp_path, {"gau": class_spec("gau", "crawler")})
+    assert limits["gau"].idle_s == 60.0
+    # There is no cap left to hold: the model has exactly one field.
+    assert set(limits["gau"].model_dump()) == {"idle_s"}
 
 
-def test_nikto_cap_uses_scanner_class(tmp_path: Path) -> None:
-    """D48: `class: scanner` -> floor 300 s, idle kill 120 s."""
-    specs = {"nikto": class_spec("nikto", "scanner", Stage.VULNS)}
-    limits = limits_for(tmp_path, specs, ["example.com"], budget=7200.0)
-    assert limits["nikto"].max_s == 300
-    assert limits["nikto"].idle_s == 120
-    assert limits["nikto"].min_s == 300
-
-
-def test_a_tool_with_no_class_gets_no_cap(tmp_path: Path) -> None:
-    """D48: an unclassed tool is not capped, exactly as before this change."""
-    limits = limits_for(tmp_path, {"waybackurls": class_spec("waybackurls", None)}, ["example.com"])
+def test_a_tool_with_no_class_gets_no_idle_window(tmp_path: Path) -> None:
+    """D52: an unclassed tool has no window; only the stage budget bounds it."""
+    limits = limits_for(tmp_path, {"waybackurls": class_spec("waybackurls", None)})
     assert limits == {}
 
 
-async def test_a_tool_that_exits_early_is_not_delayed_by_the_cap(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Acceptance for "a ceiling, not a timer": a fast tool pays nothing.
+def test_a_tool_idle_s_entry_wins_over_its_class(tmp_path: Path) -> None:
+    """D52: one `idle_s:` in tools.yaml overrides the class for that one tool."""
+    from dataclasses import replace
 
-    The tool is classed `crawler` (a 90 s ceiling), runs for ~0.2 s and must
-    finish in well under a second: the cap never sleeps, waits or pads a run.
-    """
-
-    class Quick(BaseToolAdapter):
-        name = "quick"
-        stage = Stage.URLS
-        stage_spec = class_spec("quick", "crawler")
-
-        async def run(self, ctx: RunContext) -> ToolResult:
-            await asyncio.sleep(0.2)
-            return ToolResult(tool=self.name, status=ToolStatus.OK, records=[])
-
-    specs = {"quick": Quick.stage_spec}
-    engine = make_engine(tmp_path, specs, {"quick": Quick})
-    started = time.perf_counter()
-    limits = engine._limits([(specs["quick"], Quick)], {}, ["example.com"], 1800.0, {})
-    await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), active=True, mock=True))
-    elapsed = time.perf_counter() - started
-    assert limits["quick"].max_s == 90
-    assert elapsed < 2.0, f"a 0.2 s tool took {elapsed:.2f}s with a 90 s ceiling in place"
+    spec = replace(class_spec("nikto", "scanner", Stage.VULNS), idle_s=45.0)
+    limits = limits_for(tmp_path, {"nikto": spec})
+    assert limits["nikto"].idle_s == 45.0
 
 
-def test_urlfinder_cap_unchanged_by_the_refactor(tmp_path: Path) -> None:
-    """D27/D29's five cases still hold, and the archive class mirrors them."""
-    from reconkit.adapters.urlfinder import (
-        ENUMERATION_PER_HOST_S,
-        IDLE_ENUMERATION_S,
-        MIN_ENUMERATION_S,
-        enumeration_cap_s,
+def test_an_unknown_class_is_a_config_error(tmp_path: Path) -> None:
+    """D52: a typo in `class:` must not silently mean "no window at all"."""
+    specs = {"mystery": class_spec("mystery", "crawlerr")}
+    engine = make_engine(tmp_path, specs, {})
+    with pytest.raises(ConfigError, match="crawlerr"):
+        engine._limits([(specs["mystery"], NoopAdapter)])
+
+
+class SilentAdapter(BaseToolAdapter):
+    """A tool that never prints anything: the idle watchdog's target."""
+
+    name = "quiet"
+    stage = Stage.SUBS
+
+    async def run(self, ctx: RunContext) -> ToolResult:
+        await asyncio.Event().wait()
+        return ToolResult(tool=self.name, status=ToolStatus.OK)  # pragma: no cover
+
+    def parse_output(self, raw: str) -> list[Record]:
+        return []
+
+
+class ChattyAdapter(BaseToolAdapter):
+    """A tool that keeps producing output, however slowly."""
+
+    name = "chatty"
+    stage = Stage.SUBS
+
+    async def run(self, ctx: RunContext) -> ToolResult:
+        for _ in range(6):
+            await asyncio.sleep(0.1)
+            if ctx.activity is not None:
+                ctx.activity()
+        return ToolResult(tool=self.name, status=ToolStatus.OK, records=[])
+
+    def parse_output(self, raw: str) -> list[Record]:
+        return []
+
+
+def _short_crawler_window(engine: Engine) -> None:
+    """A 0.3 s crawler window, so a kill test does not take a minute."""
+    from reconkit.config import RuntimeClassConfig
+
+    engine.config = engine.config.model_copy(
+        update={
+            "runtime_idle": {"crawler": RuntimeClassConfig(idle=0.3)},
+        }
     )
-    from reconkit.config import DEFAULT_RUNTIME_CAPS
 
-    assert enumeration_cap_s(43, 1800) == 180
-    assert enumeration_cap_s(100, 1800) == 400
-    assert enumeration_cap_s(500, 1800) == 1800
-    assert enumeration_cap_s(2000, 3600, ceiling=1800) == 1800
-    assert enumeration_cap_s(2000, 3600) == 3600
 
-    archive = DEFAULT_RUNTIME_CAPS["archive"]
-    assert (archive.floor, archive.per_host, archive.idle) == (
-        MIN_ENUMERATION_S,
-        ENUMERATION_PER_HOST_S,
-        IDLE_ENUMERATION_S,
+async def test_a_silent_tool_is_killed_and_reported(tmp_path: Path) -> None:
+    """D52: silence past the class window kills the tool, and the run says so."""
+    spec = class_spec("quiet", "crawler", Stage.SUBS)
+    engine = make_engine(tmp_path, {"quiet": spec}, {"quiet": SilentAdapter})
+    _short_crawler_window(engine)
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), active=True, mock=True)
     )
-    # The explicit `urls:` entry still wins for urlfinder itself (same numbers).
-    urlfinder_spec = class_spec("urlfinder", "archive")
-    engine = make_engine(tmp_path, {"urlfinder": urlfinder_spec}, {})
-    limits = engine._limits(
-        [(urlfinder_spec, NoopAdapter)],
-        {},
-        [f"h{i}.example.com" for i in range(43)],
-        1800.0,
-        {"urlfinder": engine_module.ToolLimits(max_s=180.0)},
+    killed = summary.stages[0].results
+    assert [(result.tool, result.status) for result in killed] == [("quiet", ToolStatus.KILLED)]
+    assert killed[0].error is not None and "killed after 0.3s idle" in killed[0].error
+    row = engine.store._conn.execute("SELECT status, error FROM tool_runs").fetchone()
+    assert row["status"] == "killed"
+    assert "killed after 0.3s idle" in row["error"]
+    # A kill is a deliberate stop, not a broken tool: today's run still completed.
+    assert summary.exit_code is ExitCode.SUCCESS
+
+
+async def test_a_productive_tool_is_not_killed_at_its_idle_window(tmp_path: Path) -> None:
+    """D52: activity resets the clock - a slow but working tool runs to the end."""
+    spec = class_spec("chatty", "crawler", Stage.SUBS)
+    engine = make_engine(tmp_path, {"chatty": spec}, {"chatty": ChattyAdapter})
+    _short_crawler_window(engine)
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.SUBS,), active=True, mock=True)
     )
-    assert limits["urlfinder"].max_s == 180
+    statuses = [result.status for result in summary.stages[0].results]
+    assert statuses == [ToolStatus.OK]
 
 
 def test_a_new_tool_with_class_in_tools_yaml_needs_no_engine_edit(tmp_path: Path) -> None:
-    """D48's zero-edit claim: a new crawler is a tools.yaml row, not a code change."""
+    """D52's zero-edit claim: a new crawler is a tools.yaml row, not code."""
     from reconkit.adapters.registry import load_tools
 
     registry = tmp_path / "tools.yaml"
@@ -4207,8 +4221,8 @@ def test_a_new_tool_with_class_in_tools_yaml_needs_no_engine_edit(tmp_path: Path
     specs = load_tools(registry)
     assert specs["newcrawl"].class_ == "crawler"
 
-    limits = limits_for(tmp_path, specs, [f"h{i}.example.com" for i in range(10)])
-    assert limits["newcrawl"].max_s == 90  # crawler floor, no code naming the tool
+    limits = limits_for(tmp_path, specs)
+    assert limits["newcrawl"].idle_s == 60.0  # crawler window, no code names the tool
     source = Path(engine_module.__file__).read_text(encoding="utf-8")
     assert "newcrawl" not in source
 

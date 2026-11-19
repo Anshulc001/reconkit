@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
@@ -57,6 +58,10 @@ class ToolStatus(StrEnum):
     SKIPPED = "skipped"
     FAILED = "failed"
     TIMEOUT = "timeout"
+    # D52: the engine stopped this tool on purpose - it went silent past its idle
+    # window, or the stage budget fired. It is a deliberate stop, not a failure:
+    # whatever it produced is kept and reported (docs/09 section 4a2b).
+    KILLED = "killed"
 
 
 class SubdomainRecord(BaseModel):
@@ -118,6 +123,9 @@ class ToolResult(BaseModel):
     duration_s: float = 0.0
     error: str | None = None
     raw_path: str | None = None
+    # D52: seconds since this tool last printed anything when it was stopped.
+    # None means "it finished on its own" (or the adapter cannot tell).
+    last_output_s: float | None = None
     # Captured output for the raw-output file (docs/09 section 3). It is
     # unredacted in memory and redacted only by Workspace.write, so it is
     # excluded from every serialization (`--json` included).
@@ -131,18 +139,15 @@ class InstallStatus(BaseModel):
 
 
 class ToolLimits(BaseModel):
-    """Per-tool runtime bounds the engine reads from `config.yaml` (`urls:`).
+    """One tool's runtime bounds for one run (D52, docs/09 section 4a2b).
 
-    `max_s` is a hard cap, `idle_s` kills a tool whose stdout has been silent
-    that long and `min_s` is the floor below which idleness cannot kill. They
-    reach an adapter through `RunContext.limits`, so an adapter never reads the
-    config file itself (docs/09 sections 4a2b and 4a3).
+    Only `idle_s` exists: how long the tool's stdout may stay silent before it
+    is killed. There is no `max_s` (the stage budget is the only hard wall) and
+    no `min_s` (the floors went with the caps). The value reaches an adapter
+    through `RunContext.limits`, so an adapter never reads the config file.
     """
 
-    max_s: float | None = None
     idle_s: float | None = None
-    min_s: float | None = None
-    note: str = ""
 
 
 class RunContext(BaseModel):
@@ -170,8 +175,17 @@ class RunContext(BaseModel):
     # The configured results root, so a per-run artifact adapter (gowitness,
     # D17) writes under the same `results/` the reports use.
     results_dir: Path | None = None
-    # Runtime bounds per tool name, from `config.yaml` `urls:` (docs/09 4a2b).
+    # The idle window per tool name, from `runtime_idle:` / `class:` (D52).
     limits: dict[str, ToolLimits] = {}
+    # D52: when this stage started (a `time.perf_counter()` value). A killed
+    # tool reports "at stage <n>s" from it; 0 means "not measured".
+    stage_started: float = 0.0
+    # D52: called by the adapter whenever its child produces output, so the
+    # engine's idle watchdog sees real activity and not just task liveness.
+    activity: Callable[[], None] | None = None
+    # D52: set when the engine wants this tool stopped; a subprocess adapter
+    # passes it to `run_exec`, which kills the child and keeps its partial stdout.
+    stop: threading.Event | None = None
     # docs/05 rule 6: the loaded scope's `in_scope_cidrs` check, handed down by the
     # engine so an adapter can refuse a resolved address without importing `scope`.
     # `None` means "no permission": an adapter that connects to a resolved address

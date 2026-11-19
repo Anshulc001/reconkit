@@ -42,6 +42,8 @@ _STATUS_STYLES: dict[ToolStatus, str] = {
     ToolStatus.SKIPPED: "yellow",
     ToolStatus.FAILED: "red",
     ToolStatus.TIMEOUT: "red",
+    # D52: a kill is a deliberate stop, not a broken tool, so it is not red.
+    ToolStatus.KILLED: "yellow",
 }
 
 
@@ -259,6 +261,9 @@ def summary_document(
             # stage that built nothing cannot read as a stage that found nothing.
             "tools_skipped": tool_counts[ToolStatus.SKIPPED] + len(summary.skipped),
             "tools_timeout": tool_counts[ToolStatus.TIMEOUT],
+            # D52: stopped by the engine (idle window or stage budget), partial
+            # output kept. Counted separately from `timeout`, which stays 0.
+            "tools_killed": tool_counts[ToolStatus.KILLED],
         },
     }
     if filter_info is not None:
@@ -350,11 +355,18 @@ def _host_table(rows: list[HostRow]) -> Table:
 
 
 def _tool_table(summary: ScanSummary) -> Table:
+    """The per-tool table: what ran, how long, and how stale its last output was.
+
+    D52: the `Last output` column is what tells a killed tool apart from a slow
+    one that is still working; it is `-` for a tool that never had a window.
+    """
     table = Table(title="Tools", header_style="bold")
     table.add_column("Tool")
     table.add_column("Stage")
     table.add_column("Status")
     table.add_column("Items")
+    table.add_column("Time")
+    table.add_column("Last output")
     table.add_column("Details")
     for stage in summary.stages:
         for result in stage.results:
@@ -363,6 +375,12 @@ def _tool_table(summary: ScanSummary) -> Table:
                 Text(stage.stage.value),
                 Text(result.status.value, style=_STATUS_STYLES[result.status]),
                 Text(str(len(result.records))),
+                Text(f"{result.duration_s:.1f}s"),
+                Text(
+                    f"{result.last_output_s:.0f}s ago"
+                    if result.status is ToolStatus.KILLED
+                    else "-"
+                ),
                 Text(result.error or "-"),
             )
         for skip in stage.skipped:
@@ -370,6 +388,8 @@ def _tool_table(summary: ScanSummary) -> Table:
                 Text(skip.tool),
                 Text(stage.stage.value),
                 Text(ToolStatus.SKIPPED.value, style=_STATUS_STYLES[ToolStatus.SKIPPED]),
+                Text("-"),
+                Text("-"),
                 Text("-"),
                 Text(skip.reason),
             )
@@ -832,9 +852,11 @@ def render(
             filter_info=filter_info,
             injections=injections,
         )
-        # The block is stderr-only, so stdout stays a single clean document.
+        # The blocks are stderr-only, so stdout stays a single clean document.
         if not silent:
-            render_completion_gaps(summary, console=make_console(stderr, no_color=no_color))
+            side_console = make_console(stderr, no_color=no_color)
+            render_killed_tools(summary, console=side_console)
+            render_completion_gaps(summary, console=side_console)
         return code
     if silent:
         return int(summary.exit_code)
@@ -876,14 +898,50 @@ def render(
             + " | tools: "
             + f"{tools[ToolStatus.OK]} ok, {tools[ToolStatus.GAP]} gap, "
             + f"{tools[ToolStatus.FAILED]} failed, "
-            + f"{tools[ToolStatus.SKIPPED] + len(summary.skipped)} skipped, "
-            + f"{tools[ToolStatus.TIMEOUT]} timeout"
+            + f"{tools[ToolStatus.SKIPPED] + len(summary.skipped)} skipped"
+            # D52: only shown when something was stopped, so an ordinary run's
+            # line is byte-identical to before the batch.
+            + (f", {tools[ToolStatus.KILLED]} killed" if tools[ToolStatus.KILLED] else "")
+            + f", {tools[ToolStatus.TIMEOUT]} timeout"
         )
         target.print(Text(summary_line))
     for warning in summary.warnings:
         target.print(Text(f"warning: {warning}", style="yellow"))
+    render_killed_tools(summary, console=target)
     render_completion_gaps(summary, console=target)
     return int(summary.exit_code)
+
+
+def render_killed_tools(
+    summary: ScanSummary,
+    *,
+    console: Console | None = None,
+    no_color: bool = False,
+) -> None:
+    """Render the "what got stuck" block on stderr (docs/02 section 6, D52).
+
+    A killed tool is not a failure: the engine stopped it and kept the output it
+    had already produced. Silence when nothing was killed, so an ordinary run's
+    output is byte-identical to before this batch.
+    """
+    killed = [result for result in summary.results if result.status is ToolStatus.KILLED]
+    if not killed:
+        return
+    target = console if console is not None else make_console(no_color=no_color)
+    target.print(
+        Text(
+            f"⚠ {len(killed)} tool(s) stopped early — partial output kept",
+            style="yellow",
+        )
+    )
+    for result in killed:
+        target.print(Text(f"  {result.tool}: {result.error or 'stopped'}"))
+    target.print(
+        Text(
+            "  raise that class's window under runtime_idle: in config.yaml, or the "
+            "stage budget with --phase-timeout."
+        )
+    )
 
 
 def render_completion_gaps(

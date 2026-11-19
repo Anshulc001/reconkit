@@ -23,3 +23,7 @@ dist/
 .vscode/
 .idea/
 .DS_Store
+
+# scale fixtures and capture data (2026-11-19): generated, never committed
+bench/
+captures/

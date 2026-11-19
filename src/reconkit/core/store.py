@@ -16,7 +16,7 @@ from pathlib import Path
 
 from reconkit.errors import ConfigError
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 REDACTED = "***"
 # docs/04 section 5: the stored reason is one line of at most this many characters.
 DETAIL_MAX_CHARS = 200
@@ -198,6 +198,27 @@ _SCHEMA_V10 = """
 ALTER TABLE urls ADD COLUMN status_code INTEGER;
 """
 
+# docs/04 section 11 (2026-11-19, MASTER_PLAN D52): a tool the engine stopped
+# (idle watchdog or stage budget) keeps its partial output, so its run is
+# `killed` - not `failed` and not `timeout`. The CHECK is rebuilt once more;
+# every existing row is copied unchanged and nothing references tool_runs.
+_SCHEMA_V11 = """
+CREATE TABLE tool_runs_new (
+  id           INTEGER PRIMARY KEY,
+  run_id       INTEGER NOT NULL REFERENCES scan_runs(id),
+  tool         TEXT NOT NULL,
+  status       TEXT NOT NULL CHECK (status IN ('ok','gap','skipped','failed','timeout',
+                                              'killed')),
+  item_count   INTEGER NOT NULL DEFAULT 0,
+  duration_s   REAL,
+  error        TEXT
+);
+INSERT INTO tool_runs_new (id, run_id, tool, status, item_count, duration_s, error)
+  SELECT id, run_id, tool, status, item_count, duration_s, error FROM tool_runs;
+DROP TABLE tool_runs;
+ALTER TABLE tool_runs_new RENAME TO tool_runs;
+"""
+
 _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, _SCHEMA_V1),
     (2, _SCHEMA_V2),
@@ -209,6 +230,7 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (8, _SCHEMA_V8),
     (9, _SCHEMA_V9),
     (10, _SCHEMA_V10),
+    (11, _SCHEMA_V11),
 )
 
 _COUNT_SQL: dict[str, str] = {

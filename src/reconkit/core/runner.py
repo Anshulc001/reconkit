@@ -9,7 +9,7 @@ import signal
 import subprocess
 import threading
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import IO
 
@@ -42,6 +42,9 @@ class ExecResult(BaseModel):
     # True when the kill came from the inactivity clock, not the total timeout;
     # an adapter reports the two differently in its detail line (docs/09 4a2b).
     idle_killed: bool = False
+    # D52: seconds since stdout last grew when the child was stopped. A tool that
+    # was killed on the stage budget reports this; a clean exit is 0.
+    last_output_s: float = 0.0
 
 
 def validate_target(target: str) -> str:
@@ -98,6 +101,8 @@ def run_exec(
     stdin_text: str | None = None,
     idle_timeout: float | None = None,
     min_runtime: float = 0.0,
+    stop_event: threading.Event | None = None,
+    on_output: Callable[[], None] | None = None,
 ) -> ExecResult:
     """Run one program without a shell and return its captured output.
 
@@ -113,6 +118,11 @@ def run_exec(
     has been silent that long, but never before `min_runtime` seconds have
     elapsed. That is how a source that has stopped answering is told apart from
     one that is still working (docs/09 section 4a2b).
+
+    `stop_event` is the engine's own kill switch (D52): when it is set the child
+    is stopped the same way an idle kill stops it, so the adapter still parses
+    the partial output it produced. `on_output` is called on every stdout chunk,
+    so the engine's idle watchdog sees activity rather than mere liveness.
     """
     _validate_argv(argv)
     if timeout <= 0:
@@ -160,6 +170,8 @@ def run_exec(
             max_output_bytes=max_output_bytes,
             idle_timeout=idle_timeout,
             min_runtime=min_runtime,
+            stop_event=stop_event,
+            on_output=on_output,
         )
     finally:
         # Registered only while the child can still run, so an interrupt cannot
@@ -179,6 +191,8 @@ def _collect(
     max_output_bytes: int,
     idle_timeout: float | None,
     min_runtime: float,
+    stop_event: threading.Event | None = None,
+    on_output: Callable[[], None] | None = None,
 ) -> ExecResult:
     """Drain the child's pipes and wait for it (the body of `run_exec`)."""
     stdout_pipe = process.stdout
@@ -218,6 +232,8 @@ def _collect(
             if watch:
                 with activity_lock:
                     last_activity[0] = time.monotonic()
+                if on_output is not None:
+                    on_output()
             room = max_output_bytes - kept
             if room > 0:
                 chunks.append(chunk[:room])
@@ -241,6 +257,12 @@ def _collect(
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 timed_out = True
+                terminate_tree(process)
+                break
+            if stop_event is not None and stop_event.is_set():
+                # D52: the engine asked this tool to stop (its idle window passed).
+                timed_out = True
+                idle_killed = True
                 terminate_tree(process)
                 break
             try:
@@ -276,6 +298,7 @@ def _collect(
         truncated=truncated,
         duration_s=time.monotonic() - started,
         idle_killed=idle_killed,
+        last_output_s=time.monotonic() - last_activity[0],
     )
 
 

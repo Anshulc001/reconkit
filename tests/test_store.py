@@ -168,7 +168,7 @@ def test_v1_database_migrates_and_defaults_cname_columns(tmp_path: Path) -> None
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 10
+        assert migrated.schema_version == SCHEMA_VERSION == 11
         assert "cnames_json" in columns
         assert "dangling_cname" in columns
         assert "detail" in columns
@@ -206,6 +206,29 @@ def test_v8_database_migrates_the_www_dedup_columns(tmp_path: Path) -> None:
             );
             INSERT INTO host_status_history (subdomain_id, run_id, state, checked_at)
               VALUES (1, 1, 'ALIVE', '2026-11-17T10:00:00Z');
+            -- A real database of this version has scan_runs (tool_runs references it).
+            CREATE TABLE scan_runs (
+              id          INTEGER PRIMARY KEY,
+              target_id   INTEGER NOT NULL,
+              stage       TEXT NOT NULL,
+              status      TEXT NOT NULL,
+              started_at  TEXT NOT NULL,
+              finished_at TEXT,
+              params_json TEXT NOT NULL DEFAULT '{}'
+            );
+            INSERT INTO scan_runs (id, target_id, stage, status, started_at, params_json)
+              VALUES (1, 1, 'subs', 'completed', '2026-11-19T00:00:00Z', '{}');
+            -- A real database of this version has tool_runs; schema 11 rebuilds it.
+            CREATE TABLE tool_runs (
+              id         INTEGER PRIMARY KEY,
+              run_id     INTEGER NOT NULL,
+              tool       TEXT NOT NULL,
+              status     TEXT NOT NULL,
+              item_count INTEGER NOT NULL DEFAULT 0,
+              duration_s REAL,
+              error      TEXT
+            );
+            INSERT INTO tool_runs (id, run_id, tool, status) VALUES (1, 1, 'subfinder', 'ok');
             """
         )
     finally:
@@ -213,7 +236,7 @@ def test_v8_database_migrates_the_www_dedup_columns(tmp_path: Path) -> None:
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 10
+        assert migrated.schema_version == SCHEMA_VERSION == 11
         columns = {
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
@@ -242,6 +265,29 @@ def test_v9_database_migrates_the_url_status_column(tmp_path: Path) -> None:
               url       TEXT NOT NULL
             );
             INSERT INTO urls (target_id, url) VALUES (1, 'https://example.com/a');
+            -- A real database of this version has scan_runs (tool_runs references it).
+            CREATE TABLE scan_runs (
+              id          INTEGER PRIMARY KEY,
+              target_id   INTEGER NOT NULL,
+              stage       TEXT NOT NULL,
+              status      TEXT NOT NULL,
+              started_at  TEXT NOT NULL,
+              finished_at TEXT,
+              params_json TEXT NOT NULL DEFAULT '{}'
+            );
+            INSERT INTO scan_runs (id, target_id, stage, status, started_at, params_json)
+              VALUES (1, 1, 'subs', 'completed', '2026-11-19T00:00:00Z', '{}');
+            -- A real database of this version has tool_runs; schema 11 rebuilds it.
+            CREATE TABLE tool_runs (
+              id         INTEGER PRIMARY KEY,
+              run_id     INTEGER NOT NULL,
+              tool       TEXT NOT NULL,
+              status     TEXT NOT NULL,
+              item_count INTEGER NOT NULL DEFAULT 0,
+              duration_s REAL,
+              error      TEXT
+            );
+            INSERT INTO tool_runs (id, run_id, tool, status) VALUES (1, 1, 'gau', 'ok');
             """
         )
     finally:
@@ -249,7 +295,7 @@ def test_v9_database_migrates_the_url_status_column(tmp_path: Path) -> None:
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 10
+        assert migrated.schema_version == SCHEMA_VERSION == 11
         columns = {str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(urls)")}
         assert "status_code" in columns
         row = migrated._conn.execute("SELECT status_code FROM urls").fetchone()
@@ -437,7 +483,7 @@ def test_v3_database_migrates_the_additive_detail_column(tmp_path: Path) -> None
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 10
+        assert migrated.schema_version == SCHEMA_VERSION == 11
         columns = {
             str(row["name"])
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")
@@ -881,7 +927,7 @@ def test_v2_database_migrates_provenance_with_backfill(tmp_path: Path) -> None:
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(subdomains)")
         }
-        assert migrated.schema_version == SCHEMA_VERSION == 10
+        assert migrated.schema_version == SCHEMA_VERSION == 11
         assert "provenance" in columns
         rows = {
             str(row["fqdn"]): str(row["provenance"])
@@ -1171,7 +1217,7 @@ def test_v4_database_migrates_by_removing_the_speed_column(tmp_path: Path) -> No
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 10
+        assert migrated.schema_version == SCHEMA_VERSION == 11
         columns = {
             str(row["name"]) for row in migrated._conn.execute("PRAGMA table_info(scan_runs)")
         }
@@ -1241,7 +1287,7 @@ def test_v7_database_rebuilds_tool_runs_for_the_gap_status(tmp_path: Path) -> No
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 10
+        assert migrated.schema_version == SCHEMA_VERSION == 11
         row = migrated._conn.execute(
             "SELECT id, run_id, tool, status, item_count, duration_s, error FROM tool_runs"
         ).fetchone()
@@ -1262,6 +1308,66 @@ def test_v7_database_rebuilds_tool_runs_for_the_gap_status(tmp_path: Path) -> No
         assert stored["status"] == "gap"
         with pytest.raises(sqlite3.IntegrityError):
             migrated.record_tool_run(1, "otx", "nonsense")
+    finally:
+        migrated.close()
+
+
+def test_v10_database_accepts_the_killed_status(tmp_path: Path) -> None:
+    """D52: schema 11 rebuilds tool_runs for `killed`; existing rows survive."""
+    db_path = tmp_path / "v10.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE schema_version (version INTEGER NOT NULL);
+        INSERT INTO schema_version (version) VALUES (10);
+        CREATE TABLE urls (
+          id          INTEGER PRIMARY KEY,
+          target_id   INTEGER NOT NULL,
+          url         TEXT NOT NULL,
+          status_code INTEGER
+        );
+        CREATE TABLE scan_runs (
+          id          INTEGER PRIMARY KEY,
+          target_id   INTEGER NOT NULL,
+          stage       TEXT NOT NULL,
+          status      TEXT NOT NULL,
+          started_at  TEXT NOT NULL,
+          finished_at TEXT,
+          params_json TEXT NOT NULL DEFAULT '{}'
+        );
+        INSERT INTO scan_runs (id, target_id, stage, status, started_at, params_json)
+          VALUES (1, 1, 'subs', 'completed', '2026-11-19T00:00:00Z', '{}');
+        CREATE TABLE tool_runs (
+          id           INTEGER PRIMARY KEY,
+          run_id       INTEGER NOT NULL,
+          tool         TEXT NOT NULL,
+          status       TEXT NOT NULL CHECK (status IN ('ok','gap','skipped','failed','timeout')),
+          item_count   INTEGER NOT NULL DEFAULT 0,
+          duration_s   REAL,
+          error        TEXT
+        );
+        INSERT INTO tool_runs (id, run_id, tool, status, item_count, duration_s, error)
+          VALUES (5, 1, 'gau', 'ok', 42, 3.25, NULL);
+        """
+    )
+    conn.close()
+
+    migrated = Store(db_path)
+    try:
+        assert migrated.schema_version == SCHEMA_VERSION == 11
+        row = migrated._conn.execute(
+            "SELECT id, run_id, tool, status, item_count, duration_s FROM tool_runs"
+        ).fetchone()
+        assert (row["id"], row["run_id"], row["tool"], row["status"]) == (5, 1, "gau", "ok")
+        assert (row["item_count"], row["duration_s"]) == (42, 3.25)
+        # The rebuilt table accepts the new value, and still rejects a typo.
+        migrated.record_tool_run(1, "gau", "killed", error="killed after 60s idle")
+        stored = migrated._conn.execute(
+            "SELECT status FROM tool_runs WHERE error = 'killed after 60s idle'"
+        ).fetchone()
+        assert stored["status"] == "killed"
+        with pytest.raises(sqlite3.IntegrityError):
+            migrated.record_tool_run(1, "gau", "nonsense")
     finally:
         migrated.close()
 
@@ -1322,7 +1428,7 @@ def test_v6_database_migrates_the_waf_priority_column(tmp_path: Path) -> None:
 
     migrated = Store(db_path)
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 10
+        assert migrated.schema_version == SCHEMA_VERSION == 11
         columns = {
             str(row["name"]): row
             for row in migrated._conn.execute("PRAGMA table_info(host_status_history)")

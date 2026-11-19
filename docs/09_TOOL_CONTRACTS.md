@@ -233,6 +233,13 @@ keeps `-version` (its own banner) and the ProjectDiscovery markers.
 
 ### 4a2b. Passive-tool timeouts (2026-11-18): gau and urlfinder
 
+> **Superseded by 4a2c (D52, 2026-11-19).** Everything below about `runtime_cap_s`,
+> the `urls:` block, `urlfinder.max_enumeration_s` and the `cap_s` formula is
+> history: those keys and constants no longer exist. What survives from this
+> section is the per-request flag fix (`--timeout 45` for `gau`, `-timeout 30`
+> for `urlfinder`), the `waybackurls` apex rule, and the fact that a stopped run
+> keeps its partial stdout.
+
 Both archive readers were passing the per-tool **run budget** into a flag that
 means a **per-request HTTP timeout**, which made them slower than their own
 defaults and, for `gau`, fatal:
@@ -334,6 +341,60 @@ This is deliberately limited to the **passive** tools and to these two
 one-process-per-item tools. Other active tools are bounded by the phase timeout
 only, because their work *is* the scan.
 
+### 4a2c. Idle-only runtime: the caps are gone (D52, 2026-11-19)
+
+**There is no per-tool runtime cap anywhere in the code.** A tool runs until one
+of exactly three things happens:
+
+1. it produces its own output and exits - the normal case, and nothing delays it;
+2. the engine's **idle watchdog** sees it silent past its class window and stops
+   it, keeping every record it had already printed (`status: killed`);
+3. the **stage budget** fires (`--phase-timeout`, else `timeouts.<stage>`) - still
+   `status: timeout`, because a tool that did not finish in the stage's time is a
+   real signal (R13, D45 stands unchanged).
+
+Deleted in this batch: `BinaryAdapter.runtime_cap_s`, `min_runtime_s`,
+`RuntimeClassConfig.floor`/`per_host`, `UrlsConfig`, `UrlfinderConfig`,
+`config.class_cap()`, `ToolLimits.max_s`/`min_s`/`note`, and the `urls:` /
+`urlfinder:` blocks of `config.yaml`. `ToolLimits` now holds one field, `idle_s`.
+`runner.run_exec` lost its `min_runtime` floor along with them.
+
+**The windows.** `config.yaml` `runtime_idle:` is the only runtime bound, and a
+class carries one number - how long the tool may stay **silent**:
+
+| class | idle window | members today |
+|---|---|---|
+| `crawler` | 60 s | `gau`, `katana`, `hakrawler`, `gospider`, `subjs` |
+| `scanner` | 120 s | `nikto` |
+| `api` | 60 s | `crtsh`, `certspotter`, `otx`, `hackertarget`, `urlscan`, `chaos`, `github_subdomains` |
+| `archive` | 180 s | `urlfinder` |
+
+`subjs` gained `class: crawler` here: it used to carry its own 60 s cap, and a
+class window is the only way to keep that behaviour without a cap. A tool with no
+`class:` has no window at all and is bounded by the stage budget alone; a typo in
+`class:` is a `ConfigError` rather than a silent "no window". One tool may
+override its class with `idle_s:` in its own `tools.yaml` row.
+
+**How the kill works.** The engine watches every running tool (`IDLE_WATCH_TICK_S`
+= 0.1 s). It stops a tool when *every* running tool in the stage is silent past
+its own window, or when the only tool still running is alone and past its window.
+It then sets a per-tool `threading.Event` that `run_exec` watches: the child is
+killed and its partial stdout returned, so the adapter can still parse it. An
+adapter that never looks at the flag (a pure-Python one) is cancelled after
+`KILL_GRACE_S` (0.25 s), and the stage's own backstop sits at the budget plus
+`STAGE_KILL_GRACE_S` (2.0 s) so the per-tool path always reports first.
+
+**What a stopped tool says.** Idle: `killed after 60s idle at stage 412.3s, 1042
+partial`. Stage budget: `timed out at stage budget 1800s, 12 partial, last output
+300s ago`. Both keep their records; the difference is the status, because a kill
+is the engine ending a stuck tool (exit 0, `tools_killed` in `--json`, the
+"stopped early" block on stderr) while a budget timeout stays a failure (exit 5).
+
+**`urlfinder`.** `-max-time` is gone from the argv entirely: the real binary does
+not enforce it (measured still running at 5m52s with `-max-time 3`), and with no
+cap left to translate into minutes there is nothing to pass. The stage budget and
+the `archive` window are its bounds, and its partial stdout is kept either way.
+
 ### 4a3. Adapter wave 3 (2026-11-17): hakrawler, gospider, subjs, urlfinder
 
 Three are `urls` / `active` / `core` (`hakrawler`, `gospider`, `subjs`), so they
@@ -387,9 +448,8 @@ tool. `base.is_non_web_reference()` recognises `javascript:`, `mailto:`,
   parse are the tool's real output. `urlfinder` keeps its stricter rule (a line
   with inner whitespace or a non-web scheme is skipped silently, anything else
   is still a parse error), because its input is an archive, not a live page.
-- **Per-tool runtime caps (2026-11-18).** `hakrawler` is capped at 120 s and
-  `subjs` at 60 s (`urls.hakrawler_max_s` / `urls.subjs_max_s` in
-  `config.yaml`): on the sakec.ac.in scan both hit the phase budget with 0
+- **Per-tool runtime caps (2026-11-18; deleted by D52, see 4a2c).** `hakrawler`
+  was capped at 120 s and `subjs` at 60 s: on the sakec.ac.in scan both hit the phase budget with 0
   items and owned the whole `urls` stage. A capped run keeps its partial stdout,
   records `ok N` with `capped at <n>s; kept partial output` in the detail
   column, and never reports `timeout` - which stays reserved for a tool that
@@ -1083,4 +1143,9 @@ explicit `urls:` entries (`urlfinder_*`, `hakrawler_max_s`, `subjs_max_s`) still
 which is why D27's numbers did not move. **A new tool is one `tools.yaml` row** - `class: crawler` and the adapter file -
 with no `engine.py` edit; `tests/test_engine.py::test_a_new_tool_with_class_in_tools_yaml_needs_no_engine_edit` proves
 it against a synthetic registry.
+
+> **D52 (2026-11-19) keeps the classes and deletes the caps.** `class:` is still the one registry field that shapes a
+tool's runtime, and the zero-edit claim still holds, but a class now carries only an idle window (`runtime_idle:` in
+`config.yaml`); `floor`, `per_host`, the `cap_s` formula and every `max_s`/`min_s` are gone. The table above is kept as
+the record of what the caps were - see 4a2c for what replaced them.
 
