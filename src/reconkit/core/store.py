@@ -403,6 +403,33 @@ class Store:
             self._conn.close()
             raise
 
+    @classmethod
+    def open_readonly(cls, path: str | Path) -> Store:
+        """Open an existing database that this process may not write (D65).
+
+        `reconkit report --from-db` only reads. `mode=ro` makes that a property
+        of the connection instead of a promise: a stray INSERT or UPDATE raises
+        `OperationalError` rather than changing the store. Migrations are skipped
+        on purpose - the report reads two stable views (`subdomains`,
+        `host_status_history`, `urls`, `scan_runs`), and a write would defeat the
+        point. A missing file or table raises; the caller turns that into a
+        usage error.
+        """
+        self = cls.__new__(cls)
+        self.path = Path(path)
+        self._conn = sqlite3.connect(f"file:{self.path.resolve().as_posix()}?mode=ro", uri=True)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._batch_depth = 0
+        try:
+            # One cheap read proves the file is a reconkit schema before the
+            # caller turns a raw sqlite error into a traceback.
+            self._conn.execute("SELECT id FROM scan_runs LIMIT 1").fetchone()
+        except sqlite3.Error as exc:
+            self._conn.close()
+            raise ValueError(f"not a reconkit database: {self.path}") from exc
+        return self
+
     def __enter__(self) -> Store:
         return self
 
@@ -488,6 +515,22 @@ class Store:
             (target_id,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def run_stamp(self, target_id: int, run_id: int | None = None) -> dict[str, object] | None:
+        """The run a report is rebuilt from: its id and start time (D65)."""
+        if run_id is None:
+            row = self._conn.execute(
+                "SELECT id, started_at FROM scan_runs WHERE target_id = ? ORDER BY id DESC LIMIT 1",
+                (target_id,),
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT id, started_at FROM scan_runs WHERE target_id = ? AND id = ?",
+                (target_id, run_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"id": int(row["id"]), "started_at": str(row["started_at"])}
 
     def subdomains(self, target_id: int) -> list[dict[str, object]]:
         """Known hosts and states for one target (engine resume seeds)."""

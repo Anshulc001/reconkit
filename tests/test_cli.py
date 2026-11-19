@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import sqlite3
 from collections.abc import Iterator
@@ -1556,3 +1557,128 @@ def test_scope_limited_banner_prints_once(tmp_path: Path) -> None:
     )
     assert allowed.exit_code == 0, allowed.stderr
     assert "ACTIVE STAGES SKIPPED BY SCOPE" not in allowed.stderr
+
+
+# --------------------------------------- (D65) report from a stored database
+
+
+def _scan_for_report(tmp_path: Path) -> Path:
+    """One small mock scan so the tests have a real DB and a real report."""
+    config = _isolated_config(tmp_path)
+    result = CliRunner().invoke(app, scan_args(config, "run", "--active", "--no-scope"))
+    assert result.exit_code == 0, result.stderr
+    return config
+
+
+def test_report_from_db_writes_both_files(tmp_path: Path) -> None:
+    """D65: a stored DB is enough to rebuild the report, no scan involved."""
+    config = _scan_for_report(tmp_path)
+    out = tmp_path / "rebuilt"
+    result = CliRunner().invoke(
+        app,
+        [
+            "report",
+            "--db",
+            str(tmp_path / "recon.db"),
+            "--target",
+            "example.com",
+            "--out",
+            str(out),
+            "--config",
+            str(config),
+            "--no-color",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert (out / "report.txt").is_file()
+    document = json.loads((out / "report.json").read_text(encoding="utf-8"))
+    assert len(document["hosts"]) > 0
+    assert document["urls_total"] > 0
+    assert "=== URLs by host ===" in (out / "report.txt").read_text(encoding="utf-8")
+    # Informational lines are stderr in this CLI; stdout stays data-only.
+    assert "hosts," in result.stderr and "URLs (" in result.stderr
+
+
+def test_report_from_db_latest_is_default(tmp_path: Path) -> None:
+    """No --run and no --out: the latest run's folder, without overwriting it."""
+    config = _scan_for_report(tmp_path)
+    original = _reports(tmp_path)[-1]
+    before = (original / "report.json").read_bytes()
+    result = CliRunner().invoke(
+        app,
+        [
+            "report",
+            "--db",
+            str(tmp_path / "recon.db"),
+            "--target",
+            "example.com",
+            "--config",
+            str(config),
+            "--no-color",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    # The run's start stamp is not the moment the scan wrote its report, so the
+    # default lands beside that folder rather than inside it.
+    default_root = tmp_path / "results" / "example.com"
+    written = sorted(default_root.glob("*/report.json"))
+    assert written, result.stderr
+    assert written[-1].parent != original
+    # The report the scan wrote is evidence of that run and stays untouched.
+    assert (original / "report.json").read_bytes() == before
+
+
+def test_report_from_db_nonexistent_run_errors_cleanly(tmp_path: Path) -> None:
+    """A run id that is not this target's is a usage error, and writes nothing."""
+    config = _scan_for_report(tmp_path)
+    out = tmp_path / "never"
+    result = CliRunner().invoke(
+        app,
+        [
+            "report",
+            "--db",
+            str(tmp_path / "recon.db"),
+            "--target",
+            "example.com",
+            "--run",
+            "999999",
+            "--out",
+            str(out),
+            "--config",
+            str(config),
+            "--no-color",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "run 999999 does not belong to example.com" in result.stderr
+    assert not out.exists()
+
+
+def test_report_from_db_is_read_only(tmp_path: Path) -> None:
+    """The connection cannot write: a read-only file still produces a report."""
+    config = _scan_for_report(tmp_path)
+    database = tmp_path / "recon.db"
+    digest = hashlib.sha256(database.read_bytes()).hexdigest()
+    database.chmod(0o444)
+    try:
+        out = tmp_path / "readonly"
+        result = CliRunner().invoke(
+            app,
+            [
+                "report",
+                "--db",
+                str(database),
+                "--target",
+                "example.com",
+                "--out",
+                str(out),
+                "--config",
+                str(config),
+                "--no-color",
+            ],
+        )
+        assert result.exit_code == 0, result.stderr
+        assert (out / "report.json").is_file()
+    finally:
+        database.chmod(0o644)
+    assert hashlib.sha256(database.read_bytes()).hexdigest() == digest

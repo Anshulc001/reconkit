@@ -190,10 +190,12 @@ line through `validate_host()` rather than `validate_target()`, and probes those
 URLs the way the `url_probe` stage does; that is a new flag and needs an owner
 ruling, so this build does not have it.
 
-**Getting the list out of a previous run.** `export`, `db list` and `db export`
-are Phase 3 stubs in this build: they print `... is not wired in Part 8` and
-exit `1` without reading the database. The export that does exist is the report
-every run writes next to its results: `results/<target>/<timestamp>/report.json`,
+**Getting the list out of a previous run.** `reconkit report --target <domain>`
+rebuilds the saved report from the database (D65, section 5). `export`, `db
+list` and `db export` remain Phase 3 stubs in this build: they print `... is
+not wired in Part 8` and exit `1` without reading the database - `report`
+supersedes what they were going to do for the host list. The export every run
+already writes is `results/<target>/<timestamp>/report.json`,
 where `hosts[].hostname` is the hostname list (and `report.txt` carries the same
 names in its first column). That report contains hosts only - a name that
 appeared only in `urls` rows is not in it unless D58's second resolve reached it
@@ -612,6 +614,22 @@ One folder per domain per run, never reused:
   run always says where its report went; `--silent` suppresses that line only.
 - A report that can not be written is a run error (exit 1), never a silent
   success.
+- **A report can be rebuilt from the database, without scanning (added
+  2026-11-19, D65).** `reconkit report --target <domain> [--run <id>] [--db
+  <path>] [--out <dir>]` runs the same writer over the rows already stored, so
+  a run that predates the current report shape can be read in it without
+  touching the target again:
+  `wrote <dir>/report.txt and <dir>/report.json — 69 hosts, 7421 URLs (200
+  shown)`. `--run` defaults to that target's latest `scan_runs` row; an id that
+  is not the target's is exit `2` and writes nothing. The database is opened
+  `mode=ro`: the connection cannot write, nothing is fetched and no adapter
+  runs. `--out` is created if missing; without it the folder is
+  `<results_dir>/<domain>/<run stamp>`, with `-rebuilt` appended when a report
+  already exists there, because the stored one is evidence of that run. Two
+  things it deliberately does *not* do: the hosts are the latest stored state
+  and the URL block is every URL stored for the target (the same input a
+  scan's own report reads), not a snapshot of that run only; and the header
+  carries the run's own timestamp, because the file describes that run.
 
 ### Empty, error and success states
 - **Empty:** `No results from 3 tools (crtsh, subfinder, otx). Check 'reconkit doctor'.`

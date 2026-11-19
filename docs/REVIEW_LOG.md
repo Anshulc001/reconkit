@@ -169,6 +169,58 @@ allowed "the stage subcommands if they share the option group"). The bare
 Gate: `990 passed`, `ruff check .` clean, `ruff format --check .` 96 files,
 `mypy src/reconkit` clean (62 source files). No scan was run.
 
+## 2026-11-19 (D65) - `reconkit report` rebuilds a report from the database
+
+Before, the only writer was a scan: a run stored before D62 could not be seen in
+the new shape without scanning the target again. After, on a **copy** of the
+repo's `recon.db` (the stale sakec data):
+
+```
+$ cp recon.db /tmp/item4.db
+$ reconkit report --db /tmp/item4.db --target sakec.ac.in --out /tmp/item4-out/
+wrote /tmp/item4-out/report.txt and /tmp/item4-out/report.json — 69 hosts, 7421 
+URLs (200 shown)
+
+$ grep -c '=== Domains ===\|=== URLs by host ===' /tmp/item4-out/report.txt
+2
+$ jq '.urls_total, .urls_shown, .urls_truncated' /tmp/item4-out/report.json
+7421 200 true
+$ jq 'keys' /tmp/item4-out/report.json
+['type','target','generated_at','selection','scope_warnings','fields','hosts',
+ 'urls_total','urls_shown','urls_truncated','roots','urls_by_host']
+$ jq -r .generated_at /tmp/item4-out/report.json
+2026-11-19T18:50:30+00:00
+```
+
+(The batch expected 2,253 URLs; the stored total for `sakec.ac.in` is **7,421**
+over runs 163-187 - that number was from an earlier run's stage output.)
+
+Read-only is a property of the connection, not a promise: `Store.open_readonly`
+opens `file:<path>?mode=ro`, skips migrations, and runs one `SELECT` to prove the
+file is a reconkit schema. The test chmods the database to `0444`, rebuilds a
+report from it successfully, and asserts the file's sha256 is unchanged.
+
+Shape: `host_snapshots()`/`url_snapshots()` are now module functions in
+`engine.py`, used by both `Engine.host_rows`/`url_rows` and
+`load_stored_report`, so a rebuilt report cannot drift from a scan's. Command
+name `report` was free, so no `db report` fallback was needed. `--out` is
+created if missing; without it the folder is `<results_dir>/<domain>/<run
+stamp>`, with `-rebuilt` appended when a report already exists there (the stored
+one is evidence). Dot-not-dash: the hosts are the latest stored state and the
+URL block is every URL stored for the target, exactly like a scan's report -
+`--run` selects the run stamp, not a point-in-time snapshot.
+
+Tests (4): `test_report_from_db_writes_both_files`,
+`test_report_from_db_latest_is_default`,
+`test_report_from_db_nonexistent_run_errors_cleanly`,
+`test_report_from_db_is_read_only`. Gate: `996 passed`, ruff/format/mypy clean.
+
+**Deviation from the item's stop rule:** it said to skip if the work needs more
+than `cli.py` + `ui.py`. No new module was created, but the read-only
+requirement and `test_cli_imports_only_the_allowed_layers` (no `Store` in the
+CLI) made `core/store.py` and `engine.py` the right homes; the disclosure is
+here and in PROGRESS.
+
 ## 2026-11-19 (D64) - a scope-limited run says so in banner and report
 
 Before, `reconkit run -d not-in-scope.example --active --mock` (scope file

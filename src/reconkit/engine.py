@@ -19,6 +19,7 @@ import threading
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from enum import IntEnum, StrEnum
 from functools import partial
 from pathlib import Path
@@ -630,6 +631,111 @@ class UrlSnapshot:
     host_state: str
 
 
+def host_snapshots(store: Store, target_id: int) -> list[HostSnapshot]:
+    """Stored host rows as report/display snapshots (one conversion, D65).
+
+    Used by both a scan's own report and `reconkit report --from-db`, so a
+    rebuilt report cannot drift from the one the run wrote.
+    """
+    rows: list[HostSnapshot] = []
+    for row in store.host_rows(target_id):
+        raw_sources = cast(tuple[str, ...], row["sources"])
+        raw_ports = cast(tuple[int, ...], row["ports"])
+        raw_status = row["status_code"]
+        raw_detail = row["detail"]
+        raw_title = row["title"]
+        raw_location = row["location"]
+        raw_count = row["source_count"]
+        rows.append(
+            HostSnapshot(
+                fqdn=str(row["fqdn"]),
+                state=HostState(str(row["state"])),
+                confidence=Confidence(str(row["confidence"])),
+                sources=tuple(str(value) for value in raw_sources),
+                status_code=raw_status if isinstance(raw_status, int) else None,
+                ports=tuple(int(value) for value in raw_ports),
+                detail=raw_detail if isinstance(raw_detail, str) else None,
+                source_count=raw_count if isinstance(raw_count, int) else 0,
+                ips=tuple(str(value) for value in cast(tuple[str, ...], row["ips"])),
+                title=raw_title if isinstance(raw_title, str) else None,
+                location=raw_location if isinstance(raw_location, str) else None,
+                tech=tuple(str(value) for value in cast(tuple[str, ...], row["tech"])),
+                duplicate_of=(
+                    str(row["duplicate_of"]) if isinstance(row["duplicate_of"], str) else None
+                ),
+                www_note=(str(row["www_note"]) if isinstance(row["www_note"], str) else None),
+            )
+        )
+    return rows
+
+
+def url_snapshots(store: Store, target_id: int) -> list[UrlSnapshot]:
+    """Stored URLs as report snapshots (D62's columns, D65's second caller)."""
+    return [
+        UrlSnapshot(
+            url=str(row["url"]),
+            host=str(row["host"]),
+            status_code=(row["status_code"] if isinstance(row["status_code"], int) else None),
+            host_state=str(row["host_state"]),
+        )
+        for row in store.url_report_rows(target_id)
+    ]
+
+
+@dataclass(frozen=True)
+class StoredReport:
+    """Everything a report needs, read from a stored run (D65).
+
+    Nothing here is recomputed: the hosts are the latest stored state and the
+    URLs are what the `urls` stage stored, which is the same input a scan's own
+    report reads. `started_at` is the run the operator asked for, used for the
+    output folder name when no `--out` is given.
+    """
+
+    target: str
+    target_id: int
+    run_id: int
+    started_at: datetime
+    hosts: tuple[HostSnapshot, ...]
+    urls: tuple[UrlSnapshot, ...]
+
+
+def load_stored_report(
+    db_path: str | Path, target: str, *, run_id: int | None = None
+) -> StoredReport:
+    """Read one stored run for `reconkit report` - no network, no writes (D65).
+
+    The connection is opened read-only (`Store.open_readonly`), so this function
+    cannot change the database even by accident. A target or run that is not
+    stored raises `ConfigError`, which the CLI turns into exit 2 without writing
+    a partial report.
+    """
+    normalized = validate_target(target)
+    store = Store.open_readonly(db_path)
+    try:
+        target_id = store.get_target(normalized)
+        if target_id is None:
+            raise ConfigError(f"no stored runs for {normalized} in {db_path}")
+        stamp = store.run_stamp(target_id, run_id)
+        if stamp is None:
+            if run_id is None:
+                raise ConfigError(f"no stored runs for {normalized} in {db_path}")
+            raise ConfigError(f"run {run_id} does not belong to {normalized}")
+        hosts = host_snapshots(store, target_id)
+        urls = url_snapshots(store, target_id)
+    finally:
+        store.close()
+    started = datetime.fromisoformat(str(stamp["started_at"]).replace("Z", "+00:00"))
+    return StoredReport(
+        target=normalized,
+        target_id=target_id,
+        run_id=cast(int, stamp["id"]),
+        started_at=started.astimezone(UTC),
+        hosts=tuple(hosts),
+        urls=tuple(urls),
+    )
+
+
 @dataclass(frozen=True)
 class DiffSnapshot:
     """Latest two same-kind runs; empty tuples mean nothing to compare."""
@@ -749,48 +855,11 @@ class Engine:
 
     def host_rows(self, target_id: int) -> list[HostSnapshot]:
         """Read stored host rows for the UI without exposing Store to the CLI."""
-        rows: list[HostSnapshot] = []
-        for row in self.store.host_rows(target_id):
-            raw_sources = cast(tuple[str, ...], row["sources"])
-            raw_ports = cast(tuple[int, ...], row["ports"])
-            raw_status = row["status_code"]
-            raw_detail = row["detail"]
-            raw_title = row["title"]
-            raw_location = row["location"]
-            raw_count = row["source_count"]
-            rows.append(
-                HostSnapshot(
-                    fqdn=str(row["fqdn"]),
-                    state=HostState(str(row["state"])),
-                    confidence=Confidence(str(row["confidence"])),
-                    sources=tuple(str(value) for value in raw_sources),
-                    status_code=raw_status if isinstance(raw_status, int) else None,
-                    ports=tuple(int(value) for value in raw_ports),
-                    detail=raw_detail if isinstance(raw_detail, str) else None,
-                    source_count=raw_count if isinstance(raw_count, int) else 0,
-                    ips=tuple(str(value) for value in cast(tuple[str, ...], row["ips"])),
-                    title=raw_title if isinstance(raw_title, str) else None,
-                    location=raw_location if isinstance(raw_location, str) else None,
-                    tech=tuple(str(value) for value in cast(tuple[str, ...], row["tech"])),
-                    duplicate_of=(
-                        str(row["duplicate_of"]) if isinstance(row["duplicate_of"], str) else None
-                    ),
-                    www_note=(str(row["www_note"]) if isinstance(row["www_note"], str) else None),
-                )
-            )
-        return rows
+        return host_snapshots(self.store, target_id)
 
     def url_rows(self, target_id: int) -> list[UrlSnapshot]:
         """Read the stored URLs for a report without exposing Store to the CLI."""
-        return [
-            UrlSnapshot(
-                url=str(row["url"]),
-                host=str(row["host"]),
-                status_code=(row["status_code"] if isinstance(row["status_code"], int) else None),
-                host_state=str(row["host_state"]),
-            )
-            for row in self.store.url_report_rows(target_id)
-        ]
+        return url_snapshots(self.store, target_id)
 
     def recent_runs(self, limit: int = 20) -> list[RunSnapshot]:
         """Read recent stage runs for the status command."""

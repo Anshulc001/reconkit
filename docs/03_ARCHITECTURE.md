@@ -272,7 +272,7 @@ Speed control was removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN
 - CLI -> Engine -> (Adapters, Core). Never the reverse.
 - Adapters must not import `store`, `scope`, `ui`, or `cli`.
 - Only `core/runner.py` imports `subprocess`.
-- Only `core/store.py` imports `sqlite3`.
+- Only `core/store.py` imports `sqlite3`. The one read-only entry point is `Store.open_readonly()` (D65): `mode=ro` on the URI, no migrations, so `reconkit report` cannot write even by accident. Its callers in `engine.py` (`load_stored_report`, `host_snapshots`, `url_snapshots`) are the only way the CLI reads a stored run, and the CLI still imports no `Store` and no `sqlite3`.
 - Redaction has one implementation and one value source (`core/store.py`). `cli.py` imports exactly the helpers `configure_redaction` and `redact` from `core.store` - never `Store`, never `sqlite3` - so console output and stored text are masked identically. A second pattern list or a second secret source is a bug.
 - Only `ui.py` prints to the terminal (adapters and engine return data or raise).
 - Registry (`tools.yaml`) is the only source of tool names, per-tool `source:` hints and tiers. reconkit installs nothing, so a `source:` string is documentation, never a command.

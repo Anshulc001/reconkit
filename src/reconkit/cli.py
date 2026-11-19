@@ -33,6 +33,7 @@ from reconkit.engine import (
     Engine,
     ExitCode,
     ScanOptions,
+    load_stored_report,
     registry_tool_index,
 )
 from reconkit.errors import ConfigError, ScopeError
@@ -1464,6 +1465,71 @@ def status_command(
     finally:
         if engine is not None:
             engine.close()
+
+
+@app.command("report")
+def report_command(
+    target: Annotated[
+        str, typer.Option("--target", help="Root domain whose stored run to rebuild.")
+    ],
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Output directory (default: <results>/<target>/<run stamp>)."),
+    ] = None,
+    run_id: Annotated[
+        int | None, typer.Option("--run", help="Run id (default: the target's latest run).")
+    ] = None,
+    no_color: Annotated[bool, typer.Option("--no-color", help="Disable colors.")] = False,
+    config_path: Annotated[Path | None, typer.Option("--config", help="Config file path.")] = None,
+    db_path: Annotated[Path | None, typer.Option("--db", help="SQLite database path.")] = None,
+) -> None:
+    """Rebuild a report from a stored database, without scanning (D65).
+
+    The same writer a scan uses, fed the same stored rows. Read-only: the
+    database connection cannot write, nothing is fetched and no adapter runs.
+    """
+    try:
+        config = load_config(config_path)
+        database = Path(db_path) if db_path is not None else Path(config.db_path)
+        if not database.exists():
+            raise ConfigError(f"no database at {database}")
+        stored = load_stored_report(database, target, run_id=run_id)
+        if out is not None:
+            directory = Path(out)
+        else:
+            directory = report_directory(config.results_dir, stored.target, stored.started_at)
+            if (directory / "report.txt").exists():
+                # Never overwrite a report that is already there: the stored one
+                # is evidence of that run, this one is a rebuild (D65).
+                directory = directory.with_name(f"{directory.name}-rebuilt")
+        if out is not None:
+            # `report_directory` creates its folder; an explicit --out is the
+            # operator's path to create.
+            directory.mkdir(parents=True, exist_ok=True)
+        text_path, json_path = write_field_report(
+            directory,
+            stored.target,
+            stored.hosts,
+            REPORT_FIELDS,
+            # The header carries the run's own stamp, because the rebuild
+            # describes that run, not the moment the file was written.
+            run_at=stored.started_at,
+            urls=stored.urls,
+            urls_max=config.report.urls_max,
+        )
+        shown = len(stored.urls)
+        if config.report.urls_max:
+            shown = min(shown, config.report.urls_max)
+        render_message(
+            f"wrote {text_path} and {json_path} — {len(stored.hosts)} hosts, "
+            f"{len(stored.urls)} URLs ({shown} shown)",
+            no_color=no_color,
+        )
+    except (ConfigError, ScopeError, ValueError) as exc:
+        render_error(redact(str(exc)), no_color=no_color)
+        raise typer.Exit(
+            code=exc.exit_code if hasattr(exc, "exit_code") else int(ExitCode.USAGE)
+        ) from None
 
 
 @app.command("doctor")

@@ -279,6 +279,18 @@ reconkit diff -d example.com
 reconkit doctor
 ```
 
+### Rebuild a saved report from the database (no scan)
+
+```bash
+reconkit report --target example.com
+reconkit report --target example.com --run 187 --db other.db --out /tmp/report-out
+```
+
+Read-only: no network, no adapter, no writes. The database connection is opened
+with `mode=ro`. `--run` defaults to the target's latest run; `--out` defaults to
+`<results_dir>/<domain>/<run stamp>`, with `-rebuilt` appended if a report is
+already there.
+
 ### No network at all
 
 ```bash

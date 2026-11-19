@@ -4,6 +4,13 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-19, D65): **`reconkit report --target <domain>` rebuilds a saved report from the DB.**
+`--run` (default: latest), `--db`, `--out`; same writer as a scan, `mode=ro` connection, no
+network and no adapter. `Store.open_readonly` + `engine.load_stored_report` are the read-only
+entry points; `host_snapshots`/`url_snapshots` are shared with the scan's own report so the two
+cannot drift. Non-existent run -> exit 2, nothing written. Suite 992 -> 996. Regenerated the
+sakec DB copy: 69 hosts, 7,421 stored URLs, 200 shown. The `export`/`db list`/`db export`
+stubs are left in place and documented as superseded for the host list.
 - Status (2026-11-19, D64): **a scope-refused active run labels its passive results.** The refusal already
 exited `3` and printed the pre-flight block, but the saved report looked like a normal scan. The run now ends
 with `⚠ ACTIVE STAGES SKIPPED BY SCOPE — this run is passive-only; the report says so.`, `report.json` adds
