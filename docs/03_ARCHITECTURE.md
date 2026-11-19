@@ -82,9 +82,9 @@ workspaces/<domain>/
   subs/    raw output from subdomain sources
   live/    raw probe output
   ports/   raw scanner output
-  urls/    raw URL/crawl output (Phase 3)
-  tech/    raw technology/WAF output (Phase 3)
-  meta/    run metadata and summaries
+  urls/    raw URL/crawl output
+  tech/    raw technology/WAF output
+  meta/    run metadata and summaries; dns, vulns and shots raw output
 ```
 
 ### Workspace API (`core/workspace.py`)
@@ -92,7 +92,7 @@ workspaces/<domain>/
 - `Workspace.create(root, target, secrets=...)` validates `target` with `validate_target()`, creates `workspaces/<domain>/` and exactly the six stage directories above (mode `0700`), and is idempotent.
 - `workspace.path(stage, filename)` accepts only a documented stage and one plain filename. Traversal, absolute/UNC paths, `..`, trailing dot/space and hidden names are rejected with `ValueError`.
 - `workspace.write(stage, filename, text, *, secrets=None, max_bytes=MAX_OUTPUT_BYTES)` passes `text` through `store.redact()` with the run's secrets before any bytes reach disk, caps the result at `max_bytes` UTF-8 bytes, then writes a temporary file in the same directory and `os.replace()`s it (mode `0600`). A failure leaves the destination untouched and no temporary file behind. Writing the same filename again replaces it atomically. `MAX_OUTPUT_BYTES` is `core/runner.MAX_OUTPUT_BYTES` (1,000,000), the same limit `run_exec` applies to a child's output, so the cap has one definition and needs no config key. A longer text is cut at the cap, never dropped and never written unbounded; a multi-byte character split by the cut is dropped rather than written as a broken byte sequence. Redaction happens before the cap, so a secret that straddles the cut cannot survive as a prefix.
-- Raw adapter output is written by the engine as `<stage>/<run_id>-<tool>.txt`: one file per executed tool per stage run (`run_id` is the `scan_runs` id), so two tools in one stage and the same tool in two runs never collide, and a rerun never overwrites an earlier run's evidence. The `dns` stage has no raw directory of its own - the workspace keeps exactly the six documented directories - so its files go to `meta/`, which also holds `vulns`/`shots` output when those phases exist. `write` returns the path and the engine stores it unchanged in `ToolResult.raw_path`, so it is relative while `workspace_dir` is relative (the shipped `config.yaml` value) and absolute when the caller passed an absolute root. The path is not shown in the human tables (docs/02) but does appear in `--json` under `stages[].results`, because that object is the docs/09 `ToolResult` schema.
+- Raw adapter output is written by the engine as `<stage>/<run_id>-<tool>.txt`: one file per executed tool per stage run (`run_id` is the `scan_runs` id), so two tools in one stage and the same tool in two runs never collide, and a rerun never overwrites an earlier run's evidence. The `dns` stage has no raw directory of its own - the workspace keeps exactly the six documented directories - so its files go to `meta/`, which also holds `vulns` and `shots` output: a vulns finding file is `meta/<run_id>-<tool>.txt`, and those findings are not persisted to SQLite (docs/09 section 6). `write` returns the path and the engine stores it unchanged in `ToolResult.raw_path`, so it is relative while `workspace_dir` is relative (the shipped `config.yaml` value) and absolute when the caller passed an absolute root. The path is not shown in the human tables (docs/02) but does appear in `--json` under `stages[].results`, because that object is the docs/09 `ToolResult` schema.
 - Raw tool output uses `subs`, `live`, `ports`, `urls` or `tech`; run metadata and summaries use `meta`. No other directory is created.
 
 ### Saved reports (`results/`, interactive mode only)

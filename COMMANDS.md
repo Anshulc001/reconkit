@@ -181,6 +181,39 @@ They accept the same flags as `run` but execute only their own stage.
 `passive` runs subs+dns+urls; `lite` is the same pipeline (bare `reconkit -d X`
 is `lite`). There is no `shots` command.
 
+### Vulnerability scanning (current state)
+
+`vulns` requires `--active` and runs after `urls`:
+
+```bash
+reconkit vulns -d <domain> --active                 # nuclei + subzy (installed)
+reconkit vulns -d <domain> --active --include-noisy # adds nikto and ffuf
+reconkit run -d <domain> --full                     # vulns is the last stage
+reconkit vulns -d <domain> --active --tools nuclei  # one adapter
+```
+
+| Tool | Tier | Notes |
+|---|---|---|
+| `nuclei` | core | templates; findings are not persisted |
+| `subzy` | core | subdomain-takeover checks |
+| `nikto` | opt_in | needs `--include-noisy`, `--full`, or `--tools` |
+| `ffuf` | opt_in | content discovery; same gating |
+| `dnsreaper` | core | no adapter (D15) - skipped |
+| `dalfox`, `crlfuzz`, `sqlmap` | intrusive | exploitation-class; explicit `--tools` only, no adapter yet |
+
+**Where the results go.** Findings are not written to SQLite and do not appear
+in `report.txt`/`report.json`. Each executed tool's redacted, capped raw output
+is written to:
+
+```
+workspaces/<domain>/meta/<run_id>-<tool>.txt
+```
+
+`<run_id>` is the `vulns` stage's `scan_runs` id, so two runs never overwrite
+each other. The same path is the tool result's `raw_path` in the run's `--json`
+(`stages[].results[].raw_path`), which is the only structured copy. `tool_runs`
+records status, item count and duration, but not the findings themselves.
+
 ---
 
 ## Management commands
@@ -406,7 +439,7 @@ A tool that cannot run without its key is a **selection skip** with the reason
 | **urls** | ALIVE hosts | discovered URLs + patterns | `urls` |
 | **url_probe** | stored in-scope URLs | HTTP status (`-1` no answer, `-2` unverified certificate) | `urls.status_code` |
 | **shots** | ALIVE hosts | screenshots + `screenshots.jsonl` | `results/<domain>/<ts>/screenshots/` (files, no rows — D17) |
-| **vulns** | ALIVE hosts | findings | raw output files and `--json` only (not persisted) |
+| **vulns** | ALIVE hosts | findings | `workspaces/<domain>/meta/<run_id>-<tool>.txt` and `--json` only (never `urls`/DB tables - not persisted) |
 
 `confidence` is `HIGH`/`MEDIUM`/`LOW`/`UNCONFIRMED` from how many independent
 tools agree plus the stage's evidence rules.
@@ -497,7 +530,7 @@ reconkit diff -d testfire.net
 | **masscan** | Needs raw sockets; non-root runs skip it with `requires root / sudo` | run as root or `setcap cap_net_raw+ep` on the binary |
 | **dnsreaper** | Not adapted (no PyPI package, no console script — D15) | `subzy` covers takeover |
 | **sqlmap, dalfox, crlfuzz** | Exploitation-class; never auto-run (no `--intrusive` flag exists) | `--tools sqlmap` explicitly |
-| **vulns findings** | Not persisted to the DB | read `--json` or the raw output files |
+| **vulns findings** | Not persisted to the DB or the saved report | read `--json` or `workspaces/<domain>/meta/<run_id>-<tool>.txt` |
 | **WAF** | One string per host, merged by `waf_priority` (D12) | n/a |
 | **`export`, `db list/export`, `scope import`** | Phase 3 stubs: exit 1, do nothing | use `--json` on scan commands, `reconkit report`, or `db delete`/`db wipe` |
 | **`shots` in passive/active** | Not requested by any other mode (D19) | use `--full` |

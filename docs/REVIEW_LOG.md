@@ -77,6 +77,27 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 | PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `target.com` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.target.com/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
 
+## 2026-11-20 - vulns documentation matches the stage
+
+The `vulns` stage has adapters, but several docs still said `tech` and `vulns`
+had none and that `vulns` findings were "raw output files" without a location.
+Corrected in README, COMMANDS.md, docs/02, docs/03 and docs/09:
+
+- Run it with `reconkit vulns -d <domain> --active` or as the last stage of
+  `--full`; `--active` alone does not include it.
+- `nuclei` and `subzy` are `core`; `nikto` and `ffuf` are `opt_in` (need
+  `--include-noisy`, `--full`, or `--tools`). `dnsreaper` has no adapter (D15);
+  `dalfox`, `crlfuzz` and `sqlmap` are exploitation-class, explicit `--tools`
+  only, and none has an adapter yet.
+- Findings are not persisted: no `findings` table, no `VULNS` branch in
+  `_persist_stage`, nothing in `diff` or `report.txt`/`report.json`. The copies
+  are the run's `--json` (`stages[].results[]`, with `raw_path`) and
+  `workspaces/<target>/meta/<run_id>-<tool>.txt`, one redacted/capped file per
+  executed tool per stage run. `tool_runs` keeps status/item count/duration
+  only.
+
+No code changed; suite stays 1029. Docs only.
+
 ## 2026-11-20 - AI attribution trailers stripped from four commits
 
 The D79, D80, D81 and README-contribution commits carried `Generated with ...`

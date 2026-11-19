@@ -97,7 +97,7 @@ section 4.
 | `ports` | open ports, services (`pyscan` only; LOW is the ceiling - accepted permanently, docs/09 section 5) | yes | 2 |
 | `tech` | tech, WAF, CDN | yes | 3 |
 | `urls` | URLs, params, JS | yes (crawling) | 3 |
-| `vulns` | takeover and exposure checks | yes | 3 |
+| `vulns` | vulnerability checks: `nuclei`, `subzy` (core); `nikto`, `ffuf` (opt_in); findings not persisted | yes | 3 |
 
 There is no `url_probe` stage command (D23): the probe is part of a scan, not a
 command of its own. A flagged `run -d X --active` (or `--full`) runs it after
@@ -134,6 +134,33 @@ completion gap (so `--json` says `complete_with_gaps`) and the exit code stays
 nothing usable, so it exits **4** under the existing "nothing usable" rule rather
 than 0. A normal scan that includes `url_probe` alongside other stages is
 unaffected and still exits 0 (see `test_url_probe_respects_phase_timeout`).
+
+**Vulnerability scanning (current state, 2026-11-20).** The `vulns` stage is
+implemented but narrow. It runs only with `--active` (or inside `--full`, where
+it is the last stage) and never in `passive`. `nuclei` and `subzy` are `core`
+and run with the stage; `nikto` and `ffuf` are `opt_in`, so they need
+`--include-noisy`, `--full`, or an explicit `--tools` name. `dnsreaper` has no
+adapter (D15). `dalfox`, `crlfuzz` and `sqlmap` are `exploitation: true` and
+run only when named with `--tools`; none of the three has an adapter yet.
+
+```bash
+reconkit vulns -d example.com --active
+reconkit run -d example.com --full
+```
+
+**Findings are not persisted.** `_persist_stage` has no `VULNS` branch and there
+is no `findings` table, so no vulnerability row reaches SQLite, `diff`, or the
+saved `report.txt`/`report.json`. What is kept:
+
+```
+workspaces/<target>/meta/<run_id>-<tool>.txt
+```
+
+one redacted, capped file per executed tool per `vulns` stage run (`run_id` is
+that stage's `scan_runs` id). `tool_runs` stores the status, item count and
+duration; the run's `--json` exposes the same file as
+`stages[].results[].raw_path`. A `vulns` tool that is not installed is a
+selection skip, and a stage left with none is a completion gap (exit `0`).
 
 ### Workflows
 | Command | Pipeline |
@@ -317,9 +344,9 @@ The questions:
 
    `active` and `full` set `--active`, so the scope gate applies unchanged.
    `full` additionally sets `--full` and `--include-noisy`. Exploitation-class
-   tools still require `--tools`. Because the `tech` and `vulns` stages have no
-   adapter in this build, an `active` or `full` choice requests stages that
-   report their skips and warn, then finish as **completion gaps** (exit `0`,
+   tools still require `--tools`. `tech` and `vulns` have adapters, but a tool
+   that is not installed is still skipped at selection: an `active` or `full`
+   choice can report those skips and finish as **completion gaps** (exit `0`,
    section 6) - the same rule as a flag-based `run --active`/`--full`, stated
    before the run starts.
 4. **Report fields.** A numbered menu built from fields `reconkit` actually

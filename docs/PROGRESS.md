@@ -4,6 +4,15 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, vulns docs): **the documented state of `vulns` now matches
+  the code.** The stage needs `--active` (or `--full`); `nuclei`/`subzy` are
+  core, `nikto`/`ffuf` opt_in, `dnsreaper` has no adapter, and the three
+  exploitation tools need explicit `--tools` and have no adapter yet. Findings
+  are **not persisted**: the only copies are the run's `--json`
+  (`stages[].results[]`, including `raw_path`) and
+  `workspaces/<target>/meta/<run_id>-<tool>.txt`. README, COMMANDS, docs/02,
+  docs/03 and docs/09 were corrected; no code changed and the findings table is
+  still deferred (docs/04). Suite stays 1029. Docs only.
 - Status (2026-11-20, attribution): **the last four commits were re-created
   without AI attribution trailers**, per the rule already recorded below in this
   file. Only messages changed; every tree is byte-identical. AGENTS.md section 0c

@@ -48,7 +48,9 @@ reconkit diff -d <authorized-domain>
 | `subs`, `dns` | Run one passive stage |
 | `live` | ALIVE / DNS_ONLY / SHUT_DOWN / DEAD; needs `--active` (uses any present scope file) |
 | `ports` | Port scan over each adapter's default port set (`--ports` overrides); needs `--active` |
-| `tech`, `urls`, `vulns` | Stage commands whose adapters are Phase 3; may report no usable tool |
+| `tech` | Technology, WAF and CDN inventory; needs `--active` |
+| `urls` | URL discovery from archives and crawlers; needs `--active` |
+| `vulns` | Vulnerability checks: `nuclei`, `subzy` (core), `nikto`, `ffuf` (opt_in); needs `--active`. Findings are not persisted |
 | `run` | `passive` (subs+dns+urls) by default; `--active` = subs+dns+live+tech+urls+url_probe; `--full` = all eight stages (`shots` included) with `opt_in` enabled. The mode table is in [docs/02_CLI_UX.md](docs/02_CLI_UX.md) |
 | `diff` | New, gone, state-changed and port-changed items vs the previous run |
 | `status` | Recent scans (`--json` for scripts) |
@@ -62,6 +64,25 @@ reconkit diff -d <authorized-domain>
 | `scope import` | **Phase 3 stub**: exits `1` |
 
 Scan flags include `--active`, `--full`, `--no-scope`, `--tools`, `--exclude`, `--include-noisy`, `--min-sources`, `--phase-timeout`, `--mock`, `--resume`, `--no-keys`, `--only-alive`, `--only-states`, `--ports`, `--status-codes`, `--header`, `--user-agent`, `--redact-headers/--show-headers`, `--json`, `--no-color`, `-q/--silent`, `-v/--verbose`, and `--config/--scope/--db`. `--json` is available on the scan commands, `doctor`, `diff` and `status`, not on the Phase 3 stubs. `--no-scope` does not skip the gate while reading a scope file: it opts out of the file entirely and warns (docs/02 section 3.1). The mode definitions live in one table in [docs/02_CLI_UX.md](docs/02_CLI_UX.md) section 2.
+
+### Vulnerability scanning (current state)
+
+`vulns` is implemented but deliberately narrow. It runs only with `--active`:
+
+```bash
+reconkit vulns -d example.com --active
+reconkit run -d example.com --full          # vulns is the last stage
+```
+
+- `nuclei` and `subzy` (`core`) run with the stage.
+- `nikto` and `ffuf` are `opt_in`: add `--include-noisy`, use `--full`, or name
+  them with `--tools`.
+- `dnsreaper` has no adapter (D15); `dalfox`, `crlfuzz` and `sqlmap` are
+  exploitation-class and never run automatically (explicit `--tools` only).
+- Findings are **not stored in SQLite** and do not appear in `report.json` or
+  `report.txt`. Raw, redacted output goes to
+  `workspaces/<target>/meta/<run_id>-<tool>.txt` (one file per tool per stage
+  run); the run's `--json` carries the stage results, including `raw_path`.
 
 ## Example (real mock run)
 

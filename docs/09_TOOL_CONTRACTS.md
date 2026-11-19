@@ -641,8 +641,9 @@ because the template joins literally (`https://host//admin` otherwise).
 **Findings are not persisted yet.** `FindingRecord` and the `vulns` stage
 existed as a contract since Phase 2, but `_persist_stage` has no `VULNS`
 branch and `docs/04` still defers the `findings` table, so a vulns adapter's
-records reach the `--json` document and the run's raw output file and stop
-there. That is the documented state of the stage, not new behaviour: making
+records reach the `--json` document and
+`workspaces/<target>/meta/<run_id>-<tool>.txt` and stop there (`tool_runs`
+stores status, item count and duration, never the findings). That is the documented state of the stage, not new behaviour: making
 them durable is the deferred findings table (schema + report work), and no
 adapter invented a second persistence path for it.
 
