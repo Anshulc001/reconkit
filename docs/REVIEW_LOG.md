@@ -75,6 +75,64 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-62 | PD `httpx` v1.12.0 looks like the faster probe transport but is not usable for liveness: it has **no `-insecure` flag** and skips TLS verification by default, so `https://testfire.net/` (certificate issued for `www.testfire.net`) returns `200`; a URL that fails produces **no JSON line at all**; and its default UA is a random browser string | The option list has `-probe`, `-tls-grab`, `-ztls` but no verification switch, and failures are simply absent from JSONL instead of being reported with an error field | The `url_probe` stage keeps the Python httpx transport (D24) - only it can distinguish "answered, certificate did not verify" (`-2`) from "no answer" (`-1`) with verification on. PD `httpx` remains the `httpx`/`httpx_tech` adapter, where a `200` and a technology list are all that is needed | `test_url_probe_marks_an_unverified_certificate_apart_from_unreachable`, `test_url_probe_sees_a_certificate_error_in_the_context_chain` |
 | PIT-55 | A real `reconkit run -d sakec.ac.in --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
+| PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `slice.bank.in` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.slice.bank.in/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
+
+## 2026-11-19 (D69) - an ALIVE host keeps the HTTP status the live pool observed
+
+**Symptom (owner report).** `results/slice.bank.in/20261119T200322Z/report.txt`
+listed 9 ALIVE hosts, all with `HTTP status code = -`, although `b.slice.bank.in`
+had technologies (`Amazon CloudFront`, `Cloudflare`) from the `tech` stage.
+
+**Diagnosis (case a: the live pass wrote the wrong record's status).**
+
+```
+$ sqlite3 /tmp/item1.db "SELECT s.fqdn, h.state, h.status_code, h.tech_json ..."
+b.slice.bank.in            ALIVE    NULL  ["Amazon CloudFront", "Amazon
+blog.slice.bank.in         ALIVE    NULL  ["Cloudflare", "Google Font AP ...
+... 9 rows, every status_code NULL, run_id 203
+$ sqlite3 /tmp/item1.db "SELECT url, status_code FROM urls WHERE url LIKE '%b.slice%'"
+https://b.slice.bank.in/                       200
+http://b.slice.bank.in/                         -1
+$ sqlite3 /tmp/item1.db "SELECT tool, status, item_count FROM tool_runs WHERE run_id=203"
+httprobe ok 9 | httpx ok 9 | pyprobe ok 9 (unreachable=3) | tlsx ok 13
+```
+
+`_persist_live` built `best = next(record for ..., if record.state is ALIVE)`
+over the pass's `HostStatusRecord`s in completion order and `_write_host`
+stored `best.status_code`. `pyprobe` and `httpx` set a code; `httprobe` (it
+prints URLs) and `tlsx` (certificates) do not. Whichever ALIVE record finished
+first won, so the row kept a status only by luck - older runs (161: 39 rows with
+a code) happened to win. `tech` is innocent: `Store.update_host_extras` writes
+`tech_json`/`waf` on the newest row and never touches `status_code`
+(docs/04 section 5), which the tech test now pins.
+
+**Fix.** `_best_live_record()` + `_live_rank()`
+(`src/reconkit/engine.py:193` and `:210`): ALIVE records first, then 2xx < 3xx < other
+known code < no code, then the tool name as the tie-break. The chosen record
+still supplies `title`/`location`/`detail`; state still comes from
+`decide_host_state`.
+
+**Mutation check.** Putting the old `next(...)` back made
+`test_multiple_live_adapters_prefer_200_over_other` fail with `assert 301 == 200`
+(the 301 adapter returns immediately, the 200 adapter after 20 ms); restored, it
+passes.
+
+**Mock acceptance (`results/mock/example.com/20261119T203613Z/`):**
+
+```
+$ grep www.example.com report.txt
+www.example.com  ALIVE  HIGH  assetfinder, certspotter, crtsh, hackertarget, otx, subfi...  6  203.0.113.5  200  Example Domain  -  -  Nginx  not applicable
+$ sqlite3 ~/.reconkit/mock.db "SELECT s.fqdn, h.state, h.status_code, h.tech_json ..."
+api.example.com  ALIVE  401  []
+www.example.com  ALIVE  200  ["Nginx"]
+```
+
+Historical rows are not rewritten: run 203 keeps its NULLs until a new live
+pass writes the host again, and no real scan was run in this batch.
+
+**Tests.** `test_alive_host_has_status_code_in_report`,
+`test_tech_stage_does_not_clear_host_status`,
+`test_multiple_live_adapters_prefer_200_over_other` (suite 996 -> 999).
 
 ## 2026-11-19 (D63) - `--exclude` reaches stages and sections; `--include` forces one in
 

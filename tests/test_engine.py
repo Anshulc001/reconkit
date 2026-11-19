@@ -9,6 +9,7 @@ import ssl
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -61,6 +62,7 @@ from reconkit.models import (
     ToolStatus,
     UrlRecord,
 )
+from reconkit.ui import REPORT_FIELDS, report_text
 
 REPO = Path(__file__).resolve().parents[1]
 CONFIG = REPO / "config.yaml"
@@ -4608,3 +4610,153 @@ async def test_second_resolve_is_one_pass(tmp_path: Path) -> None:
     assert rec.hosts[-1] == ["new1.example.com"]
     names = {str(row["fqdn"]) for row in engine.store._conn.execute("SELECT fqdn FROM subdomains")}
     assert names == {"new1.example.com"}
+
+
+# --- D69: the live pass keeps an observed HTTP status on the host row -------
+
+
+async def test_alive_host_has_status_code_in_report(tmp_path: Path) -> None:
+    """The 200 a live adapter observed reaches `host_status_history` and the report.
+
+    Regression: `_persist_live` took the first ALIVE record in completion order,
+    so a live pool mixing adapters with a status (`pyprobe`, `httpx`) and
+    adapters without one (`httprobe`, `tlsx`) could store `NULL` while the
+    report showed `-` for an ALIVE host. Measured on `slice.bank.in` run 203.
+    """
+    rec = Recorder()
+    specs = {"live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE)}
+    adapters = {
+        "live-fake": adapter(
+            "live-fake",
+            Stage.LIVE,
+            rec,
+            records=[
+                HostStatusRecord(
+                    fqdn="example.com",
+                    source="live-fake",
+                    state=HostState.ALIVE,
+                    status_code=200,
+                    title="home",
+                )
+            ],
+        )
+    }
+    store = Store(tmp_path / "recon.db")
+    engine = make_engine(tmp_path, specs, adapters, store=store)
+    summary = await engine.run(
+        "example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True)
+    )
+
+    stored = store._conn.execute(
+        "SELECT status_code FROM host_status_history ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert stored["status_code"] == 200
+
+    text = report_text(
+        "example.com",
+        engine.host_rows(summary.target_id),
+        REPORT_FIELDS,
+        run_at=datetime(2026, 11, 19, 20, 0, tzinfo=UTC),
+    )
+    row = next(line for line in text.splitlines() if line.startswith("example.com"))
+    # REPORT_FIELDS order: hostname, state, confidence, sources, source count,
+    # IPs, HTTP status code - so the seventh cell is the one that used to be `-`.
+    assert row.split()[6] == "200", row
+
+
+async def test_tech_stage_does_not_clear_host_status(tmp_path: Path) -> None:
+    """`tech` annotates the newest status row; it must not blank `status_code`.
+
+    It already only writes `tech`/`waf` (`Store.update_host_extras`), so this is
+    the guard that keeps a future merge from re-introducing the D69 symptom.
+    """
+    rec = Recorder()
+    specs = {
+        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
+        "tech-fake": tool("tech-fake", Stage.TECH, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "live-fake": adapter(
+            "live-fake",
+            Stage.LIVE,
+            rec,
+            records=[
+                HostStatusRecord(
+                    fqdn="example.com", source="live-fake", state=HostState.ALIVE, status_code=200
+                )
+            ],
+        ),
+        "tech-fake": adapter(
+            "tech-fake",
+            Stage.TECH,
+            rec,
+            records=[
+                HostStatusRecord(
+                    fqdn="example.com",
+                    source="tech-fake",
+                    state=HostState.ALIVE,
+                    tech=["nginx"],
+                )
+            ],
+        ),
+    }
+    store = Store(tmp_path / "recon.db")
+    engine = make_engine(tmp_path, specs, adapters, store=store)
+    await engine.run(
+        "example.com", ScanOptions(stages=(Stage.LIVE, Stage.TECH), active=True, mock=True)
+    )
+
+    row = store._conn.execute(
+        "SELECT status_code, tech_json FROM host_status_history ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert row["status_code"] == 200
+    assert json.loads(str(row["tech_json"])) == ["nginx"]
+
+
+async def test_multiple_live_adapters_prefer_200_over_other(tmp_path: Path) -> None:
+    """A 200 wins over a 301 even when the redirecting tool finishes first.
+
+    Completion order must never decide the row: the 301 adapter returns
+    immediately and the 200 adapter waits, which is the order that used to lose
+    the 200.
+    """
+    rec = Recorder()
+    specs = {
+        "redirect-fake": tool("redirect-fake", Stage.LIVE, mode=Mode.ACTIVE),
+        "probe-fake": tool("probe-fake", Stage.LIVE, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "redirect-fake": adapter(
+            "redirect-fake",
+            Stage.LIVE,
+            rec,
+            delay=0.0,
+            records=[
+                HostStatusRecord(
+                    fqdn="example.com",
+                    source="redirect-fake",
+                    state=HostState.ALIVE,
+                    status_code=301,
+                )
+            ],
+        ),
+        "probe-fake": adapter(
+            "probe-fake",
+            Stage.LIVE,
+            rec,
+            delay=0.02,
+            records=[
+                HostStatusRecord(
+                    fqdn="example.com", source="probe-fake", state=HostState.ALIVE, status_code=200
+                )
+            ],
+        ),
+    }
+    store = Store(tmp_path / "recon.db")
+    engine = make_engine(tmp_path, specs, adapters, store=store)
+    await engine.run("example.com", ScanOptions(stages=(Stage.LIVE,), active=True, mock=True))
+
+    row = store._conn.execute(
+        "SELECT status_code FROM host_status_history ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    assert row["status_code"] == 200

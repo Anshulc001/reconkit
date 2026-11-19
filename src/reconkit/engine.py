@@ -17,7 +17,7 @@ import secrets
 import ssl
 import threading
 import time
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import IntEnum, StrEnum
@@ -188,6 +188,43 @@ def _is_2xx(status: object) -> bool:
 def _is_redirect(status: object) -> bool:
     """A redirect answer: the name points somewhere else (D22)."""
     return isinstance(status, int) and status in (301, 302, 303, 307, 308)
+
+
+def _live_rank(record: HostStatusRecord) -> tuple[int, int]:
+    """How good a live record's HTTP answer is, lower being better (D69).
+
+    A 2xx is the site answering, a 3xx is a redirect, any other known code is
+    weaker evidence, and no code at all is weakest. The code itself breaks a
+    tie inside a class (`200` before `204`).
+    """
+    code = record.status_code
+    if code is None:
+        return (3, 0)
+    if 200 <= code < 300:
+        return (0, code)
+    if 300 <= code < 400:
+        return (1, code)
+    return (2, code)
+
+
+def _best_live_record(
+    records: Sequence[tuple[str, HostStatusRecord]],
+) -> HostStatusRecord | None:
+    """The record whose fields a host row keeps (D69, 2026-11-19).
+
+    The pool has adapters that never observe a status (`httprobe`, `tlsx`) and
+    adapters that do (`pyprobe`, `httpx`). Taking the first ALIVE record in
+    completion order let a statusless answer win at random, so a 200 was lost
+    from `host_status_history.status_code` while the row kept the tech the
+    `tech` stage wrote. Prefer ALIVE records, then the best status
+    (`_live_rank`), then the tool name, so the result never depends on which
+    tool finished first.
+    """
+    if not records:
+        return None
+    alive = [(tool, record) for tool, record in records if record.state is HostState.ALIVE]
+    pool = alive or list(records)
+    return min(pool, key=lambda item: (_live_rank(item[1]), item[0]))[1]
 
 
 def _completed(status: ToolStatus) -> bool:
@@ -2640,10 +2677,7 @@ class Engine:
             )
             if not transition.persist:
                 continue
-            best = next(
-                (record for _, record in records if record.state is HostState.ALIVE),
-                records[0][1] if records else None,
-            )
+            best = _best_live_record(records)
             ips = tuple(sorted(dns_ips.get(host, set())))
             self._write_host(
                 target_id,

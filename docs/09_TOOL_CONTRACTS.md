@@ -1049,6 +1049,32 @@ truth). Two consequences for this table:
   (wave 2 and wave 4), so either tool's match can trigger the skip.
 - **Ports:** `open` if at least one tool saw it open. If one tool saw open and another (that scanned the same port) saw closed, store `unconfirmed` with both in `port_sources`. A service fingerprint (`nmap -sV`, a banner) raises confidence by one level and is stored in `ports.service` / `ports.version`; when two tools disagree (`nmap` says `http`, `smap` says `http?`) both fields stay empty rather than picking a winner, and a fingerprint never lifts an `unconfirmed` state. Before wave 6 `_persist_ports` discarded `service`/`version`, so the bump never fired; it now does.
 
+### Which status code a host row keeps (D69, 2026-11-19)
+
+The live pool has adapters that do not observe a status (`httprobe` prints a
+URL, `tlsx` reads a certificate) and adapters that do (`pyprobe`'s local probe
+and the `httpx` binary). `_persist_live` used to pass the **first ALIVE record
+in completion order** to `_write_host`, so the stored `status_code` depended on
+which tool finished first: a 200 from `pyprobe` was discarded whenever
+`httprobe`'s statusless record landed first. Measured on `slice.bank.in` run
+203: four live tools, 9 ALIVE hosts, every `status_code` `NULL`, while the URL
+probe stored 200 for `https://b.slice.bank.in/` in the same scan.
+
+One rule now picks the record whose fields the row keeps:
+
+1. a known 2xx beats a 3xx, which beats any other known code, which beats no
+   code at all;
+2. between two codes of the same class the lower code wins (`200` over `204`),
+   and the tool name breaks a remaining tie, so completion order can never
+   change a row;
+3. a record with no code never displaces one that has a code: the merge only
+   ever fills a status, it never clears one.
+
+The chosen record supplies `status_code`, `title`, `location` and `detail`; the
+state itself still comes from `decide_host_state`, and `tech`/`waf` are still
+merged by the `tech` stage (`Store.update_host_extras`), which never writes
+`status_code` (docs/04 section 5).
+
 ### Passive ports (smap)
 Stored with source `smap` and confidence LOW until an active scan confirms; never counted as active proof.
 

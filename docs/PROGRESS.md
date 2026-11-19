@@ -4,6 +4,14 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-19, D69): **an ALIVE host keeps the HTTP status the live pool saw.**
+  `_persist_live` used to hand `_write_host` the first ALIVE `HostStatusRecord` in
+  completion order, and `httprobe`/`tlsx` carry no status, so `slice.bank.in` run 203
+  stored NULL for all 9 ALIVE hosts while `url_probe` had 200 for `b.slice.bank.in`.
+  `_best_live_record()` now ranks records: ALIVE, then 2xx < 3xx < other known code <
+  no code, tie by tool name. `tech` was already innocent (`update_host_extras` never
+  writes `status_code`) and now has a guard test. Suite 996 -> 999. Historical rows
+  are not rewritten; a later live pass fills them. See D69 in REVIEW_LOG.
 - Status (2026-11-19, loop): **`live --urls-file` deferred.** Needs explicit host-list plumbing in
 `ScanOptions`/engine (live hosts are `[target] + stored subdomains`), which is outside a
 cli+tests change; docs/02 section 1 names the gap and the enabler. **urlfinder idle stays 180s**:
