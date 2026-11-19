@@ -4,7 +4,11 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
-- Status: **D52 done at HEAD: the per-tool runtime caps are deleted, runtime is idle-only.** 950 tests,
+- Status: **D53 done at HEAD: per-request timeouts are adapter constants; `ctx.timeout` is the stage budget and the
+  hard wall only.** 961 tests, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical
+  (`d45a3c90...eeee8b`). Part U (the first sakec.ac.in engine run) follows in this batch. D51 does not exist;
+  R13/R14/R15 and the Part C dedup question are still open exactly as recorded. See D53 below and 4a2d in
+  `docs/09` for the constants. Previous status: **D52 done at `41387e0`: the per-tool runtime caps are deleted, runtime is idle-only.** 950 tests,
   `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (sha256 `d45a3c90...eeee8b`). D48 and its
   addendum are superseded by D52 (the classes stay, every cap goes); D51 does not exist. R13/R14/R15 and the Part C
   dedup question are still open exactly as recorded. See D52 and its addendum below for the model, the scale numbers
@@ -255,6 +259,19 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   `subs: quiet killed 0 item(s)`, Tools row `quiet | subs | killed | 0 | 0.6s | 0s ago | killed after 0.3s idle at
   stage 0.3s, 0 partial`, summary `..., 1 killed, 0 timeout`, the `⚠ 1 tool(s) stopped early — partial output kept`
   block, **exit 0**. A run where every tool is stopped is still a completed run; only the budget (`timeout`) exits 5.
+
+- **D53 (2026-11-19): per-request timeouts are adapter constants, not the stage budget.** `RunContext.timeout` is the
+  stage budget and now belongs to the hard wall only: `run_exec(timeout=...)` for the tool and for a read-back command,
+  plus the stage's own `asyncio.wait_for`. Eight places were borrowing it as a per-request value - `hakrawler -timeout`,
+  `gospider -m`, `subjs -t`, `httprobe -t` (milliseconds), `pyprobe`'s httpx client, `gowitness`'s per-URL `run_exec`,
+  `base.HttpAdapter`'s request timeout, and `pyscan`'s connect timeout - and each now has a module-level constant in the
+  shape `gau.HTTP_TIMEOUT_S` (45 s) and `urlfinder.REQUEST_TIMEOUT_S` (30 s) already had: **10 s** (`hakrawler`,
+  `gospider`, `subjs`), **10 000 ms** (`httprobe`), **30 s** (`pyprobe`, `gowitness`, `base.HTTP_TIMEOUT_S`), **5 s**
+  (`pyscan`). `nikto`'s `started + ctx.timeout` is kept: it is a **total run deadline**, and each host's `-maxtime` is a
+  share of what remains of it. The bug predates D52 - `per_tool_default: 600` already meant 600 s per request
+  (`httprobe` 600 000 ms per probe) - and D52 would have scaled it to the stage budget (`vulns` 7200 s). No new config
+  field: per-tool tuning would be a `tools.yaml` entry, which was not added. Suite 950 -> 961 (one six-case
+  parametrized test plus five named tests).
 
 - **D50 (2026-11-19): a running tool says so, once, on stderr.** The stage spinner was the only sign of life and it
   needs a terminal; a piped stderr saw nothing between "running N tool(s)" and the first finished-tool line. Now every
@@ -823,6 +840,11 @@ per-host share, which is what 4a2b/D52 intended. The other seven (`hakrawler -ti
 crawlers per request, and `httprobe` 1 800 000 ms. **Decision needed:** does `ctx.timeout` mean "this stage's
 remaining time" for every adapter (status quo), or do these flags get their own constants the way `gau`/`urlfinder`
 already do? No code changed, no scan was run.
+
+**Resolved by D53 (2026-11-19): the second option.** Each of the eight sites above now uses its own module-level
+constant (10 s / 10 000 ms / 30 s / 5 s), `ctx.timeout` is the hard wall only, and the re-grep leaves just `nikto`'s
+total deadline, `gau`/`urlfinder`'s clamp and the two `base` hard walls. The entry above is kept as the record of what
+was asked; nothing in it is open.
 
 **For the reviewer:** tree clean at `41387e0` plus this docs commit, **45 commits ahead of `reconkit/main`**,
 **950 tests**, `scope.yaml` byte-identical (`d45a3c90...eeee8b`). The first sakec.ac.in engine run was **not

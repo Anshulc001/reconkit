@@ -32,6 +32,9 @@ TITLE_LIMIT = 256 * 1024
 TITLE_MAX_CHARS = 200
 TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 SCHEMES = ("https", "http")
+# D53: one probe's HTTP client timeout. A request-level constant, never
+# `ctx.timeout` (the stage budget): 1800 s for one dead host is not a timeout.
+HTTP_TIMEOUT_S = 30.0
 
 
 def extract_title(body: bytes) -> str | None:
@@ -83,7 +86,7 @@ class PyprobeAdapter(BaseToolAdapter):
         if ctx.user_agent:
             headers["User-Agent"] = ctx.user_agent
         async with httpx.AsyncClient(
-            timeout=ctx.timeout,
+            timeout=HTTP_TIMEOUT_S,
             headers=headers,
             transport=self._transport,
             follow_redirects=False,

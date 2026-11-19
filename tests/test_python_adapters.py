@@ -794,3 +794,28 @@ async def test_pyscan_raw_text_carries_the_blocked_count() -> None:
     document = json.loads(result.raw_text or "")
     assert document["error"] == "blocked=1"
     assert document["records"] == []
+
+
+# ------------------------------------- D53: per-request timeouts are constants
+
+
+async def test_pyprobe_client_timeout_is_a_constant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D53: one probe's client timeout is 30 s, never the 1800 s stage budget."""
+    seen: list[object] = []
+    real_client = httpx.AsyncClient
+
+    def recording_client(*args: object, **kwargs: object) -> httpx.AsyncClient:
+        seen.append(kwargs.get("timeout"))
+        return real_client(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(httpx, "AsyncClient", recording_client)
+    adapter = PyprobeAdapter(
+        transport=httpx.MockTransport(lambda _r: httpx.Response(200, text="<title>probe</title>"))
+    )
+    ctx = make_ctx(hosts=["a.example.com"])
+    ctx.timeout = 1800.0
+    result = await adapter.run(ctx)
+    assert result.status is ToolStatus.OK
+    assert seen == [30.0]

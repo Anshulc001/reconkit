@@ -23,6 +23,9 @@ from reconkit.errors import ParseError
 from reconkit.models import PortRecord, Record, RunContext, Stage, ToolResult, ToolStatus
 
 DEFAULT_PORTS = (80, 443, 22, 21, 25, 53, 110, 143, 3306, 3389, 8080, 8443)
+# D53: one TCP connect gets this much time. A connection-level constant, never
+# `ctx.timeout` (the stage budget): a 600 s connect timeout is a silent hang.
+CONNECT_TIMEOUT_S = 5.0
 
 Connect = Callable[[str, int], Awaitable[tuple[Any, Any]]]
 Resolve = Callable[[str], Awaitable[list[str]]]
@@ -146,7 +149,9 @@ class PyscanAdapter(BaseToolAdapter):
 
     async def _probe(self, ctx: RunContext, ip: str, port: int) -> str:
         try:
-            _reader, writer = await asyncio.wait_for(self._opener(ip, port), timeout=ctx.timeout)
+            _reader, writer = await asyncio.wait_for(
+                self._opener(ip, port), timeout=CONNECT_TIMEOUT_S
+            )
         except ConnectionRefusedError:
             return "closed"
         except TimeoutError:

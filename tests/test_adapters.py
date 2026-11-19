@@ -635,3 +635,38 @@ def test_urlscan_sends_the_key_when_set() -> None:
     adapter = UrlscanAdapter(transport=httpx.MockTransport(handler))
     asyncio.run(adapter.run(make_ctx(env={"URLSCAN_API_KEY": "secret-key"})))
     assert seen[0].headers["api-key"] == "secret-key"
+
+
+# ------------------------------------- D53: per-request timeouts are constants
+
+
+async def test_base_http_adapter_request_timeout_is_a_constant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D53: a `kind: http` tool's request timeout is 30 s, not the stage budget."""
+    from reconkit.adapters.base import HTTP_TIMEOUT_S
+
+    class LocalAdapter(HttpAdapter):
+        name = "localhttp"
+
+        def url(self, ctx: RunContext) -> str:
+            return "http://127.0.0.1/"
+
+        def parse_output(self, raw: str) -> list[object]:
+            return []
+
+    seen: list[object] = []
+    real_client = httpx.AsyncClient
+
+    def recording_client(*args: object, **kwargs: object) -> httpx.AsyncClient:
+        seen.append(kwargs.get("timeout"))
+        return real_client(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(httpx, "AsyncClient", recording_client)
+    adapter = LocalAdapter(transport=httpx.MockTransport(lambda _r: httpx.Response(200, text="[]")))
+    ctx = make_ctx()
+    ctx.timeout = 1800.0
+    result = await adapter.run(ctx)
+    assert result.status is ToolStatus.OK
+    assert HTTP_TIMEOUT_S == 30.0
+    assert seen == [HTTP_TIMEOUT_S]

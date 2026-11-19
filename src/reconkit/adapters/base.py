@@ -39,6 +39,9 @@ MAX_BODY_BYTES = 10 * 1024 * 1024
 MAX_ERROR_CHARS = 200
 # How many unusable parser lines are named one by one in the detail column.
 SKIP_WARNINGS = 10
+# D53: one HTTP request's timeout for the `kind: http` tools. A request-level
+# constant, never `ctx.timeout` (the stage budget, which is the hard wall only).
+HTTP_TIMEOUT_S = 30.0
 IDENTITY_TIMEOUT = 10.0
 # A probe that fails once must not drop a working tool from every scan (D42):
 # one retry after a short pause, then today's verdict stands.
@@ -670,9 +673,9 @@ class HttpAdapter(BaseToolAdapter):
             raise FetchFailed(f"{self.name}: {type(exc).__name__}") from None
 
     async def _attempt(self, ctx: RunContext) -> str:
-        # D52: there is no per-tool cap left to borrow, so an HTTP tool's request
-        # timeout is the stage budget. A stalled request is caught there.
-        timeout = ctx.timeout
+        # D53: the request timeout is a constant; `ctx.timeout` is the stage
+        # budget and belongs to the hard wall, not to one request.
+        timeout = HTTP_TIMEOUT_S
         async with httpx.AsyncClient(
             timeout=timeout,
             headers=self.headers(ctx),

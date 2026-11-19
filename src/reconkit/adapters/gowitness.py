@@ -41,6 +41,9 @@ from reconkit.core.runner import run_exec, validate_host
 from reconkit.models import Record, RunContext, Stage, ToolResult, ToolStatus, UrlRecord
 
 MANIFEST_NAME = "screenshots.jsonl"
+# D53: one page's browser run gets this much time. A per-URL constant, never
+# `ctx.timeout` (the stage budget): N hosts must not each receive 1800 s.
+PAGE_TIMEOUT_S = 30.0
 
 # gowitness 3.2.2 says one of these when it has no browser to drive. Matched only
 # when a run produced zero screenshots, so a stray word in a page title cannot
@@ -130,7 +133,7 @@ class GowitnessAdapter(BinaryAdapter):
                 output = await asyncio.to_thread(
                     run_exec,
                     self._command(ctx, url, shots),
-                    timeout=ctx.timeout,
+                    timeout=PAGE_TIMEOUT_S,
                     env=self.child_env(ctx),
                 )
                 captured.append(capture_output(output.stdout, output.stderr))

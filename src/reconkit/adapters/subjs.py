@@ -27,6 +27,9 @@ from reconkit.errors import ToolFailed
 from reconkit.models import Record, RunContext, Stage, UrlRecord
 
 WORKERS = 10
+# D53: `-t` is the HTTP timeout in seconds, one request at a time, so it is a
+# request-level constant and never `ctx.timeout` (the stage budget).
+REQUEST_TIMEOUT_S = 10
 # subjs fetches a handful of pages and prints script URLs; on the sakec.ac.in
 # scan it hit the phase budget with 0 items (2.2). D52: no hard cap - it carries
 # `class: crawler`, so one minute of silence means it is stuck and a productive
@@ -65,7 +68,7 @@ class SubjsAdapter(BinaryAdapter):
             "-c",
             str(WORKERS),
             "-t",
-            str(max(1, int(ctx.timeout))),
+            str(int(REQUEST_TIMEOUT_S)),
             "-ua",
             ctx.user_agent or USER_AGENT,
         ]

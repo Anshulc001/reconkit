@@ -395,6 +395,42 @@ not enforce it (measured still running at 5m52s with `-max-time 3`), and with no
 cap left to translate into minutes there is nothing to pass. The stage budget and
 the `archive` window are its bounds, and its partial stdout is kept either way.
 
+### 4a2d. Per-request vs stage timeouts (D53, 2026-11-19)
+
+`RunContext.timeout` is the **stage budget**. It exists for the hard wall only:
+`run_exec(timeout=...)` (`base.py:313` for a read-back command, `base.py:334` for
+the tool itself) and the stage's own `asyncio.wait_for`. It is never a
+per-request timeout.
+
+A per-request timeout belongs to the adapter that makes the request, as a
+module-level constant - the shape `gau.HTTP_TIMEOUT_S` (45 s) and
+`urlfinder.REQUEST_TIMEOUT_S` (30 s) already had. This batch gave the seven
+adapters that were borrowing the run budget the same shape:
+
+| constant | value | what it bounds |
+|---|---|---|
+| `hakrawler.REQUEST_TIMEOUT_S` | 10 s | `-timeout`, seconds per URL |
+| `gospider.REQUEST_TIMEOUT_S` | 10 s | `-m/--timeout`, seconds per request |
+| `subjs.REQUEST_TIMEOUT_S` | 10 s | `-t`, HTTP timeout in seconds |
+| `httprobe.PROBE_TIMEOUT_MS` | 10 000 ms | `-t`, milliseconds per probe |
+| `pyprobe.HTTP_TIMEOUT_S` | 30 s | the httpx client for one probe |
+| `gowitness.PAGE_TIMEOUT_S` | 30 s | one `run_exec` per page/URL |
+| `pyscan.CONNECT_TIMEOUT_S` | 5 s | one TCP connect |
+| `base.HTTP_TIMEOUT_S` | 30 s | one HTTP request of a `kind: http` tool |
+
+**The bug predates D52.** With `timeouts.per_tool_default: 600` these adapters
+were already waiting 600 s per request (`hakrawler` asked 600 s per URL,
+`httprobe` 600 000 ms per probe). D52 then made `ctx.timeout` the stage budget,
+so an unflagged `urls` run would have handed three crawlers 1800 s per request
+and a `vulns` run 7200 s. The constants are not tuning knobs: per-tool tuning
+would be a `tools.yaml` field, which does not exist for this and was not added.
+
+Unchanged and still correct: `nikto`'s `deadline = started + ctx.timeout` is a
+**total run deadline** (each host's `-maxtime` is its share of what is left of
+the budget, `base`-style hard wall), `urlfinder`/`gau` clamp the budget to their
+per-request ceilings, and a tool with no request-level flag keeps
+`run_exec(timeout=ctx.timeout)`.
+
 ### 4a3. Adapter wave 3 (2026-11-17): hakrawler, gospider, subjs, urlfinder
 
 Three are `urls` / `active` / `core` (`hakrawler`, `gospider`, `subjs`), so they

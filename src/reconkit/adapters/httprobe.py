@@ -17,6 +17,11 @@ from reconkit.core.runner import validate_host
 from reconkit.errors import ParseError, ToolFailed
 from reconkit.models import HostState, HostStatusRecord, Record, RunContext, Stage
 
+# D53: `-t` is milliseconds **per probe**, so it is a request-level constant and
+# never `ctx.timeout` (the stage budget). Before D53 this adapter asked for
+# 600 000 ms, i.e. ten minutes for one dead host.
+PROBE_TIMEOUT_MS = 10_000
+
 
 class HttprobeAdapter(BinaryAdapter):
     name = "httprobe"
@@ -50,7 +55,7 @@ class HttprobeAdapter(BinaryAdapter):
         return [
             self.binary_path() or self.binary,
             "-t",
-            str(max(1, int(ctx.timeout * 1000))),
+            str(int(PROBE_TIMEOUT_MS)),
         ]
 
     def stdin_text(self, ctx: RunContext) -> str | None:

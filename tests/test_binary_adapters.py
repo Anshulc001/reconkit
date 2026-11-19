@@ -84,12 +84,13 @@ def make_ctx(
     user_agent: str | None = None,
     resolvers: Path | None = None,
     target: str = "example.com",
+    timeout: float = 5.0,
 ) -> RunContext:
     return RunContext(
         target=target,
         hosts=hosts or [],
         ports=ports or [],
-        timeout=5.0,
+        timeout=timeout,
         workspace=REPO / "workspaces" / "example.com",
         mock=mock,
         env=env or {},
@@ -3027,3 +3028,129 @@ def test_gowitness_zero_screenshots_without_a_browser_message_stays_ok(
 
     assert result.status is ToolStatus.OK
     assert result.error is not None and "no screenshot" in result.error
+
+
+# ------------------------------------- D53: per-request timeouts are constants
+#
+# `ctx.timeout` is the stage budget and belongs to the hard wall only. Before
+# D53 these adapters passed it straight into a per-request flag, so a 600 s
+# solution-wide default (and now a whole stage budget) became one request's
+# timeout. Each helper below observes the number an adapter actually hands to
+# its tool or client when the stage budget is 1800 s - the old bug case.
+
+
+def _argv_flag(argv: list[str], flag: str) -> float:
+    return float(argv[argv.index(flag) + 1])
+
+
+def _hakrawler_request_timeout(_monkeypatch: pytest.MonkeyPatch, _tmp_path: Path) -> float:
+    adapter = HakrawlerAdapter(finder=lambda _name: "/usr/bin/hakrawler")
+    ctx = make_ctx(hosts=["a.example.com"], timeout=1800.0)
+    return _argv_flag(adapter.build_command(ctx), "-timeout")
+
+
+def _gospider_request_timeout(_monkeypatch: pytest.MonkeyPatch, _tmp_path: Path) -> float:
+    adapter = GospiderAdapter(finder=lambda _name: "/usr/bin/gospider")
+    ctx = make_ctx(hosts=["a.example.com"], timeout=1800.0)
+    return _argv_flag(adapter.build_command(ctx), "-m")
+
+
+def _subjs_request_timeout(_monkeypatch: pytest.MonkeyPatch, _tmp_path: Path) -> float:
+    adapter = SubjsAdapter(finder=lambda _name: "/usr/bin/subjs")
+    ctx = make_ctx(hosts=["a.example.com"], timeout=1800.0)
+    return _argv_flag(adapter.build_command(ctx), "-t")
+
+
+def _httprobe_request_timeout(_monkeypatch: pytest.MonkeyPatch, _tmp_path: Path) -> float:
+    adapter = HttprobeAdapter(finder=lambda _name: "/usr/bin/httprobe")
+    ctx = make_ctx(hosts=["a.example.com"], timeout=1800.0)
+    # `-t` is milliseconds; the observed value is seconds so every row compares.
+    return _argv_flag(adapter.build_command(ctx), "-t") / 1000
+
+
+def _gowitness_request_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> float:
+    adapter = GowitnessAdapter(finder=lambda _name: "/usr/bin/gowitness")
+    monkeypatch.setattr(adapter, "run_dir", lambda _ctx: tmp_path / "run")
+    seen: list[float] = []
+
+    def fake(argv: list[str], **kwargs: object) -> ExecResult:
+        seen.append(float(kwargs["timeout"]))  # type: ignore[arg-type]
+        return outcome(stdout="")
+
+    monkeypatch.setattr(gowitness_module, "run_exec", fake)
+    asyncio.run(adapter.run(make_ctx(hosts=["testfire.net"], timeout=1800.0)))
+    assert seen
+    return seen[0]
+
+
+def _pyscan_request_timeout(monkeypatch: pytest.MonkeyPatch, _tmp_path: Path) -> float:
+    from reconkit.adapters import pyscan as pyscan_module
+
+    seen: list[float] = []
+
+    async def fake_wait_for(awaitable: object, timeout: object) -> object:
+        seen.append(float(timeout))  # type: ignore[arg-type]
+        return await awaitable  # type: ignore[misc]
+
+    class Writer:
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            return None
+
+    async def connect(_ip: str, _port: int) -> tuple[None, Writer]:
+        return None, Writer()
+
+    monkeypatch.setattr(pyscan_module.asyncio, "wait_for", fake_wait_for)
+    adapter = pyscan_module.PyscanAdapter(connect=connect)
+    asyncio.run(adapter._probe(make_ctx(timeout=1800.0), "203.0.113.5", 80))
+    assert seen
+    return seen[0]
+
+
+@pytest.mark.parametrize(
+    ("observe", "expected_s"),
+    [
+        (_hakrawler_request_timeout, 10.0),
+        (_gospider_request_timeout, 10.0),
+        (_subjs_request_timeout, 10.0),
+        (_httprobe_request_timeout, 10.0),
+        (_gowitness_request_timeout, 30.0),
+        (_pyscan_request_timeout, 5.0),
+    ],
+    ids=["hakrawler", "gospider", "subjs", "httprobe", "gowitness", "pyscan"],
+)
+def test_request_timeout_is_a_constant(
+    observe: Callable[[pytest.MonkeyPatch, Path], float],
+    expected_s: float,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Six adapters, six constants: none of them may see the 1800 s stage budget."""
+    assert observe(monkeypatch, tmp_path) == pytest.approx(expected_s)
+
+
+def test_hakrawler_timeout_is_a_constant_not_the_stage_budget() -> None:
+    """D53: `-timeout` is seconds per URL, so the stage budget never reaches it."""
+    adapter = HakrawlerAdapter(finder=lambda _name: "/usr/bin/hakrawler")
+    argv = adapter.build_command(make_ctx(hosts=["testfire.net"], timeout=1800.0))
+    assert argv[argv.index("-timeout") + 1] == "10"
+    assert "1800" not in argv
+
+
+def test_httprobe_timeout_is_milliseconds_constant() -> None:
+    """D53: `-t` is per-probe milliseconds; 1800 s must not become 1 800 000."""
+    adapter = HttprobeAdapter(finder=lambda _name: "/usr/bin/httprobe")
+    argv = adapter.build_command(make_ctx(hosts=["testfire.net"], timeout=1800.0))
+    assert argv[argv.index("-t") + 1] == "10000"
+    assert "1800000" not in argv
+
+
+def test_an_adapter_with_no_request_flag_is_unaffected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D53 leaves the hard wall alone: `run_exec` still gets `ctx.timeout`."""
+    calls = fake_exec(monkeypatch, outcome(stdout="a.example.com\n"))
+    adapter = AssetfinderAdapter(finder=lambda _name: "/usr/bin/assetfinder")
+    asyncio.run(adapter.run(make_ctx(timeout=1800.0)))
+    assert calls
+    assert float(calls[0][1]["timeout"]) == pytest.approx(1800.0)  # type: ignore[arg-type]

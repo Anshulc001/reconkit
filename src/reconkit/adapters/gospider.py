@@ -29,6 +29,9 @@ from reconkit.errors import ToolFailed
 from reconkit.models import Record, RunContext, Stage, UrlRecord
 
 THREADS = 10
+# D53: `-m/--timeout` is seconds per request, so it is a request-level constant,
+# never `ctx.timeout` (the stage budget).
+REQUEST_TIMEOUT_S = 10
 
 
 class GospiderAdapter(BinaryAdapter):
@@ -84,7 +87,7 @@ class GospiderAdapter(BinaryAdapter):
             "-t",
             str(THREADS),
             "-m",
-            str(max(1, int(ctx.timeout))),
+            str(int(REQUEST_TIMEOUT_S)),
         ]
 
     def parse_output(self, raw: str) -> list[Record]:
