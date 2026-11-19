@@ -485,6 +485,13 @@ marker, and a closing line per stage with its item count.
   lines it got before, and `--silent` removes it too. Which tool starts next is
   still not predicted: the line reports what is running, in the order the stage
   started it.
+- **A per-tool heartbeat (added 2026-11-19, D50).** A tool that is still running
+  after 10 s prints one durable line to stderr, `<stage>: <tool> running (<n>s)`,
+  exactly once per tool; it stops when the tool exits and leaves no closing
+  "done" line, because the finished-tool line above already says what happened.
+  It reports liveness only - no mid-stream URL counts, because a tool that prints
+  1042 URLs in one block has no progress to report - and `--silent` suppresses it
+  with every other progress line.
 
 ### Saved reports (every scan)
 One folder per domain per run, never reused:

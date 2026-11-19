@@ -199,6 +199,7 @@ def make_engine(
     installed: Callable[[type[BaseToolAdapter]], bool] | None = None,
     resolve: Callable[[str], object] | None = None,
     activity: Callable[[str], None] | None = None,
+    progress: Callable[[str], None] | None = None,
     url_probe_transport: object | None = None,
 ) -> Engine:
     config = load_config(CONFIG)
@@ -222,6 +223,7 @@ def make_engine(
         now=now,
         resolve=resolve,
         activity=activity,
+        progress=progress,
         url_probe_transport=url_probe_transport,
     )
 
@@ -4209,3 +4211,79 @@ def test_a_new_tool_with_class_in_tools_yaml_needs_no_engine_edit(tmp_path: Path
     assert limits["newcrawl"].max_s == 90  # crawler floor, no code naming the tool
     source = Path(engine_module.__file__).read_text(encoding="utf-8")
     assert "newcrawl" not in source
+
+
+# ---- D50: one heartbeat line per long-running tool ----------------------------
+
+
+class SleepyAdapter(BaseToolAdapter):
+    """A tool that simply takes a while, the way a crawler does."""
+
+    name = "sleepy"
+    stage = Stage.URLS
+
+    def __init__(self, seconds: float) -> None:
+        super().__init__()
+        self._seconds = seconds
+
+    async def run(self, ctx: RunContext) -> ToolResult:
+        await asyncio.sleep(self._seconds)
+        return ToolResult(tool=self.name, status=ToolStatus.OK, records=[])
+
+
+async def test_heartbeat_prints_while_a_tool_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D50: a tool still running after the delay gets one stderr line, in place."""
+    monkeypatch.setattr(engine_module, "HEARTBEAT_AFTER_S", 0.15)
+    lines: list[str] = []
+    specs = {"sleepy": tool("sleepy", Stage.URLS, mode=Mode.ACTIVE)}
+    adapters = {"sleepy": type("Sleepy", (SleepyAdapter,), {"__init__": lambda self: None})}
+    engine = make_engine(tmp_path, specs, adapters, progress=lines.append)
+    monkeypatch.setattr(
+        engine, "_run_one", lambda run_id, adapter, ctx, workspace: _slow_result(0.5)
+    )
+    await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), active=True, mock=True))
+    beats = [line for line in lines if "running (" in line]
+    assert beats, f"no heartbeat in {lines!r}"
+    assert beats[0].startswith("urls: sleepy running (")
+    assert beats[0].endswith("s)")
+
+
+async def _slow_result(seconds: float) -> ToolResult:
+    await asyncio.sleep(seconds)
+    return ToolResult(tool="sleepy", status=ToolStatus.OK, records=[])
+
+
+async def test_heartbeat_is_suppressed_by_silent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """D50: `--silent` passes `progress=None`, so no heartbeat exists at all."""
+    monkeypatch.setattr(engine_module, "HEARTBEAT_AFTER_S", 0.1)
+    specs = {"sleepy": tool("sleepy", Stage.URLS, mode=Mode.ACTIVE)}
+    adapters = {"sleepy": type("Sleepy", (SleepyAdapter,), {"__init__": lambda self: None})}
+    engine = make_engine(tmp_path, specs, adapters, progress=None)
+    monkeypatch.setattr(
+        engine, "_run_one", lambda run_id, adapter, ctx, workspace: _slow_result(0.3)
+    )
+    await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), active=True, mock=True))
+    captured = capsys.readouterr()
+    assert engine._progress_cb is None
+    assert "running (" not in captured.err
+    assert "running (" not in captured.out
+
+
+async def test_heartbeat_stops_when_the_tool_exits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D50: a tool that exits before the delay never produces a heartbeat."""
+    monkeypatch.setattr(engine_module, "HEARTBEAT_AFTER_S", 10.0)
+    lines: list[str] = []
+    specs = {"sleepy": tool("sleepy", Stage.URLS, mode=Mode.ACTIVE)}
+    adapters = {"sleepy": type("Sleepy", (SleepyAdapter,), {"__init__": lambda self: None})}
+    engine = make_engine(tmp_path, specs, adapters, progress=lines.append)
+    monkeypatch.setattr(
+        engine, "_run_one", lambda run_id, adapter, ctx, workspace: _slow_result(0.05)
+    )
+    await engine.run("example.com", ScanOptions(stages=(Stage.URLS,), active=True, mock=True))
+    assert [line for line in lines if "running (" in line] == []

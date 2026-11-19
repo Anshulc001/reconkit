@@ -7941,3 +7941,50 @@ changed for C: no model field, no insert, no test, no commit beyond this record.
 Whether the duplicate is worth that change: it is one wasted request per alive host (500 hosts -> 500
 requests), and the alternative - deriving the scheme from `location` or from the tech pass' httpx JSON
 later - is exactly the guess the stop rule forbids.
+
+## 2026-11-19 (scalability) D - a heartbeat line per running tool (D50)
+
+### The change
+
+`engine.py` gained `HEARTBEAT_AFTER_S = 10.0` and, inside `_run_tools`, a `heartbeat()` task that
+sleeps in `HEARTBEAT_AFTER_S` steps, walks the stage's `running` set and prints one line per tool that
+has been running at least that long:
+
+```
+{stage}: {tool} running ({n}s)
+```
+
+It is emitted through the existing `progress` callback (`self._progress`, the durable stderr channel), not
+through a new callback and not through `activity` (which is the transient spinner and is `None` for a
+piped stderr). No sink means no task at all (`self._progress_cb is not None`), which is exactly the
+`--silent` wiring in `cli.py`. The task is cancelled in `finally`, the per-tool `started` clock is dropped
+when the tool leaves `running`, and each tool can print at most one line (`heartbeats` set). Nothing parses
+tool output and nothing waits for the heartbeat.
+
+### Raw capture (a 1.2 s tool, interval lowered to 0.3 s for the run)
+
+```
+--- progress=stderr (normal) ---
+stderr: urls: running 1 tool(s)
+stderr: urls: slowfake running (1s)
+stderr: urls: slowfake ok 0 item(s)
+stderr: urls: finished 1/1 tool(s), 0 item(s)
+--- progress=None (--silent) ---
+done
+```
+
+The `--silent` half prints nothing but the script's own `done`: with `progress=None` (the exact value
+`cli.py` passes for `--silent`) there is no heartbeat task, so no line can appear on any stream.
+
+### Tests (948 -> 951)
+
+- `test_heartbeat_prints_while_a_tool_runs` - interval patched to 0.15 s, a 0.5 s tool: at least one line,
+  starting `urls: sleepy running (` and ending `s)`.
+- `test_heartbeat_is_suppressed_by_silent` - `progress=None` (the `--silent` value): no line on stdout or
+  stderr and `engine._progress_cb is None`.
+- `test_heartbeat_stops_when_the_tool_exits` - a 0.05 s tool with the real 10 s delay: zero heartbeats.
+
+The intervals are patched in the tests (0.15 s instead of 10 s) so the suite does not sleep for ten
+seconds; the production constant is 10 s and the fast-tool test uses it unpatched.
+
+`ruff check .` clean; `ruff format --check .` 92 files; `mypy src/reconkit` clean.

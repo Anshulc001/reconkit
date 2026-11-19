@@ -204,6 +204,12 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   guess, and the part's stop rule forbids exactly that. The fix needs the URL to travel with the record (models + three
   adapters + engine, five files, four tests); recorded in REVIEW_LOG "C" for the owner to schedule. The duplicate
   itself is real: crawler rows like `https://host/` are probed again by `url_probe` after `live` already answered.
+- **D50 (2026-11-19): a running tool says so, once, on stderr.** The stage spinner was the only sign of life and it
+  needs a terminal; a piped stderr saw nothing between "running N tool(s)" and the first finished-tool line. Now every
+  tool still running after `HEARTBEAT_AFTER_S` (10 s) gets one durable line, `<stage>: <tool> running (<n>s)`, emitted
+  from the existing `progress` callback (no new plumbing, `None` under `--silent`), cleared when the tool exits and
+  never repeated for the same tool. It is liveness only: no output parsing, no percentage, no timer that delays a tool.
+  Suite 948 -> 951.
 
 
 

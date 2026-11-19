@@ -205,6 +205,10 @@ def allow_all_ip(_ip: str) -> bool:
 # `[target, *discovered]` - never empty, so the rule can never skip the apex.
 HOST_INPUT_STAGES = frozenset({Stage.LIVE, Stage.TECH, Stage.URLS, Stage.VULNS})
 NO_INPUT_HOSTS = "no input hosts"
+# D50: seconds a tool must be running before its one "still running" line is
+# printed. A tool that finishes sooner never produces one, and a tool that is
+# killed on its cap produces no extra line either.
+HEARTBEAT_AFTER_S = 10.0
 
 
 def cap_for_tool(
@@ -1488,6 +1492,33 @@ class Engine:
         total = len(selected)
         running: set[str] = set()
         started_at = time.perf_counter()
+        # D50: one line per tool that is still running after this many seconds.
+        # It is a "still working" signal, not progress: gau printing 1042 URLs in
+        # one block has no meaningful percentage, and nothing here parses output.
+        heartbeat_started: dict[str, float] = {}
+        heartbeats: set[str] = set()
+        stop_heartbeat = asyncio.Event()
+
+        async def heartbeat() -> None:
+            """Announce each long-running tool once, then stop (D50)."""
+            while not stop_heartbeat.is_set():
+                try:
+                    await asyncio.wait_for(stop_heartbeat.wait(), timeout=HEARTBEAT_AFTER_S)
+                except TimeoutError:
+                    pass
+                else:
+                    return
+                now = time.perf_counter()
+                for name in sorted(running - heartbeats):
+                    began = heartbeat_started.get(name)
+                    if began is None:
+                        continue
+                    elapsed = now - began
+                    if elapsed < HEARTBEAT_AFTER_S:
+                        continue
+                    heartbeats.add(name)
+                    seconds = max(1, int(round(elapsed)))
+                    self._progress(f"{stage.value}: {name} running ({seconds}s)")
 
         def snapshot() -> None:
             """The live line: how far the stage got and what is still in flight."""
@@ -1505,6 +1536,7 @@ class Engine:
                 overrides["hosts"] = tool_hosts[spec.name]
             tool_ctx = ctx.model_copy(update=overrides)
             running.add(spec.name)
+            heartbeat_started[spec.name] = time.perf_counter()
             snapshot()
             finished = False
             try:
@@ -1521,7 +1553,14 @@ class Engine:
                 snapshot()
             results.append(result)
 
-        await asyncio.gather(*(one(spec, adapter) for spec, adapter in selected))
+        # No durable-line sink (`--silent`) means no heartbeat task at all.
+        beat_task = asyncio.create_task(heartbeat()) if self._progress_cb is not None else None
+        try:
+            await asyncio.gather(*(one(spec, adapter) for spec, adapter in selected))
+        finally:
+            stop_heartbeat.set()
+            if beat_task is not None:
+                await asyncio.gather(beat_task, return_exceptions=True)
         return ctx
 
     def _limits(
