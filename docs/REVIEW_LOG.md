@@ -169,6 +169,53 @@ allowed "the stage subcommands if they share the option group"). The bare
 Gate: `990 passed`, `ruff check .` clean, `ruff format --check .` 96 files,
 `mypy src/reconkit` clean (62 source files). No scan was run.
 
+## 2026-11-19 - loop notes: `live --urls-file` deferred, urlfinder idle unchanged
+
+**`live --urls-file` was not built (deferred, not silent).** The flag is small;
+the plumbing is not. `Stage.LIVE`'s input is `[target] + that target's stored
+subdomains` (`_stage_hosts`), and `engine.run()` takes one root target from
+`validate_target()`. A file of URLs has no single root, so the command needs a
+way to hand the engine an explicit host list (and a scope decision for each
+host) - engine work the batch's stop rule excludes from `cli.py` + tests. The
+gap and the smallest enabler stay documented in docs/02 section 1 ("A list of
+URLs does not work").
+
+**urlfinder's idle window stays at 180s - the evidence does not support 240.**
+`config.yaml` today:
+
+```
+runtime_idle:
+  crawler: 60
+  scanner: 120
+  archive: 180
+  api: 60
+```
+
+Per-run `tool_runs` for the urls stage (repo `recon.db`, copy):
+
+```
+run 193 slice 19:06  urlfinder killed    80  "killed after 180s idle at stage 180.1s, 80 partial"  waybackurls ok 0
+gaU 1540 killed, katana 380, gospider 681, hakrawler 678, subjs 75, unfurl 24
+run 187 sakec 18:45  urlfinder killed  6367  "killed after 180s idle at stage 281.2s, 6367 partial" waybackurls ok 0
+run 181 slice 18:33  urlfinder killed     6  "killed after 180s idle at stage 180.2s, 6 partial"    waybackurls ok 0
+run 178 slice 17:05  urlfinder ok       2222  (no kill)                                          waybackurls ok 0
+run 174 sakec 16:48  urlfinder killed  6367  "killed after 180s idle at stage 199.2s, 6367 partial" waybackurls ok 0
+run 168 sakec 14:53  urlfinder killed  6367  "killed after 180s idle at stage 193.5s, 6367 partial" waybackurls ok 0
+```
+
+The batch's proposed evidence - "waybackurls also 0 that run" - does not
+discriminate: waybackurls returned **0 items in every one of these runs**,
+including the three that produced 6,367. The variance is inside urlfinder: the
+same target produced 2,222 (completed) at 17:05 and 6 (killed at 180s of
+silence) at 18:33. `grep -n 'runtime_idle' config.yaml` -> `29:runtime_idle:`,
+`32:  archive: 180`; `grep -c urlfinder results/*/*/report.json` -> `0` in all
+six reports (the report never names tools), so the DB is the only witness.
+
+Each killed run had already emitted its items (6,367 or 80) and then went
+silent; the 6-item run was silent from the start. A longer idle window would
+not turn either into more data - it would only hold the stage open 60 s longer.
+No config change; no D-number.
+
 ## 2026-11-19 (D65) - `reconkit report` rebuilds a report from the database
 
 Before, the only writer was a scan: a run stored before D62 could not be seen in

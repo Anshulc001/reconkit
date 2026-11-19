@@ -4,6 +4,11 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-19, loop): **`live --urls-file` deferred.** Needs explicit host-list plumbing in
+`ScanOptions`/engine (live hosts are `[target] + stored subdomains`), which is outside a
+cli+tests change; docs/02 section 1 names the gap and the enabler. **urlfinder idle stays 180s**:
+waybackurls is 0 in every run (so it does not explain the variance), and the 6-vs-6367 spread is
+inside urlfinder's own provider behaviour; a longer window would not add data.
 - Status (2026-11-19, D65): **`reconkit report --target <domain>` rebuilds a saved report from the DB.**
 `--run` (default: latest), `--db`, `--out`; same writer as a scan, `mode=ro` connection, no
 network and no adapter. `Store.open_readonly` + `engine.load_stored_report` are the read-only

@@ -188,7 +188,11 @@ line like `https://nb.example.com/x` fails validation before any run starts
 FQDNs only. The smallest enabler is a new option that reads a file, sends each
 line through `validate_host()` rather than `validate_target()`, and probes those
 URLs the way the `url_probe` stage does; that is a new flag and needs an owner
-ruling, so this build does not have it.
+ruling, so this build does not have it. There is a second piece beyond the flag:
+`Stage.LIVE`'s input is `[target] + that target's stored subdomains`, and
+`engine.run()` takes one root target, so a file with no common root also needs
+a way to hand the engine an explicit host list (REVIEW_LOG, 2026-11-19 loop
+notes).
 
 **Getting the list out of a previous run.** `reconkit report --target <domain>`
 rebuilds the saved report from the database (D65, section 5). `export`, `db
