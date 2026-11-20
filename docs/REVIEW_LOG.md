@@ -80,6 +80,22 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-67 | `reconkit ports -d slice.bank.in --active` exited 0, ran **0 tools**, printed `Ports -` for all 13 hosts and wrote no `scan_runs` row, so a completed active scan looked like a ports scan that found nothing | `_stage_hosts(PORTS)` returns the in-memory `alive` set, which is only filled by a `live` stage in the same run; `_seed_from_store` ran only under `--resume`, so a standalone stage command had no hosts and `if stage is Stage.PORTS and not hosts: continue` skipped it silently | every run whose stage list contains none of `subs`/`dns`/`live` now seeds `discovered`/`alive` from `Store.subdomains()` (so `ports`/`tech`/`urls`/`vulns`/`shots` commands use what earlier runs stored). A `ports` run that still has no ALIVE host prints `ports: no ALIVE host from an earlier run; run \`reconkit live\` first` instead of exit 0 silence | `test_ports_stage_command_uses_stored_alive_hosts` (`Regression: PIT-67`) |
 | PIT-66 | A fresh `git clone` on Ubuntu could not follow the new install path: `./scripts/install-tools.sh` was `Permission denied`, and run with `bash` it skipped ProjectDiscovery's `httpx` and failed every apt tool | the script was committed `100644` while `bootstrap.sh` was `100755`; `have()` used `command -v`, so the project's own `httpx` dependency in `.venv/bin` counted as ProjectDiscovery's `httpx`; and apt installed all packages in one command, so four names Ubuntu does not package (`amass`, `findomain`, `massdns`, `rustscan`) aborted `nmap`, `nikto`, `sqlmap`, `whatweb`, `masscan` and `dig` too | the script is committed executable; the plan asks `reconkit doctor --json` and treats only `installed: yes` as present (managed/PATH fallback before reconkit exists); apt packages install one at a time with a warning naming each unavailable one; `amass` installs from its upstream Go module so Kali and Ubuntu share one source | `test_documented_scripts_are_executable`, plus the clean-clone sandbox rerun recorded under "2026-11-20 (D95)" |
 
+## 2026-11-20 (D97) - one command sets up a fresh clone
+
+The README asked a new user to run `bootstrap.sh`, then `install-tools.sh`,
+then `doctor` - three commands and one thing to remember (`source
+.venv/bin/activate`) between them. `scripts/setup.sh` is now the single entry:
+it runs `bootstrap.sh` only when `.venv/bin/reconkit` is missing, puts the
+checkout's `.venv/bin` and `~/.reconkit/bin` first on `PATH`, and `exec`s
+`install-tools.sh` with every argument forwarded (`--check`, `--only`,
+`--dry-run`, `--yes`). The two scripts stay separate: the tool half can be
+re-run alone, and install logic still lives in exactly one place.
+
+README, SETUP.md and docs/10 section 5 now show the one command; the
+executable-mode test covers `setup.sh` too. Verified with `bash -n` and
+`./scripts/setup.sh --check` (exit 0 on a machine with every tool); the
+underlying scripts were verified end-to-end on a fresh Ubuntu clone in D95.
+
 ## 2026-11-20 (D96) - a stage command uses the hosts earlier runs stored
 
 Found while running the authorized `slice.bank.in` scan: the `--active` run

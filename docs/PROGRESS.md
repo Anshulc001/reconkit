@@ -4,6 +4,11 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D97): **one setup command.** `scripts/setup.sh` runs
+  bootstrap (only when needed), then `install-tools.sh` with all arguments
+  forwarded, then doctor. README/SETUP/docs/10 document it; `test_package`
+  checks its executable bit. Next action: none.
+
 - Status (2026-11-20, D96): **a standalone stage command now uses stored
   hosts.** `reconkit ports -d slice.bank.in --active` after a completed active
   scan exited 0 with 0 tools and `Ports -`: `_stage_hosts(PORTS)` only saw the

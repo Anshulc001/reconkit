@@ -11,13 +11,17 @@ the virtual environment in every new terminal.
 
 ```bash
 cd /path/to/reconkit
-./scripts/bootstrap.sh
+./scripts/setup.sh
 source .venv/bin/activate
 ```
 
-`bootstrap.sh` creates `.venv`, installs reconkit in editable mode with its dev
-tools, sets the repo's git hooks and adds `~/.reconkit/bin` to the venv's
-`PATH`.
+`setup.sh` is the one command for a fresh clone: it creates `.venv`, installs
+reconkit in editable mode with its dev tools, sets the repo's git hooks, adds
+`~/.reconkit/bin` to the venv's `PATH`, installs every missing tool from
+`tools.yaml`, and finishes with `reconkit doctor`. Pass `--check`, `--only
+<tool>` or `--dry-run` to report instead of installing. The two steps are also
+available separately: `bootstrap.sh` (environment only) and `install-tools.sh`
+(tools only).
 
 The manual equivalent:
 
@@ -45,10 +49,10 @@ call the script directly without activating: `.venv/bin/reconkit doctor`.
 
 ## 3. Check which tools are available
 
-**To check which scanning tools are available, run `reconkit doctor`.** The
-optional `./scripts/install-tools.sh` installs what the registry can install
-automatically (`apt`, `go install`, `pipx`); run it as your normal user, not
-with `sudo`.
+**To check which scanning tools are available, run `reconkit doctor`.**
+`./scripts/setup.sh` already installs what the registry can install
+automatically (`apt`, `go install`, `pipx`); `./scripts/install-tools.sh` does
+only the tool half. Run either as your normal user, not with `sudo`.
 
 ```bash
 ./scripts/install-tools.sh --check   # report only

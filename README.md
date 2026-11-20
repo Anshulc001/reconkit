@@ -26,15 +26,15 @@ v1.0.0 is stable and feature-complete. `install`, `update` and `doctor --fix` we
 ## Quick start (Kali / Ubuntu)
 
 ```bash
-cd /path/to/reconkit
-./scripts/bootstrap.sh
+git clone https://github.com/Anshulc001/reconkit.git
+cd reconkit
+./scripts/setup.sh                    # venv + dependencies + every installable tool + doctor
 source .venv/bin/activate
 
 reconkit doctor                        # what is installed, what is missing
-./scripts/install-tools.sh --check    # what is missing, and how each tool installs
-./scripts/install-tools.sh --yes      # install every missing tool (sudo for apt)
-# or obtain missing tools however you prefer; the reconkit CLI itself installs nothing.
-# Provenance for every tool is in docs/10_TOOL_SOURCES.md (and tools.yaml `source:`).
+# `setup.sh` forwards --check, --only <tool> and --dry-run to install-tools.sh.
+# The reconkit CLI itself installs nothing; tools come from tools.yaml `source:`.
+# Provenance for every tool is in docs/10_TOOL_SOURCES.md.
 # Optional: cp .env.example .env and add the API keys you have.
 cp scope.example.yaml scope.yaml      # edit with YOUR authorized targets
 reconkit passive -d example.com --mock

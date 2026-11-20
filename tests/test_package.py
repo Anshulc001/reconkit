@@ -27,6 +27,6 @@ def test_documented_scripts_are_executable() -> None:
     from pathlib import Path
 
     scripts = Path(__file__).resolve().parents[1] / "scripts"
-    for name in ("bootstrap.sh", "install-tools.sh"):
+    for name in ("bootstrap.sh", "install-tools.sh", "setup.sh"):
         mode = (scripts / name).stat().st_mode
         assert mode & stat.S_IXUSR, f"{name} is not executable in the checkout"

@@ -4,10 +4,10 @@ This is a reference of the tools reconkit uses. The `reconkit` CLI never install
 any of them: it runs tools that already exist on your system and skips a missing
 one. To see which are present, run `reconkit doctor`.
 
-There is one optional, human-run shortcut for Kali/Debian -
-`scripts/install-tools.sh`. It is a shell script, not a CLI command, it reads
-this same registry, and it covers what the registry can install automatically
-(`apt:`, `go install`, `pipx`). Kali packages every tool. Ubuntu 24.04 has no
+There is one optional, human-run shortcut for Kali/Debian/Ubuntu -
+`scripts/setup.sh`. It is a shell script, not a CLI command, and it covers a
+fresh clone in one command: the Python venv (`bootstrap.sh`), then every tool
+this registry can install automatically (`install-tools.sh`), then `doctor`. Kali packages every tool. Ubuntu 24.04 has no
 `findomain`, `massdns` or `rustscan` package, so the script reports each one it
 cannot install and carries on with the rest; `amass` now installs from its
 upstream Go module (`github.com/owasp-amass/amass/v5/cmd/amass`) on every
@@ -197,11 +197,20 @@ are yours to run). Nothing in this repository names an official download page
 as a procedure or asks you to pipe a script into a shell; the `source:` strings
 are provenance and are never executed by the CLI.
 
-## 5. `scripts/install-tools.sh` (optional, Kali/Debian)
+## 5. Setup scripts (optional, Kali/Debian/Ubuntu)
 
-A bash script for a fresh machine, run by a human, outside the CLI
-(docs/MASTER_PLAN.md D21). It has no tool catalogue of its own: it reads every
-`kind: binary` entry in `tools.yaml` and follows its `source:` string.
+`scripts/setup.sh` is the single entry point for a fresh clone. It runs
+`scripts/bootstrap.sh` when the checkout has no working `.venv`, puts the
+checkout's `.venv/bin` and `~/.reconkit/bin` first on `PATH`, and then
+`exec`s `scripts/install-tools.sh` with every argument forwarded (`--check`,
+`--only`, `--dry-run`, `--yes`). The two scripts stay separate so the tool
+half can be re-run without touching the environment, and because install
+logic lives in exactly one place (the wrapper has none).
+
+`scripts/install-tools.sh` is a bash script for a fresh machine, run by a
+human, outside the CLI (docs/MASTER_PLAN.md D21). It has no tool catalogue of
+its own: it reads every `kind: binary` entry in `tools.yaml` and follows its
+`source:` string.
 
 | `source:` shape | what the script runs |
 |---|---|
