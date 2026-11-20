@@ -11,8 +11,9 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
   report a locked database cleanly; GitHub Actions runs the gate on Python
   3.11-3.13; stale docs and the `install:`/`max_speed` template keys are gone.
   Suite **1041 passed**, ruff/format/mypy clean, tree clean before the final
-  push. Tag `v1.0.0` remains at `db965ea` and was not moved. See the D82-D87
-  entry in REVIEW_LOG.
+  push. The old `v1.0.0` tag (`db965ea`) was deleted locally and from origin,
+  and `v1.0.0` was re-created on the final release commit after this batch. See
+  the D82-D87 entry in REVIEW_LOG.
 - Status (2026-11-20, D87): **stale docs and dead keys are gone.** AGENTS.md
   points at docs/10_TOOL_SOURCES.md, README says v1.0.0 is stable and
   feature-complete for the documented scope, docs/01 no longer claims nuclei is

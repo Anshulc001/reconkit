@@ -194,8 +194,9 @@ exit 2
 Full gate: **1041 passed**, `ruff check .` clean, `ruff format --check .` clean,
 `mypy src/reconkit` clean. CI was added but could not be executed locally; this
 machine has Python 3.14 only, so 3.11/3.12/3.13 remain unverified until the
-first workflow run. `scope.yaml` sha256 was unchanged. The `v1.0.0` tag was not
-moved.
+first workflow run. `scope.yaml` sha256 was unchanged. At the owner's request
+the old `v1.0.0` tag (`db965ea`) was deleted locally and from origin, and a new
+annotated `v1.0.0` was created on the final release commit after this batch.
 
 ## 2026-11-20 (D81) - `db delete` and `db wipe`
 
