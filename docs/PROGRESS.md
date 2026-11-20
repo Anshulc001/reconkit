@@ -4,6 +4,20 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D94): **the binary lookup no longer depends on how the
+  shell was started.** `~/.reconkit/bin` is still first, but after it the
+  search covers PATH, `$GOPATH/bin`, `~/.local/bin`, `~/go/bin`, `~/.gobin`,
+  `/usr/local/bin`, `/usr/local/sbin`, `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`,
+  `/snap/bin`, plus the `SUDO_USER` bin dirs when running under sudo. The
+  identity probe gets `HOME` and a `PATH` led by the copy's own directory, so a
+  distro wrapper script (Kali's `/usr/bin/amass`) works. Doctor and the engine
+  share `adapters.base.binary_search_dirs()` / `identity_probe_env()`. Verified:
+  1046 passed, ruff/format/mypy clean; `doctor --json` reports 47 installed with
+  a normal PATH and with `PATH=/usr/bin:/bin` (the `dnsreaper` manual entry is
+  the 1 missing). Docs: docs/10 section 3, docs/09 adapter contract, docs/03.
+  `v1.0.0` was deleted and re-created on this commit (same version); the tag and
+  `main` were pushed. Next action: none.
+
 - Status (2026-11-20, D93): **the CI-fix work is one commit.** D88-D92 were
   squashed into a single commit on `main` at the owner's request, and `v1.0.0`
   was moved onto it, so history no longer carries the intermediate commits that

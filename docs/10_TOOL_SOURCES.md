@@ -91,11 +91,21 @@ docs/MASTER_PLAN.md D6): `version_cmd`/`version_regex` are the identity check,
 and the string they read decides `installed`/`identity` only - the table and
 `doctor --json` carry no version value at all.
 
-**Lookup order.** `~/.reconkit/bin/<binary>` first (the managed copy), then
-`PATH`. The directory is `config.bin_dir()` and is the only definition of the
-path; `adapters.base.managed_bin_dir()` returns the same value. A copy in
-`~/.reconkit/bin` wins over `PATH` on purpose, so a broken managed copy shadows
-a working binary and the mitigation is manual - remove or replace that file.
+**Lookup order.** `~/.reconkit/bin/<binary>` first (the managed copy), then the
+operator's `PATH` in its own order, then the standard install places a minimal
+`PATH` (sudo, cron, a non-login shell, a distro that does not export `~/go/bin`)
+leaves out: `~/.local/bin`, `~/go/bin` (and every `$GOPATH/bin`), `~/.gobin`,
+`/usr/local/bin`, `/usr/local/sbin`, `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`,
+`/snap/bin`. When the process runs as root with `SUDO_USER` set, that user's
+`~/.local/bin` and `~/go/bin` are searched too, because `sudo reconkit ...`
+(masscan needs root) runs with `HOME=/root` while the tools were installed by
+the logged-in operator. `adapters.base.binary_search_dirs()` is the one
+definition of that list and both doctor and every adapter use it; duplicates are
+searched once. The managed directory is `config.bin_dir()` and
+`adapters.base.managed_bin_dir()` returns the same value. A copy in
+`~/.reconkit/bin` wins over everything on purpose, so a broken managed copy
+shadows a working binary and the mitigation is manual - remove or replace that
+file.
 
 **The version contract.** An entry may carry `version_cmd` (argv; its first
 element is the program that reports the version, defaulting to the tool's
@@ -116,8 +126,11 @@ probe that runs but does not print the expected banner is a namesake). Only when
 the field is absent is the fallback the first non-empty line of the output. A
 probe may exit nonzero and still count, but only when its output names the
 program: `masscan --version` exits 1 and is accepted, while a nonzero exit with
-unrelated text stays `wrong program` (PIT-35). Every probe gets `HOME` in its
-child environment, never the parent environment (PIT-30).
+unrelated text stays `wrong program` (PIT-35). Every probe gets `HOME` and a
+`PATH` whose first entry is the copy's own directory - never the rest of the
+parent environment (PIT-30/PIT-31). The `PATH` lets a distro wrapper script
+(Kali's `/usr/bin/amass` is a `/bin/sh` wrapper around `/usr/lib/amass/amass`)
+run the helpers it calls.
 
 **A probe is retried once** (D42/D46, PIT-63). A single failed probe used to mean
 `wrong program`, which silently removed a working tool from every scan: `amass`

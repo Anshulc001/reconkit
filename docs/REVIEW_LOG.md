@@ -76,6 +76,73 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-55 | A real `reconkit run -d example.com --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 | PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `target.com` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.target.com/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
+| PIT-65 | A tool installed anywhere but `~/.reconkit/bin` and the shell's `PATH` was invisible: `doctor` said `missing` for a `go install`/`pipx` copy, and a distro wrapper script could read `wrong program`, so the same install layout gave a different verdict per machine | `BinaryAdapter.binary_path()` and `toolcheck.installed_copy()` tried only the managed directory and `shutil.which`, and the identity probe environment was `{"HOME"}` only, so `~/go/bin`, `~/.local/bin` and a `/bin/sh` wrapper's `id`/`sudo` calls all depended on how the shell was started | `adapters.base.binary_search_dirs()` adds PATH, `$GOPATH/bin`, `~/.local/bin`, `~/go/bin`, `~/.gobin`, `/usr/local/bin`, `/usr/local/sbin`, `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`, `/snap/bin` and the `SUDO_USER` bin directories under sudo; both resolvers use that one list, and `identity_probe_env()` passes `HOME` plus a `PATH` led by the copy's own directory | `test_a_binary_outside_path_is_found_in_a_standard_dir` (`Regression: PIT-65`), `test_sudo_user_bin_dirs_are_searched`, `test_identity_probe_gets_a_path_led_by_the_program`, `test_installed_copy_finds_a_binary_outside_path` |
+
+## 2026-11-20 (D94) - the binary lookup follows the install, not the shell PATH
+
+A tool installed in a directory the starting shell did not export was reported
+`missing` (or, for a wrapper script, `wrong program`), so the same machine
+layout could produce different `doctor` rows depending on whether reconkit was
+started from a login shell, a cron job or `sudo`. Two concrete shapes:
+
+- `go install` writes to `~/go/bin`, which Kali does not export by default; a
+  scan started outside the shell that added it found nothing.
+- `sudo reconkit ...` (masscan needs root) runs with `HOME=/root`, so the
+  operator's `~/.local/bin` and `~/go/bin` were not searched at all.
+- Kali's `/usr/bin/amass` is a `/bin/sh` wrapper around `/usr/lib/amass/amass`;
+  the identity probe passed only `HOME`, so the wrapper's `id`/`sudo` lookups
+  relied on `/bin/sh`'s fallback PATH.
+
+### The change (2 source files)
+
+- `src/reconkit/adapters/base.py`: `STANDARD_BIN_DIRS`, `binary_search_dirs()`
+  (PATH -> `$GOPATH/bin` -> standard dirs -> `SUDO_USER` dirs under sudo, with
+  duplicates dropped) and `identity_probe_env()` (`HOME` plus a `PATH` led by
+  the copy's own directory). `BinaryAdapter.binary_path()` scans those
+  directories when no test finder is injected; `_probe_identity()` uses the new
+  env.
+- `src/reconkit/core/toolcheck.py`: `installed_copy()` scans the same
+  directories after the managed copy, and `installed_version()` uses the same
+  probe env, so doctor and the engine cannot disagree.
+
+Unchanged: `~/.reconkit/bin` stays authoritative (a broken managed copy still
+shadows a working one), identity markers and `version_regex` are untouched, the
+`wrong program` / `missing` verdicts are the same, and an injected `finder`
+still pins resolution so a test never picks up a binary from the runner.
+Docs changed first: docs/10 section 3 (lookup order and probe env), docs/09
+adapter contract, docs/03 decision table.
+
+### Raw evidence
+
+```
+baseline: 1042 passed; ruff/format/mypy clean
+after:    1046 passed; ruff All checks passed; 96 files already formatted;
+          mypy Success: no issues found in 62 source files
+
+$ reconkit doctor --json                    # normal shell
+47 installed; 1 missing (dnsreaper, manual); 0 warnings
+amass: installed yes, path /usr/bin/amass, identity ok
+
+$ env -u GOPATH PATH=/usr/bin:/bin HOME=/home/kali .venv/bin/reconkit doctor --json
+47 installed; 1 missing; 0 warnings        # same verdict with a minimal PATH
+subfinder/httpx/gau resolved from /home/kali/.reconkit/bin
+```
+
+`v1.0.0` was moved onto this commit at the owner's request (same version, no
+bump); the tag was deleted locally and on origin and re-created.
+
+### Tests (1042 -> 1046)
+
+- `test_a_binary_outside_path_is_found_in_a_standard_dir` - `~/go/bin/subfinder`
+  is resolved and its identity probe passes with `PATH` empty.
+- `test_sudo_user_bin_dirs_are_searched` - as root with `SUDO_USER`, that
+  user's `~/.local/bin` and `~/go/bin` are in the search list.
+- `test_identity_probe_gets_a_path_led_by_the_program` - the probe env keeps
+  `HOME` and starts `PATH` with the copy's directory.
+- `test_installed_copy_finds_a_binary_outside_path` - `doctor`'s resolver finds
+  `~/go/bin` with no PATH entry.
+- Updated: `test_identity_probe_passes_home` now checks the `HOME` key rather
+  than an exact single-key env.
 
 ## 2026-11-20 (D92) - help assertions must strip ANSI, not widen the terminal
 

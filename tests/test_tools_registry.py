@@ -16,7 +16,7 @@ import pytest
 
 from reconkit.adapters.registry import get_spec, load_tools
 from reconkit.core.runner import ExecResult
-from reconkit.core.toolcheck import installed_version
+from reconkit.core.toolcheck import installed_copy, installed_version
 from reconkit.errors import ConfigError
 
 REPO = Path(__file__).resolve().parents[1]
@@ -327,6 +327,25 @@ def _probe(tmp_path: Path, tool: str, binary: str, outcome: ExecResult) -> str |
     (tmp_path / binary).write_text("", encoding="utf-8")
     spec = load_tools()[tool]
     return installed_version(spec, tmp_path, runner=lambda argv, **kwargs: outcome)
+
+
+def test_installed_copy_finds_a_binary_outside_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A tool installed by `go install` must be found without a PATH entry.
+
+    `~/go/bin` and `~/.local/bin` are common on a real machine and often absent
+    from a minimal PATH (sudo, cron); resolution must not depend on the shell
+    that started reconkit (docs/10 section 3).
+    """
+    home = tmp_path / "home"
+    target = home / "go" / "bin" / "findomain"
+    target.parent.mkdir(parents=True)
+    target.write_text("", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.delenv("GOPATH", raising=False)
+    assert installed_copy(load_tools()["findomain"], tmp_path / "managed") == target
 
 
 def test_the_python_httpx_cli_is_not_httpx_tech(tmp_path: Path) -> None:

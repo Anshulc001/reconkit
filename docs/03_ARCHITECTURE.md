@@ -285,7 +285,7 @@ Speed control was removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN
 | SQLite + workspace files | Diffing, resume, queries; plus human-browsable raw output | Flat files only (no history), Postgres (too heavy) |
 | Natural-pace execution | The owner asked for no throttling (2026-11-17, D3); every tool runs at its own rate | Speed presets, delays, shuffling, rate limiter |
 | Adapter + registry | Add a tool without touching core | Hard-coded pipelines |
-| Own `~/.reconkit/bin` (checked first) | No sudo, no global breakage, correct `httpx` | System PATH only |
+| Own `~/.reconkit/bin` (checked first), then PATH and the standard user/system bin dirs | No sudo, no global breakage, correct `httpx`; a tool installed by `go install`/`pipx` or under `sudo` is still found | PATH only, which misses `~/go/bin`, `~/.local/bin` and the `SUDO_USER` dirs under a minimal shell |
 
 ## 11. Performance
 

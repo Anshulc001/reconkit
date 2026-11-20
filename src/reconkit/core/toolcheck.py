@@ -17,7 +17,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-from reconkit.adapters.base import probe_with_retry
+from reconkit.adapters.base import binary_search_dirs, identity_probe_env, probe_with_retry
 from reconkit.adapters.registry import ToolSpec
 from reconkit.core.runner import ExecResult, run_exec
 
@@ -26,12 +26,22 @@ Runner = Callable[..., ExecResult]
 
 
 def installed_copy(spec: ToolSpec, directory: Path) -> Path | None:
-    """The managed copy, else a copy on PATH, else None (docs/10 section 3)."""
+    """The managed copy, else the first copy in any search directory, else None.
+
+    The search order is `adapters.base.binary_search_dirs()` - PATH, `$GOPATH/bin`
+    and the standard install directories - so a tool installed by `go install`
+    or `pipx` is found even when the shell that started reconkit never exported
+    its directory (docs/10 section 3).
+    """
     if spec.binary is None:
         return None
-    candidate = directory / spec.binary
-    if candidate.exists():
-        return candidate
+    managed = directory / spec.binary
+    if managed.exists():
+        return managed
+    for search_dir in binary_search_dirs():
+        candidate = search_dir / spec.binary
+        if candidate.exists():
+            return candidate
     found = shutil.which(spec.binary)
     return Path(found) if found else None
 
@@ -71,7 +81,9 @@ def installed_version(
         outcome = runner(
             [argv0, *command[1:]],
             timeout=timeout,
-            env={"HOME": str(Path.home())},
+            # HOME and a PATH led by the copy's own directory, never the rest of
+            # the parent environment (PIT-30/PIT-31, docs/10 section 3).
+            env=identity_probe_env(argv0),
         )
         if outcome.timed_out or outcome.returncode is None:
             return None

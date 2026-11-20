@@ -304,7 +304,58 @@ def test_identity_probe_passes_home(monkeypatch: pytest.MonkeyPatch, isolated_ho
     calls = fake_exec(monkeypatch, outcome("projectdiscovery.io\n[INF] Current Version: v2.17.0"))
     status = SubfinderAdapter(finder=lambda _name: "/usr/bin/subfinder").check_installed()
     assert status.installed is True
-    assert calls[0][1]["env"] == {"HOME": str(isolated_home)}
+    assert calls[0][1]["env"]["HOME"] == str(isolated_home)
+
+
+def test_identity_probe_gets_a_path_led_by_the_program(
+    monkeypatch: pytest.MonkeyPatch, isolated_home: Path
+) -> None:
+    """PIT-31: a distro wrapper script needs PATH to run the helpers it calls.
+
+    Kali's `/usr/bin/amass` is a `/bin/sh` script that execs its real binary and
+    may call `id`/`sudo`; a probe env with only HOME is not enough everywhere.
+    """
+    calls = fake_exec(monkeypatch, outcome("projectdiscovery.io\nCurrent Version: v2.17.0"))
+    SubfinderAdapter(finder=lambda _name: "/opt/tools/subfinder").check_installed()
+    env = calls[0][1]["env"]
+    assert env["HOME"] == str(isolated_home)
+    assert env["PATH"].split(os.pathsep)[0] == "/opt/tools"
+    assert len(env["PATH"].split(os.pathsep)) > 1
+
+
+def test_a_binary_outside_path_is_found_in_a_standard_dir(
+    monkeypatch: pytest.MonkeyPatch, isolated_home: Path
+) -> None:
+    """`go install`/`pipx` put tools in dirs a minimal PATH never exports.
+
+    The tool must be found wherever this machine installed it, not only in
+    `~/.reconkit/bin` or the shell's PATH (docs/10 section 3).
+    """
+    target = isolated_home / "go" / "bin" / "subfinder"
+    target.parent.mkdir(parents=True)
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    target.chmod(0o755)
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.delenv("GOPATH", raising=False)
+    fake_exec(monkeypatch, outcome("projectdiscovery.io\nCurrent Version: v2.17.0"))
+    adapter = SubfinderAdapter()
+    assert adapter.binary_path() == str(target)
+    status = adapter.check_installed()
+    assert status.installed is True
+    assert status.path == target
+
+
+def test_sudo_user_bin_dirs_are_searched(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`sudo reconkit` runs with HOME=/root; the tools belong to SUDO_USER."""
+    import pwd
+
+    user = pwd.getpwuid(os.getuid()).pw_name
+    monkeypatch.setenv("SUDO_USER", user)
+    monkeypatch.setattr(base_module, "running_as_root", lambda: True)
+    dirs = base_module.binary_search_dirs()
+    home = Path(pwd.getpwnam(user).pw_dir)
+    assert home / ".local" / "bin" in dirs
+    assert home / "go" / "bin" in dirs
 
 
 def test_projectdiscovery_httpx_identity_is_accepted(

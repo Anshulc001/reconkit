@@ -499,6 +499,103 @@ def managed_bin_dir() -> Path:
     return bin_dir()
 
 
+# Install places a tool lands in on a real machine but that a minimal PATH
+# (sudo, cron, a non-login shell, a distro that does not export ~/go/bin) leaves
+# out. PATH keeps its own order; these follow it, and the managed directory is
+# not listed because every caller checks it first and it must stay authoritative
+# (docs/10 section 3).
+STANDARD_BIN_DIRS: tuple[str, ...] = (
+    "~/.local/bin",
+    "~/go/bin",
+    "~/.gobin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+    "/usr/bin",
+    "/usr/sbin",
+    "/bin",
+    "/sbin",
+    "/snap/bin",
+)
+
+
+def _sudo_user_home() -> Path | None:
+    """The invoking user's home when running under `sudo`, else None.
+
+    `sudo reconkit ...` (masscan needs root) runs with `HOME=/root`, so a tool
+    the operator installed as themselves into `~/.local/bin` or `~/go/bin` would
+    be invisible. `SUDO_USER` names them; a lookup failure just means no extra
+    directories.
+    """
+    user = os.environ.get("SUDO_USER")
+    if not user or not running_as_root():
+        return None
+    try:
+        import pwd
+
+        return Path(pwd.getpwnam(user).pw_dir)
+    except (ImportError, KeyError):
+        return None
+
+
+def binary_search_dirs() -> tuple[Path, ...]:
+    """Directories searched for a tool binary after the managed copy.
+
+    Order: the operator's PATH, `$GOPATH/bin`, then `STANDARD_BIN_DIRS`, then
+    (when running under sudo) the invoking user's `~/.local/bin` and `~/go/bin`.
+    Duplicates are dropped, so a PATH entry that also appears below is searched
+    once. Tests pin this list because doctor, the engine's selection check and
+    every adapter share it (docs/10 section 3).
+    """
+    ordered: list[Path] = []
+    seen: set[Path] = set()
+
+    def add(directory: Path) -> None:
+        # Expand `~` through Path.home(), the one definition the rest of the
+        # lookup uses (config.bin_dir and the managed copy do the same).
+        text = str(directory)
+        if text == "~":
+            path = Path.home()
+        elif text.startswith("~/"):
+            path = Path.home() / text[2:]
+        else:
+            path = directory
+        if path not in seen:
+            seen.add(path)
+            ordered.append(path)
+
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if entry:
+            add(Path(entry))
+    for entry in os.environ.get("GOPATH", "").split(os.pathsep):
+        if entry:
+            add(Path(entry) / "bin")
+    for raw in STANDARD_BIN_DIRS:
+        add(Path(raw))
+    sudo_home = _sudo_user_home()
+    if sudo_home is not None:
+        add(sudo_home / ".local" / "bin")
+        add(sudo_home / "go" / "bin")
+    return tuple(ordered)
+
+
+def identity_probe_env(path: str) -> dict[str, str]:
+    """Environment for an identity probe: `HOME` and a `PATH`, nothing else.
+
+    `HOME` keeps ProjectDiscovery tools from writing their config beside the
+    CWD (PIT-30). `PATH` starts with the copy's own directory so a distro
+    wrapper (Kali's `/usr/bin/amass` is a `/bin/sh` script that execs
+    `/usr/lib/amass/amass`) and a tool that calls a sibling binary work however
+    PATH was inherited (PIT-31). No other parent variable is passed - secrets
+    stay out.
+    """
+    inherited = os.environ.get("PATH", os.defpath)
+    parts = [str(Path(path).parent), *inherited.split(os.pathsep)]
+    return {
+        "HOME": str(Path.home()),
+        "PATH": os.pathsep.join(dict.fromkeys(part for part in parts if part)),
+    }
+
+
 class BinaryAdapter(BaseToolAdapter):
     """Binary tool with an identity check and an optional HOME for config."""
 
@@ -511,6 +608,10 @@ class BinaryAdapter(BaseToolAdapter):
 
     def __init__(self, *, finder: Finder | None = None, fixtures_dir: Path | None = None) -> None:
         super().__init__(fixtures_dir=fixtures_dir)
+        # An injected finder pins resolution in tests; the standard-directory
+        # scan is only for the real lookup, so a test never picks up a tool that
+        # happens to be installed on the machine running it.
+        self._scan_standard_dirs = finder is None
         self._finder = finder if finder is not None else shutil.which
 
     def child_env(self, ctx: RunContext) -> dict[str, str]:
@@ -522,11 +623,24 @@ class BinaryAdapter(BaseToolAdapter):
         return env
 
     def binary_path(self) -> str | None:
+        """The copy to run: managed directory first, then every search dir.
+
+        The managed directory stays authoritative (a broken copy there shadows a
+        working one, docs/10 section 3). After it, PATH order is kept, then the
+        standard install directories are tried, so a tool installed with `go
+        install`, `pipx` or a distro package is found even when the shell that
+        started reconkit never exported its directory.
+        """
         own = managed_bin_dir() / self.binary
         own_paths = [own, own.with_name(f"{own.name}.exe")] if os.name == "nt" else [own]
         for candidate in own_paths:
             if candidate.is_file():
                 return str(candidate)
+        if self._scan_standard_dirs:
+            for directory in binary_search_dirs():
+                candidate = directory / self.binary
+                if candidate.is_file():
+                    return str(candidate)
         return self._finder(self.binary)
 
     def check_installed(self) -> InstallStatus:
@@ -550,12 +664,14 @@ class BinaryAdapter(BaseToolAdapter):
 
         The probe gets `HOME` because ProjectDiscovery tools write their config
         under `$HOME/.config`; with no HOME they fall back to the current
-        directory and create or move `subfinder/` and `naabu/` into it.
+        directory and create or move `subfinder/` and `naabu/` into it. It also
+        gets a `PATH` led by the copy's own directory, so a wrapper script can
+        run the helpers it calls (docs/10 section 3).
         """
         outcome = run_exec(
             [path, *self.version_args],
             timeout=IDENTITY_TIMEOUT,
-            env={"HOME": str(Path.home())},
+            env=identity_probe_env(path),
         )
         text = f"{outcome.stdout}\n{outcome.stderr}"
         if outcome.timed_out or outcome.returncode is None:
