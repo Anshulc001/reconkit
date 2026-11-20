@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import re
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -12,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 from typer.main import get_command
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from reconkit import ui
 from reconkit.cli import app
@@ -63,6 +64,21 @@ DOCUMENTED_OPTIONS = {
     "--scope",
     "--db",
 }
+# D88/D92: on GitHub Actions Typer sets FORCE_TERMINAL (typer/rich_utils.py),
+# so Rich styles the help even though CliRunner captures it to a pipe. The
+# option highlighter then splits a name across escape runs
+# (`\x1b[1m-\x1b[0m\x1b[1m-only\x1b[0m`), so a plain substring check misses it.
+# Strip the styling before asserting; COLUMNS keeps the render wide enough that
+# no option is truncated (`terminal_width` is ignored by Rich's help console).
+HELP_ENV = {"COLUMNS": "120", "LINES": "60"}
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def help_text(result: Result) -> str:
+    """Help output with ANSI styling removed, so option names stay contiguous."""
+    return ANSI_ESCAPE.sub("", result.stdout)
+
+
 SCAN_COMMANDS = (
     "subs",
     "dns",
@@ -154,10 +170,11 @@ def test_cli_never_reads_environment_keys() -> None:
 
 
 def test_every_documented_scan_flag_is_registered() -> None:
-    result = CliRunner().invoke(app, ["passive", "--help"])
+    result = CliRunner().invoke(app, ["passive", "--help"], env=HELP_ENV)
     assert result.exit_code == 0
+    rendered = help_text(result)
     for option in DOCUMENTED_OPTIONS:
-        assert option in result.stdout
+        assert option in rendered
 
 
 def test_scan_has_no_undocumented_options() -> None:
@@ -171,9 +188,9 @@ def test_scan_has_no_undocumented_options() -> None:
 
 @pytest.mark.parametrize("command", SCAN_COMMANDS)
 def test_every_scan_command_has_help(command: str) -> None:
-    result = CliRunner().invoke(app, [command, "--help"])
+    result = CliRunner().invoke(app, [command, "--help"], env=HELP_ENV)
     assert result.exit_code == 0
-    assert command in result.stdout
+    assert command in help_text(result)
 
 
 @pytest.mark.parametrize(
@@ -398,7 +415,8 @@ def test_a_stage_with_no_adapter_reports_its_skips(tmp_path: Path) -> None:
     """
     config = make_config(tmp_path)
     result = CliRunner().invoke(
-        app, scan_args(config, "vulns", "--active", "--json", "--tools", "dnsreaper")
+        app,
+        scan_args(config, "vulns", "--active", "--no-scope", "--json", "--tools", "dnsreaper"),
     )
     assert result.exit_code == 4  # no usable tool for the stage, unchanged
     document = json.loads(result.stdout)
@@ -782,7 +800,7 @@ def test_cli_active_runs_subs_dns_live_stages_and_passive_active_tools(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (options,) = captured_options(
-        tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--active")
+        tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--active", "--no-scope")
     )
     assert options.stages == MODE_STAGES["active"]
     assert options.active is True
@@ -793,7 +811,7 @@ def test_cli_active_does_not_run_intrusive_tier(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (options,) = captured_options(
-        tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--active")
+        tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--active", "--no-scope")
     )
     assert Tier.INTRUSIVE not in options_tiers(options)
 
@@ -807,19 +825,25 @@ def options_tiers(options: ScanOptions) -> frozenset[str]:
 def test_cli_full_runs_all_stages_tool_modes_and_tiers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (options,) = captured_options(tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--full"))
+    (options,) = captured_options(
+        tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--full", "--no-scope")
+    )
     assert options.stages == MODE_STAGES["full"]
     assert options.mode == "full"
     assert options_tiers(options) == {"core", "opt_in", "intrusive"}
 
 
 def test_full_implies_active(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (options,) = captured_options(tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--full"))
+    (options,) = captured_options(
+        tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--full", "--no-scope")
+    )
     assert options.active is True
 
 
 def test_full_implies_include_noisy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (options,) = captured_options(tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--full"))
+    (options,) = captured_options(
+        tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--full", "--no-scope")
+    )
     assert options.include_noisy is True
 
 
@@ -928,10 +952,24 @@ def test_run_help_describes_stages_tool_modes_and_tiers() -> None:
     assert "Implies --active and --include-noisy" in _FULL_HELP
     assert "scope_mode = unrestricted_flag" in _NO_SCOPE_HELP
 
-    result = CliRunner().invoke(app, ["run", "--help"])
+    result = CliRunner().invoke(app, ["run", "--help"], env=HELP_ENV)
     assert result.exit_code == 0
+    rendered = help_text(result)
     for flag in ("--active", "--full", "--no-scope", "--only-alive", "--header"):
-        assert flag in result.stdout
+        assert flag in rendered
+
+
+def test_run_help_renders_flags_without_requiring_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D88: help is handled by Typer before the scan execution function."""
+    monkeypatch.chdir(tmp_path)  # deliberately no scope.yaml here
+    result = CliRunner().invoke(app, ["run", "--help"], env=HELP_ENV)
+    assert result.exit_code == 0, result.stderr
+    rendered = help_text(result)
+    for flag in ("--active", "--reprobe-urls", "--full", "--no-scope"):
+        assert flag in rendered
+    assert "No scope.yaml found" not in result.stdout + result.stderr
 
 
 def test_skip_url_probe_drops_the_stage_from_an_active_run(
@@ -1198,7 +1236,7 @@ def test_ports_injection_reaches_the_port_stage(
     assert document["injections"]["ports"] == [80, 443]
 
 
-def test_active_scan_fails_without_scope_file(
+def test_active_scan_still_fails_closed_without_scope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """D82: a missing scope file is not an implicit unrestricted run."""

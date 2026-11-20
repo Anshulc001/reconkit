@@ -77,6 +77,93 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 | PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `target.com` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.target.com/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
 
+## 2026-11-20 (D92) - help assertions must strip ANSI, not widen the terminal
+
+D91 diagnosed the CI help failures as a width problem and passed both
+`terminal_width=HELP_WIDTH` and `COLUMNS`. That was wrong, and the same three
+tests failed again on the D90 commit. The real cause is styling:
+
+- `typer/rich_utils.py` sets `FORCE_TERMINAL = True` when `GITHUB_ACTIONS` is in
+the environment, so Rich emits ANSI even though `CliRunner` captures to a pipe.
+- With styling on, the option highlighter writes a name as several escape runs:
+  `\x1b[1m-\x1b[0m\x1b[1m-only\x1b[0m\x1b[1m-alive\x1b[0m`. `"--only-alive" in
+  result.stdout` is therefore false while the rendered help is correct.
+- `terminal_width=` is ignored by Typer's Rich help console, which sizes itself
+  from `COLUMNS`; that is why D91's pin changed nothing.
+
+`help_text(result)` strips `\x1b[...m` before the assertions, and every rendered
+help test passes `env=HELP_ENV` (`COLUMNS=120`, `LINES=60`) so no option is
+truncated below ~60 columns. Verified locally: the pre-fix code reproduced the
+CI failure under `GITHUB_ACTIONS=true`; after the fix `tests/test_cli.py -k
+help` is 22 passed under `GITHUB_ACTIONS=true`, under `COLUMNS=1
+GITHUB_ACTIONS=true`, and the full suite is 1042 passed from `/tmp` under
+`GITHUB_ACTIONS=true`.
+
+D88-D92 were then squashed into one commit on `main` on the owner's request, so
+the intermediate commits that failed CI no longer exist in history. The decision
+labels D88-D92 are kept here as the record of what was decided and why; the tree
+pushed is byte-identical to the state verified above.
+
+## 2026-11-20 (D90) - adapter tests must not need a clean runner's binaries
+
+Two failures were real test-environment assumptions, not scope failures:
+
+- `test_puredns_points_at_the_resolved_massdns_binary` called the real
+  `which("massdns")`; the binary is absent on the GitHub runner. The test now
+  monkeypatches `reconkit.adapters.puredns.which` to return `/usr/bin/massdns`
+  for `massdns` and `None` otherwise, so the `-b` assertion is deterministic.
+- `test_webanalyze_missing_database_is_a_failed_result` used the shared
+  `make_ctx` workspace (`<repo>/workspaces/example.com`), which does not exist
+  in CI, so `prepare()` raised `FileNotFoundError` before the adapter could
+  return its failed result. It now uses `tmp_path` as `ctx.workspace`.
+
+`test_every_documented_scan_flag_is_registered` failed because of the D88
+width/wrapping issue; `--reprobe-urls` is present in `cli.py` and in the
+rendered help, so no source flag was re-added.
+
+Verified in the focused clean-directory run and the full scope-free suite at
+`COLUMNS=80`: **1042 passed**.
+
+## 2026-11-20 (D89) - active CLI tests must not rely on the repo scope file
+
+The CI runner has no `scope.yaml`; this checkout does, so six tests passed
+locally while exiting 3 in CI. Added `--no-scope` to the six invocations that
+test mode/flag wiring and did not already chdir to the temp scope:
+
+- `test_cli_active_runs_subs_dns_live_stages_and_passive_active_tools`
+- `test_cli_active_does_not_run_intrusive_tier`
+- `test_cli_full_runs_all_stages_tool_modes_and_tiers`
+- `test_full_implies_active`
+- `test_full_implies_include_noisy`
+- `test_a_stage_with_no_adapter_reports_its_skips`
+
+Tests that exercise scope filtering keep their explicit `--scope`/`--no-scope`
+or chdir to the `tmp_path` where `make_config` writes its permissive scope.
+Verified from `/tmp` (no scope file) with `COLUMNS=80`: **1042 passed**. D82 is
+unchanged: `test_active_scan_still_fails_closed_without_scope` still gets exit 3
+and the exact message.
+
+## 2026-11-20 (D88) - scope check must not block `--help`
+
+The CI traceback named a scope refusal before help rendering. The actual log
+shows the opposite: `CliRunner` returned 0 and the assertion failed because
+`--active`/`--include-noisy`/`--ffuf-wordlist` was wrapped by Rich on a narrow
+terminal. The fail-closed check was **already** in `cli._run_scan`, after Typer
+had handled help and validated argv; there was no scope check in the callback.
+No behavior moved, and D82 was not weakened.
+
+- Added a source comment at the `_run_scan` refusal making that ordering
+  explicit.
+- `HELP_ENV = {"COLUMNS": "120", "LINES": "60"}` for the two rendered-help
+  tests. Reproduced the CI failure locally with `COLUMNS=60`.
+- Added `test_run_help_renders_flags_without_requiring_scope`: it chdirs to an
+  empty `tmp_path`, invokes `run --help`, and requires `--active`,
+  `--full`, `--no-scope` and `--reprobe-urls` with no scope error.
+- Renamed the D82 test to `test_active_scan_still_fails_closed_without_scope`;
+  it still asserts exit 3 and the exact message from a scope-free directory.
+
+Tests 1041 -> 1042.
+
 ## 2026-11-20 - vulns documentation matches the stage
 
 The `vulns` stage has adapters, but several docs still said `tech` and `vulns`

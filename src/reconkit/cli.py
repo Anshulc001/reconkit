@@ -942,6 +942,9 @@ def _run_scan(
         if is_active and not no_scope and not scope_present(scope_path):
             # D82: fail closed. A missing scope file is no longer an implicit
             # unrestricted run; the operator must opt out explicitly.
+            # D88: this is in the scan body, not the Typer callback. --help,
+            # --version and argv validation return before this line, so rendering
+            # help never requires a scope file; a real scan still refuses.
             render_error(NO_SCOPE_MESSAGE, console=progress_console, no_color=no_color)
             return int(ExitCode.SCOPE)
         if no_scope and not is_active:

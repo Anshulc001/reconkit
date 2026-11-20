@@ -4,6 +4,41 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D93): **the CI-fix work is one commit.** D88-D92 were
+  squashed into a single commit on `main` at the owner's request, and `v1.0.0`
+  was moved onto it, so history no longer carries the intermediate commits that
+  failed on GitHub Actions. The tree is unchanged from the verified D92 state:
+  1042 passed from `/tmp` under `GITHUB_ACTIONS=true`, ruff/format/mypy clean.
+  See the D92 entry in REVIEW_LOG for the ANSI cause; the decision labels
+  D88-D92 stay in that log as the record of the decisions themselves.
+
+- Status (2026-11-20, D92): **help assertions now survive GitHub Actions.**
+  D91's width pin was the wrong diagnosis (Typer's Rich help console ignores
+  `terminal_width`). On CI `GITHUB_ACTIONS` makes Typer force a terminal, so
+  Rich styles the help and splits `--only-alive` across escape runs; a raw
+  substring check misses it. Tests now read `help_text()`, which strips ANSI,
+  and pass `env=HELP_ENV` so the render stays wide enough. Verified: pre-fix
+  failure reproduced locally under `GITHUB_ACTIONS=true`; post-fix 22 help tests
+  and 1042 suite tests pass from `/tmp` with `GITHUB_ACTIONS=true`. Suite stays
+  1042.
+
+- Status (2026-11-20, D90): **adapter tests no longer need clean-runner
+  binaries or repository paths.** `puredns` injects `which("massdns")`; the
+  webanalyze missing-database test uses `tmp_path` as its workspace. The
+  `--reprobe-urls` flag was already registered; the CI failure was the D88
+  help-rendering issue, not a missing flag. Suite stays 1042.
+- Status (2026-11-20, D89): **CI active/full tests no longer depend on the
+  repository's local scope file.** The six mode/stage tests that did not chdir
+  now pass `--no-scope`; tests that need scope filtering still use the temp
+  scope written by `make_config`. This masked D82 locally because only the
+  checkout had `scope.yaml`. Suite stays 1042.
+- Status (2026-11-20, D88): **help no longer depends on a scope file.** The
+  fail-closed check is in the scan body (`cli._run_scan`), after Typer handles
+  `--help`/`--version`/argv; a source comment and two regressions now pin that.
+  The two help tests pin `COLUMNS=120`; `run --help` from a scope-free directory
+  shows `--active`, `--full`, `--no-scope` and `--reprobe-urls`. The width part
+  of that diagnosis was wrong and D92 replaced it. Tests 1041 -> 1042. No D82
+  weakening.
 - Status (2026-11-20, D82-D87 batch complete): **the v1.0.0 release blockers
   are closed.** Active/full scans fail closed without `scope.yaml`; MIT LICENSE
   and package metadata exist; version `1.0.0`, `--version` and the configured

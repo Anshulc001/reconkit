@@ -1519,7 +1519,7 @@ def test_webanalyze_requires_update_documented() -> None:
 
 
 async def test_webanalyze_missing_database_is_a_failed_result(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     fake_exec(
         monkeypatch,
@@ -1529,9 +1529,8 @@ async def test_webanalyze_missing_database_is_a_failed_result(
             returncode=1,
         ),
     )
-    result = await WebanalyzeAdapter(finder=lambda _name: "/usr/bin/webanalyze").run(
-        make_ctx(hosts=["testfire.net"])
-    )
+    ctx = make_ctx(hosts=["testfire.net"]).model_copy(update={"workspace": tmp_path})
+    result = await WebanalyzeAdapter(finder=lambda _name: "/usr/bin/webanalyze").run(ctx)
     assert result.status is ToolStatus.FAILED
     assert "can not open apps file" in (result.error or "")
 
@@ -2852,7 +2851,13 @@ def test_puredns_adapter_parses_output() -> None:
     assert all(record.source == "puredns" for record in records)
 
 
-def test_puredns_points_at_the_resolved_massdns_binary(tmp_path: Path) -> None:
+def test_puredns_points_at_the_resolved_massdns_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "reconkit.adapters.puredns.which",
+        lambda name: "/usr/bin/massdns" if name == "massdns" else None,
+    )
     adapter = PurednsAdapter(finder=lambda _name: "/usr/bin/puredns")
     ctx = make_ctx(hosts=["testfire.net"])
     ctx.workspace = tmp_path

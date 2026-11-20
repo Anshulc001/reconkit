@@ -95,6 +95,9 @@ Type check:  mypy src/reconkit
 - Unit and default integration tests must not use the network or installed tools.
 - Every new adapter ships with a real (sanitized) fixture and parser tests, including an empty-output and a malformed-output case.
 - Seed randomness (`random.Random(1234)`) in tests that involve jitter.
+- Help assertions read `help_text(result)`, which strips ANSI styling, and invoke with `env=HELP_ENV` (`COLUMNS=120`). On GitHub Actions Typer sets `FORCE_TERMINAL`, so Rich styles the help even into a captured pipe and splits a name like `--only-alive` across escape runs; a raw substring check misses it even though the render is fine. `terminal_width=` is ignored by Typer's Rich help console — do not rely on it. Also assert help from a scope-free `tmp_path`, never from the repository's local `scope.yaml` (D88, D91, D92).
+- A CLI test that runs `--active` or `--full` either passes `--no-scope` (when it is testing mode/flag wiring) or `monkeypatch.chdir(tmp_path)` so the scope written by `make_config` is found; never rely on the repository's local `scope.yaml` (D89).
+- Adapter tests inject `finder`/`which` for companion binaries (`puredns` -> `massdns`) and set `ctx.workspace` to `tmp_path`; no test may require a system-installed tool or write under the repository's `workspaces/` (D90).
 
 ## 9. Definition of Done
 
