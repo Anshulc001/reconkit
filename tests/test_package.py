@@ -23,10 +23,36 @@ def test_documented_scripts_are_executable() -> None:
     committed as 100644 while `bootstrap.sh` was 100755, so `./scripts/
     install-tools.sh` failed with Permission denied for every new user.
     """
+    import shutil
     import stat
+    import subprocess
     from pathlib import Path
 
     scripts = Path(__file__).resolve().parents[1] / "scripts"
-    for name in ("bootstrap.sh", "install-tools.sh", "setup.sh"):
+    names = ("bootstrap.sh", "install-tools.sh", "setup.sh")
+    for name in names:
         mode = (scripts / name).stat().st_mode
         assert mode & stat.S_IXUSR, f"{name} is not executable in the checkout"
+    # The checkout mode is not enough: `core.fileMode=false` (this repo's
+    # setting) silently records a new file as 100644 even when it is +x on
+    # disk, which is how `setup.sh` first landed. Check the index git will hand
+    # a fresh clone.
+    root = scripts.parent
+    if (root / ".git").exists() and shutil.which("git"):
+        listed = subprocess.run(
+            ["git", "ls-files", "-s", *[f"scripts/{name}" for name in names]],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        recorded = {
+            line.split("\t", 1)[1]: line.split("\t", 1)[0].split()[0]
+            for line in listed.splitlines()
+            if "\t" in line
+        }
+        for name in names:
+            assert recorded.get(f"scripts/{name}") == "100755", (
+                f"scripts/{name} is {recorded.get(f'scripts/{name}')} in the git index; "
+                "run `git update-index --chmod=+x scripts/%s`" % name
+            )
