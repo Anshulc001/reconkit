@@ -45,10 +45,21 @@ call the script directly without activating: `.venv/bin/reconkit doctor`.
 
 ## 3. Check which tools are available
 
-**To check which scanning tools are available, run `reconkit doctor`. To obtain
-missing tools, see the reference in
-[docs/10_TOOL_SOURCES.md](docs/10_TOOL_SOURCES.md) - reconkit does not install
-them.**
+**To check which scanning tools are available, run `reconkit doctor`.** The
+optional `./scripts/install-tools.sh` installs what the registry can install
+automatically (`apt`, `go install`, `pipx`); run it as your normal user, not
+with `sudo`.
+
+```bash
+./scripts/install-tools.sh --check   # report only
+./scripts/install-tools.sh --yes     # install everything missing
+```
+
+Kali packages every tool. Ubuntu/Debian can lack `findomain`, `massdns` and
+`rustscan`; the script reports each one it cannot install and keeps going, and
+[docs/10_TOOL_SOURCES.md](docs/10_TOOL_SOURCES.md) gives the upstream source.
+`dnsreaper` always has to be installed by hand. The reconkit CLI itself installs
+nothing and skips any tool that is missing.
 
 `doctor` prints one row per tool (installed, version, path), per-stage coverage,
 system packages, `scope.yaml` presence, the database path and the API key names

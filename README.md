@@ -31,7 +31,9 @@ cd /path/to/reconkit
 source .venv/bin/activate
 
 reconkit doctor                        # what is installed, what is missing
-# obtain any missing tool however you prefer; reconkit installs nothing.
+./scripts/install-tools.sh --check    # what is missing, and how each tool installs
+./scripts/install-tools.sh --yes      # install every missing tool (sudo for apt)
+# or obtain missing tools however you prefer; the reconkit CLI itself installs nothing.
 # Provenance for every tool is in docs/10_TOOL_SOURCES.md (and tools.yaml `source:`).
 # Optional: cp .env.example .env and add the API keys you have.
 cp scope.example.yaml scope.yaml      # edit with YOUR authorized targets

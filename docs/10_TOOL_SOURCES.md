@@ -7,10 +7,12 @@ one. To see which are present, run `reconkit doctor`.
 There is one optional, human-run shortcut for Kali/Debian -
 `scripts/install-tools.sh`. It is a shell script, not a CLI command, it reads
 this same registry, and it covers what the registry can install automatically
-(`apt:`, `go install`, `pipx`). Kali packages `findomain` and `rustscan` in its
-signed repositories, so both install with `sudo apt-get` like the rest; only
-`dnsreaper` has no automatic source, and the script prints its upstream URL
-instead of downloading anything. Skip the script entirely if you prefer to
+(`apt:`, `go install`, `pipx`). Kali packages every tool. Ubuntu 24.04 has no
+`findomain`, `massdns` or `rustscan` package, so the script reports each one it
+cannot install and carries on with the rest; `amass` now installs from its
+upstream Go module (`github.com/owasp-amass/amass/v5/cmd/amass`) on every
+distro. `dnsreaper` has no automatic source, and the script prints its upstream
+URL instead of downloading anything. Skip the script entirely if you prefer to
 install tools yourself; nothing else in reconkit depends on it. See section 5.
 
 ## 1. What this document is
@@ -212,7 +214,23 @@ Rules it keeps:
 
 - **Run it as your normal user, never with `sudo`.** It escalates for `apt-get`
   itself. Run as root, Go would write to `/root/.reconkit/bin`, which no scan
-  looks in, so the script refuses with that explanation.
+  looks in, so the script refuses with that explanation. The file is committed
+executable (`100755`), so `./scripts/install-tools.sh` works after a fresh
+  `git clone` (2026-11-20: it was `100644`, and every new user hit `Permission
+denied`).
+- **"Already installed" means doctor says so.** Before planning it asks
+  `reconkit doctor --json` and treats only `installed: yes` as present.
+  `command -v` alone is not identity: the project's own `httpx` dependency puts
+a console script named `httpx` in `.venv/bin`, so an activated venv made the
+  script report the Python namesake as present, skip ProjectDiscovery's binary,
+  and leave `doctor` reporting `wrong program`. When reconkit itself is not
+  installed yet, the old managed-dir/PATH check is the fallback.
+- **One apt package at a time.** A distro that does not package one tool must
+  not abort the others: Ubuntu 24.04 lacks `amass`, `findomain`, `massdns` and
+  `rustscan`, and a single batched `apt-get install` failed every apt tool with
+  them (`nmap`, `nikto`, `sqlmap`, `whatweb`, `masscan`, `dig`). Each failure is
+  reported with a pointer to this document and the run continues; the final
+  `doctor` verdict still exits non-zero while a tool is unusable.
 - **It downloads nothing itself.** `apt-get` and `go install` fetch from their
   own official sources; there is no `curl`, no release archive, no checksum
   handling. The nine ProjectDiscovery release-only entries carry a verified

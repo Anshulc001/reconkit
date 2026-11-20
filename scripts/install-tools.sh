@@ -99,8 +99,36 @@ if [ -z "${PY}" ]; then
   exit 2
 fi
 
+# What doctor already considers usable. `command -v` is not enough: the
+# project's own httpx dependency installs a console script called `httpx`, so an
+# activated venv made the script report that namesake as "have" and skip
+# ProjectDiscovery's binary. Ask doctor, whose identity check is the documented
+# verdict, and fall back to a path check only before reconkit is installed.
+RECONKIT=""
+for candidate in "${ROOT}/.venv/bin/reconkit" reconkit; do
+  if command -v "${candidate}" >/dev/null 2>&1; then
+    RECONKIT="${candidate}"
+    break
+  fi
+done
+
 PLAN=$(mktemp)
-trap 'rm -f "${PLAN}"' EXIT
+READY=""
+if [ -n "${RECONKIT}" ]; then
+  READY=$(mktemp)
+  "${RECONKIT}" doctor --json 2>/dev/null | "${PY}" -c '
+import json, sys
+
+try:
+    doc = json.load(sys.stdin)
+except json.JSONDecodeError:
+    raise SystemExit(0)
+for row in doc.get("tools", []):
+    if row.get("kind") == "binary" and row.get("installed") == "yes":
+        print(row.get("tool", ""))
+' >"${READY}" || true
+fi
+trap 'rm -f "${PLAN}" "${READY}"' EXIT
 
 "${PY}" - "${REGISTRY}" "${ONLY}" >"${PLAN}" <<'PYEOF'
 import re
@@ -146,7 +174,7 @@ for kind, target, binary in rows:
     if key in seen_targets:
         continue
     seen_targets.add(key)
-    print(f"install\t{kind}\t{target}\t{binary}")
+    print(f"install\t{kind}\t{target}\t{binary}\t{name}")
 
 covered = {binary for _, _, binary in rows}
 for binary, source in manual:
@@ -162,8 +190,13 @@ if [ ! -s "${PLAN}" ]; then
 fi
 
 have() {
-  # Same lookup order the adapters use: the managed directory first, then PATH.
-  [ -x "${BIN_DIR}/${1}" ] || command -v "${1}" >/dev/null 2>&1
+  # `doctor` is authoritative when it ran: it proves identity, not presence.
+  # Without reconkit, fall back to the managed directory and PATH.
+  if [ -n "${READY}" ]; then
+    grep -qxF -- "$1" "${READY}"
+  else
+    [ -x "${BIN_DIR}/${1}" ] || command -v "${1}" >/dev/null 2>&1
+  fi
 }
 
 apt_pkgs=()
@@ -172,13 +205,14 @@ go_names=()
 pipx_pkgs=()
 missing=()
 
-while IFS=$'\t' read -r tag a b c; do
+while IFS=$'\t' read -r tag a b c d; do
   case "${tag}" in
     install)
       kind="${a}"
       target="${b}"
       binary="${c}"
-      if have "${binary}" && [ "${UPDATE}" -eq 0 ]; then
+      tool="${d:-${c}}"
+      if have "${tool}" && [ "${UPDATE}" -eq 0 ]; then
         printf 'have    %-16s %s\n' "${binary}" "${target}"
         continue
       fi
@@ -275,7 +309,16 @@ else
       fi
     fi
     run sudo apt-get update -y
-    run sudo apt-get install -y "${apt_pkgs[@]}"
+    # One package at a time: a distro that does not package one tool (Ubuntu has
+    # no amass/findomain/massdns/rustscan) must not stop apt from installing
+    # every other tool in the same batch.
+    for pkg in "${apt_pkgs[@]}"; do
+      if run sudo apt-get install -y "${pkg}"; then
+        :
+      else
+        printf 'warning: apt could not install %s on this system; install that tool by hand (see docs/10_TOOL_SOURCES.md)\n' "${pkg}" >&2
+      fi
+    done
   fi
 
   if [ "${#go_mods[@]}" -gt 0 ]; then
@@ -311,14 +354,6 @@ fi
 # ---------------------------------------------------------------- verification
 # doctor is the adapter's own check (installed / path / identity). No second
 # checker here: a binary that exists but is the wrong program must fail.
-RECONKIT=""
-for candidate in "${ROOT}/.venv/bin/reconkit" reconkit; do
-  if command -v "${candidate}" >/dev/null 2>&1; then
-    RECONKIT="${candidate}"
-    break
-  fi
-done
-
 if [ -z "${RECONKIT}" ]; then
   echo
   echo "note: reconkit is not on PATH, so the doctor check was skipped."

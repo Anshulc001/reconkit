@@ -77,6 +77,66 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 | PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `target.com` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.target.com/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
 | PIT-65 | A tool installed anywhere but `~/.reconkit/bin` and the shell's `PATH` was invisible: `doctor` said `missing` for a `go install`/`pipx` copy, and a distro wrapper script could read `wrong program`, so the same install layout gave a different verdict per machine | `BinaryAdapter.binary_path()` and `toolcheck.installed_copy()` tried only the managed directory and `shutil.which`, and the identity probe environment was `{"HOME"}` only, so `~/go/bin`, `~/.local/bin` and a `/bin/sh` wrapper's `id`/`sudo` calls all depended on how the shell was started | `adapters.base.binary_search_dirs()` adds PATH, `$GOPATH/bin`, `~/.local/bin`, `~/go/bin`, `~/.gobin`, `/usr/local/bin`, `/usr/local/sbin`, `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`, `/snap/bin` and the `SUDO_USER` bin directories under sudo; both resolvers use that one list, and `identity_probe_env()` passes `HOME` plus a `PATH` led by the copy's own directory | `test_a_binary_outside_path_is_found_in_a_standard_dir` (`Regression: PIT-65`), `test_sudo_user_bin_dirs_are_searched`, `test_identity_probe_gets_a_path_led_by_the_program`, `test_installed_copy_finds_a_binary_outside_path` |
+| PIT-66 | A fresh `git clone` on Ubuntu could not follow the new install path: `./scripts/install-tools.sh` was `Permission denied`, and run with `bash` it skipped ProjectDiscovery's `httpx` and failed every apt tool | the script was committed `100644` while `bootstrap.sh` was `100755`; `have()` used `command -v`, so the project's own `httpx` dependency in `.venv/bin` counted as ProjectDiscovery's `httpx`; and apt installed all packages in one command, so four names Ubuntu does not package (`amass`, `findomain`, `massdns`, `rustscan`) aborted `nmap`, `nikto`, `sqlmap`, `whatweb`, `masscan` and `dig` too | the script is committed executable; the plan asks `reconkit doctor --json` and treats only `installed: yes` as present (managed/PATH fallback before reconkit exists); apt packages install one at a time with a warning naming each unavailable one; `amass` installs from its upstream Go module so Kali and Ubuntu share one source | `test_documented_scripts_are_executable`, plus the clean-clone sandbox rerun recorded under "2026-11-20 (D95)" |
+
+## 2026-11-20 (D95) - a fresh clone can install every tool it can install
+
+Clean-room test of the documented new-user flow: `git clone` of the pushed
+`main`, `./scripts/bootstrap.sh`, then `./scripts/install-tools.sh --yes` in a
+`ubuntu:24.04` container (Python + git + Go only). Three defects appeared, all
+fixed here:
+
+1. **`install-tools.sh` was not executable.** Git carried `100644`; only
+   `bootstrap.sh` was `100755`. `./scripts/install-tools.sh` failed with
+   `Permission denied` before doing anything.
+2. **The script skipped ProjectDiscovery `httpx`.** Its `have()` used
+   `command -v`, and the activated venv puts the project dependency's Python
+   `httpx` console script first, so the plan said `have httpx`; `doctor` then
+   reported `wrong program` and `httpx`/`httpx_tech` stayed unusable.
+3. **One missing apt package aborted the whole apt set.** Ubuntu 24.04 has no
+   `amass`, `findomain`, `massdns` or `rustscan`; the batched
+   `apt-get install -y <all>` exited non-zero, so `nmap`, `nikto`, `sqlmap`,
+   `whatweb`, `masscan` and `dig` were never installed either.
+
+### The change
+
+- `scripts/install-tools.sh`: plan from `reconkit doctor --json`
+  (`installed: yes` only, with the managed-dir/PATH check as the pre-reconkit
+  fallback); install each apt package on its own and warn about each one the
+  distro does not have; the tool name travels through the plan so the identity
+  verdict is per registry row. The file's git mode is now `100755`
+  (`capture_example.sh` too).
+- `tools.yaml`: `amass` installs with
+  `go install github.com/owasp-amass/amass/v5/cmd/amass@latest` (verified:
+  `go list -m` resolves `v5.1.3`), instead of `apt: amass`, which only Kali has.
+- README quick start and SETUP section 3 now name `scripts/install-tools.sh
+  --check/--yes`; docs/10 section 5 records the per-package apt rule and the
+  identity-aware skip.
+
+### Sandbox evidence (before -> after)
+
+```
+before: ./scripts/install-tools.sh  -> Permission denied (mode 100644)
+        bash ./scripts/install-tools.sh --yes
+          have httpx            <- Python httpx in .venv/bin
+          E: Unable to locate package amass/findomain/massdns/rustscan
+          -> nmap/nikto/sqlmap/whatweb/masscan/dig all missing
+          35 installed, 1 manual, 12 need attention; exit 1
+
+after:  doctor-based plan: go httpx ..., per-package apt
+        fresh clone of this commit, `./scripts/install-tools.sh --yes`:
+          44 installed, 1 manual (dnsreaper), 3 not ready
+          missing:findomain  missing:massdns  missing:rustscan
+          (Ubuntu 24.04 has no package for those three; the script names them)
+        `doctor --json`: 0 wrong-program rows
+        amass v5.1.3 (Go), httpx "Current Version: v1.12.0", nmap 7.94SVN,
+        dig 9.18.39; mock run exit 0 (18 tools ok, 0 failed, 0 timeout)
+```
+
+The clean clone's `doctor` also proved the D94 lookup: 0 wrong-program rows
+before any tool, and a Go tool in `~/go/bin` found with `PATH=/usr/bin:/bin`.
+Tests 1046 -> 1047 (`test_documented_scripts_are_executable`); ruff, format and
+mypy clean.
 
 ## 2026-11-20 (D94) - the binary lookup follows the install, not the shell PATH
 

@@ -4,6 +4,19 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D95): **a fresh clone can install every tool its distro
+  packages.** Clean-room `ubuntu:24.04` run of `git clone` -> `bootstrap.sh` ->
+  `install-tools.sh --yes` found three real new-user defects: the script was
+  committed non-executable, its `have()` trusted `command -v` (so the venv's
+  Python `httpx` hid ProjectDiscovery's binary), and one unavailable apt
+  package aborted the whole apt batch. Fixed: executable mode, plan from
+  `reconkit doctor --json`, one apt package at a time with a warning per
+  unavailable one, and `amass` installs from its Go module on every distro.
+  README/SETUP now name the script. Suite 1047, ruff/format/mypy clean. Tag
+  `v1.0.0` moved to the new commit again (same version). Ubuntu still has no
+  `findomain`, `massdns` or `rustscan` package and `dnsreaper` stays manual;
+  the script reports those by name. Next action: none.
+
 - Status (2026-11-20, D94): **the binary lookup no longer depends on how the
   shell was started.** `~/.reconkit/bin` is still first, but after it the
   search covers PATH, `$GOPATH/bin`, `~/.local/bin`, `~/go/bin`, `~/.gobin`,
