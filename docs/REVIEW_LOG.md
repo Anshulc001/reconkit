@@ -119,6 +119,84 @@ on the rewritten D81 commit (`db965ea`) and force-pushed with the branch. Old
 hashes remain in local reflog/original refs and may be cached by GitHub, but no
 branch or tag points at them.
 
+## 2026-11-20 (D82-D87) - release-blocker fixes from the senior review
+
+This batch addressed the P0/P1 findings only. No feature work, no version bump,
+no network scans, `scope.yaml` untouched.
+
+**D82 - fail closed without a scope file.** `reconkit run ... --active` (and
+`--full`) now exits 3 before `Engine.open` when the resolved scope path does not
+exist, with the exact message:
+
+```
+Error: No scope.yaml found. Active scanning requires a scope file. If you intend
+to scan without scope restrictions, you must explicitly pass --no-scope.
+```
+
+`--no-scope` remains the explicit opt-out (loud warning, `scope_mode =
+unrestricted_flag`); passive runs still need no file. The same guard stays in
+`Engine._active_hosts` for direct callers. This supersedes D1's fail-open rule;
+docs/02, 03, 05, 08, 09, README, AGENTS, MASTER_PLAN D1 and the naabu/ports
+manuals were corrected in the same commit. Tests 1029 -> 1032. The old
+no-file-success tests now assert the refusal or pass `no_scope=True` explicitly.
+
+**D83 - license.** Added MIT `LICENSE` (2026 Anshul), `license`, `authors` and
+classifiers in `pyproject.toml`, and a README License section. No code change.
+
+**D84 - one version.** `pyproject.toml` and `reconkit.__version__` are `1.0.0`;
+`reconkit --version` prints `reconkit v1.0.0` and exits 0; `adapters.base`
+builds `USER_AGENT` from `__version__`; `Engine._user_agent` uses
+`--user-agent`, else `config.user_agent`, replacing `{version}`. Tests 1032 ->
+1036 (CLI version, package/pyproject consistency, config default, flag override).
+
+**D85 - destructive db safety.** `db delete` now prompts `[y/N]` and Enter
+cancels. `core.store` translates `sqlite3.OperationalError` into `StorageError`;
+the CLI catches it and prints `Error: Database is locked. Is a scan running?`
+then exits 1 with no traceback. A results-folder `OSError` after a successful
+row delete prints a warning and exits 0. Deviation: the instruction named a CLI
+`except sqlite3.OperationalError`, but `test_cli_imports_only_the_allowed_layers`
+bans `sqlite3` in `cli.py`; translating at the store boundary preserves the
+behaviour and the layering. Tests 1036 -> 1040, including two real
+`BEGIN IMMEDIATE` lock tests.
+
+**D86 - CI.** `.github/workflows/test.yml` runs on push/PR to `main` with Python
+3.11, 3.12 and 3.13; each job installs `.[dev]` and runs `pytest -q`,
+`ruff check .`, `ruff format --check .`, `mypy src/reconkit`. README has the
+badge. No source/test change.
+
+**D87 - stale docs and keys.** AGENTS points at `docs/10_TOOL_SOURCES.md`;
+README says v1.0.0 is stable and feature-complete for the documented scope;
+docs/01 no longer says nuclei stays Phase 3; `scope.example.yaml` no longer
+lists `max_speed`; `config.yaml`, `AppConfig` and `InstallConfig` no longer
+accept the ignored `install:` block. Tests 1040 -> 1041 (removed block is
+rejected).
+
+**Verification (local review before push).**
+
+```
+$ reconkit --version
+reconkit v1.0.0
+exit 0
+
+$ reconkit run -d example.com --active --mock --json --scope /tmp/missing.yaml
+Error: No scope.yaml found. Active scanning requires a scope file. If you intend
+to scan without scope restrictions, you must explicitly pass --no-scope.
+exit 3
+
+$ reconkit passive -d example.com --mock --json --scope /tmp/missing.yaml
+exit 0
+
+$ printf '\n' | reconkit --db /tmp/rk.db db delete --target example.com
+This cannot be undone. Delete this target? [y/N]: cancelled; nothing was deleted.
+exit 2
+```
+
+Full gate: **1041 passed**, `ruff check .` clean, `ruff format --check .` clean,
+`mypy src/reconkit` clean. CI was added but could not be executed locally; this
+machine has Python 3.14 only, so 3.11/3.12/3.13 remain unverified until the
+first workflow run. `scope.yaml` sha256 was unchanged. The `v1.0.0` tag was not
+moved.
+
 ## 2026-11-20 (D81) - `db delete` and `db wipe`
 
 **What existed.** `reconkit db` had two Phase 3 stubs (`list`, `export`) and no

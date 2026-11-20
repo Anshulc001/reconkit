@@ -4,6 +4,15 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D82-D87 batch complete): **the v1.0.0 release blockers
+  are closed.** Active/full scans fail closed without `scope.yaml`; MIT LICENSE
+  and package metadata exist; version `1.0.0`, `--version` and the configured
+  User-Agent are consistent; `db delete` defaults to no and both db commands
+  report a locked database cleanly; GitHub Actions runs the gate on Python
+  3.11-3.13; stale docs and the `install:`/`max_speed` template keys are gone.
+  Suite **1041 passed**, ruff/format/mypy clean, tree clean before the final
+  push. Tag `v1.0.0` remains at `db965ea` and was not moved. See the D82-D87
+  entry in REVIEW_LOG.
 - Status (2026-11-20, D87): **stale docs and dead keys are gone.** AGENTS.md
   points at docs/10_TOOL_SOURCES.md, README says v1.0.0 is stable and
   feature-complete for the documented scope, docs/01 no longer claims nuclei is

@@ -91,7 +91,7 @@ Before any significant change, read the relevant documents:
 | `docs/02_CLI_UX.md` | commands, flags, output, colors, exit codes |
 | `docs/03_ARCHITECTURE.md` | layers, folders, engine, concurrency, data flow |
 | `docs/04_DATABASE.md` | any table, column, query, migration |
-| `docs/05_SECURITY.md` | scope gate, subprocess, secrets, installer, logging |
+| `docs/05_SECURITY.md` | scope gate, subprocess, secrets, tool sources, logging |
 | `docs/06_CODE_STYLE.md` | any code you write |
 | `docs/07_TESTING.md` | tests, fixtures, `--mock` |
 | `docs/08_UX_FLOWS.md` | user journeys and expected terminal output |
@@ -155,7 +155,7 @@ Also run the changed command with `--mock` and report what you ran. Do not claim
 
 ## 8. Documentation updates
 
-Update the matching doc in the same change when you alter: commands/flags, DB schema, adapter contract, security rules, installer behavior, or config keys.
+Update the matching doc in the same change when you alter: commands/flags, DB schema, adapter contract, security rules, tool-source/doctor behavior, or config keys.
 
 ## 9. Conflict handling
 
