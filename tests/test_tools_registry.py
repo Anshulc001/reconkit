@@ -30,13 +30,11 @@ def test_version_cmd_comes_from_the_registry() -> None:
     assert specs["crtsh"].version_cmd is None
 
 
-def test_massdns_version_command_is_the_package_manager() -> None:
-    assert load_tools()["massdns"].version_cmd == [
-        "dpkg-query",
-        "-W",
-        "-f=${Version}",
-        "massdns",
-    ]
+def test_massdns_version_command_is_the_binary() -> None:
+    # D98: massdns is built from source on Ubuntu (no package), so the probe
+    # cannot go through dpkg-query. `massdns --version` prints `massdns`,
+    # exits 0, and the identity probe accepts it.
+    assert load_tools()["massdns"].version_cmd == ["massdns", "--version"]
 
 
 def test_requires_apt_is_carried() -> None:
@@ -166,11 +164,18 @@ def test_a_release_source_names_its_repository() -> None:
     assert "github.com/projectdiscovery/nuclei" in (specs["nuclei"].source or "")
     assert "github.com/projectdiscovery/chaos-client" in (specs["chaos"].source or "")
 
-    # These two used to cite their release pages. Kali packages both, so the
-    # registry now installs them from the signed repository instead
-    # (2026-11-18); the release page is the fallback named in `notes:`.
-    assert specs["findomain"].source == "apt: findomain"
-    assert specs["rustscan"].source == "apt: rustscan"
+    # Ubuntu packages neither, so both install from a pinned release archive:
+    # an https github.com URL plus a checked SHA-256 (D98). massdns is built
+    # from a pinned commit instead.
+    import re
+
+    for tool in ("findomain", "rustscan"):
+        source = specs[tool].source or ""
+        assert source.startswith("release: https://github.com/"), source
+        assert re.search(r" sha256=[0-9a-f]{64}$", source), source
+    massdns = specs["massdns"].source or ""
+    assert massdns.startswith("build: https://github.com/blechschmidt/massdns.git@")
+    assert re.search(r"@[0-9a-f]{40}$", massdns), massdns
 
 
 def test_a_shared_binary_tool_still_has_a_source() -> None:

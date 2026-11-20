@@ -4,6 +4,13 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D98): **every installable tool now installs on Ubuntu.**
+  `findomain` (pinned 11.0.0 zip) and `rustscan` (pinned 2.4.1 .deb.zip) use new
+  `release:` sources with SHA-256 checks; `massdns` uses a pinned `build:` commit
+  plus make, and its version probe is `massdns --version`. Fresh Ubuntu run: 47
+  installed, 1 manual (`dnsreaper`), doctor 0 wrong-program, exit 0. Next
+  action: none.
+
 - Status (2026-11-20, D97): **one setup command.** `scripts/setup.sh` runs
   bootstrap (only when needed), then `install-tools.sh` with all arguments
   forwarded, then doctor. README/SETUP/docs/10 document it; `test_package`

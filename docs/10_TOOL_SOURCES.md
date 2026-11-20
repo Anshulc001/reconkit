@@ -217,6 +217,8 @@ its own: it reads every `kind: binary` entry in `tools.yaml` and follows its
 | `apt: <pkg>` | `sudo apt-get install -y <pkg>` |
 | `go install <module>@latest` | `GOBIN=~/.reconkit/bin go install <module>@latest` |
 | `pipx install <pkg>` | `pipx install <pkg>` |
+| `release: <url> sha256=<hex>` | download the https GitHub archive, verify the pinned SHA-256, take the binary (or `usr/bin/<binary>` out of a `.deb` inside) and install it to `~/.reconkit/bin` |
+| `build: <git-url>@<commit>` | clone that commit, `make`, install `bin/<binary>` to `~/.reconkit/bin` |
 | anything else | nothing - the entry is printed as manual with its URL |
 
 Rules it keeps:
@@ -240,12 +242,14 @@ a console script named `httpx` in `.venv/bin`, so an activated venv made the
   them (`nmap`, `nikto`, `sqlmap`, `whatweb`, `masscan`, `dig`). Each failure is
   reported with a pointer to this document and the run continues; the final
   `doctor` verdict still exits non-zero while a tool is unusable.
-- **It downloads nothing itself.** `apt-get` and `go install` fetch from their
-  own official sources; there is no `curl`, no release archive, no checksum
-  handling. The nine ProjectDiscovery release-only entries carry a verified
-  `(or: go install ...)` hint that the script uses instead, and `findomain` /
-  `rustscan` come from Kali's signed repositories rather than their release
-  assets (2026-11-18).
+- **Release archives are pinned, never "latest".** `release:` is only for a
+tool a distro does not package. The URL is https on `github.com`, the SHA-256
+in `tools.yaml` is checked before anything is unpacked, and a mismatch refuses
+that archive. `build:` clones a pinned commit; no release asset is piped into a
+shell. Today that is `findomain` (11.0.0 zip), `rustscan` (2.4.1 .deb.zip) and
+`massdns` (source at commit `30c3809`), the three tools Ubuntu 24.04 does not
+package (2026-11-20). The tools a distro *does* package still use `apt:`,
+`go install` or `pipx`.
 - **Verification is `reconkit doctor --json`**, the adapter's own probe
   (installed / path / identity). A binary that exists but is the wrong program
   is `identity: failed` and fails the script. An entry with no automatic source

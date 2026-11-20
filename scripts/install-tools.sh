@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# scripts/install-tools.sh - install or update every tool reconkit uses (Kali/Debian).
+# scripts/install-tools.sh - install or update every tool reconkit uses
+# (Kali, Debian or Ubuntu).
 #
 # The tool list is NOT in this file: it is read from tools.yaml, which stays the
 # only registry of what reconkit may run (docs/MASTER_PLAN.md D21). Each
@@ -8,19 +9,26 @@
 #   apt: <pkg>                 -> sudo apt-get install -y <pkg>
 #   go install <module>@latest -> GOBIN=~/.reconkit/bin go install <module>@latest
 #   pipx install <pkg>         -> pipx install <pkg>
+#   release: <url> sha256=<hex> -> download, verify the pinned SHA-256, unpack
+#                                (zip, with a plain binary or a .deb inside),
+#                                install to ~/.reconkit/bin
+#   build: <git-url>@<commit>  -> clone that commit, run make, install bin/<binary>
 #   anything else              -> reported as manual, with its upstream URL
 #
-# It never downloads a release archive itself: `go install` and `apt-get` fetch
-# from their own official sources, and the manual list points at the registry's
-# URL for a human to decide. The last step is `reconkit doctor --json`, so a tool
-# that exists but is the wrong program (identity != ok) still counts as a
-# failure - that probe is the adapter's own (docs/09).
+# `release:` and `build:` are the two ways to install a tool a distro does not
+# package (findomain, massdns, rustscan on Ubuntu). Both are pinned in
+# tools.yaml: an archive URL plus its SHA-256, or a git commit. The download must
+# be https on github.com and is never piped into a shell; `build:` runs the
+# project's own Makefile at the pinned commit. The last step is
+# `reconkit doctor --json`, so a tool that exists but is the wrong program
+# (identity != ok) still counts as a failure - that probe is the adapter's own
+# (docs/09).
 #
 # Usage:
 #   ./scripts/install-tools.sh              # install what is missing
 #   ./scripts/install-tools.sh --dry-run    # print the commands, change nothing
 #   ./scripts/install-tools.sh --check      # report what is present/missing
-#   ./scripts/install-tools.sh --update     # re-run apt/go/pipx for every tool
+#   ./scripts/install-tools.sh --update     # re-run every source for every tool
 #   ./scripts/install-tools.sh --only gau   # one tool (bash pattern allowed)
 #   ./scripts/install-tools.sh --yes        # no confirmation prompt
 #
@@ -154,9 +162,16 @@ for name, spec in sorted(tools.items()):
     apt = re.match(r"apt:\s*([^\s(]+)", source)
     go = re.search(r"go install\s+(\S+)", source)
     pipx = re.match(r"pipx install\s+(\S+)", source)
+    release = re.match(r"release:\s*(\S+)\s+sha256=([0-9a-fA-F]{64})\s*$", source)
+    build = re.match(r"build:\s*(\S+?)(?:@([0-9a-fA-F]{7,40}))?\s*$", source)
 
     if apt:
         rows.append(("apt", apt.group(1), binary))
+    elif release:
+        rows.append(("release", f"{release.group(1)}|{release.group(2).lower()}", binary))
+    elif build:
+        target = build.group(1) + ("|" + build.group(2) if build.group(2) else "")
+        rows.append(("build", target, binary))
     elif go:
         # The hint lives inside a prose string, so it ends with punctuation:
         # "(or: go install <module>@latest; the archive member is ...)".
@@ -203,6 +218,10 @@ apt_pkgs=()
 go_mods=()
 go_names=()
 pipx_pkgs=()
+release_targets=()
+release_bins=()
+build_targets=()
+build_bins=()
 missing=()
 
 while IFS=$'\t' read -r tag a b c d; do
@@ -230,6 +249,16 @@ while IFS=$'\t' read -r tag a b c d; do
           pipx_pkgs+=("${target}")
           printf 'pipx    %-16s %s\n' "${binary}" "${target}"
           ;;
+        release)
+          release_targets+=("${target}")
+          release_bins+=("${binary}")
+          printf 'release %-16s %s\n' "${binary}" "${target%%|*}"
+          ;;
+        build)
+          build_targets+=("${target}")
+          build_bins+=("${binary}")
+          printf 'build   %-16s %s\n' "${binary}" "${target%%|*}"
+          ;;
       esac
       ;;
     manual)
@@ -250,13 +279,15 @@ if [ "${CHECK_ONLY}" -eq 1 ]; then
   exit 0
 fi
 
-if [ "${#apt_pkgs[@]}" -eq 0 ] && [ "${#go_mods[@]}" -eq 0 ] && [ "${#pipx_pkgs[@]}" -eq 0 ]; then
+if [ "${#apt_pkgs[@]}" -eq 0 ] && [ "${#go_mods[@]}" -eq 0 ] && \
+   [ "${#pipx_pkgs[@]}" -eq 0 ] && [ "${#release_bins[@]}" -eq 0 ] && \
+   [ "${#build_bins[@]}" -eq 0 ]; then
   echo
   echo "nothing to install"
 else
   echo
   if [ "${ASSUME_YES}" -eq 0 ] && [ "${DRY_RUN}" -eq 0 ]; then
-    read -r -p "Proceed with ${#apt_pkgs[@]} apt package(s), ${#go_mods[@]} go module(s), ${#pipx_pkgs[@]} pipx package(s)? [y/N] " reply
+    read -r -p "Proceed with ${#apt_pkgs[@]} apt package(s), ${#go_mods[@]} go module(s), ${#pipx_pkgs[@]} pipx package(s), ${#release_bins[@]} release archive(s), ${#build_bins[@]} source build(s)? [y/N] " reply
     case "${reply}" in
       y | Y) ;;
       *)
@@ -282,6 +313,22 @@ else
   if [ "${#pipx_pkgs[@]}" -gt 0 ] && ! command -v pipx >/dev/null 2>&1; then
     echo "pipx is missing; installing pipx first"
     run sudo apt-get install -y pipx
+  fi
+
+  # release/build need a few ordinary tools; install them only when missing.
+  need_build=()
+  [ "${#release_bins[@]}" -gt 0 ] && need_build+=(curl unzip ca-certificates)
+  [ "${#build_bins[@]}" -gt 0 ] && need_build+=(git make gcc)
+  if [ "${#need_build[@]}" -gt 0 ]; then
+    absent=()
+    for need in "${need_build[@]}"; do
+      command -v "${need}" >/dev/null 2>&1 || absent+=("${need}")
+    done
+    if [ "${#absent[@]}" -gt 0 ]; then
+      echo "installing prerequisites: ${absent[*]}"
+      run sudo apt-get update -y
+      run sudo apt-get install -y "${absent[@]}"
+    fi
   fi
 
   if [ "${#apt_pkgs[@]}" -gt 0 ]; then
@@ -341,6 +388,98 @@ else
       else
         run pipx install "${pkg}"
       fi
+    done
+  fi
+
+  if [ "${#release_bins[@]}" -gt 0 ] || [ "${#build_bins[@]}" -gt 0 ]; then
+    run mkdir -p "${BIN_DIR}"
+  fi
+
+  if [ "${#release_bins[@]}" -gt 0 ]; then
+    echo
+    echo "== release archives (${#release_bins[@]}) -> ${BIN_DIR} =="
+    for index in "${!release_bins[@]}"; do
+      binary="${release_bins[index]}"
+      url="${release_targets[index]%%|*}"
+      sha="${release_targets[index]#*|}"
+      if [ "${DRY_RUN}" -eq 1 ]; then
+        printf 'dry-run: curl -fsSL %s | verify sha256 %s -> %s\n' "${url}" "${sha}" "${BIN_DIR}/${binary}"
+        continue
+      fi
+      work=$(mktemp -d)
+      printf '>> %s\n' "${url}"
+      if ! curl -fsSL --proto '=https' --tlsv1.2 -o "${work}/archive" "${url}"; then
+        echo "warning: download failed for ${binary}; see docs/10_TOOL_SOURCES.md" >&2
+        rm -rf "${work}"
+        continue
+      fi
+      if ! printf '%s  %s\n' "${sha}" "${work}/archive" | sha256sum -c - >/dev/null 2>&1; then
+        echo "warning: SHA-256 mismatch for ${binary}; refusing that archive" >&2
+        rm -rf "${work}"
+        continue
+      fi
+      mkdir -p "${work}/unpacked"
+      if ! unzip -q -o "${work}/archive" -d "${work}/unpacked"; then
+        echo "warning: cannot unpack the archive for ${binary}" >&2
+        rm -rf "${work}"
+        continue
+      fi
+      source_path="${work}/unpacked/${binary}"
+      deb=$(find "${work}/unpacked" -maxdepth 1 -name '*.deb' -print -quit)
+      if [ -n "${deb}" ]; then
+        mkdir -p "${work}/root"
+        dpkg-deb -x "${deb}" "${work}/root" || true
+        source_path="${work}/root/usr/bin/${binary}"
+      fi
+      if [ -f "${source_path}" ]; then
+        install -m 0755 "${source_path}" "${BIN_DIR}/${binary}"
+      else
+        echo "warning: ${binary} was not inside the archive" >&2
+      fi
+      rm -rf "${work}"
+    done
+  fi
+
+  if [ "${#build_bins[@]}" -gt 0 ]; then
+    echo
+    echo "== source builds (${#build_bins[@]}) -> ${BIN_DIR} =="
+    for index in "${!build_bins[@]}"; do
+      binary="${build_bins[index]}"
+      url="${build_targets[index]%%|*}"
+      commit="${build_targets[index]}"
+      [ "${commit}" = "${url}" ] && commit="" || commit="${commit#*|}"
+      if [ "${DRY_RUN}" -eq 1 ]; then
+        printf 'dry-run: git clone %s %s && make && install bin/%s\n' "${url}" "${commit:-HEAD}" "${binary}"
+        continue
+      fi
+      work=$(mktemp -d)
+      printf '>> %s %s\n' "${url}" "${commit:-HEAD}"
+      if ! git clone -q --no-checkout --depth 1 "${url}" "${work}/src"; then
+        echo "warning: cannot clone ${url} for ${binary}" >&2
+        rm -rf "${work}"
+        continue
+      fi
+      if [ -n "${commit}" ]; then
+        if ! git -C "${work}/src" fetch -q --depth 1 origin "${commit}" || \
+           ! git -C "${work}/src" checkout -q FETCH_HEAD; then
+          echo "warning: cannot check out ${commit} for ${binary}" >&2
+          rm -rf "${work}"
+          continue
+        fi
+      else
+        git -C "${work}/src" checkout -q HEAD || true
+      fi
+      if ! make -C "${work}/src" -j"$(nproc 2>/dev/null || echo 2)" >/dev/null 2>&1; then
+        echo "warning: make failed for ${binary}" >&2
+        rm -rf "${work}"
+        continue
+      fi
+      if [ -f "${work}/src/bin/${binary}" ]; then
+        install -m 0755 "${work}/src/bin/${binary}" "${BIN_DIR}/${binary}"
+      else
+        echo "warning: ${binary} was not at bin/${binary} after make" >&2
+      fi
+      rm -rf "${work}"
     done
   fi
 fi

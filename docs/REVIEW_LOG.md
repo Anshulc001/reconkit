@@ -80,6 +80,40 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-67 | `reconkit ports -d slice.bank.in --active` exited 0, ran **0 tools**, printed `Ports -` for all 13 hosts and wrote no `scan_runs` row, so a completed active scan looked like a ports scan that found nothing | `_stage_hosts(PORTS)` returns the in-memory `alive` set, which is only filled by a `live` stage in the same run; `_seed_from_store` ran only under `--resume`, so a standalone stage command had no hosts and `if stage is Stage.PORTS and not hosts: continue` skipped it silently | every run whose stage list contains none of `subs`/`dns`/`live` now seeds `discovered`/`alive` from `Store.subdomains()` (so `ports`/`tech`/`urls`/`vulns`/`shots` commands use what earlier runs stored). A `ports` run that still has no ALIVE host prints `ports: no ALIVE host from an earlier run; run \`reconkit live\` first` instead of exit 0 silence | `test_ports_stage_command_uses_stored_alive_hosts` (`Regression: PIT-67`) |
 | PIT-66 | A fresh `git clone` on Ubuntu could not follow the new install path: `./scripts/install-tools.sh` was `Permission denied`, and run with `bash` it skipped ProjectDiscovery's `httpx` and failed every apt tool | the script was committed `100644` while `bootstrap.sh` was `100755`; `have()` used `command -v`, so the project's own `httpx` dependency in `.venv/bin` counted as ProjectDiscovery's `httpx`; and apt installed all packages in one command, so four names Ubuntu does not package (`amass`, `findomain`, `massdns`, `rustscan`) aborted `nmap`, `nikto`, `sqlmap`, `whatweb`, `masscan` and `dig` too | the script is committed executable; the plan asks `reconkit doctor --json` and treats only `installed: yes` as present (managed/PATH fallback before reconkit exists); apt packages install one at a time with a warning naming each unavailable one; `amass` installs from its upstream Go module so Kali and Ubuntu share one source | `test_documented_scripts_are_executable`, plus the clean-clone sandbox rerun recorded under "2026-11-20 (D95)" |
 
+## 2026-11-20 (D98) - the installer covers every Ubuntu packaging gap
+
+Ubuntu 24.04 packages neither `findomain`, `massdns` nor `rustscan`, so a
+fresh clone ended with "44 installed, 3 not ready" even after D95. D98 adds two
+source shapes to `scripts/install-tools.sh`, both pinned in `tools.yaml`:
+
+- `release: <https github url> sha256=<64 hex>` - download, verify the pinned
+  SHA-256, unpack the zip, take the binary or `usr/bin/<binary>` out of the
+  `.deb` inside, install to `~/.reconkit/bin`. Used by `findomain` (11.0.0
+  `findomain-linux.zip`, sha `67763aef...765b7`) and `rustscan` (2.4.1
+  `rustscan.deb.zip`, sha `9606f9a4...eb6a`). A mismatch refuses the archive.
+- `build: <git url>@<commit>` - clone that commit, run `make`, install
+  `bin/<binary>`. Used by `massdns` (commit `30c3809`), whose version probe is
+  now `massdns --version` instead of `dpkg-query` (there is no package).
+
+Prerequisites (`curl`, `unzip`, `git`, `make`, `gcc`) are installed only when a
+run needs them. The planner, dry-run and confirmation prompt all name the new
+kinds, and `tests/test_tools_registry.py` now asserts the pinned shapes.
+
+Evidence, fresh Ubuntu 24.04 container, clean home:
+
+```
+findomain   -> installed, doctor: "every binary matching 'findomain' ..."
+rustscan    -> installed, `rustscan 2.4.1`, doctor ok
+massdns     -> built from 30c3809, `massdns`, doctor ok
+full run    -> 47 installed, 1 manual (dnsreaper), exit 0
+doctor      -> "every installable registry binary is installed and
+                identified correctly" (0 wrong-program)
+```
+
+The Go module cache those builds fill (`~/go/pkg/mod`) is build-time
+scaffolding: those packages are libraries, never installed as tools or added
+to PATH.
+
 ## 2026-11-20 (D97) - one command sets up a fresh clone
 
 The README asked a new user to run `bootstrap.sh`, then `install-tools.sh`,
