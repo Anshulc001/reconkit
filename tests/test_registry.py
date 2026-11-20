@@ -124,9 +124,10 @@ def test_unknown_tool_raises_config_error() -> None:
 
 
 def test_listed_tool_without_adapter_raises_config_error() -> None:
-    # `urlscan` gained an adapter in wave 7; `dnsreaper` stays unadapted by D15.
+    # `urlscan` gained an adapter in wave 7 and `dnsreaper` in D100; `sqlmap` is
+    # an intrusive entry that still has none.
     with pytest.raises(ConfigError, match="no adapter yet"):
-        get_adapter("dnsreaper")
+        get_adapter("sqlmap")
 
 
 def test_invalid_yaml_is_a_config_error(tmp_path: Path) -> None:
@@ -191,10 +192,17 @@ def test_invalid_system_packages_is_a_config_error(tmp_path: Path) -> None:
         load_system_packages(bad)
 
 
-def test_manual_flag_is_parsed_and_defaults_to_false() -> None:
-    """D36: dnsreaper is the one tool the operator must place by hand."""
-    assert get_spec("dnsreaper").manual is True
+def test_manual_flag_is_parsed_and_defaults_to_false(tmp_path: Path) -> None:
+    """D36 kept the flag; D100 moved the last manual tool (dnsreaper) to setup."""
+    assert get_spec("dnsreaper").manual is False
     assert get_spec("crtsh").manual is False
+    path = tmp_path / "tools.yaml"
+    path.write_text(
+        "tools:\n  zeta: {stage: vulns, kind: binary, tier: core, mode: active, phase: 3,\n"
+        "         manual: true, binary: zeta}\n",
+        encoding="utf-8",
+    )
+    assert load_tools(path)["zeta"].manual is True
 
 
 def test_a_non_bool_manual_flag_is_a_config_error(tmp_path: Path) -> None:

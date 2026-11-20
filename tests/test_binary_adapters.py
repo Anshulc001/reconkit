@@ -24,6 +24,7 @@ from reconkit.adapters import subfinder as subfinder_module
 from reconkit.adapters.assetfinder import AssetfinderAdapter
 from reconkit.adapters.base import BinaryAdapter
 from reconkit.adapters.cdncheck import CdncheckAdapter
+from reconkit.adapters.dnsreaper import DnsreaperAdapter
 from reconkit.adapters.dnsx import DnsxAdapter
 from reconkit.adapters.gau import GauAdapter
 from reconkit.adapters.gospider import GospiderAdapter
@@ -2271,6 +2272,70 @@ def test_regression_a_nuclei_host_with_a_port_keeps_its_name() -> None:
     assert isinstance(record, FindingRecord)
     assert record.fqdn == "demo.testfire.net"
     assert record.evidence is None
+
+
+def test_dnsreaper_parses_confidence_levels_as_severities() -> None:
+    """CONFIRMED/POTENTIAL/UNLIKELY are the tool's real levels (D100)."""
+    records = DnsreaperAdapter().parse_output(fixture("adapters", "dnsreaper.synthetic.json"))
+    assert [(r.fqdn, r.severity) for r in records] == [
+        ("old.testfire.net", "high"),
+        ("blog.testfire.net", "medium"),
+        ("docs.testfire.net", "low"),
+    ]
+    assert all(isinstance(record, FindingRecord) for record in records)
+    assert all(record.kind == "takeover" for record in records)
+    assert all(record.source == "dnsreaper" for record in records)
+    first = records[0]
+    assert first.title == "subdomain takeover: AWS/S3"
+    assert first.template_id == "AWS/S3"
+    assert first.evidence is not None and "CNAME: old-testfire.s3.amazonaws.com" in first.evidence
+
+
+def test_dnsreaper_treats_an_empty_file_as_no_findings() -> None:
+    """The real writer emits nothing at all when nothing matched, not `[]`."""
+    assert DnsreaperAdapter().parse_output("") == []
+    assert DnsreaperAdapter().parse_output("[]") == []
+
+
+def test_dnsreaper_reads_its_findings_from_the_out_file(tmp_path: Path) -> None:
+    adapter = DnsreaperAdapter(finder=lambda _name: "/usr/bin/dnsreaper")
+    ctx = make_ctx(hosts=["testfire.net"])
+    ctx.workspace = tmp_path
+
+    with pytest.raises(ParseError, match="no --out file"):
+        adapter.read_output(ctx)
+
+    output = tmp_path / f"dnsreaper-output-{os.getpid()}.json"
+    output.write_text(fixture("adapters", "dnsreaper.synthetic.json"), encoding="utf-8")
+    assert "old.testfire.net" in (adapter.read_output(ctx) or "")
+
+
+def test_dnsreaper_scans_the_given_hosts_with_a_file(tmp_path: Path) -> None:
+    adapter = DnsreaperAdapter(finder=lambda _name: "/usr/bin/dnsreaper")
+    ctx = make_ctx(hosts=["testfire.net", "www.testfire.net", "testfire.net"])
+    ctx.workspace = tmp_path
+    command = adapter.build_command(ctx)
+    assert command[1] == "file"
+    assert command[command.index("--filename") + 1] == str(
+        tmp_path / f"dnsreaper-hosts-{os.getpid()}.txt"
+    )
+    assert command[command.index("--out-format") + 1] == "json"
+    assert "--nocolour" in command
+    assert "--parallelism" not in command  # the tool's default stands, no pacing (D3)
+
+
+def test_dnsreaper_identity_rejects_wrong_program(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_exec(
+        monkeypatch,
+        outcome(stdout="DNS Reaper ☠️\nScan all your DNS records for subdomain takeovers!\n"),
+    )
+    accepted = DnsreaperAdapter(finder=lambda _name: "/usr/bin/dnsreaper").check_installed()
+    assert accepted.installed is True
+    fake_exec(monkeypatch, outcome(stdout="dnsreaper 1.0 - not the takeover tool\n"))
+    rejected = DnsreaperAdapter(finder=lambda _name: "/usr/bin/dnsreaper").check_installed()
+    assert rejected.installed is False
 
 
 def test_subzy_treats_a_null_document_as_no_findings() -> None:

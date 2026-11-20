@@ -294,7 +294,10 @@ def test_the_source_notes_are_preserved() -> None:
     specs = load_tools()
     assert "chaos-client" in (specs["chaos"].source or "")
     assert "punk-security/dnsReaper" in (specs["dnsreaper"].source or "")
-    assert "no PyPI package" in (specs["dnsreaper"].source or "")
+    # D100: a Python project with no console script installs from a pinned
+    # checkout into its own venv (docs/10 section 5).
+    assert (specs["dnsreaper"].source or "").startswith("python: ")
+    assert "c1588b22772d157f207e9334a7f4d7c24afbfd0a" in (specs["dnsreaper"].source or "")
     assert specs["puredns"].version_cmd == ["puredns", "--version"]
 
 

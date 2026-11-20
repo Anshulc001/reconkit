@@ -13,6 +13,9 @@
 #                                (zip, with a plain binary or a .deb inside),
 #                                install to ~/.reconkit/bin
 #   build: <git-url>@<commit>  -> clone that commit, run make, install bin/<binary>
+#   python: <git-url>@<commit> -> clone that commit, build a private venv from
+#                                requirements.txt, write a launcher in
+#                                ~/.reconkit/bin (tools with no console script)
 #   anything else              -> reported as manual, with its upstream URL
 #
 # `release:` and `build:` are the two ways to install a tool a distro does not
@@ -39,6 +42,7 @@ set -uo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BIN_DIR="${HOME}/.reconkit/bin"
+OPT_DIR="${HOME}/.reconkit/opt"
 REGISTRY="${ROOT}/tools.yaml"
 
 DRY_RUN=0
@@ -164,6 +168,7 @@ for name, spec in sorted(tools.items()):
     pipx = re.match(r"pipx install\s+(\S+)", source)
     release = re.match(r"release:\s*(\S+)\s+sha256=([0-9a-fA-F]{64})\s*$", source)
     build = re.match(r"build:\s*(\S+?)(?:@([0-9a-fA-F]{7,40}))?\s*$", source)
+    python = re.match(r"python:\s*(\S+?)(?:@([0-9a-fA-F]{7,40}))?\s*$", source)
 
     if apt:
         rows.append(("apt", apt.group(1), binary, name))
@@ -174,6 +179,9 @@ for name, spec in sorted(tools.items()):
     elif build:
         target = build.group(1) + ("|" + build.group(2) if build.group(2) else "")
         rows.append(("build", target, binary, name))
+    elif python:
+        target = python.group(1) + ("|" + python.group(2) if python.group(2) else "")
+        rows.append(("python", target, binary, name))
     elif go:
         # The hint lives inside a prose string, so it ends with punctuation:
         # "(or: go install <module>@latest; the archive member is ...)".
@@ -227,6 +235,8 @@ release_targets=()
 release_bins=()
 build_targets=()
 build_bins=()
+python_targets=()
+python_bins=()
 missing=()
 
 while IFS=$'\t' read -r tag a b c d; do
@@ -264,6 +274,11 @@ while IFS=$'\t' read -r tag a b c d; do
           build_bins+=("${binary}")
           printf 'build   %-16s %s\n' "${binary}" "${target%%|*}"
           ;;
+        python)
+          python_targets+=("${target}")
+          python_bins+=("${binary}")
+          printf 'python  %-16s %s\n' "${binary}" "${target%%|*}"
+          ;;
       esac
       ;;
     manual)
@@ -286,13 +301,13 @@ fi
 
 if [ "${#apt_pkgs[@]}" -eq 0 ] && [ "${#go_mods[@]}" -eq 0 ] && \
    [ "${#pipx_pkgs[@]}" -eq 0 ] && [ "${#release_bins[@]}" -eq 0 ] && \
-   [ "${#build_bins[@]}" -eq 0 ]; then
+   [ "${#build_bins[@]}" -eq 0 ] && [ "${#python_bins[@]}" -eq 0 ]; then
   echo
   echo "nothing to install"
 else
   echo
   if [ "${ASSUME_YES}" -eq 0 ] && [ "${DRY_RUN}" -eq 0 ]; then
-    read -r -p "Proceed with ${#apt_pkgs[@]} apt package(s), ${#go_mods[@]} go module(s), ${#pipx_pkgs[@]} pipx package(s), ${#release_bins[@]} release archive(s), ${#build_bins[@]} source build(s)? [y/N] " reply
+    read -r -p "Proceed with ${#apt_pkgs[@]} apt package(s), ${#go_mods[@]} go module(s), ${#pipx_pkgs[@]} pipx package(s), ${#release_bins[@]} release archive(s), ${#build_bins[@]} source build(s), ${#python_bins[@]} python checkout(s)? [y/N] " reply
     case "${reply}" in
       y | Y) ;;
       *)
@@ -324,6 +339,7 @@ else
   need_build=()
   [ "${#release_bins[@]}" -gt 0 ] && need_build+=(curl unzip ca-certificates)
   [ "${#build_bins[@]}" -gt 0 ] && need_build+=(git make gcc)
+  [ "${#python_bins[@]}" -gt 0 ] && need_build+=(git)
   if [ "${#need_build[@]}" -gt 0 ]; then
     absent=()
     for need in "${need_build[@]}"; do
@@ -334,6 +350,12 @@ else
       run sudo apt-get update -y
       run sudo apt-get install -y "${absent[@]}"
     fi
+  fi
+  # A venv needs ensurepip, which Debian/Ubuntu split into python3-venv.
+  if [ "${#python_bins[@]}" -gt 0 ] && ! python3 -c 'import ensurepip' >/dev/null 2>&1; then
+    echo "python3-venv is missing; installing it first"
+    run sudo apt-get update -y
+    run sudo apt-get install -y python3-venv
   fi
 
   if [ "${#apt_pkgs[@]}" -gt 0 ]; then
@@ -494,6 +516,62 @@ else
         echo "warning: ${binary} was not at bin/${binary} after make" >&2
       fi
       rm -rf "${work}"
+    done
+  fi
+
+  # A Python tool with no console script (`python:` in tools.yaml): the pinned
+  # checkout keeps its own venv under ~/.reconkit/opt/<binary>, and the managed
+  # bin gets a launcher, so every adapter still invokes one binary path.
+  if [ "${#python_bins[@]}" -gt 0 ]; then
+    echo
+    echo "== python checkouts (${#python_bins[@]}) -> ${BIN_DIR} =="
+    run mkdir -p "${BIN_DIR}" "${OPT_DIR}"
+    for index in "${!python_bins[@]}"; do
+      binary="${python_bins[index]}"
+      url="${python_targets[index]%%|*}"
+      commit="${python_targets[index]}"
+      [ "${commit}" = "${url}" ] && commit="" || commit="${commit#*|}"
+      dest="${OPT_DIR}/${binary}"
+      if [ "${DRY_RUN}" -eq 1 ]; then
+        printf 'dry-run: git clone %s %s -> %s && python3 -m venv && pip install -r requirements.txt && launcher %s\n' \
+          "${url}" "${commit:-HEAD}" "${dest}" "${BIN_DIR}/${binary}"
+        continue
+      fi
+      printf '>> %s %s\n' "${url}" "${commit:-HEAD}"
+      rm -rf "${dest}"
+      if ! git clone -q --no-checkout --depth 1 "${url}" "${dest}"; then
+        echo "warning: cannot clone ${url} for ${binary}" >&2
+        continue
+      fi
+      if [ -n "${commit}" ]; then
+        if ! git -C "${dest}" fetch -q --depth 1 origin "${commit}" || \
+           ! git -C "${dest}" checkout -q FETCH_HEAD; then
+          echo "warning: cannot check out ${commit} for ${binary}" >&2
+          rm -rf "${dest}"
+          continue
+        fi
+      else
+        git -C "${dest}" checkout -q HEAD || true
+      fi
+      if ! python3 -m venv "${dest}/.venv"; then
+        echo "warning: cannot create the ${binary} virtualenv" >&2
+        continue
+      fi
+      "${dest}/.venv/bin/pip" install -q --upgrade pip >/dev/null 2>&1 || true
+      if [ -f "${dest}/requirements.txt" ]; then
+        if ! "${dest}/.venv/bin/pip" install -q -r "${dest}/requirements.txt" >/dev/null 2>&1; then
+          echo "warning: pip could not install ${binary} requirements" >&2
+          continue
+        fi
+      fi
+      # google-cloud-dns==0.34.1 imports pkg_resources, removed in setuptools 81.
+      "${dest}/.venv/bin/pip" install -q 'setuptools<81' >/dev/null 2>&1 || true
+      {
+        printf '#!/bin/sh\n'
+        printf '# written by reconkit setup (docs/10 section 5); %s has no console script.\n' "${binary}"
+        printf 'exec "%s/.venv/bin/python" "%s/main.py" "$@"\n' "${dest}" "${dest}"
+      } >"${BIN_DIR}/${binary}"
+      chmod 0755 "${BIN_DIR}/${binary}"
     done
   fi
 fi

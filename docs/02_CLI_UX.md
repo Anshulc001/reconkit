@@ -73,10 +73,11 @@ contradiction elsewhere, this table wins - file it as a doc bug.**
 What "full = all" means today, honestly: every stage is requested and every
 `core` and `opt_in` tool is eligible. The `intrusive` tier is enabled, but its
 three tools are `exploitation: true` and therefore still skip unless named;
-and the `vulns` pool still carries one tool with no adapter (`dnsreaper`, D15).
-`subs`, `dns`, `live`, `ports`, `tech` and `urls` are fully adapted since
-adapter waves 6-8 (2026-11-17); `shots` has an adapter (`gowitness`) and is in
-the `full` mode table only (D19). An adapter-less tool reports
+and the `vulns` pool still carries three intrusive tools with no adapter
+(`dalfox`, `crlfuzz`, `sqlmap`). `subs`, `dns`, `live`, `ports`, `tech` and
+`urls` are fully adapted since adapter waves 6-8 (2026-11-17); `vulns` carries
+`nuclei`, `subzy`, `dnsreaper`, `nikto` and `ffuf` (2026-11-20, D100); `shots`
+has an adapter (`gowitness`) and is in the `full` mode table only (D19). An adapter-less tool reports
 `no adapter yet (phase 3)`, and a stage left with only those is a completion gap
 (exit `0`), not a partial run. The per-tool mode/tier table is in docs/09
 section 4.
@@ -136,12 +137,15 @@ than 0. A normal scan that includes `url_probe` alongside other stages is
 unaffected and still exits 0 (see `test_url_probe_respects_phase_timeout`).
 
 **Vulnerability scanning (current state, 2026-11-20).** The `vulns` stage is
-implemented but narrow. It runs only with `--active` (or inside `--full`, where
-it is the last stage) and never in `passive`. `nuclei` and `subzy` are `core`
-and run with the stage; `nikto` and `ffuf` are `opt_in`, so they need
-`--include-noisy`, `--full`, or an explicit `--tools` name. `dnsreaper` has no
-adapter (D15). `dalfox`, `crlfuzz` and `sqlmap` are `exploitation: true` and
-run only when named with `--tools`; none of the three has an adapter yet.
+implemented but narrow, and it is **full-only**: `run --active` never includes
+it (the `active` entry in the mode table stops at `url_probe`). It runs inside
+`--full`, where it is the last stage, or when the stage command is named
+explicitly. `nuclei`, `subzy` and `dnsreaper` are `core` and run with the stage;
+`nikto` and `ffuf` are `opt_in`, so they need `--include-noisy`, `--full`, or an
+explicit `--tools` name. `dalfox`, `crlfuzz` and `sqlmap` are
+`exploitation: true` and run only when named with `--tools`; none of the three
+has an adapter yet. So a `run --active` stays discovery-only by design, and
+findings come from `run --full` or `reconkit vulns`.
 
 ```bash
 reconkit vulns -d example.com --active
@@ -571,7 +575,7 @@ line gains the unique count when any duplicate exists:
 
 ### Doctor output
 
-`doctor` prints one row per tool: `tool`, `stage`, `tier`, `installed`, `path`, `identity`. A `kind: http` or `kind: python` tool needs no binary, so `path` prints `n/a (no binary required)` and `installed` is always `yes`; only `kind: binary` tools can be missing. A binary that exists but fails its identity check prints `wrong program` in `installed` (with its `path`) and counts as not ready. **Doctor shows no version**: `version_cmd` and `version_regex` exist only to prove a copy is the expected program, and the string they read is never displayed (owner ruling 2026-11-17, docs/MASTER_PLAN.md D6). Below the table: a one-row **Browser** table (`chromium`, `yes`/`missing`, and `shots will produce 0 screenshots` when absent - D35; gowitness cannot screenshot without a Chromium-family browser), per-stage coverage (`subs 6/11 ready`), system packages, the Keys table (names and sign-up URLs, never values), and, when anything is missing, `46 installed, 1 manual (dnsreaper), 1 needs attention (amass). Scans will use the tools that are installed and skip the rest. Per-tool provenance: docs/10_TOOL_SOURCES.md.` (D36 - the counts come from `DoctorReport.installed` and `.manual`, the same fields the JSON carries, so the footer and `--json` cannot disagree; a `manual: true` tool is a known by-hand install, not a gap). `--json` writes one document with `type`, `python`, `python_ok`, `config`, `scope`, `db`, `tools`, `stages`, `system_packages`, `keys`, `missing`, `installed`, `manual`, `warnings`, `chromium` and `exit_code`, and keeps warnings at exit `0` (docs/10 section 3); each object in `tools` carries `tool`, `stage`, `tier`, `kind`, `installed`, `path` and `identity`, with no version key.
+`doctor` prints one row per tool: `tool`, `stage`, `tier`, `installed`, `path`, `identity`. A `kind: http` or `kind: python` tool needs no binary, so `path` prints `n/a (no binary required)` and `installed` is always `yes`; only `kind: binary` tools can be missing. A binary that exists but fails its identity check prints `wrong program` in `installed` (with its `path`) and counts as not ready. **Doctor shows no version**: `version_cmd` and `version_regex` exist only to prove a copy is the expected program, and the string they read is never displayed (owner ruling 2026-11-17, docs/MASTER_PLAN.md D6). Below the table: a one-row **Browser** table (`chromium`, `yes`/`missing`, and `shots will produce 0 screenshots` when absent - D35; gowitness cannot screenshot without a Chromium-family browser), per-stage coverage (`subs 6/11 ready`), system packages, the Keys table (names and sign-up URLs, never values), and, when anything is missing, `47 installed, 0 manual, 1 needs attention (amass). Scans will use the tools that are installed and skip the rest. Per-tool provenance: docs/10_TOOL_SOURCES.md.` (D36 - the counts come from `DoctorReport.installed` and `.manual`, the same fields the JSON carries, so the footer and `--json` cannot disagree; a `manual: true` tool is a known by-hand install, not a gap). `--json` writes one document with `type`, `python`, `python_ok`, `config`, `scope`, `db`, `tools`, `stages`, `system_packages`, `keys`, `missing`, `installed`, `manual`, `warnings`, `chromium` and `exit_code`, and keeps warnings at exit `0` (docs/10 section 3); each object in `tools` carries `tool`, `stage`, `tier`, `kind`, `installed`, `path` and `identity`, with no version key.
 
 ### JSON (`--json`)
 

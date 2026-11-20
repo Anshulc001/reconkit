@@ -159,7 +159,7 @@ Phase 2 = working adapter in the first build. Phase 3 = listed in `tools.yaml`, 
 | ports | active (smap passive) | pyscan, naabu, nmap, rustscan, smap; masscan (opt_in) | pyscan, naabu |
 | tech | active | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze |
 | urls | passive/active | gau, waybackurls, katana, hakrawler, gospider, subjs, unfurl, urlfinder | gau, katana, waybackurls, hakrawler, gospider, subjs, unfurl, urlfinder |
-| vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) | nuclei, subzy |
+| vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) | nuclei, subzy, dnsreaper, nikto, ffuf |
 | shots | active | gowitness (opt_in) | full mode only (D19) |
 
 Selection rules (2026-11-17: the mode tables in docs/02 section 2 and `MODE_STAGES`/`MODE_TOOLS` in `engine.py` are the source): use adapters that are installed (or http/python kind), allowed by tier for the mode (`allowed_tiers`: `opt_in` only with `--include-noisy` or a `full` run; `intrusive` only with `full` or an explicit `--tools` name), allowed by tool mode (an active tool in `passive` mode is skipped with `tool mode not included in passive mode` even when named `--tools`, **except** a name in `--include`, which is the one documented override - D63, 2026-11-19; it also prints the forced-contact banner), never `exploitation: true` unless named with `--tools` (`--include` does not lift that rule), and filtered by `--tools` / `--exclude`. `tools.yaml` may carry `exploitation: true` on an intrusive entry (`sqlmap`, `dalfox`, `crlfuzz`); the registry parses it into `ToolSpec.exploitation` (a non-bool is a `ConfigError`) and the engine skips such a tool automatically in every mode with `exploitation tool requires explicit --tools`. Missing tools are reported as `skipped`, never fatal unless no adapter remains (exit 4). A `needs_root` tool in a non-root process is skipped the same way with `requires root / sudo` (section 4a6). Every selection-time skip is recorded in `tool_runs` **and** reported to the caller: `stages[].skipped` in the `--json` document and the Tools table list each tool with its reason, and `summary.tools_skipped` counts them (docs/02 section 5), so a stage whose whole pool has no adapter cannot look like a stage that ran and found nothing. This is the selection-time rule: a binary that was present at selection but cannot be spawned at run time is a `failed` result instead (see the adapter contract in section 3), not a skip. **`naabu` is scope-mode dependent (owner decision 2026-11-17; supersedes the permanent block of 11c-G-7/12i):**
@@ -683,7 +683,7 @@ Verified on this box (`nuclei` v3.11.1 in `~/go/bin`, `subzy` v1.2.0 in
   `read_output(ctx)` hook: after a successful run the base flow asks the
   adapter for the document to parse (and to store as the raw output) instead of
   `stdout`, so timeout/failed/parse handling stays in one place. A
-  `--output`-only tool is a real class (`subzy` now, `ffuf`/`dnsreaper` later),
+  A file-output tool is a real class (`subzy`, `dnsreaper`; `ffuf` later),
   which is why the hook is generic rather than a `subzy`-only `run()` override.
 - **`post_command(ctx)` is the read-back hook (added 2026-11-18, amass).** Some
   tools keep their findings neither on stdout nor in a file they were told to
@@ -818,8 +818,7 @@ Verified on this box (`nmap` 7.991 in `/usr/bin`, `rustscan` 2.3.0 in
 ### 4a7. Adapter wave 7 (2026-11-17): subs stage - urlscan, amass, findomain, chaos, github_subdomains
 
 All five are `subs` / `passive` / `core` and return `SubdomainRecord`s. This
-closes the stage: every `subs` tool in `tools.yaml` now has an adapter
-(`dnsreaper` stays unadapted by D15).
+closes the stage: every `subs` tool in `tools.yaml` now has an adapter.
 
 | Tool | Invocation | Notes |
 |---|---|---|
@@ -879,9 +878,11 @@ findomain 11.0.0, chaos 0.5.2, github-subdomains with no version flag):
   (`read_output`), leaving the operator's directory untouched. `-version` is not
   defined (`flag provided but not defined: -version`), hence the `-h` probe.
 
-`dnsreaper` (D15) is not adapted: no PyPI package, no `setup.py`, no console
-script - it is `main.py` + `requirements.txt` and would need a script-launching
-adapter kind. `subzy` covers takeover; revisit only if that kind is added.
+`dnsreaper` was left unadapted here (D15) because it is `main.py` +
+`requirements.txt` with no console script. D100 (2026-11-20) added it without a
+new adapter kind: `scripts/install-tools.sh` installs a launcher named
+`dnsreaper` in `~/.reconkit/bin`, so the adapter drives one binary and reads the
+JSON file it writes with `--out` (section 4a9).
 
 ### 4a8. Adapter wave 8 (2026-11-17): dns - dig, massdns, puredns; shots - gowitness; vulns - nikto
 
@@ -977,6 +978,37 @@ gowitness 3.2.2, Nikto 2.6.1):
   Every finding is `severity="info"`: a Nikto message is a lead for the
   operator, not a confirmed exploit, and the tier is already `opt_in`.
 
+### 4a9. Adapter wave 9 (2026-11-20, D100): vulns - dnsreaper
+
+`dnsreaper` is `vulns` / `active` / `core` and returns `FindingRecord`s. It is a
+Python project (`main.py` + `requirements.txt`), so the adapter is only possible
+because setup installs a launcher named `dnsreaper` in `~/.reconkit/bin`
+(section 5 of docs/10); no new adapter kind was added - the adapter still drives
+one binary.
+
+Verified against the real tool at commit `c1588b2`:
+
+- `--help` prints the banner to **stderr** and exits 0. It names the tool and
+  its purpose, which is the identity probe (`dns reaper`, `subdomain
+  takeovers`). There is no `--version` flag.
+- `file --filename <workspace file>` scans a host list in one run, so the
+  adapter writes `dnsreaper-hosts-<pid>.txt` and removes it in `finally`.
+- `--out <workspace file> --out-format json --nocolour` keeps findings out of
+  stdout and ANSI out of the file. The writer emits `[` then one object per
+  finding; with no finding the file is **empty**, not `[]`. `read_output` reads
+  that file and an empty document parses as no findings.
+- Each object: `domain`, `signature`, `info`, `confidence`, `a_records`,
+  `aaaa_records`, `cname_records`, `ns_records`, `more_info_url`.
+- `confidence` is `CONFIRMED`, `POTENTIAL` or `UNLIKELY`. UNLIKELY checks are off
+  by default; the other two map to `high` and `medium` (UNLIKELY maps to `low`
+  if an operator enables it). A finding is `kind="takeover"`, its title is
+  `subdomain takeover: <signature>`, and `template_id` keeps the signature name.
+- No `--parallelism` and no rate flag: the tool's own defaults stand, because
+  reconkit adds no pacing (D3).
+
+A real run on this box against `zero.webappsecurity.com` finished `ok` with 0
+findings in 1.4s; the empty-file path is that run, not only a fixture.
+
 ### 4b. Per-tool support for the injected parameters
 
 | Parameter | `httpx` | `pyprobe` | `pyscan` | `naabu` | Every other adapter |
@@ -1010,7 +1042,7 @@ what is printed and never what is stored.
 | gau, waybackurls, unfurl, urlfinder | urls | passive | core | no | yes / yes / yes |
 | katana, hakrawler, gospider, subjs | urls | active | core | no | no (tool mode) / yes / yes |
 | nuclei, subzy | vulns | active | core | no | no / no / yes |
-| dnsreaper | vulns | active | core | no | **no adapter (D15)** |
+| dnsreaper | vulns | active | core | no | no / no / yes (D100) |
 | nikto, ffuf | vulns | active | opt_in | no | no / no / yes |
 | gowitness | shots | active | opt_in | no | full only (D19) |
 | dalfox, crlfuzz, sqlmap | vulns | active | intrusive | **yes** | never automatic; `--tools <name>` only |

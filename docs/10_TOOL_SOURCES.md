@@ -11,8 +11,8 @@ this registry can install automatically (`install-tools.sh`), then `doctor`. Kal
 `findomain`, `massdns` or `rustscan` package, so the script reports each one it
 cannot install and carries on with the rest; `amass` now installs from its
 upstream Go module (`github.com/owasp-amass/amass/v5/cmd/amass`) on every
-distro. `dnsreaper` has no automatic source, and the script prints its upstream
-URL instead of downloading anything. Skip the script entirely if you prefer to
+distro. `dnsreaper` installs too: its pinned checkout gets its own venv and a
+launcher (D100). Skip the script entirely if you prefer to
 install tools yourself; nothing else in reconkit depends on it. See section 5.
 
 ## 1. What this document is
@@ -69,7 +69,7 @@ anything, because installing is not something reconkit does or asks for.
 | `urlfinder` | urls | Passive URL discovery over several sources | https://github.com/projectdiscovery/urlfinder/releases |
 | `nuclei` | vulns | Template-based takeover and exposure checks | https://github.com/projectdiscovery/nuclei/releases |
 | `subzy` | vulns | Subdomain takeover detection | github.com/PentestPad/subzy |
-| `dnsreaper` | vulns | **Not adapted (D15):** no PyPI package, no console script, needs `git clone` + `python main.py`; `subzy` covers takeover | https://github.com/punk-security/dnsReaper |
+| `dnsreaper` | vulns | Subdomain takeover detection from dangling DNS records (D100) | https://github.com/punk-security/dnsReaper |
 | `nikto` | vulns | Web server misconfiguration and exposure scan (`opt_in`) | Debian package `nikto` |
 | `ffuf` | vulns | Content and parameter discovery (`opt_in`) | github.com/ffuf/ffuf (v2) |
 | `dalfox` | vulns | XSS scanner (`intrusive`) | github.com/hahwul/dalfox (v2) |
@@ -159,9 +159,9 @@ fails the check is `wrong program` (identity `failed`) and the engine skips the
 tool as `not installed`. Tools without an adapter go through the same
 `ToolSpec` path in `doctor`.
 
-**Presence-only tools (known limitation).** Ten binary tools carry no
+**Presence-only tools (known limitation).** Nine binary tools carry no
 `version_cmd`, because their real `-version` only prints Go `flag` usage, so
-there is nothing to run the name through: `crlfuzz`, `dalfox`, `dnsreaper`,
+there is nothing to run the name through: `crlfuzz`, `dalfox`,
 `github_subdomains`, `gowitness`, `hakrawler`, `httprobe`, `sqlmap`,
 `waybackurls`, `webanalyze`. For these, a **same-named program that is
 not the expected product is counted as installed**, and doctor's `path` column
@@ -174,9 +174,8 @@ adapters on 2026-11-17 and prove their identity through their own
 `-h`/`-version` markers instead - `unfurl` uses its stderr `Usage:` block,
 `subzy` its `version` subcommand, since neither has a version flag at all.
 `doctor` asks the adapter when one exists (`doctor.default_status`), so the
-identity column is a real check for those nine; `crlfuzz`, `dalfox`,
-`dnsreaper`, `github_subdomains`, `gowitness` and `sqlmap` still have no
-adapter and stay presence-only. `smap`, `gospider`, `subjs`
+identity column is a real check for those; `crlfuzz`, `dalfox` and `sqlmap`
+still have no adapter and stay presence-only. `smap`, `gospider`, `subjs`
 and `urlfinder` have real probes; the ProjectDiscovery tools, `wafw00f`,
 `findomain`, `puredns`, `dig`, `massdns`, `whatweb`, `nmap`, `masscan`, `gau`,
 `ffuf` and `nikto` report a version from their own banner. `gau` gained a
@@ -228,6 +227,7 @@ its own: it reads every `kind: binary` entry in `tools.yaml` and follows its
 | `pipx install <pkg>` | `pipx install <pkg>` |
 | `release: <url> sha256=<hex>` | download the https GitHub archive, verify the pinned SHA-256, take the binary (or `usr/bin/<binary>` out of a `.deb` inside) and install it to `~/.reconkit/bin` |
 | `build: <git-url>@<commit>` | clone that commit, `make`, install `bin/<binary>` to `~/.reconkit/bin` |
+| `python: <git-url>@<commit>` | clone that commit under `~/.reconkit/opt/<binary>`, build a private venv from `requirements.txt` (plus `setuptools<81`), write a `~/.reconkit/bin/<binary>` launcher that runs `main.py` |
 | anything else | nothing - the entry is printed as manual with its URL |
 
 Rules it keeps:
@@ -255,6 +255,14 @@ a console script named `httpx` in `.venv/bin`, so an activated venv made the
   module against `sum.golang.org`; a clean run lost `github-subdomains` and
   `subzy` to an `i/o timeout` there (2026-11-20, D99). One retry per module, and
   the final doctor verdict still reports a persistent failure.
+- **A `python:` checkout is pinned and isolated.** It clones one commit, never a
+  branch tip, and builds its own venv: `dnsreaper` pins `dnspython==2.2.1` and
+  the boto3/azure/google stacks, which must not touch the project venv. It also
+  installs `setuptools<81`, because `google-cloud-dns==0.34.1` imports
+  `pkg_resources`, which newer setuptools removed. The launcher is what makes a
+  normal binary adapter possible; without it there is no `dnsreaper` command to
+  check or run. Verified 2026-11-20: `setup.sh --only dnsreaper` installs and
+  `doctor` identifies the launcher.
 - **Release archives are pinned, never "latest".** `release:` is only for a
 tool a distro does not package. The URL is https on `github.com`, the SHA-256
 in `tools.yaml` is checked before anything is unpacked, and a mismatch refuses
@@ -266,12 +274,13 @@ package (2026-11-20). The tools a distro *does* package still use `apt:`,
 - **Verification is `reconkit doctor --json`**, the adapter's own probe
   (installed / path / identity). A binary that exists but is the wrong program
   is `identity: failed` and fails the script. An entry with no automatic source
-  is printed as `manual` **only while it is still missing** (today that is just
-  `dnsreaper`), and it is never counted as a failure. That flag is now part of the
-  registry contract (D36): `tools.yaml` may carry `manual: true` (a non-bool is a
-  `ConfigError`), the registry parses it into `ToolSpec.manual`, and `reconkit
-  doctor` counts such a tool as **manual**, separately from the tools that need
-  attention - `46 installed, 1 manual (dnsreaper), 1 needs attention (amass)`.
+  is printed as `manual` **only while it is still missing**, and it is never
+  counted as a failure. No registry entry needs that path today (D100 installed
+  the last one), but the flag stays part of the contract (D36): `tools.yaml` may
+  carry `manual: true` (a non-bool is a `ConfigError`), the registry parses it
+  into `ToolSpec.manual`, and `reconkit doctor` counts such a tool as **manual**,
+  separately from the tools that need attention - `47 installed, 0 manual, 1
+  needs attention (amass)`.
 - `--dry-run` prints every command, `--check` reports only, `--update` re-runs
   `apt`/`go`/`pipx` for every tool, `--only <pattern>` narrows to one tool.
 

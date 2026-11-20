@@ -80,6 +80,62 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-67 | `reconkit ports -d slice.bank.in --active` exited 0, ran **0 tools**, printed `Ports -` for all 13 hosts and wrote no `scan_runs` row, so a completed active scan looked like a ports scan that found nothing | `_stage_hosts(PORTS)` returns the in-memory `alive` set, which is only filled by a `live` stage in the same run; `_seed_from_store` ran only under `--resume`, so a standalone stage command had no hosts and `if stage is Stage.PORTS and not hosts: continue` skipped it silently | every run whose stage list contains none of `subs`/`dns`/`live` now seeds `discovered`/`alive` from `Store.subdomains()` (so `ports`/`tech`/`urls`/`vulns`/`shots` commands use what earlier runs stored). A `ports` run that still has no ALIVE host prints `ports: no ALIVE host from an earlier run; run \`reconkit live\` first` instead of exit 0 silence | `test_ports_stage_command_uses_stored_alive_hosts` (`Regression: PIT-67`) |
 | PIT-66 | A fresh `git clone` on Ubuntu could not follow the new install path: `./scripts/install-tools.sh` was `Permission denied`, and run with `bash` it skipped ProjectDiscovery's `httpx` and failed every apt tool | the script was committed `100644` while `bootstrap.sh` was `100755`; `have()` used `command -v`, so the project's own `httpx` dependency in `.venv/bin` counted as ProjectDiscovery's `httpx`; and apt installed all packages in one command, so four names Ubuntu does not package (`amass`, `findomain`, `massdns`, `rustscan`) aborted `nmap`, `nikto`, `sqlmap`, `whatweb`, `masscan` and `dig` too | the script is committed executable; the plan asks `reconkit doctor --json` and treats only `installed: yes` as present (managed/PATH fallback before reconkit exists); apt packages install one at a time with a warning naming each unavailable one; `amass` installs from its upstream Go module so Kali and Ubuntu share one source | `test_documented_scripts_are_executable`, plus the clean-clone sandbox rerun recorded under "2026-11-20 (D95)" |
 
+## 2026-11-20 (D100) - dnsreaper installs and runs in vulns; vulns is --full only
+
+Owner request: install dnsreaper automatically, add its `vulns` adapter, and keep
+the stage activated only by `run --full` (or the explicit `vulns` command).
+
+**Install.** D15 was right that there is no PyPI package, no `setup.py` and no
+console script, but that is a packaging gap, not an uninstallable tool. New
+`python: <git-url>@<commit>` source shape (docs/10 section 5): clone the pinned
+commit under `~/.reconkit/opt/<binary>`, build a private venv, install
+`requirements.txt` plus `setuptools<81` (its `google-cloud-dns==0.34.1` imports
+`pkg_resources`), then write the `~/.reconkit/bin/<binary>` launcher. No new
+adapter kind: the launcher is a normal binary from the adapter's side.
+
+`tools.yaml` pins commit `c1588b22772d157f207e9334a7f4d7c24afbfd0a`, and
+`manual: true` is gone from its entry. On this Kali host
+`./scripts/setup.sh --only dnsreaper --yes` installed it and doctor ended with
+`every binary matching 'dnsreaper' is installed and identified correctly`;
+`setup.sh --check` now prints `have dnsreaper`. The pinned install costs a
+121 MB venv plus the 1.5 MB checkout.
+
+**Adapter.** `file --filename <workspace list> --out <workspace file>
+--out-format json --nocolour`; findings are read from the `--out` file, because
+stdout carries the tool's log. With no finding the writer leaves the file
+**empty** (not `[]`), which parses as no findings. `confidence` maps
+`CONFIRMED` -> `high`, `POTENTIAL` -> `medium`, `UNLIKELY` -> `low`; each match
+becomes a `kind=takeover` finding titled `subdomain takeover: <signature>`.
+
+Real run on this box against `zero.webappsecurity.com`:
+
+```
+vulns: dnsreaper ok 0 item(s)
+vulns: finished 1/1 tool(s), 0 item(s)     (1.4s, exit 0)
+```
+
+That exercised the empty-output path end to end. No real takeover was available
+to capture, so the parsing fixture is synthetic in the tool's documented JSON
+shape (`tests/fixtures/adapters/dnsreaper.synthetic.json`) - the limitation is
+recorded rather than dressed up.
+
+**Gating.** `run --active` already excluded `vulns` in `MODE_STAGES`; docs/02
+claimed otherwise, calling it active-or-full. The docs now say full-only, with
+the stage command as the explicit path. Verified against the CLI:
+
+```
+run --active --mock -> stages: subs, dns, live, tech, urls, url_probe
+run --full   --mock -> stages: ..., shots, vulns
+                       vulns tools: nuclei, subzy, dnsreaper, nikto, ffuf
+```
+
+**Checks.** `pytest -q` 1055 passed; `ruff check .`, `ruff format --check .`
+and `mypy src/reconkit` clean. Tests updated: the no-adapter skip example is now
+`sqlmap`, the full-mock vulns list includes `dnsreaper`, the manual-flag test
+parses `manual: true` from a temporary registry instead of from dnsreaper, and
+five adapter tests cover parsing, the empty file, the output file, the command
+and the identity probe.
+
 ## 2026-11-20 (D99) - the plan checks each tool by its own name
 
 A user with a fresh clone saw `setup.sh` print `have` for every tool, then

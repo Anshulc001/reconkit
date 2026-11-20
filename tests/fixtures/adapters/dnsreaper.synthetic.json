@@ -1,0 +1,35 @@
+[
+  {
+    "domain": "old.testfire.net",
+    "signature": "AWS/S3",
+    "info": "The CNAME points at an S3 bucket name that is no longer registered.",
+    "confidence": "CONFIRMED",
+    "a_records": [],
+    "aaaa_records": [],
+    "cname_records": ["old-testfire.s3.amazonaws.com"],
+    "ns_records": [],
+    "more_info_url": "https://github.com/EdOverflow/can-i-take-over-xyz/issues/29"
+  },
+  {
+    "domain": "blog.testfire.net",
+    "signature": "GitHub Pages",
+    "info": "The CNAME points at a GitHub Pages host with no site.",
+    "confidence": "POTENTIAL",
+    "a_records": [],
+    "aaaa_records": [],
+    "cname_records": ["testfire.github.io"],
+    "ns_records": [],
+    "more_info_url": "https://github.com/EdOverflow/can-i-take-over-xyz/issues/105"
+  },
+  {
+    "domain": "docs.testfire.net",
+    "signature": "Generic CNAME",
+    "info": "The CNAME target does not resolve.",
+    "confidence": "UNLIKELY",
+    "a_records": [],
+    "aaaa_records": [],
+    "cname_records": ["gone.example.invalid"],
+    "ns_records": [],
+    "more_info_url": ""
+  }
+]

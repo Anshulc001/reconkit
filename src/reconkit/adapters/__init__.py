@@ -11,6 +11,7 @@ from reconkit.adapters.chaos import ChaosAdapter
 from reconkit.adapters.crtsh import CrtshAdapter
 from reconkit.adapters.dig import DigAdapter
 from reconkit.adapters.dnspython import DnsPythonAdapter
+from reconkit.adapters.dnsreaper import DnsreaperAdapter
 from reconkit.adapters.dnsx import DnsxAdapter
 from reconkit.adapters.ffuf import FfufAdapter
 from reconkit.adapters.findomain import FindomainAdapter
@@ -77,6 +78,7 @@ ADAPTERS: dict[str, type[BaseToolAdapter]] = {
     "whatweb": WhatwebAdapter,
     "httpx_tech": HttpxTechAdapter,
     "nuclei": NucleiAdapter,
+    "dnsreaper": DnsreaperAdapter,
     "subzy": SubzyAdapter,
     "ffuf": FfufAdapter,
     "nmap": NmapAdapter,

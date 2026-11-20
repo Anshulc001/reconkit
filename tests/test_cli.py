@@ -409,14 +409,15 @@ def test_passive_only_commands_reject_active(tmp_path: Path, command: str) -> No
 def test_a_stage_with_no_adapter_reports_its_skips(tmp_path: Path) -> None:
     """Regression: 11d-findings-f, `tools_skipped: 0` for a stage that built nothing.
 
-    Changed 2026-11-17 (wave 4): every `tech` tool has an adapter now, so the tool
-    is named from a phase-3 stage instead - `dnsreaper` (wave 5 added nuclei and
-    subzy, so it is the vulns tool that still has no adapter).
+    Changed 2026-11-20 (D100): `dnsreaper` gained an adapter, so the example is
+    now `sqlmap` - an intrusive tool that needs `--tools` and still has no
+    adapter. `--full` lifts the intrusive tier; the explicit name is what
+    overrides `exploitation: true`.
     """
     config = make_config(tmp_path)
     result = CliRunner().invoke(
         app,
-        scan_args(config, "vulns", "--active", "--no-scope", "--json", "--tools", "dnsreaper"),
+        scan_args(config, "vulns", "--full", "--no-scope", "--json", "--tools", "sqlmap"),
     )
     assert result.exit_code == 4  # no usable tool for the stage, unchanged
     document = json.loads(result.stdout)
@@ -1121,7 +1122,13 @@ def test_a_full_run_has_no_gaps_when_every_mode_stage_has_a_tool(
     assert result.stdout.count("\n") == 1
     assert "completed with gaps" not in result.stderr
     vulns = next(stage for stage in document["stages"] if stage["stage"] == "vulns")
-    assert [item["tool"] for item in vulns["results"]] == ["nuclei", "subzy", "nikto", "ffuf"]
+    assert [item["tool"] for item in vulns["results"]] == [
+        "nuclei",
+        "subzy",
+        "dnsreaper",
+        "nikto",
+        "ffuf",
+    ]
 
 
 def test_a_partial_stage_still_exits_five(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

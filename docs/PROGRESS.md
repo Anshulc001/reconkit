@@ -4,6 +4,16 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D100): **dnsreaper is installed by setup and adapted, and
+  `vulns` is documented as full-only.** New `python:` source shape builds the
+  pinned checkout (`c1588b2`) in `~/.reconkit/opt/dnsreaper` with its own venv
+  (`requirements.txt` + `setuptools<81`) and writes the managed launcher; the
+  adapter reads `--out` JSON (`CONFIRMED` high, `POTENTIAL` medium, `UNLIKELY`
+  low) and a real run on zero.webappsecurity.com finished `ok` with 0 findings.
+  `run --active` never includes `vulns` (code already matched; docs corrected),
+  `run --full` runs nuclei, subzy, dnsreaper, nikto, ffuf. Gate: 1055 tests,
+  ruff/format/mypy clean. Next action: none.
+
 - Status (2026-11-20, D99): **the installer works on a partly-installed box.**
   The planner printed one shared `name` for all rows, so `have()` asked about
   `whatweb` for everything and printed `nothing to install` on a machine where
