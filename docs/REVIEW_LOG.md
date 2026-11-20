@@ -110,6 +110,20 @@ doctor      -> "every installable registry binary is installed and
                 identified correctly" (0 wrong-program)
 ```
 
+Repeated from an actual `git clone` of `eac0806` in a second fresh Ubuntu
+container, with only `sudo`, `git` and `python3-venv` preinstalled:
+
+```
+./scripts/setup.sh --yes        -> exit 0; 47 installed, 1 manual (dnsreaper)
+setup.sh from the clone        -> mode 755
+findomain / rustscan           -> 11.0.0 / 2.4.1 (doctor identity ok)
+massdns --version              -> "massdns" (identity ok)
+doctor --json                  -> 39/40 binaries installed; the only miss is
+                                  dnsreaper, the registry's manual entry
+pytest -q                      -> 1048 passed
+reconkit run -d example.com --mock -> exit 0 (18 tools ok, 0 failed)
+```
+
 The Go module cache those builds fill (`~/go/pkg/mod`) is build-time
 scaffolding: those packages are libraries, never installed as tools or added
 to PATH.
