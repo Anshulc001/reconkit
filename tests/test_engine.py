@@ -301,6 +301,39 @@ async def test_stage_order_and_tool_rows(tmp_path: Path) -> None:
     ]
 
 
+async def test_ports_stage_command_uses_stored_alive_hosts(tmp_path: Path) -> None:
+    """PIT-67: a standalone `ports` run had no hosts and silently did nothing.
+
+    The stage command has no `live` stage, so `_stage_hosts(PORTS)` only saw the
+    in-memory alive set, which was empty; the stage was skipped, no scan_runs
+    row existed, and the table showed `Ports -` with exit 0 (a real
+    `reconkit ports -d slice.bank.in` after a completed `--active` run,
+    2026-11-20). Seed every run that has no discovery stage of its own from the
+    hosts an earlier run already stored.
+    """
+    rec = Recorder()
+    specs = {"ports-fake": tool("ports-fake", Stage.PORTS, mode=Mode.ACTIVE)}
+    adapters = {"ports-fake": adapter("ports-fake", Stage.PORTS, rec)}
+    engine = make_engine(tmp_path, specs, adapters, installed=lambda _adapter: True)
+    target_id = engine.store.create_target("example.com")
+    run_id = engine.store.create_scan_run(target_id, "live")
+    engine.store.upsert_subdomain(
+        target_id, "www.example.com", run_id=run_id, state="ALIVE", provenance="subs"
+    )
+    engine.store.finish_scan_run(run_id, "completed")
+
+    summary = await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.PORTS,), active=True, no_scope=True, mock=True),
+    )
+
+    assert rec.names == ["ports-fake"]
+    assert rec.hosts == [["www.example.com"]]
+    stages = rows(engine.store, "SELECT stage FROM scan_runs ORDER BY id")
+    assert [row["stage"] for row in stages] == ["live", "ports"]
+    assert summary.exit_code is ExitCode.SUCCESS
+
+
 async def test_tools_flag_overrides_tier_gating(tmp_path: Path) -> None:
     """A named tool runs whatever its tier; an unknown name is still a usage error.
 

@@ -4,6 +4,16 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D96): **a standalone stage command now uses stored
+  hosts.** `reconkit ports -d slice.bank.in --active` after a completed active
+  scan exited 0 with 0 tools and `Ports -`: `_stage_hosts(PORTS)` only saw the
+  in-memory `alive` set, which a `live`-less run never fills, and
+  `_seed_from_store` was `--resume`-only. Any run without `subs`/`dns`/`live`
+  now seeds from `Store.subdomains()`, and an empty `ports` run says
+  `run 'reconkit live' first` instead of silence. Regression
+  `test_ports_stage_command_uses_stored_alive_hosts`; suite 1048; gate clean.
+  Next action: none.
+
 - Status (2026-11-20, D95): **a fresh clone can install every tool its distro
   packages.** Clean-room `ubuntu:24.04` run of `git clone` -> `bootstrap.sh` ->
   `install-tools.sh --yes` found three real new-user defects: the script was

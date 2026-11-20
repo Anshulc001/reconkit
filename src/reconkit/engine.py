@@ -1002,7 +1002,15 @@ class Engine:
         )
         discovered: set[str] = set()
         alive: set[str] = set()
-        if resumed:
+        # A standalone stage command (`ports`, `tech`, `urls`, `vulns`, `shots`)
+        # has no discovery stage in its own stage list, so the in-memory sets
+        # would stay empty and the stage would silently scan nothing
+        # (2026-11-20: `reconkit ports -d X` after a completed `--active` run
+        # reported 0 tools and `Ports -`). Seed those runs from what earlier
+        # runs stored. A run that includes subs/dns/live builds its own sets,
+        # exactly as before, and `--resume` keeps its own seeding.
+        discovery = {Stage.SUBS, Stage.DNS, Stage.LIVE}
+        if resumed or not (discovery & set(opts.stages)):
             self._seed_from_store(target_id, target, discovered, alive)
 
         dns_results: list[ToolResult] = []
@@ -1041,6 +1049,11 @@ class Engine:
             if not selected and not skipped:
                 continue
             if stage is Stage.PORTS and not hosts:
+                # A standalone `ports` run with nothing stored would otherwise
+                # look like a successful empty scan (2026-11-20, PIT-67).
+                self._progress(
+                    "ports: no ALIVE host from an earlier run; run `reconkit live` first"
+                )
                 continue
 
             dropped: list[str] = []

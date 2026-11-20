@@ -174,6 +174,8 @@ selection skip, and a stage left with none is a completion gap (exit `0`).
 
 `--active` is a usage error (exit `2`) on every passive-only command - the bare form, `lite`, `passive`, `subs` and `dns` - because none of them runs an active stage and accepting the flag would promise work the command cannot do. The message names `run` as the active workflow. Use `run -d X --active`, or an active stage command (`live`, `ports`, `tech`, `urls`, `vulns`), for active stages.
 
+**A stage command works on the hosts earlier runs stored.** `live`, `ports`, `tech`, `urls` and `vulns` do not repeat discovery, so they seed their host list from the database (ALIVE hosts for `ports`/`tech`/`urls`/`vulns`, every known name for `live`). Run an active or live pass first: `reconkit live -d X --active`, then `reconkit ports -d X --active`. A `ports` run with no stored ALIVE host now prints `ports: no ALIVE host from an earlier run; run 'reconkit live' first` instead of silently reporting `Ports -` with exit 0 (2026-11-20).
+
 **What `--active` needs depends on whether a scope file exists.** With `--scope PATH` (default `./scope.yaml`):
 
 - **No scope file at that path** - active and full runs are **refused before any traffic** with exit code 3: `Error: No scope.yaml found. Active scanning requires a scope file. If you intend to scan without scope restrictions, you must explicitly pass --no-scope.` Passive stages still work. `--no-scope` is the only way to run actively without a file (docs/05 rule 2, D82).

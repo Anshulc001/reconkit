@@ -77,7 +77,42 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
 | PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `target.com` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.target.com/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
 | PIT-65 | A tool installed anywhere but `~/.reconkit/bin` and the shell's `PATH` was invisible: `doctor` said `missing` for a `go install`/`pipx` copy, and a distro wrapper script could read `wrong program`, so the same install layout gave a different verdict per machine | `BinaryAdapter.binary_path()` and `toolcheck.installed_copy()` tried only the managed directory and `shutil.which`, and the identity probe environment was `{"HOME"}` only, so `~/go/bin`, `~/.local/bin` and a `/bin/sh` wrapper's `id`/`sudo` calls all depended on how the shell was started | `adapters.base.binary_search_dirs()` adds PATH, `$GOPATH/bin`, `~/.local/bin`, `~/go/bin`, `~/.gobin`, `/usr/local/bin`, `/usr/local/sbin`, `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`, `/snap/bin` and the `SUDO_USER` bin directories under sudo; both resolvers use that one list, and `identity_probe_env()` passes `HOME` plus a `PATH` led by the copy's own directory | `test_a_binary_outside_path_is_found_in_a_standard_dir` (`Regression: PIT-65`), `test_sudo_user_bin_dirs_are_searched`, `test_identity_probe_gets_a_path_led_by_the_program`, `test_installed_copy_finds_a_binary_outside_path` |
+| PIT-67 | `reconkit ports -d slice.bank.in --active` exited 0, ran **0 tools**, printed `Ports -` for all 13 hosts and wrote no `scan_runs` row, so a completed active scan looked like a ports scan that found nothing | `_stage_hosts(PORTS)` returns the in-memory `alive` set, which is only filled by a `live` stage in the same run; `_seed_from_store` ran only under `--resume`, so a standalone stage command had no hosts and `if stage is Stage.PORTS and not hosts: continue` skipped it silently | every run whose stage list contains none of `subs`/`dns`/`live` now seeds `discovered`/`alive` from `Store.subdomains()` (so `ports`/`tech`/`urls`/`vulns`/`shots` commands use what earlier runs stored). A `ports` run that still has no ALIVE host prints `ports: no ALIVE host from an earlier run; run \`reconkit live\` first` instead of exit 0 silence | `test_ports_stage_command_uses_stored_alive_hosts` (`Regression: PIT-67`) |
 | PIT-66 | A fresh `git clone` on Ubuntu could not follow the new install path: `./scripts/install-tools.sh` was `Permission denied`, and run with `bash` it skipped ProjectDiscovery's `httpx` and failed every apt tool | the script was committed `100644` while `bootstrap.sh` was `100755`; `have()` used `command -v`, so the project's own `httpx` dependency in `.venv/bin` counted as ProjectDiscovery's `httpx`; and apt installed all packages in one command, so four names Ubuntu does not package (`amass`, `findomain`, `massdns`, `rustscan`) aborted `nmap`, `nikto`, `sqlmap`, `whatweb`, `masscan` and `dig` too | the script is committed executable; the plan asks `reconkit doctor --json` and treats only `installed: yes` as present (managed/PATH fallback before reconkit exists); apt packages install one at a time with a warning naming each unavailable one; `amass` installs from its upstream Go module so Kali and Ubuntu share one source | `test_documented_scripts_are_executable`, plus the clean-clone sandbox rerun recorded under "2026-11-20 (D95)" |
+
+## 2026-11-20 (D96) - a stage command uses the hosts earlier runs stored
+
+Found while running the authorized `slice.bank.in` scan: the `--active` run
+completed (13 hosts, 10 ALIVE), then
+`reconkit ports -d slice.bank.in --active --no-scope` exited 0 after scanning
+nothing - `Ports` stayed `-`, the summary said `tools: 0 ok`, and no `ports`
+row was written. The `ports` command had no `live` stage of its own, so
+`_stage_hosts(PORTS)` saw an empty in-memory `alive` set; `_seed_from_store`
+was gated on `--resume`, and the stage was skipped by
+`if stage is Stage.PORTS and not hosts: continue` without a word.
+
+### The change
+
+- `src/reconkit/engine.py`: seed `discovered`/`alive` from `Store.subdomains()`
+  whenever the run's stage list contains none of `subs`/`dns`/`live` (and on
+  `--resume`, as before). A run that includes discovery builds its own sets
+  exactly as before, so `--active`/`--full` behaviour is unchanged.
+- A `ports` run with no stored ALIVE host now prints
+  `ports: no ALIVE host from an earlier run; run \`reconkit live\` first` before
+  skipping, instead of a silent exit 0.
+- docs/02 records the rule for every host-consuming stage command.
+
+### Evidence
+
+```
+before: reconkit ports -d slice.bank.in --active --no-scope
+        -> 0 tools, Ports -, no scan_runs row, exit 0
+after:  same command: ports: running 5 tool(s)
+        smap ok 93, naabu ok 0, rustscan ok 45229, pyscan ok 48,
+        nmap ok 5979 (530.0s); tools: 5 ok, 0 gap, 0 failed, 1 skipped
+        (masscan: tier not included in active mode); exit 0; report written
+tests:  1048 passed; ruff/format/mypy clean
+```
 
 ## 2026-11-20 (D95) - a fresh clone can install every tool it can install
 
