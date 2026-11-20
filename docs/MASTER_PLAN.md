@@ -743,9 +743,9 @@ D13. 2026-11-17 - Inline default wordlist for ffuf (owner ruling). Wave 5 left
     paths, committed, packaged as package data, no runtime download - and add
     `--ffuf-wordlist PATH` on the scan commands so an operator can replace it.
     `ffuf` is `opt_in`, and its findings are `severity="info"`: a discovered path
-    is not a confirmed vulnerability. dnsreaper stays unadapted: it is not on
-    PyPI, has no `setup.py`/`pyproject.toml`, and is a script run by hand, so it
-    needs an adapter kind that does not exist.
+    is not a confirmed vulnerability. dnsreaper stayed unadapted at this point
+    (D15); D100 (2026-11-20) later installed and adapted it via a managed
+    launcher, so this note is superseded.
 
 D14. 2026-11-17 - Ports wave: four mechanics the brief and the tools disagreed
     on. (1) **masscan root is a selection-time skip, not a runtime status.** The
@@ -771,7 +771,8 @@ D14. 2026-11-17 - Ports wave: four mechanics the brief and the tools disagreed
     per-file `S314` ignore because it parses only the `-oX` file nmap itself
     wrote.
 
-D15. 2026-11-17 - dnsreaper is not adapted (owner ruling). `pip install
+D15. 2026-11-17 - dnsreaper is not adapted (owner ruling, superseded by D100).
+    `pip install
 dnsreaper` has no distribution (`No matching distribution found`), the GitHub
 project has no `setup.py`/`pyproject.toml` and ships `main.py` +
 `requirements.txt`, so driving it needs a checkout plus a script-launching
@@ -887,8 +888,9 @@ D21. 2026-11-18 - `scripts/install-tools.sh`: the owner reinstates installation,
     (1) **`tools.yaml` stays the only tool list.** The script does not carry its
     own catalogue; it reads every `kind: binary` entry and follows its `source:`
     string - `apt: <pkg>`, `go install <module>@latest`, `pipx install <pkg>` -
-    and reports the rest (release-only: `findomain`, `rustscan`, `dnsreaper`) as
-    manual, with the upstream URL from the same entry. The `(or: go install
+    and reports the rest (release-only: `findomain`, `rustscan`) as manual, with
+    the upstream URL from the same entry (`dnsreaper` was manual here; D100
+    installed it). The `(or: go install
     ...)` hints added today to the nine release-only ProjectDiscovery entries
     were each verified with `go install -n` against the module proxy before
     being written (REVIEW_LOG, "scripts/install-tools.sh" entry), so no module

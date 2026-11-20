@@ -54,7 +54,7 @@ reconkit diff -d <authorized-domain>
 | `ports` | Port scan over each adapter's default port set (`--ports` overrides); needs `--active` |
 | `tech` | Technology, WAF and CDN inventory; needs `--active` |
 | `urls` | URL discovery from archives and crawlers; needs `--active` |
-| `vulns` | Vulnerability checks: `nuclei`, `subzy` (core), `nikto`, `ffuf` (opt_in); needs `--active`. Findings are not persisted |
+| `vulns` | Vulnerability checks: `nuclei`, `subzy`, `dnsreaper` (core), `nikto`, `ffuf` (opt_in); needs `--active`. Findings are not persisted |
 | `run` | `passive` (subs+dns+urls) by default; `--active` = subs+dns+live+tech+urls+url_probe; `--full` = all eight stages (`shots` included) with `opt_in` enabled. The mode table is in [docs/02_CLI_UX.md](docs/02_CLI_UX.md) |
 | `diff` | New, gone, state-changed and port-changed items vs the previous run |
 | `status` | Recent scans (`--json` for scripts) |
@@ -71,18 +71,21 @@ Scan flags include `--active`, `--full`, `--no-scope`, `--tools`, `--exclude`, `
 
 ### Vulnerability scanning (current state)
 
-`vulns` is implemented but deliberately narrow. It runs only with `--active`:
+`vulns` is implemented but deliberately narrow. It runs with `--active` as a
+stage command, or as the last stage of `--full`:
 
 ```bash
 reconkit vulns -d example.com --active
 reconkit run -d example.com --full          # vulns is the last stage
 ```
 
-- `nuclei` and `subzy` (`core`) run with the stage.
+- `nuclei`, `subzy` and `dnsreaper` (`core`) run with the stage.
 - `nikto` and `ffuf` are `opt_in`: add `--include-noisy`, use `--full`, or name
   them with `--tools`.
-- `dnsreaper` has no adapter (D15); `dalfox`, `crlfuzz` and `sqlmap` are
-  exploitation-class and never run automatically (explicit `--tools` only).
+- `dalfox`, `crlfuzz` and `sqlmap` are exploitation-class and never run
+  automatically (explicit `--tools` only).
+- `run --active` does **not** include `vulns` (full-only); use `run --full`
+  or `reconkit vulns`.
 - Findings are **not stored in SQLite** and do not appear in `report.json` or
   `report.txt`. Raw, redacted output goes to
   `workspaces/<target>/meta/<run_id>-<tool>.txt` (one file per tool per stage
