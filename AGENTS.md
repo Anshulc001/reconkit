@@ -96,7 +96,7 @@ Before any significant change, read the relevant documents:
 | `docs/07_TESTING.md` | tests, fixtures, `--mock` |
 | `docs/08_UX_FLOWS.md` | user journeys and expected terminal output |
 | `docs/09_TOOL_CONTRACTS.md` | adapters, schemas, stage registry, confidence rules |
-| `docs/10_TOOL_INSTALLER.md` | install, update, doctor |
+| `docs/10_TOOL_SOURCES.md` | tool reference, sources, doctor |
 | `docs/MASTER_PLAN.md` | the part order, autonomy rules and self-review loop |
 | `docs/REVIEW_LOG.md` | evidence for every part: decisions, tests, mutations, check output |
 | `tools.yaml` | the registry of every tool (the only list of allowed tools) |

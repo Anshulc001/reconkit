@@ -4,6 +4,13 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D87): **stale docs and dead keys are gone.** AGENTS.md
+  points at docs/10_TOOL_SOURCES.md, README says v1.0.0 is stable and
+  feature-complete for the documented scope, docs/01 no longer claims nuclei is
+  Phase 3, `scope.example.yaml` no longer advertises the removed `max_speed`,
+  and `config.yaml`/`AppConfig` no longer accept the ignored `install:` block.
+  Tests 1040 -> 1041 (the removed install block is rejected). Gate clean. See
+  D87 in REVIEW_LOG.
 - Status (2026-11-20, D86): **CI exists.** `.github/workflows/test.yml` runs on
   every push and pull request to `main`, with a Python 3.11/3.12/3.13 matrix;
   each job installs `.[dev]` and runs `pytest -q`, `ruff check .`,

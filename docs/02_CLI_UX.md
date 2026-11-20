@@ -469,7 +469,7 @@ and there is no `--interactive` switch. Omitting the target is the whole trigger
 
 `install`, `update` and `doctor --fix` no longer exist (removed 2026-11-17, docs/MASTER_PLAN.md D4). Obtaining a missing tool is entirely up to you and is never a reconkit command; docs/10_TOOL_SOURCES.md is a reference to where each project lives, not a how-to.
 
-`config.yaml` has no `tool_versions` key: it was accepted and ignored after the installer went, and the key itself was removed on 2026-11-17, so a config that still carries one is rejected as an unknown key like any other typo. The `install:` block (`dir`, `verify_checksums`) is accepted and ignored.
+`config.yaml` has no `tool_versions` key and no `install:` block (D87): both were accepted and ignored after the installer went, and both keys are now removed, so a config that still carries either is rejected as an unknown key like any other typo.
 
 There is no `--speed` and no `--delay`: both were removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN.md D3). Tools start together and run at their own natural pace; nothing in reconkit throttles, delays or reshuffles them.
 

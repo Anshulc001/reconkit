@@ -126,11 +126,6 @@ class WildcardCheck(_StrictModel):
     probes: int = Field(ge=1)
 
 
-class InstallConfig(_StrictModel):
-    dir: str
-    verify_checksums: bool
-
-
 class Webhook(_StrictModel):
     """Phase 3 notification settings; the URL itself comes from the environment."""
 
@@ -157,7 +152,6 @@ class AppConfig(_StrictModel):
     report: ReportConfig = Field(default_factory=ReportConfig)
     confidence: ConfidenceConfig
     wildcard_check: WildcardCheck
-    install: InstallConfig
     webhook: Webhook | None = None
 
 

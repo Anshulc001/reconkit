@@ -97,6 +97,17 @@ def test_webhook_block_loads() -> None:
     assert config.webhook.only_on_new is True
 
 
+def test_removed_install_block_is_rejected(tmp_path: Path) -> None:
+    """D87: the old ignored `install:` block is now an unknown key."""
+    text = CONFIG.read_text(encoding="utf-8") + (
+        'install:\n  dir: "~/.reconkit/bin"\n  verify_checksums: true\n'
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_config(path)
+
+
 def test_unknown_top_level_key_is_rejected(tmp_path: Path) -> None:
     # Append rather than string-replace, so the test does not depend on one line's
     # spelling in the real file: a replace silently stops testing the schema.

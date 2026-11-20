@@ -57,12 +57,6 @@ wildcard_check:
   enabled: true
   probes: 3
 
-# Accepted and ignored for the same reason: doctor looks in ~/.reconkit/bin and
-# then PATH, and reconkit downloads nothing. Kept so an existing config still loads.
-install:
-  dir: "~/.reconkit/bin"
-  verify_checksums: true
-
 # Phase 3
 webhook:
   enabled: false     # URL comes from env MONITOR_WEBHOOK_URL, never from this file

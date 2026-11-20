@@ -23,5 +23,4 @@ exclude_cidrs: []           # always win over in_scope_cidrs (D56); only pyscan/
 
 allow_active: true          # false = passive only
 allow_intrusive: false      # Phase 3 intrusive tier stays disabled unless true
-max_speed: normal           # slow | normal | fast. Caps --speed for this scope
 notes: "Rate limit from program rules: max 10 req/s"
