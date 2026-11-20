@@ -15,7 +15,7 @@ A command-line reconnaissance orchestrator for **authorized** security testing. 
 
 ## Status
 
-v1.0.0 is stable and feature-complete for the documented scope. `install`, `update` and `doctor --fix` were removed on 2026-11-17: reconkit no longer installs tools, it only reports what you have. The following remain documented **Phase 3 stubs** and exit `1` with a "not wired" message: `db list`, `db export`, `export`, `scope import`. `reconkit report --target <domain>` is implemented (D65): it rebuilds a saved report from the database without scanning.
+v1.0.0 is stable and feature-complete. `install`, `update` and `doctor --fix` were removed on 2026-11-17: reconkit no longer installs tools, it only reports what you have. The following remain documented **Phase 3 stubs** and exit `1` with a "not wired" message: `db list`, `db export`, `export`, `scope import`. `reconkit report --target <domain>` is implemented (D65): it rebuilds a saved report from the database without scanning.
 
 ## Requirements
 
