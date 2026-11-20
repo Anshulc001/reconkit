@@ -4,6 +4,16 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-20, D99): **the installer works on a partly-installed box.**
+  The planner printed one shared `name` for all rows, so `have()` asked about
+  `whatweb` for everything and printed `nothing to install` on a machine where
+  `whatweb` existed; each row now carries its own registry name (+ regression
+  test). `binary_search_dirs()` also skips the project venv's `bin`, so its
+  Python `httpx` CLI can no longer shadow the real binary, and `go install`
+  gets one retry on a transient `sum.golang.org` timeout. Fresh Ubuntu repro
+  with only whatweb preinstalled: plan correct, full run 47 installed, 1
+  manual, doctor clean, exit 0. Next action: none.
+
 - Status (2026-11-20, D98): **every installable tool now installs on Ubuntu.**
   `findomain` (pinned 11.0.0 zip) and `rustscan` (pinned 2.4.1 .deb.zip) use new
   `release:` sources with SHA-256 checks; `massdns` uses a pinned `build:` commit

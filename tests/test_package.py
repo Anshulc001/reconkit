@@ -16,6 +16,59 @@ def test_package_version_matches_pyproject() -> None:
     assert __version__ == project["version"]
 
 
+def test_install_plan_checks_each_tool_by_its_own_name(tmp_path) -> None:
+    """A plan row must carry its own registry name, not the loop's last one.
+
+    2026-11-20: the planner printed the final `name` for every row, so
+    install-tools.sh asked doctor about one tool (alphabetically last) for all
+    of them. On a machine where that tool was installed, every row printed
+    `have`, nothing was installed, and doctor then reported 23 missing.
+    """
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    (tmp_path / "scripts").mkdir()
+    shutil.copy(root / "scripts" / "install-tools.sh", tmp_path / "scripts")
+    (tmp_path / "tools.yaml").write_text(
+        "tools:\n"
+        "  alpha: {kind: binary, binary: alpha, "
+        'source: "go install github.com/example/alpha@latest"}\n'
+        '  zulu: {kind: binary, binary: zulu, source: "apt: zulu"}\n',
+        encoding="utf-8",
+    )
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    reconkit = fakebin / "reconkit"
+    reconkit.write_text(
+        "#!" + sys.executable + "\n"
+        "import json\n"
+        "print(json.dumps({'tools': [\n"
+        "    {'tool': 'alpha', 'kind': 'binary', 'installed': 'missing'},\n"
+        "    {'tool': 'zulu', 'kind': 'binary', 'installed': 'yes'},\n"
+        "]}))\n",
+        encoding="utf-8",
+    )
+    reconkit.chmod(0o755)
+    env = {
+        "PATH": f"{fakebin}:{Path(sys.executable).parent}:/usr/bin:/bin",
+        "HOME": str(tmp_path),
+    }
+    result = subprocess.run(
+        ["bash", str(tmp_path / "scripts" / "install-tools.sh"), "--check"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    lines = result.stdout.splitlines()
+    assert any(line.startswith("have") and "zulu" in line for line in lines), lines
+    assert any(line.startswith("go") and "alpha" in line for line in lines), lines
+
+
 def test_documented_scripts_are_executable() -> None:
     """A fresh clone must be able to run the scripts the README names.
 

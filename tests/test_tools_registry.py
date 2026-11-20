@@ -353,6 +353,32 @@ def test_installed_copy_finds_a_binary_outside_path(
     assert installed_copy(load_tools()["findomain"], tmp_path / "managed") == target
 
 
+def test_the_project_venv_bin_is_not_a_tool_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """D99: an activated venv's `httpx` console script must not shadow the tool.
+
+    The Python `httpx` library ships a CLI with the same name as
+    ProjectDiscovery's binary. With `.venv/bin` first on PATH, doctor resolved
+    the namesake, failed identity, and reported `wrong program` even though a
+    real `/usr/bin/httpx` existed. The interpreter's own bin dir is skipped.
+    """
+    from reconkit.adapters import base
+
+    venv_bin = tmp_path / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "httpx").write_text("", encoding="utf-8")
+    system_bin = tmp_path / "usr" / "bin"
+    system_bin.mkdir(parents=True)
+    real = system_bin / "httpx"
+    real.write_text("", encoding="utf-8")
+    monkeypatch.setattr(base, "interpreter_bin_dirs", lambda: (venv_bin,))
+    monkeypatch.setenv("PATH", f"{venv_bin}:{system_bin}")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("GOPATH", raising=False)
+    assert installed_copy(load_tools()["httpx"], tmp_path / "managed") == real
+
+
 def test_the_python_httpx_cli_is_not_httpx_tech(tmp_path: Path) -> None:
     """V-UNEXPECTED item 1: the namesake must not count as installed.
 

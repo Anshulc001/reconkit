@@ -80,6 +80,43 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-67 | `reconkit ports -d slice.bank.in --active` exited 0, ran **0 tools**, printed `Ports -` for all 13 hosts and wrote no `scan_runs` row, so a completed active scan looked like a ports scan that found nothing | `_stage_hosts(PORTS)` returns the in-memory `alive` set, which is only filled by a `live` stage in the same run; `_seed_from_store` ran only under `--resume`, so a standalone stage command had no hosts and `if stage is Stage.PORTS and not hosts: continue` skipped it silently | every run whose stage list contains none of `subs`/`dns`/`live` now seeds `discovered`/`alive` from `Store.subdomains()` (so `ports`/`tech`/`urls`/`vulns`/`shots` commands use what earlier runs stored). A `ports` run that still has no ALIVE host prints `ports: no ALIVE host from an earlier run; run \`reconkit live\` first` instead of exit 0 silence | `test_ports_stage_command_uses_stored_alive_hosts` (`Regression: PIT-67`) |
 | PIT-66 | A fresh `git clone` on Ubuntu could not follow the new install path: `./scripts/install-tools.sh` was `Permission denied`, and run with `bash` it skipped ProjectDiscovery's `httpx` and failed every apt tool | the script was committed `100644` while `bootstrap.sh` was `100755`; `have()` used `command -v`, so the project's own `httpx` dependency in `.venv/bin` counted as ProjectDiscovery's `httpx`; and apt installed all packages in one command, so four names Ubuntu does not package (`amass`, `findomain`, `massdns`, `rustscan`) aborted `nmap`, `nikto`, `sqlmap`, `whatweb`, `masscan` and `dig` too | the script is committed executable; the plan asks `reconkit doctor --json` and treats only `installed: yes` as present (managed/PATH fallback before reconkit exists); apt packages install one at a time with a warning naming each unavailable one; `amass` installs from its upstream Go module so Kali and Ubuntu share one source | `test_documented_scripts_are_executable`, plus the clean-clone sandbox rerun recorded under "2026-11-20 (D95)" |
 
+## 2026-11-20 (D99) - the plan checks each tool by its own name
+
+A user with a fresh clone saw `setup.sh` print `have` for every tool, then
+`nothing to install`, and `doctor` report 23 missing. The planner built its rows
+correctly but printed the leftover loop variable `name` as the tool for every
+row, so `have()` asked doctor about one tool (the alphabetically last,
+`whatweb`) 48 times. `whatweb` was installed, so every row looked present.
+
+Fixed by carrying the registry name in each plan row
+(`rows: list[tuple[str, str, str, str]]`), with the reason in a comment.
+Regression `test_install_plan_checks_each_tool_by_its_own_name` gives the script
+a two-tool registry and a stub doctor that knows only the last one; it asserts
+the other tool still reaches the plan as `go`. Before the fix that assertion
+fails (both rows said `have`).
+
+Reproduced in a fresh Ubuntu 24.04 container with only `whatweb` preinstalled:
+`setup.sh --check` now prints 28 `go`, 5 `apt`, 2 `release`, 1 `build`, 1
+`pipx`, 1 `have` (whatweb). The full run in the same container ends 47
+installed, 1 manual, doctor clean.
+
+Two more defects from the same report:
+
+- **The venv's Python `httpx` shadowed the real binary.** The tool's own doctor
+  table showed `httpx: wrong program -> .venv/bin/httpx` while a real copy
+  existed. `binary_search_dirs()` now skips the running interpreter's `bin`
+  directory when it is a virtualenv (`interpreter_bin_dirs()`);
+  `installed_copy()` applies the same rule to its `shutil.which` fallback.
+  Regression `test_the_project_venv_bin_is_not_a_tool_directory`. On this Kali
+  host with managed copies absent, resolution returns `~/go/bin/httpx`, not
+  `.venv/bin/httpx`. The Python `httpx` *library* is still a real dependency
+  (pyprobe, API adapters); only its console script stops counting as a tool.
+- **A transient `sum.golang.org` timeout failed two tools.** In the full clean
+  run `github-subdomains` and `subzy` failed with `dial tcp ... i/o timeout`
+  while every other tool installed. `go install` is now retried once per
+  module; the rerun in the same container completed 47 installed, 1 manual,
+  doctor clean, exit 0.
+
 ## 2026-11-20 (D98) - the installer covers every Ubuntu packaging gap
 
 Ubuntu 24.04 packages neither `findomain`, `massdns` nor `rustscan`, so a

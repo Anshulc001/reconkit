@@ -149,7 +149,7 @@ tools = yaml.safe_load(open(registry, encoding="utf-8"))["tools"]
 
 seen_targets: set[str] = set()
 manual: list[tuple[str, str]] = []
-rows: list[tuple[str, str, str]] = []
+rows: list[tuple[str, str, str, str]] = []
 
 for name, spec in sorted(tools.items()):
     if spec.get("kind") != "binary":
@@ -166,32 +166,37 @@ for name, spec in sorted(tools.items()):
     build = re.match(r"build:\s*(\S+?)(?:@([0-9a-fA-F]{7,40}))?\s*$", source)
 
     if apt:
-        rows.append(("apt", apt.group(1), binary))
+        rows.append(("apt", apt.group(1), binary, name))
     elif release:
-        rows.append(("release", f"{release.group(1)}|{release.group(2).lower()}", binary))
+        rows.append(
+            ("release", f"{release.group(1)}|{release.group(2).lower()}", binary, name)
+        )
     elif build:
         target = build.group(1) + ("|" + build.group(2) if build.group(2) else "")
-        rows.append(("build", target, binary))
+        rows.append(("build", target, binary, name))
     elif go:
         # The hint lives inside a prose string, so it ends with punctuation:
         # "(or: go install <module>@latest; the archive member is ...)".
         module = go.group(1).rstrip("),.;")
-        rows.append(("go", module, binary))
+        rows.append(("go", module, binary, name))
     elif pipx:
-        rows.append(("pipx", pipx.group(1), binary))
+        rows.append(("pipx", pipx.group(1), binary, name))
     else:
         manual.append((binary, source or "no source recorded"))
 
 # Two registry rows can share one binary (httpx / httpx_tech), and one package
 # can provide several binaries (dnsutils -> dig); install each target once.
-for kind, target, binary in rows:
+# Each row must carry ITS OWN registry name: `have()` asks doctor about that
+# name, so a leftover loop variable made every row ask about the last tool and
+# the whole plan looked installed whenever that one tool was (2026-11-20).
+for kind, target, binary, tool_name in rows:
     key = f"{kind}:{target}"
     if key in seen_targets:
         continue
     seen_targets.add(key)
-    print(f"install\t{kind}\t{target}\t{binary}\t{name}")
+    print(f"install\t{kind}\t{target}\t{binary}\t{tool_name}")
 
-covered = {binary for _, _, binary in rows}
+covered = {binary for _, _, binary, _ in rows}
 for binary, source in manual:
     # httpx_tech reuses the httpx binary; the httpx row already installs it.
     if binary in covered:
@@ -374,7 +379,16 @@ else
     run mkdir -p "${BIN_DIR}"
     for index in "${!go_mods[@]}"; do
       printf '>> %s\n' "${go_mods[index]}"
-      run env GOBIN="${BIN_DIR}" go install "${go_mods[index]}"
+      # `go install` verifies each module with sum.golang.org; a brief network
+      # failure there failed two tools in a clean run (2026-11-20, D99). One
+      # retry, then the doctor verdict reports it like any other gap.
+      if [ "${DRY_RUN}" -eq 1 ]; then
+        run env GOBIN="${BIN_DIR}" go install "${go_mods[index]}"
+      elif ! env GOBIN="${BIN_DIR}" go install "${go_mods[index]}"; then
+        echo "retrying ${go_mods[index]} once"
+        env GOBIN="${BIN_DIR}" go install "${go_mods[index]}" || \
+          printf 'warning: go install failed for %s\n' "${go_mods[index]}" >&2
+      fi
     done
   fi
 

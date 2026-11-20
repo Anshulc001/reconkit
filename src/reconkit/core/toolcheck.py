@@ -17,7 +17,12 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-from reconkit.adapters.base import binary_search_dirs, identity_probe_env, probe_with_retry
+from reconkit.adapters.base import (
+    binary_search_dirs,
+    identity_probe_env,
+    interpreter_bin_dirs,
+    probe_with_retry,
+)
 from reconkit.adapters.registry import ToolSpec
 from reconkit.core.runner import ExecResult, run_exec
 
@@ -43,7 +48,12 @@ def installed_copy(spec: ToolSpec, directory: Path) -> Path | None:
         if candidate.exists():
             return candidate
     found = shutil.which(spec.binary)
-    return Path(found) if found else None
+    if found is None:
+        return None
+    found_path = Path(found)
+    if found_path.parent in interpreter_bin_dirs():
+        return None
+    return found_path
 
 
 def installed_version(

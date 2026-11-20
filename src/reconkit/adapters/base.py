@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -537,6 +538,20 @@ def _sudo_user_home() -> Path | None:
         return None
 
 
+def interpreter_bin_dirs() -> tuple[Path, ...]:
+    """The running interpreter's `bin` directory when it is a virtualenv.
+
+    An activated project venv puts its console scripts first on PATH, and some
+    are named after libraries: the Python `httpx` library ships a CLI called
+    `httpx`, so searching that directory made doctor report the namesake
+    instead of ProjectDiscovery's binary (2026-11-20, D99). A tool is never
+    installed into the project venv; `~/.reconkit/bin` is the managed place.
+    """
+    if sys.prefix == sys.base_prefix:
+        return ()
+    return tuple({Path(sys.executable).parent, Path(sys.prefix) / "bin"})
+
+
 def binary_search_dirs() -> tuple[Path, ...]:
     """Directories searched for a tool binary after the managed copy.
 
@@ -548,6 +563,7 @@ def binary_search_dirs() -> tuple[Path, ...]:
     """
     ordered: list[Path] = []
     seen: set[Path] = set()
+    ignored = interpreter_bin_dirs()
 
     def add(directory: Path) -> None:
         # Expand `~` through Path.home(), the one definition the rest of the
@@ -559,6 +575,8 @@ def binary_search_dirs() -> tuple[Path, ...]:
             path = Path.home() / text[2:]
         else:
             path = directory
+        if path in ignored:
+            return
         if path not in seen:
             seen.add(path)
             ordered.append(path)

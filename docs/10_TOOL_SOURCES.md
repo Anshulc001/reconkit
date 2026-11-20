@@ -109,6 +109,15 @@ searched once. The managed directory is `config.bin_dir()` and
 shadows a working binary and the mitigation is manual - remove or replace that
 file.
 
+The running interpreter's own `bin` directory is skipped when it is a
+virtualenv (2026-11-20, D99). An activated project venv puts its console
+scripts first on `PATH`, and the Python `httpx` library ships a CLI with the
+same name as ProjectDiscovery's binary: doctor resolved the namesake, failed
+identity and reported `wrong program` even when the real copy was installed.
+Tools belong in `~/.reconkit/bin`, never in the project venv. If the venv's
+directory is the only place a name exists, the tool is reported missing, not
+wrong.
+
 **The version contract.** An entry may carry `version_cmd` (argv; its first
 element is the program that reports the version, defaulting to the tool's
 binary) and `version_regex`. `core.toolcheck.installed_copy()` resolves the copy
@@ -242,6 +251,10 @@ a console script named `httpx` in `.venv/bin`, so an activated venv made the
   them (`nmap`, `nikto`, `sqlmap`, `whatweb`, `masscan`, `dig`). Each failure is
   reported with a pointer to this document and the run continues; the final
   `doctor` verdict still exits non-zero while a tool is unusable.
+- **A transient Go download is retried once.** `go install` verifies every
+  module against `sum.golang.org`; a clean run lost `github-subdomains` and
+  `subzy` to an `i/o timeout` there (2026-11-20, D99). One retry per module, and
+  the final doctor verdict still reports a persistent failure.
 - **Release archives are pinned, never "latest".** `release:` is only for a
 tool a distro does not package. The URL is https on `github.com`, the SHA-256
 in `tools.yaml` is checked before anything is unpacked, and a mismatch refuses
