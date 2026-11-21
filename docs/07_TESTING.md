@@ -44,6 +44,9 @@ tests/
   test_engine.py         # stage order, tiers, scope, consensus, host state, resume
   test_scope.py  test_runner.py  test_config.py
   test_store.py  test_wildcard_workspace.py  test_ui.py  test_cli.py
+  test_branding.py       # banner, credits and live version (D107)
+  test_logging.py        # levels, UTC timestamps, redaction, unique log paths (D107)
+  test_pdf_report.py     # PDF sections, privacy mode, 600-host pagination (D107)
   test_registry.py  test_package.py
   test_doctor.py
   test_tools_registry.py  # tools.yaml -> ToolSpec, version probes, source: strings

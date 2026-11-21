@@ -54,7 +54,10 @@ reconkit/
     models.py         # Pydantic models, enums (docs/09)
     errors.py         # exception types (docs/06 §6)
     engine.py         # stage orchestration + consensus
-    ui.py             # Rich console, tables, theme, JSON output
+    ui.py             # Rich console, tables, theme, JSON/text report output
+    branding.py       # ASCII banner, credits and live version (D107)
+    logs.py           # per-scan file log + colored milestone lines (D107)
+    pdf_report.py     # ReportLab PDF assessment report (D107)
     doctor.py
     core/
       runner.py       # run_exec(argv, timeout, ...) - the only subprocess entry
@@ -99,8 +102,14 @@ workspaces/<domain>/
 
 ```
 <results_dir>/<domain>/<YYYYmmddTHHMMSSZ>/
-  report.txt  report.json
+  report.txt  report.json  report.pdf
+<results_dir>/logs/<domain>/<YYYYmmddTHHMMSSZ>.log
 ```
+
+The PDF is rendered by `pdf_report.py` from the same snapshots and is imported
+by `cli.py` only after a report folder exists; the log is owned by `logs.py` and
+sits outside the report folder. Neither module reads the database or the network
+(D107).
 
 - `results_dir` is an `AppConfig` key (default `results`) read from `config.yaml`
   and overridden by `--config` like every other key. It is deliberately **not**
@@ -274,7 +283,8 @@ Speed control was removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN
 - Only `core/runner.py` imports `subprocess`.
 - Only `core/store.py` imports `sqlite3`. The one read-only entry point is `Store.open_readonly()` (D65): `mode=ro` on the URI, no migrations, so `reconkit report` cannot write even by accident. Its callers in `engine.py` (`load_stored_report`, `host_snapshots`, `url_snapshots`) are the only way the CLI reads a stored run, and the CLI still imports no `Store` and no `sqlite3`.
 - Redaction has one implementation and one value source (`core/store.py`). `cli.py` imports exactly the helpers `configure_redaction` and `redact` from `core.store` - never `Store`, never `sqlite3` - so console output and stored text are masked identically. A second pattern list or a second secret source is a bug.
-- Only `ui.py` prints to the terminal (adapters and engine return data or raise).
+- `ui.py`, `branding.py` and `logs.py` are the only terminal writers (adapters and engine return data or raise). `branding.py` draws the one banner; `logs.py` writes the scan milestones and the persistent file; `ui.py` owns tables, JSON and the text report.
+- `pdf_report.py` is an output module like `ui.py`: it imports the engine's `HostSnapshot`/`UrlSnapshot` and `ToolResult`, reads no database and makes no request. It is the only report module that depends on ReportLab, whose imports are untyped (`tool.mypy.overrides`).
 - Registry (`tools.yaml`) is the only source of tool names, per-tool `source:` hints and tiers. reconkit installs nothing, so a `source:` string is documentation, never a command.
 
 ## 10. Key Technical Decisions

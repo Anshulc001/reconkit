@@ -46,11 +46,12 @@ reconkit installs nothing: `install`, `update` and `doctor --fix` were removed o
 ## Flow 4 - Passive recon (default, safe)
 
 1. `reconkit passive -d example.com`
-2. The stage runs silently until it finishes (no header or estimated time in this build).
-3. Progress lines go to stderr (`subs: running 6 tool(s)`, one line per tool); `--silent` is the only thing that suppresses them (docs/02 section 5).
+2. The scan opens with the ReconKit banner, credits and live version, then a separator (D107); `--json` and `--silent` omit it.
+3. The stage runs until it finishes (no estimated time in this build). Progress lines go to stderr (`subs: running 6 tool(s)`, one line per tool); `--silent` is the only thing that suppresses them (docs/02 section 5).
 4. The wildcard check runs before results are accepted; an `unknown` detection adds a warning instead of a result line.
 5. Result table columns: `Subdomain`, `State`, `Status`, `Ports`, `Sources`, `Trust`, followed by the Tools table.
 6. Footer: counts per state and tool statuses. It does not print workspace or DB paths.
+7. `report.txt`, `report.json` and `report.pdf` are written under `results/<target>/<stamp>/`; the same moments are recorded in `results/logs/<target>/<stamp>.log` with colored `[HH:MM:SS] [LEVEL]` milestones on stderr (D107).
 
 - **Success:** exit 0.
 - **Complete with gaps:** a requested stage had no runnable tool at all (`no adapter yet (phase N)`, `not installed`), or an executed tool was refused by an external service (HTTP 429/rate limit, free quota, upstream 5xx - recorded as the `gap` tool status). Exit 0; one warning per stage plus the `⚠ ... completed with gaps` block on stderr, and `completion.status = complete_with_gaps` in `--json`. The scan used every tool that was available.

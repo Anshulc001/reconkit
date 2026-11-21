@@ -116,9 +116,26 @@ class ReportConfig(_StrictModel):
     urls_max: int = Field(default=0, ge=0)
     per_host_folders: bool = True
     emit_lists: bool = True
+    # 2026-11-21 (D107): `report.pdf` generation beside report.txt/report.json.
+    # Defaulted so a config written before this flag keeps producing the PDF.
+    pdf: bool = True
     # D72: extra query parameters that rank a URL down. The built-in list in
     # `ui.NOISE_PARAMS` always applies; this one only adds to it.
     noise_params: list[str] = Field(default_factory=list)
+
+
+class LoggingConfig(_StrictModel):
+    """Per-scan logging (D107, docs/02 section 5).
+
+    `enabled` turns the persistent file on or off, `console` decides whether the
+    milestone lines are also printed, and `level` is one of DEBUG, INFO,
+    SUCCESS, WARNING or ERROR. An unknown level falls back to INFO in
+    `reconkit.logs`; the value is never a secret.
+    """
+
+    enabled: bool = True
+    console: bool = True
+    level: str = "INFO"
 
 
 class WildcardCheck(_StrictModel):
@@ -150,6 +167,8 @@ class AppConfig(_StrictModel):
     # D62: defaulted, so a config written before this block existed loads with
     # the documented 200-URL report cap.
     report: ReportConfig = Field(default_factory=ReportConfig)
+    # D107: defaulted, so a config written before this block existed still logs.
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     confidence: ConfidenceConfig
     wildcard_check: WildcardCheck
     webhook: Webhook | None = None

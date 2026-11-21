@@ -4,6 +4,21 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-21, D107): **branding, PDF reports and per-scan logging ship
+  as v1.1.0.** A human scan prints one ASCII banner (credits and live
+  `__version__`) to stderr, never under `--json`/`--silent` and never from a
+  child. Every scan writes `report.pdf` beside the unchanged `report.txt` and
+  `report.json`: five sections (cover, executive summary, results, technical
+  details, findings), navy theme, headers/footers and page numbers, alternating
+  table rows, repeated headers, `LongTable` pagination and clickable URLs. A
+  per-target log goes to `<results_dir>/logs/<target>/<UTC stamp>.log` with
+  UTC timestamps, five levels, redaction, and colored milestone lines on stderr.
+  New modules: `branding.py`, `logs.py`, `pdf_report.py`; new dependency
+  `reportlab>=4.2`; new defaulted config keys `report.pdf` and `logging.*`.
+  Gate: 1044 tests both plain and `FORCE_TERMINAL=1`, ruff/format/mypy clean.
+  Verified with a real mock scan (6-page PDF, log file) and a 1200-host
+  synthetic PDF (51 pages, no clipping). Next action: none.
+
 - Status (2026-11-21, D106): **the session handoff rule is now in AGENTS.md.**
   Every change must update all affected docs plus the PROGRESS RESUME and a
   REVIEW_LOG entry in the same commit; every error (review, CI, real run) gets
@@ -533,6 +548,23 @@ refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992
 There is no `core/consensus.py`: consensus lives in `engine.py`. Order and module names follow docs/01 section 8 and docs/03 section 5. Per-part hashes and full evidence are in `REVIEW_LOG`; the old table is in its archive.
 
 ## Deviations and assumptions
+
+### D107 (2026-11-21) - requested additions and one naming choice
+
+- The owner's batch explicitly requested three new modules and a PDF library,
+  which normally needs a ruling: `branding.py`, `logs.py`, `pdf_report.py` and
+  `reportlab>=4.2` are therefore pre-authorized by that request. The dependency
+  is in `pyproject.toml`; the tests import the real library.
+- The saved PDF is named `report.pdf`, not the brief's example
+  `recon_report.pdf`, so the three artifacts share one prefix and the existing
+  `report` command/writer keeps one shape.
+- The banner is printed for scan commands only (including bare `reconkit`), not
+  for `doctor`/`status`/`diff`/`report`/`db`; it is suppressed by `--json` and
+  `--silent` and goes to stderr so stdout stays data-only.
+- Version bumped `1.0.0` -> `1.1.0` (feature release); no other behaviour change.
+- `test_a_multi_domain_file_scans_each_domain_separately` now ignores the new
+  sibling `logs/` directory when counting report folders; the report folders
+  themselves are unchanged.
 
 Standing ones only; the per-part history (Part 5 - Part 10f, the bug-fix session, the `diff` two-miss rule) is in the `REVIEW_LOG` archive.
 

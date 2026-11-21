@@ -10840,3 +10840,104 @@ from the docs alone, and every error must leave a test behind. Added to
 
 This entry itself follows the rule. No code or test changed; the gate below is
 the same commit's gate.
+
+## 2026-11-21 - branding, PDF reports and per-scan logging (D107)
+
+**Scope.** The owner's batch: (1) a professional terminal banner with credits and
+live version, (2) a designed PDF report beside the unchanged TXT/JSON artifacts,
+(3) a persistent per-scan log with colored levels, (4) README/config/doc updates.
+No CLI command, flag, scan stage, adapter or scope rule changed.
+
+**Baseline before the change.** `pytest -q` -> `1033 passed in 81.08s`;
+`ruff check .` -> `All checks passed!`; `ruff format --check .` -> 96 files
+formatted; `mypy src/reconkit` -> no issues.
+
+**What changed.**
+- New `src/reconkit/branding.py`: fixed ASCII banner, tagline, `Pritam & Anshul`,
+  `Version: <__version__>` and a dim separator. `cli._run_scan` prints it once to
+  stderr for human scans; `--json`/`--silent` suppress it and no child process
+  can print it.
+- New `src/reconkit/logs.py`: `ScanLog`/`open_scan_log` write
+  `<results_dir>/logs/<target>/<UTC stamp>.log` (unique `-2`, `-3` on collision),
+  UTC `%(asctime)s [%(levelname)s] %(message)s`, levels DEBUG/INFO/SUCCESS/
+  WARNING/ERROR (SUCCESS = 25), and `redact()` before both file and console.
+  The file always records stage progress, including under `--silent`.
+- New `src/reconkit/pdf_report.py`: ReportLab document with a full-bleed navy
+  cover, executive summary, results (host table, failure reasons, clickable
+  URLs), technical details (tool/parameter/methodology tables) and
+  findings/conclusion derived only from stored values. Missing values print
+  `N/A`; no vulnerability is asserted. `LongTable(repeatRows=1)` paginates,
+  the URL table is capped at 500 with a note, and the file is written through a
+  temp file, `chmod 0600`, `os.replace`.
+- `cli.py` wires the PDF and log into every scan and into `reconkit report`; a
+  PDF failure prints/logs a warning and leaves TXT/JSON intact. `config.py` and
+  `config.yaml` gain defaulted `report.pdf` and `logging.{enabled,console,level}`.
+- `pyproject.toml`: `reportlab>=4.2` dependency, version `1.1.0`, scoped mypy
+  override for untyped `reportlab.*` imports. `__version__` and `test_package`
+  updated to `1.1.0`.
+- README rewritten around the real commands/flags; docs/02 sections 1 and 5,
+  docs/03 module map and results tree, docs/07 test list and COMMANDS.md updated.
+
+**New tests.** `tests/test_branding.py` (3), `tests/test_logging.py` (4),
+`tests/test_pdf_report.py` (4: PDF header/mode, 600-host pagination, empty
+report, negative cap), plus assertions in `test_flagged_run_writes_the_report_files_too`
+(PDF + log file) and `test_report_from_db_writes_both_files` (rebuilt PDF).
+
+**Gate (after the change).**
+
+```
+$ pytest -q
+1044 passed in 65.89s (0:01:05)
+
+$ FORCE_TERMINAL=1 pytest -q
+1044 passed in 203.16s (0:03:23)
+
+$ ruff check .
+All checks passed!
+
+$ ruff format --check .
+102 files already formatted
+
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+```
+
+**Real CLI check (`/tmp/rkcheck`, mock, isolated config).**
+
+```
+$ reconkit passive -d example.com --mock --config config.yaml
+<cyan banner: RECONKIT / Advanced Reconnaissance Framework /
+ Made with ♥ by Pritam & Anshul / Version: 1.1.0>
+────────────────────────────────────────────────────────────────────────
+[10:14:48] [INFO] Starting reconnaissance on example.com (passive)
+...
+21 hosts: 0 ALIVE, 2 DNS_ONLY, 0 SHUT_DOWN, 1 DEAD, 18 UNKNOWN | tools: 18 ok, 0 gap, 0 failed, 6 skipped, 0 timeout
+[10:15:09] [INFO] Generating PDF report
+[10:34:54] [SUCCESS] PDF report generated: results/mock/example.com/20261121T153454Z/report.pdf
+report: .../report.txt and .../report.json (PDF: .../report.pdf)
+[10:34:54] [SUCCESS] Reconnaissance completed for example.com
+```
+
+Exit 0. Files included `report.txt`, `report.json`, `report.pdf` (12,825 bytes,
+`%PDF-1.4`, 6 pages by `/Type /Page` count, mode 0600, 12,914 bytes) and
+`results/mock/logs/example.com/20261121T153454Z.log` starting with
+`2026-11-21T15:34:54Z [INFO] Starting reconnaissance...`.
+`reconkit --version` printed `reconkit v1.1.0`.
+Rendered pages 1-5 with `pdftoppm` and inspected them: cover text readable,
+headers/footers/page numbers present, tables not clipped.
+
+**Pagination check.** A synthetic 1200-host / 1200-URL report
+(`write_pdf_report(..., max_urls=500)`) produced a 281,237-byte PDF with 51
+pages; page 4 showed the repeated header and continuous rows with no cut text.
+
+**Issue found and fixed during verification.** `ScanLog._emit` first used
+`getattr(logging, level)`, which raised `AttributeError: module 'logging' has no
+attribute 'SUCCESS'` at the end of the first real mock run. Replaced with an
+explicit `_LEVEL_NUMBERS` map and made the file formatter use `time.gmtime`, so
+the log timestamp is UTC like the database.
+
+**Deviations.** Recorded in `docs/PROGRESS.md` "D107": the three modules and
+ReportLab are owner-requested; the artifact is `report.pdf` (not the brief's
+`recon_report.pdf`) to match the existing `report.*` naming; the banner is for
+scan commands only; version bumped to `1.1.0`; the multi-domain test ignores the
+new sibling `logs/` directory when counting report folders.

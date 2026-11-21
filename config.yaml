@@ -47,7 +47,15 @@ report:
   urls_max: 0                  # 0 = no cap; one report lists every stored URL
   emit_lists: true             # subdomains/alive/dns_resolved/host-info files
   per_host_folders: true       # hosts/<hostname>/{urls.txt,info.json}
+  pdf: true                    # write report.pdf beside report.txt/report.json
   noise_params: []             # extra marketing params to rank down (adds to the built-in list)
+
+# Per-scan logging (docs/02 section 5): results/logs/<target>/<stamp>.log.
+# The file always records the scan; `console` also prints colored milestones.
+logging:
+  enabled: true
+  console: true
+  level: INFO                  # DEBUG, INFO, SUCCESS, WARNING or ERROR
 
 confidence:
   high_min_sources: 3

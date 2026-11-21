@@ -3,6 +3,7 @@
 ## 1. Design Direction
 
 - **Style:** Technical, calm, readable. Tables for results, one-line status for progress.
+- **Branding (D107, 2026-11-21):** a human scan opens with the ReconKit ASCII banner (cyan), the tagline, `Made with ♥ by Pritam & Anshul` and the live `reconkit.__version__`, followed by a dim rule. It is written to stderr once, is suppressed by `--json` and `--silent`, and is never printed by an adapter or child process. `--no-color` keeps the text and drops the styling.
 - **Principles:**
   - Safe and polite by default (passive unless `--active` is asked for). Tools run at their own natural pace: there is no speed preset, delay or artificial throttling.
   - Every result shows where it came from and how much to trust it.
@@ -153,7 +154,7 @@ reconkit full -d example.com
 
 **Findings are not persisted.** `_persist_stage` has no `VULNS` branch and there
 is no `findings` table, so no vulnerability row reaches SQLite, `diff`, or the
-saved `report.txt`/`report.json`. What is kept:
+saved `report.txt`/`report.json`/`report.pdf`. What is kept:
 
 ```
 workspaces/<target>/meta/<run_id>-<tool>.txt
@@ -202,7 +203,7 @@ The `--active` `--help` text says this in one sentence: `A scope.yaml is require
 |---|---|
 | `diff -d X` | New / changed / gone items since the previous run; `GONE` needs two consecutive misses |
 | `status [--json]` | Progress of running or finished scans |
-| `report --target X [--run ID] [--out DIR]` | Rebuild a saved `report.txt`/`report.json` from stored rows; read-only connection, no network, no adapter (D65, section 5) |
+| `report --target X [--run ID] [--out DIR]` | Rebuild a saved `report.txt`/`report.json`/`report.pdf` from stored rows; read-only connection, no network, no adapter (D65, D107, section 5) |
 | `db delete --target X [--yes]` | Delete one target, all its rows and `results/X/`; asks first, default no (D81, D85) |
 | `db wipe [--yes]` | Delete every row, recreate the current schema; `results/` is kept (D81) |
 | `db list\|export -d X [--new-only]` | **Phase 3 stub** in this build: exits 1 with a clear message; no data is read |
@@ -549,6 +550,7 @@ One folder per domain per run, never reused:
 <results_dir>/<domain>/<YYYYmmddTHHMMSSZ>/
   report.txt          selected fields, one row per host, aligned columns
   report.json         the same rows as objects, plus target, run time and field keys
+  report.pdf          professional five-section PDF assessment report (D107)
   subdomains.txt      every stored name, one per line
   alive.txt           ALIVE hosts only, one per line
   dns_resolved.txt    ALIVE + DNS_ONLY; DNS_ONLY = resolves but answers no HTTP
@@ -559,6 +561,27 @@ One folder per domain per run, never reused:
     urls.txt          this host's URLs, one line each, status appended when probed
     info.json         this host's row from host-info
 ```
+
+The PDF is written by `reconkit.pdf_report.write_pdf_report()` from the same
+snapshots as the two other files, so the three artifacts cannot disagree. It has
+a cover (branding, target, date, mode, status), an executive summary, the
+reconnaissance results (hosts, HTTP status, IPs, tech/server, titles, redirects
+and failure reasons, clickable URLs), technical details (tool table,
+configuration, methodology, timestamps) and findings/conclusion derived only
+from the collected data. Missing values print `N/A`; no vulnerability is
+invented. `LongTable` repeats headers and splits long host lists across pages,
+and the URL table is capped at 500 entries with a note that the full list is in
+JSON/TXT. `report.pdf: true` in `config.yaml` switches it; a PDF failure prints a
+warning and leaves the text/JSON reports intact.
+
+The scan log lives outside the report folder, at
+`<results_dir>/logs/<domain>/<YYYYmmddTHHMMSSZ>.log` (mock runs under
+`<results_dir>/mock/logs/...`). It always uses UTC and records the scan start,
+every stage/tool progress line, the host counts, PDF generation and completion,
+plus any error. The console also shows the milestone lines with colored
+`[HH:MM:SS] [LEVEL]` prefixes; `logging.console: false` keeps only the file and
+`--silent` suppresses the console half while the file keeps recording. Messages
+are redacted with `store.redact()`.
 
 The five top-level lists and the `hosts/` tree are written by default
 (`report.emit_lists` and `report.per_host_folders`, both `true`). A
@@ -576,7 +599,8 @@ script can tell "the run found nothing" from "the run did not write this file".
   gets a `-2`, `-3`, ... suffix, so no run can overwrite another.
 - Both files are always written, whatever field selection was made. A field the
   run could not observe prints `not applicable` rather than a guessed value.
-- **Every scan writes these two files** (changed 2026-11-18). The report always
+- **Every scan writes the text and JSON files, plus the PDF** (PDF added by
+  D107, 2026-11-21). The report always
   carries every stored field (`REPORT_FIELDS`); the display flags narrow what is
   shown, never what is saved. Until this change a flagged run wrote nothing at
   all, which left the operator with a terminal table and no artifact; the
@@ -647,8 +671,9 @@ script can tell "the run found nothing" from "the run did not write this file".
   stored status (`null` = never probed). A report with **no** stored URLs writes
   neither block, and `report.json` omits `urls_by_host` entirely, so an empty
   section is never something a reader has to interpret.
-- The same `report: <txt> and <json>` line on stderr announces the files, so a
-  run always says where its report went; `--silent` suppresses that line only.
+- The same `report: <txt> and <json>` line on stderr announces the files (and
+  appends `(PDF: <path>)` when the PDF was written), so a run always says where
+  its report went; `--silent` suppresses that line only.
 - A report that can not be written is a run error (exit 1), never a silent
   success.
 - **A report can be rebuilt from the database, without scanning (added
@@ -656,8 +681,8 @@ script can tell "the run found nothing" from "the run did not write this file".
   <path>] [--out <dir>]` runs the same writer over the rows already stored, so
   a run that predates the current report shape can be read in it without
   touching the target again:
-  `wrote <dir>/report.txt and <dir>/report.json — 69 hosts, 7421 URLs (200
-  shown)`. `--run` defaults to that target's latest `scan_runs` row; an id that
+  `wrote <dir>/report.txt and <dir>/report.json and <dir>/report.pdf — 69
+  hosts, 7421 URLs (200 shown)`. `--run` defaults to that target's latest `scan_runs` row; an id that
   is not the target's is exit `2` and writes nothing. The database is opened
   `mode=ro`: the connection cannot write, nothing is fetched and no adapter
   runs. `--out` is created if missing; without it the folder is

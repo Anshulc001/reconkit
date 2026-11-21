@@ -277,6 +277,12 @@ def test_flagged_run_writes_the_report_files_too(tmp_path: Path) -> None:
     folders = sorted((tmp_path / "results" / "mock" / "example.com").iterdir())
     assert len(folders) == 1
     assert (folders[0] / "report.txt").is_file()
+    # D107: the PDF is written beside the existing two files, and the scan log
+    # lives under the same results root (never inside the report folder).
+    assert (folders[0] / "report.pdf").read_bytes().startswith(b"%PDF")
+    logs = sorted((tmp_path / "results" / "mock" / "logs" / "example.com").glob("*.log"))
+    assert len(logs) == 1
+    assert "PDF report generated" in logs[0].read_text(encoding="utf-8")
     document = json.loads((folders[0] / "report.json").read_text(encoding="utf-8"))
     assert document["type"] == "report"
     assert document["target"] == "example.com"
@@ -1746,6 +1752,8 @@ def test_report_from_db_writes_both_files(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.stderr
     assert (out / "report.txt").is_file()
+    # D107: a rebuilt report also gets its PDF.
+    assert (out / "report.pdf").read_bytes().startswith(b"%PDF")
     document = json.loads((out / "report.json").read_text(encoding="utf-8"))
     assert len(document["hosts"]) > 0
     # D76: the stored mock URLs name testfire.net, so they are external to
@@ -2113,5 +2121,8 @@ def test_a_multi_domain_file_scans_each_domain_separately(
     )
     assert result.exit_code == 0, result.stderr
     assert calls == ["example.com", "testfire.net"]
-    folders = sorted(path.name for path in (tmp_path / "results" / "mock").iterdir())
+    # `logs/` is the D107 scan-log root, not a report folder.
+    folders = sorted(
+        path.name for path in (tmp_path / "results" / "mock").iterdir() if path.name != "logs"
+    )
     assert folders == ["example.com", "testfire.net"]

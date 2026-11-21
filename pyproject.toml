@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reconkit"
-version = "1.0.0"
+version = "1.1.0"
 description = "Reconnaissance orchestrator for authorized security testing"
 readme = "README.md"
 license = {text = "MIT"}
@@ -27,6 +27,8 @@ dependencies = [
     "dnspython>=2.6",
     "PyYAML>=6.0",
     "python-dotenv>=1.0",
+    # D107: professional PDF scan reports (docs/02 section 5).
+    "reportlab>=4.2",
 ]
 
 [project.optional-dependencies]
@@ -83,3 +85,10 @@ markers = [
 python_version = "3.11"
 strict = true
 files = ["src/reconkit"]
+
+# reportlab ships no type stubs (checked 2026-11-21, reportlab 5.1.0), so its
+# imports cannot be typed. Scoped to the one module that draws the PDF; no
+# other strictness is relaxed.
+[[tool.mypy.overrides]]
+module = ["reportlab.*"]
+ignore_missing_imports = true

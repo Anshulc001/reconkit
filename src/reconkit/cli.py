@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import shutil
+import time
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ import typer
 from dotenv import dotenv_values
 
 from reconkit import __version__
+from reconkit.branding import render_banner
 from reconkit.config import AppConfig, load_config
 from reconkit.core.runner import terminate_all_live, validate_target
 from reconkit.core.scope import (
@@ -36,7 +38,9 @@ from reconkit.engine import (
     registry_tool_index,
 )
 from reconkit.errors import ConfigError, ScopeError, StorageError
+from reconkit.logs import ScanLog, open_scan_log
 from reconkit.models import HostState, Mode, Stage
+from reconkit.pdf_report import write_pdf_report
 from reconkit.ui import (
     REPORT_FIELDS,
     SCOPE_LIMITED_BANNER,
@@ -483,6 +487,7 @@ def _run_scan(
     reprobe_urls: bool = False,
 ) -> int:
     engine: Engine | None = None
+    scan_logs: list[ScanLog] = []
     try:
         if full:
             # docs/02 section 2: full implies both, in that order.
@@ -548,6 +553,10 @@ def _run_scan(
         ]
         forced_contact = bool(added) or bool(forced_tools)
         progress_console = make_console(no_color=no_color)
+        # D107: the banner belongs to a human scan, not to a machine document.
+        # It goes to stderr, so `--json` stdout stays one clean document.
+        if not silent and not json_output:
+            render_banner(progress_console)
         if forced_contact:
             # The owner accepted the banner: `--include` is the explicit request
             # for traffic the mode would not send, and the scope gate below
@@ -594,11 +603,16 @@ def _run_scan(
             render_message(_no_scope_warning(targets), console=progress_console, no_color=no_color)
         if json_output and len(targets) > 1:
             raise ConfigError("--json accepts one target per invocation; use -d")
+
         # Progress goes to stderr for every scan, --json included; only --silent
-        # suppresses it (docs/02 section 5).
-        progress = (
-            None if silent else (lambda message: render_progress(message, console=progress_console))
-        )
+        # suppresses the console half (docs/02 section 5). The file log keeps
+        # the same lines even under --silent, so a quiet run is still auditable.
+        def progress(message: str) -> None:
+            if not silent:
+                render_progress(message, console=progress_console)
+            if scan_logs:
+                scan_logs[-1].info(message, console=False)
+
         # The spinner is transient and only alive while a target runs, so the
         # engine gets one stable proxy that forwards to whichever display is
         # currently open (docs/02 section 5).
@@ -621,6 +635,11 @@ def _run_scan(
             progress=progress,
             activity=activity,
         )
+        mode_label = "active (forced by --include)" if forced_contact else requested_mode
+        # D107: mock runs log under results/mock/ like their reports (D30).
+        results_root = config.results_dir
+        if mock:
+            results_root = str(Path(config.results_dir) / "mock")
         exit_code = int(ExitCode.SUCCESS)
         for target in targets:
             # Item 2: loud pre-flight block, stderr only, and the run never stops.
@@ -628,8 +647,23 @@ def _run_scan(
                 block = preflight_warning(target, path=scope_path)
                 if block is not None:
                     render_message(block, console=progress_console, no_color=no_color)
-            with activity_spinner(progress_console, enabled=progress is not None) as show_activity:
+            with activity_spinner(progress_console, enabled=not silent) as show_activity:
                 activity_sink.append(show_activity)
+                run_at = datetime.now(UTC)
+                scan_log: ScanLog | None = None
+                if config.logging.enabled:
+                    scan_log = open_scan_log(
+                        results_root,
+                        target,
+                        run_at,
+                        level=config.logging.level,
+                        console=progress_console,
+                        console_enabled=config.logging.console and not silent,
+                    )
+                    scan_logs.append(scan_log)
+                    scan_log.info(f"Starting reconnaissance on {target} ({mode_label})")
+                started_clock = time.perf_counter()
+                duration_s: float | None = None
                 try:
                     summary = asyncio.run(
                         engine.run(
@@ -661,6 +695,7 @@ def _run_scan(
                         )
                     )
                 finally:
+                    duration_s = time.perf_counter() - started_clock
                     activity_sink.clear()
             snapshots = engine.host_rows(summary.target_id)
             rows = [
@@ -677,6 +712,11 @@ def _run_scan(
                 )
                 for item in snapshots
             ]
+            if scan_log is not None:
+                alive = sum(1 for item in snapshots if item.state is HostState.ALIVE)
+                scan_log.success(
+                    f"{len(snapshots)} subdomains discovered; {alive} live hosts identified"
+                )
             # docs/02 section 3: filters change what is printed, never what is
             # stored; the JSON document carries the counts.
             states = {HostState.ALIVE.value} if only_alive else set(only_states)
@@ -741,11 +781,9 @@ def _run_scan(
             # Every scan saves its report with every stored field (docs/02
             # section 5); flags narrow what is shown, never what is saved.
             # D30: mock runs write under results/mock/<target>/ so they cannot
-            # overwrite a real run's report.
-            results_root = config.results_dir
-            if mock:
-                results_root = str(Path(config.results_dir) / "mock")
-            run_at = datetime.now(UTC)
+            # overwrite a real run's report; `results_root` was fixed before the
+            # run and is also the log root (D107).
+            url_rows = engine.url_rows(summary.target_id)
             directory = report_directory(results_root, target, run_at)
             report_text_path, report_json_path = write_field_report(
                 directory,
@@ -760,7 +798,7 @@ def _run_scan(
                 # D62: the stored URLs travel with the report, capped by
                 # config.yaml `report.urls_max`, so the tree and the URL block
                 # come from the same rows as the hosts table.
-                urls=engine.url_rows(summary.target_id),
+                urls=url_rows,
                 urls_max=config.report.urls_max,
                 noise_params=config.report.noise_params,
                 # D73: counted before any stage ran, so a repeat scan says how
@@ -780,6 +818,51 @@ def _run_scan(
                 emit_lists=config.report.emit_lists,
                 per_host_folders=config.report.per_host_folders,
             )
+            # D107: the PDF is built from the same snapshots as the text and
+            # JSON reports, so the three artifacts cannot disagree. A PDF
+            # failure is reported but never discards the two written reports.
+            pdf_path: Path | None = None
+            if config.report.pdf:
+                if scan_log is not None:
+                    scan_log.info("Generating PDF report")
+                try:
+                    pdf_path = write_pdf_report(
+                        directory,
+                        target,
+                        report_rows,
+                        url_rows,
+                        run_at=run_at,
+                        mode=("active (forced by --include)" if forced_contact else summary.mode),
+                        status=summary.completion_status,
+                        scope_mode=summary.scope_mode,
+                        started_at=run_at,
+                        duration_s=duration_s,
+                        scope_limited=summary.scope_denied,
+                        warnings=summary.scope_warnings,
+                        tool_results=summary.results,
+                        parameters={
+                            "Stages run": ", ".join(stage.value for stage in stages),
+                            "Tools requested": tools or "mode default",
+                            "Minimum sources": str(min_sources),
+                            "URL probe limit": str(config.url_probe.max_urls),
+                            "Report URL cap": (
+                                "no cap"
+                                if config.report.urls_max == 0
+                                else str(config.report.urls_max)
+                            ),
+                            "Scan mode": mode_label,
+                        },
+                    )
+                except Exception as exc:
+                    message = f"PDF report failed: {type(exc).__name__}: {exc}"
+                    render_message(
+                        f"warning: {message}", console=progress_console, no_color=no_color
+                    )
+                    if scan_log is not None:
+                        scan_log.warning(message)
+                else:
+                    if scan_log is not None:
+                        scan_log.success(f"PDF report generated: {pdf_path}")
             if summary.scope_denied:
                 # D64: one line at run end. The pre-flight block says what will
                 # be skipped; this says what the run turned out to be.
@@ -789,16 +872,25 @@ def _run_scan(
                     silent=silent,
                 )
             render_progress(
-                f"report: {report_text_path} and {report_json_path}",
+                f"report: {report_text_path} and {report_json_path}"
+                + (f" (PDF: {pdf_path})" if pdf_path is not None else ""),
                 console=progress_console,
                 silent=silent,
             )
+            if scan_log is not None:
+                scan_log.success(f"Reconnaissance completed for {target}")
         return exit_code
     except ConfigError as exc:
+        if scan_logs:
+            scan_logs[-1].error(str(exc), console=False)
         return _report_error(str(exc), exc.exit_code, no_color=no_color)
     except ScopeError as exc:
+        if scan_logs:
+            scan_logs[-1].error(str(exc), console=False)
         return _report_error(str(exc), exc.exit_code, no_color=no_color)
     except ValueError as exc:
+        if scan_logs:
+            scan_logs[-1].error(str(exc), console=False)
         return _report_error(str(exc), int(ExitCode.USAGE), no_color=no_color)
     except KeyboardInterrupt:
         # D44: the engine runs adapters in worker threads, so this handler is the
@@ -809,8 +901,13 @@ def _run_scan(
         )
     except Exception as exc:
         message = f"unexpected error: {type(exc).__name__}: {exc}"
+        if scan_logs:
+            scan_logs[-1].error(message, console=False)
         return _report_error(message, int(ExitCode.ERROR), no_color=no_color, verbose=verbose)
     finally:
+        # D107: flush and detach every per-target log before the process exits.
+        for item in scan_logs:
+            item.close()
         if engine is not None:
             engine.close()
 
@@ -1228,12 +1325,31 @@ def report_command(
             emit_lists=config.report.emit_lists,
             per_host_folders=config.report.per_host_folders,
         )
+        # D107: a rebuilt report also gets a PDF, from the same stored rows.
+        pdf_path: Path | None = None
+        if config.report.pdf:
+            try:
+                pdf_path = write_pdf_report(
+                    directory,
+                    stored.target,
+                    stored.hosts,
+                    stored.urls,
+                    run_at=stored.started_at,
+                    status=f"rebuilt from stored run #{stored.run_id}",
+                    parameters={"Report source": f"stored run #{stored.run_id}"},
+                )
+            except Exception as exc:
+                render_message(
+                    f"warning: PDF report failed: {type(exc).__name__}: {exc}",
+                    no_color=no_color,
+                )
         shown = len(stored.urls)
         if config.report.urls_max:
             shown = min(shown, config.report.urls_max)
         render_message(
-            f"wrote {text_path} and {json_path} — {len(stored.hosts)} hosts, "
-            f"{len(stored.urls)} URLs ({shown} shown)",
+            f"wrote {text_path} and {json_path}"
+            + (f" and {pdf_path}" if pdf_path is not None else "")
+            + f" — {len(stored.hosts)} hosts, {len(stored.urls)} URLs ({shown} shown)",
             no_color=no_color,
         )
     except (ConfigError, ScopeError, ValueError) as exc:

@@ -234,9 +234,10 @@ reconkit report --target <domain> --out /tmp/r --db other.db
 
 `report` takes `--target` (required), `--run`, `--out`, `--db`, `--config` and
 `--no-color` only - no scan flag. It opens the database read-only, writes
-`report.txt` and `report.json` in the current report shape, and never contacts
-the target. A run id that does not belong to the target is exit `2` and writes
-nothing.
+`report.txt`, `report.json` and `report.pdf` in the current report shape, and
+never contacts the target. A run id that does not belong to the target is exit
+`2` and writes nothing. Every scan also writes the PDF automatically (D107);
+set `report.pdf: false` in `config.yaml` to turn it off.
 
 ```bash
 reconkit scope check -d <domain> [--scope PATH]   # exit 0 allowed, 3 blocked
@@ -428,6 +429,20 @@ A tool that cannot run without its key is a **selection skip** with the reason
 
 `confidence` is `HIGH`/`MEDIUM`/`LOW`/`UNCONFIRMED` from how many independent
 tools agree plus the stage's evidence rules.
+
+## Scan logs and the PDF report
+
+- Every scan writes `results/logs/<domain>/<UTC stamp>.log` (mock runs:
+  `results/mock/logs/...`). The file records the start, each stage/tool progress
+  line, host counts, PDF status and completion in UTC, with secrets redacted.
+- Colored `[HH:MM:SS] [INFO/SUCCESS/WARNING/ERROR]` milestones go to stderr;
+  `--silent` stops the console copy but not the file. `--json` keeps stdout as
+  one document.
+- `report.pdf` is generated beside `report.txt`/`report.json` after each scan
+  and by `reconkit report`. It contains a cover, executive summary,
+  reconnaissance results, technical details and findings/conclusion. Unavailable
+  fields print `N/A`; the PDF never invents findings. Long host lists continue
+  across pages with repeated table headers.
 
 ## Reading the results table
 
