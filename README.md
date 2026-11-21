@@ -35,7 +35,7 @@ The banner is printed once for a human scan (not for `--json`/`--silent`, and ne
 - **Three report formats per scan**: `report.txt`, `report.json` and a designed `report.pdf`.
 - **Per-scan logging** to a persistent file, with colored INFO/SUCCESS/WARNING/ERROR milestones.
 - **Tool inventory, not installation**: `reconkit doctor` reports what is installed and what is missing.
-- **Mock mode** (`--mock`) for a complete offline scan using packaged fixtures.
+- **Mock mode** (`--mock`) for a complete offline scan using packaged fixtures; a target with no matching fixture is skipped, not failed.
 - **No pacing/evasion**: tools run at their own natural pace; the User-Agent is honest (`reconkit/<version>`).
 - **Core and opt-in tiers are inventory only**; exploitation-class tools never run unless named explicitly with `--tools`.
 

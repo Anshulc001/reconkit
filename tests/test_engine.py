@@ -334,6 +334,39 @@ async def test_ports_stage_command_uses_stored_alive_hosts(tmp_path: Path) -> No
     assert summary.exit_code is ExitCode.SUCCESS
 
 
+async def test_ports_stage_skips_cdn_waf_fronted_hosts(tmp_path: Path) -> None:
+    """docs/05 rule 7 (D110): scanning a CDN/WAF edge records the edge's ports.
+
+    A real `slice.bank.in` scan stored 2982 "open" ports for b.slice.bank.in
+    (Cloudflare, 172.65.64.158): TCP connected on 1, 3, 7, 9, 31337 and 65389.
+    The pre-check was documented but not implemented, so the stage must now skip
+    a host whose stored status carries a CDN/WAF name and scan the rest.
+    """
+    rec = Recorder()
+    specs = {"ports-fake": tool("ports-fake", Stage.PORTS, mode=Mode.ACTIVE)}
+    adapters = {"ports-fake": adapter("ports-fake", Stage.PORTS, rec)}
+    engine = make_engine(tmp_path, specs, adapters, installed=lambda _adapter: True)
+    target_id = engine.store.create_target("example.com")
+    run_id = engine.store.create_scan_run(target_id, "live")
+    engine.store.upsert_subdomain(
+        target_id, "www.example.com", run_id=run_id, state="ALIVE", provenance="subs"
+    )
+    fronted_id = engine.store.upsert_subdomain(
+        target_id, "cdn.example.com", run_id=run_id, state="ALIVE", provenance="subs"
+    )
+    engine.store.append_host_status(fronted_id, run_id, "ALIVE", waf="Cloudflare")
+    engine.store.finish_scan_run(run_id, "completed")
+
+    summary = await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.PORTS,), active=True, no_scope=True, mock=True),
+    )
+
+    assert rec.names == ["ports-fake"]
+    assert rec.hosts == [["www.example.com"]]
+    assert summary.exit_code is ExitCode.SUCCESS
+
+
 async def test_tools_flag_overrides_tier_gating(tmp_path: Path) -> None:
     """A named tool runs whatever its tier; an unknown name is still a usage error.
 
@@ -4251,9 +4284,9 @@ def limits_for(
 
 
 def test_a_classed_tool_gets_its_class_idle_window(tmp_path: Path) -> None:
-    """D52: `class: crawler` -> 60 s of silence, and nothing else."""
+    """D52/D109: `class: crawler` -> 120 s of silence, and nothing else."""
     limits = limits_for(tmp_path, {"gau": class_spec("gau", "crawler")})
-    assert limits["gau"].idle_s == 60.0
+    assert limits["gau"].idle_s == 120.0
     # There is no cap left to hold: the model has exactly one field.
     assert set(limits["gau"].model_dump()) == {"idle_s"}
 
@@ -4376,7 +4409,7 @@ def test_a_new_tool_with_class_in_tools_yaml_needs_no_engine_edit(tmp_path: Path
     assert specs["newcrawl"].class_ == "crawler"
 
     limits = limits_for(tmp_path, specs)
-    assert limits["newcrawl"].idle_s == 60.0  # crawler window, no code names the tool
+    assert limits["newcrawl"].idle_s == 120.0  # crawler window, no code names the tool
     source = Path(engine_module.__file__).read_text(encoding="utf-8")
     assert "newcrawl" not in source
 
@@ -5060,3 +5093,265 @@ async def test_user_agent_flag_overrides_config(tmp_path: Path) -> None:
         ScanOptions(stages=(Stage.SUBS,), mock=True, user_agent="flag-agent"),
     )
     assert rec.user_agents == ["flag-agent"]
+
+
+# ------------------------------------- persistence boundaries (PIT-68..70)
+
+
+def _seed_alive(engine: Engine, fqdn: str = "www.example.com") -> tuple[int, int]:
+    """One stored ALIVE host, so a standalone stage command has input."""
+    target_id = engine.store.create_target("example.com")
+    run_id = engine.store.create_scan_run(target_id, "live")
+    engine.store.upsert_subdomain(target_id, fqdn, run_id=run_id, state="ALIVE", provenance="subs")
+    engine.store.finish_scan_run(run_id, "completed")
+    return target_id, run_id
+
+
+async def test_regression_url_variants_store_one_canonical_row(tmp_path: Path) -> None:
+    """Regression: PIT-68 one page is one `urls` row, however it is spelled.
+
+    Archives and crawlers emit `http://host`, `http://host/` and
+    `http://HOST:80/` for the same page; before canonicalization the unique key
+    saw three different strings and the table grew duplicate rows for one
+    resource.
+    """
+    rec = Recorder()
+    specs = {"urls-fake": tool("urls-fake", Stage.URLS, mode=Mode.ACTIVE)}
+    adapters = {
+        "urls-fake": adapter(
+            "urls-fake",
+            Stage.URLS,
+            rec,
+            records=[
+                UrlRecord(url=value, source="fake")
+                for value in (
+                    "http://www.example.com",
+                    "http://www.example.com/",
+                    "http://WWW.EXAMPLE.COM:80/",
+                    "https://www.example.com:443/a#frag",
+                    "https://www.example.com/a",
+                    "https://legacy.example.com/",
+                )
+            ],
+        )
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+    target_id, run_id = _seed_alive(engine)
+    # A row written before canonicalization: the canonical twin must not be added.
+    engine.store.upsert_url(target_id, "https://legacy.example.com", run_id=run_id)
+
+    await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.URLS,), active=True, no_scope=True, mock=True),
+    )
+
+    stored = sorted(str(row["url"]) for row in rows(engine.store, "SELECT url FROM urls"))
+    assert stored == [
+        "http://www.example.com/",
+        "https://legacy.example.com",
+        "https://www.example.com/a",
+    ]
+
+
+async def test_regression_ports_keep_protocol_and_drop_a_foreign_host(tmp_path: Path) -> None:
+    """Regression: PIT-70 tcp/53 and udp/53 are two facts; a foreign host is none.
+
+    The persistence path grouped on `(host, ip, port)` and called `upsert_port`
+    without `protocol`, so a UDP finding was stored as TCP under the TCP row.
+    It also wrote any host a port adapter named, with no target check.
+    """
+    rec = Recorder()
+    specs = {"ports-fake": tool("ports-fake", Stage.PORTS, mode=Mode.ACTIVE)}
+    adapters = {
+        "ports-fake": adapter(
+            "ports-fake",
+            Stage.PORTS,
+            rec,
+            records=[
+                PortRecord(
+                    fqdn="www.example.com",
+                    ip="1.2.3.4",
+                    port=53,
+                    protocol="tcp",
+                    state="open",
+                    source="fake",
+                ),
+                PortRecord(
+                    fqdn="www.example.com",
+                    ip="1.2.3.4",
+                    port=53,
+                    protocol="udp",
+                    state="open",
+                    source="fake",
+                ),
+                PortRecord(
+                    fqdn="WWW.Example.COM.",
+                    ip="1.2.3.4",
+                    port=443,
+                    protocol="tcp",
+                    state="open",
+                    source="fake",
+                ),
+                PortRecord(
+                    fqdn="evil.example.org",
+                    ip="9.9.9.9",
+                    port=22,
+                    protocol="tcp",
+                    state="open",
+                    source="fake",
+                ),
+            ],
+        )
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+    _seed_alive(engine)
+
+    await engine.run(
+        "example.com",
+        ScanOptions(stages=(Stage.PORTS,), active=True, no_scope=True, mock=True),
+    )
+
+    stored = sorted(
+        (str(row["ip"]), int(row["port"]), str(row["protocol"]))
+        for row in rows(engine.store, "SELECT ip, port, protocol FROM ports")
+    )
+    assert stored == [
+        ("1.2.3.4", 53, "tcp"),
+        ("1.2.3.4", 53, "udp"),
+        ("1.2.3.4", 443, "tcp"),
+    ]
+    fqdns = {str(row["fqdn"]) for row in rows(engine.store, "SELECT fqdn FROM subdomains")}
+    assert fqdns == {"www.example.com"}
+
+
+async def test_regression_discovery_records_are_canonical_and_in_scope(tmp_path: Path) -> None:
+    """Regression: PIT-69 a mixed-case or foreign record is not a new row.
+
+    A discovery record went straight into the `subdomains` unique key. Now the
+    engine canonicalizes it (`validate_host`) and drops a host outside the
+    target before the write, so one name has one row and a foreign name has none.
+    """
+    rec = Recorder()
+    specs = {"subs-fake": tool("subs-fake", Stage.SUBS)}
+    adapters = {
+        "subs-fake": adapter(
+            "subs-fake",
+            Stage.SUBS,
+            rec,
+            records=[sub("WWW.Example.COM."), sub("*.api.example.com"), sub("evil.example.org")],
+        )
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+
+    summary = await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
+
+    stored = sorted(str(row["fqdn"]) for row in rows(engine.store, "SELECT fqdn FROM subdomains"))
+    assert stored == ["api.example.com", "www.example.com"]
+    assert summary.exit_code is ExitCode.SUCCESS
+
+
+async def test_regression_two_identical_subs_runs_keep_one_row(tmp_path: Path) -> None:
+    """Regression: PIT-69 a second scan of the same data is not duplicate rows.
+
+    Facts are keyed by their natural identity; only the per-run source rows may
+    grow (one `(subdomain, run, tool)` row per sighting, by design).
+    """
+    rec = Recorder()
+    specs = {"subs-fake": tool("subs-fake", Stage.SUBS)}
+    adapters = {
+        "subs-fake": adapter("subs-fake", Stage.SUBS, rec, records=[sub("www.example.com")])
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+
+    await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
+    await engine.run("example.com", ScanOptions(stages=(Stage.SUBS,), mock=True))
+
+    def count(sql: str) -> int:
+        return int(rows(engine.store, sql)[0]["n"])
+
+    assert count("SELECT COUNT(*) AS n FROM subdomains") == 1
+    assert count("SELECT COUNT(*) AS n FROM subdomain_sources") == 2
+
+
+async def test_regression_missing_mock_fixture_is_a_skip_not_a_failure(
+    tmp_path: Path,
+) -> None:
+    """Regression: PIT-71 a mock target with no fixture is a skip, never exit 5.
+
+    `_read_fixture` used to raise `FetchFailed`, so an adapter whose fixture set
+    had no file for the target was reported as a failed tool. A mock run on an
+    arbitrary target then exited 5 although nothing was broken.
+    """
+
+    class NoFixture(BaseToolAdapter):
+        name = "nofix"
+        stage = Stage.SUBS
+
+        def parse_output(self, raw: str) -> list[Record]:
+            return []
+
+    adapter = NoFixture(fixtures_dir=tmp_path / "fixtures")
+    ctx = RunContext(
+        target="example.org",
+        hosts=["example.org"],
+        timeout=5,
+        workspace=tmp_path,
+        mock=True,
+    )
+
+    result = await adapter.run(ctx)
+
+    assert result.status is ToolStatus.SKIPPED
+    assert "no fixture for example.org" in (result.error or "")
+
+
+async def test_regression_stage_inputs_match_the_documented_pool(tmp_path: Path) -> None:
+    """AGENTS 0e rule 4: every stage gets exactly the previous stage's output.
+
+    A stage that silently narrows its input is how a tool appears to run but
+    receives no data. The pool is `_stage_hosts()`: subs gets the target, dns
+    and live get the target plus every discovered name, and ports/tech/urls get
+    the ALIVE set only.
+    """
+    rec = Recorder()
+    specs = {
+        "subs-fake": tool("subs-fake", Stage.SUBS),
+        "dns-fake": tool("dns-fake", Stage.DNS),
+        "live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE),
+        "ports-fake": tool("ports-fake", Stage.PORTS, mode=Mode.ACTIVE),
+        "tech-fake": tool("tech-fake", Stage.TECH, mode=Mode.ACTIVE),
+        "urls-fake": tool("urls-fake", Stage.URLS, mode=Mode.ACTIVE),
+    }
+    adapters = {
+        "subs-fake": adapter("subs-fake", Stage.SUBS, rec, records=[sub("a.example.com")]),
+        "dns-fake": adapter("dns-fake", Stage.DNS, rec, records=[sub("a.example.com")]),
+        "live-fake": adapter("live-fake", Stage.LIVE, rec, records=[alive("a.example.com")]),
+        "ports-fake": adapter("ports-fake", Stage.PORTS, rec, records=[]),
+        "tech-fake": adapter("tech-fake", Stage.TECH, rec, records=[]),
+        "urls-fake": adapter("urls-fake", Stage.URLS, rec, records=[]),
+    }
+    engine = make_engine(tmp_path, specs, adapters)
+
+    await engine.run(
+        "example.com",
+        ScanOptions(
+            stages=(
+                Stage.SUBS,
+                Stage.DNS,
+                Stage.LIVE,
+                Stage.PORTS,
+                Stage.TECH,
+                Stage.URLS,
+            ),
+            active=True,
+            no_scope=True,
+            mock=True,
+        ),
+    )
+
+    by_tool = dict(zip(rec.names, rec.hosts, strict=True))
+    assert set(by_tool["subs-fake"]) == {"example.com"}
+    assert set(by_tool["dns-fake"]) == {"example.com", "a.example.com"}
+    assert set(by_tool["live-fake"]) == {"example.com", "a.example.com"}
+    for later in ("ports-fake", "tech-fake", "urls-fake"):
+        assert set(by_tool[later]) == {"a.example.com"}, later

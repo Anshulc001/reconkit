@@ -4,6 +4,74 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-21, D112): workspace reset, and a rule to trace before
+  touching. `reconkit db wipe --yes` removed 8 targets, 27,669 subdomains,
+  13,617 URLs, 1,414 tool runs and 240 stage runs; the 92 MB `results/` tree was
+  deleted and is gone. The pre-wipe DB is at
+  `/tmp/recon-before-clean-20261121T163914.db`. AGENTS.md section 4.2 now
+  requires grepping and reading every affected file (source, tests, registry,
+  config, scripts and all docs, including `COMMANDS.md`, `README.md` and
+  `SETUP.md`) before editing one; section 0b points at it. The mock-skip rule is
+  now also stated in `COMMANDS.md`, `docs/02` and `README.md` (0df7049).
+  Verifying the clean tree exposed one more leak: the suite itself recreated
+  `results/mock/example.com` (280 folders) because `make_config()` left
+  `results_dir` at the repo-relative default. Fixed and guarded (PIT-72); both
+  gate modes now finish with `NO_RESULTS_DIR`. Gate: 1260 passed, 3 skipped.
+  Next action: none.
+
+- Status (2026-11-21, D111): **one fact, one row, for every target.** Stored
+  facts are now canonical at the engine boundary, not only in each adapter:
+  `normalize_url()` gives one spelling per page, `_persist_discovery` and
+  `_persist_ports` run `_clean_hosts()` (canonical + in-target) before a unique
+  key, and the ports key/protocol is `(host, ip, port, protocol)` so `tcp/53`
+  and `udp/53` cannot collapse. A mock target with no matching fixture is now
+  `SKIPPED` (`no fixture for <target>`), never a failed tool. Measured on the
+  real DB: 10 duplicate URL groups before, 0 after a fresh scan; run 2 on the
+  existing DB added 0 non-canonical URLs. Fresh `slice.bank.in`: 15 hosts, 12
+  ALIVE, 3057 URLs / 0 duplicate groups / 0 ports / 0 IP rows, exit 0.
+  `pentest-ground.com` (authorized, own DB): 43 hosts, 6 ALIVE, 390 URLs / 0
+  duplicates, exit 0. Mock on `example.org` (no scope) and `testfire.net`
+  (`scope_mode=enforced`) both exit 0 with 0 failed tools. AGENTS.md section 0e
+  states the machine-checked contribution invariants;  `tests/test_invariants.py`
+  enforces them. Gate: 1259 tests plain and `FORCE_TERMINAL=1`, ruff/format/mypy
+  clean. Deviations: legacy duplicate URL rows in an existing DB are left in
+  place (the fix prevents new ones and updates the legacy spelling); the old
+  `test_mock_mode_without_fixture_fails` now asserts `SKIPPED`. Next action: none.
+
+- Status (2026-11-21, D110): **a CDN/WAF host no longer produces port
+  findings.** `Store.waf_fronted_hosts()` reads the latest stored `waf`, the
+  engine drops those hosts before the ports stage (docs/05 rule 7, which was
+  documented but never implemented), and `host_rows()` returns no ports for a
+  fronted host plus the note `CDN: <waf>`. Stored rows are
+  kept. This is the `slice.bank.in` report showing 2982 "open" ports for
+  `b.slice.bank.in`: Cloudflare (172.65.64.158) answered TCP on **every** port
+  tried (1, 3, 7, 9, 31337, 65389, all ~184 ms), so the scan recorded the
+  edge's listeners. All 10 ALIVE `slice.bank.in` hosts are Cloudflare and now
+  report 0 ports. Tests: `test_cdn_fronted_host_reports_no_edge_ports`,
+  `test_ports_stage_skips_cdn_waf_fronted_hosts`. Gate: 1058 tests plain and
+  `FORCE_TERMINAL=1`, ruff/format/mypy clean. Next action: none.
+
+- Status (2026-11-21, D109): **fixture hosts cannot reach a real report, and
+  `gau` gets a silence window its own timeouts can meet.** A host whose every source row comes
+  from a mock run is now hidden by `Store.host_rows()` and `Store.subdomains()`
+  when the target also has a real run, so the four `*.example.com` names a
+  2026-11-17 mock run wrote into the real `recon.db` (run 69, `mock: true`) no
+  longer appear in a `testfire.net` table, resume seed set or url-derived host
+  set. A target whose only runs are mock keeps its fixtures, so `--mock`
+  reports are unchanged. `config.yaml` `runtime_idle.crawler` is 120 s (was
+  60): `gau` runs with its own 45 s request timeout and 1 retry, so 90 s of
+  silence is normal work, and the old window killed it on every scan (`killed
+  after 60s idle, 1029 partial`). A fresh run after the change still saw it
+  silent past 120 s (killed at stage 219.7 s with 479 partial): gau itself
+  stalls, the window is not the whole story, and partial output is kept with
+  exit 0. Regression tests:
+  `test_mock_only_hosts_are_hidden_from_reports` plus the updated class-window
+  assertions. Gate: 1056 tests plain and `FORCE_TERMINAL=1`, ruff/format/mypy
+  clean. Real runs on testfire.net: `passive` and `active --full` both exit 0
+  with a PDF; the 0 live hosts are testfire.net itself refusing :80/:443 from
+  this network (`curl` fails with connection refused), not a probe defect.
+  Next action: none.
+
 - Status (2026-11-21, D108): **one setup script; a stale venv repairs itself.**
   `scripts/setup.sh` is now the only setup script (owner request):
   `bootstrap.sh` and `install-tools.sh` are merged into it, so one file owns
@@ -567,6 +635,87 @@ refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992
 There is no `core/consensus.py`: consensus lives in `engine.py`. Order and module names follow docs/01 section 8 and docs/03 section 5. Per-part hashes and full evidence are in `REVIEW_LOG`; the old table is in its archive.
 
 ## Deviations and assumptions
+
+### D112 (2026-11-21) - a clean workspace and the trace-before-edit rule
+
+- `reconkit db wipe --yes` removed every target (8), 27,669 subdomains, 13,617
+  URLs, 1,414 tool runs and 240 stage runs. The 92 MB `results/` tree was
+  deleted. Backup before the wipe:
+  `/tmp/recon-before-clean-20261121T163914.db` (17 MB).
+- AGENTS.md section 4.2: before editing, grep and read every affected file
+  (code, tests, `tools.yaml`, `config.yaml`, `scripts/`, and all docs); a file
+  not inspected is a file that may be broken. Section 0b's loop names it.
+- The mock-skip behaviour was missing from the command-facing docs; added to
+  `COMMANDS.md`, `docs/02` and `README.md` in 0df7049.
+- The test suite recreated `results/` after it was deleted: `make_config()` in
+  `tests/test_cli.py` (69 CLI tests) never pointed `results_dir` at `tmp_path`.
+  Fixed, regression test added (PIT-72), and both gate modes verified to leave
+  no `results/` behind.
+
+### D111 (2026-11-21) - canonical facts and honest mock skips
+
+- Legacy duplicate URL rows in an existing database are not merged or rewritten:
+  the fix prevents new duplicates and updates a legacy row under its own
+  spelling. A destructive rewrite of stored rows needs an owner ruling.
+- `test_mock_mode_without_fixture_fails` asserted `FAILED`; with the docs changed
+  first it is now `test_mock_mode_without_fixture_is_a_skip` and asserts
+  `SKIPPED` plus `no fixture for`.
+- `gowitness` records are canonical (`https://host/`), while the screenshot
+  manifest keeps the URL actually requested; that test assertion was updated.
+
+### D110 (2026-11-21) - a CDN edge is not a port finding
+
+- **What the owner saw.** `reconkit active -d slice.bank.in` reported ports
+  `1,3,4,6,7,9,13,17,...` on ten hosts — impossible as an origin's service list.
+- **Cause.** `docs/05` rule 7 and `docs/09` both require the ports stage to skip
+  a host whose stored status has `waf` set. The rule was never implemented:
+  `engine.py` had no `waf` reference outside the tech merge. So the stage
+  scanned Cloudflare's edge IPs. Measured: `172.65.64.158` is
+  `NetName: CLOUDFLARENET` and accepted TCP on ports 1, 3, 7, 9, 31337 and
+  65389 in ~184 ms each; the DB held 2982 ports for `b.slice.bank.in`.
+- **Fix (two read-side gates, no data deleted).**
+  1. `Store.waf_fronted_hosts(target_id)` returns hosts whose latest
+     `host_status_history.waf` is non-empty. `engine.run()` drops them from the
+     ports stage before selection and prints
+     `ports: N CDN/WAF-fronted host(s) skipped`.
+  2. `Store.host_rows()` returns `ports=()` for a fronted host even when rows
+     exist from an earlier run, and carries `waf` so the row note reads
+     `CDN: <waf>`. This removes the already-stored edge
+     ports from the table, `report.txt`, `report.json` and the PDF without a
+     migration.
+- Tests: `test_cdn_fronted_host_reports_no_edge_ports` (store) and
+  `test_ports_stage_skips_cdn_waf_fronted_hosts` (engine: fronted host skipped,
+  plain host still scanned). Docs: `docs/05` rule 7 and `docs/09` port pre-check
+  now say "enforced".
+
+### D109 (2026-11-21) - mock fixtures never reach a real report; crawler idle 120 s
+
+- **Cause of the `*.example.com` rows in a `testfire.net` report.** Run 69
+  (2026-11-17T16:40:46Z) was a **mock** run (`params_json` `"mock": true`) that
+  wrote into the real `recon.db`, before D30 gave mock runs their own DB. The
+  report shows every known host for the target, so `api.example.com`,
+  `blog.example.com`, `dev.example.com` and `www.example.com` survived nine
+  days of real scans.
+- **Read rule, not a data delete (D109).** `Store._mock_only_ids()` finds hosts
+  whose every `subdomain_sources` row belongs to a run with `"mock": true`,
+  **and only on a target that also has a non-mock run**. `host_rows()` and
+  `subdomains()` skip them. A target whose only runs are mock keeps its
+  fixtures, which is what a `--mock` report is for. Rows stay in the DB; the
+  filter is one literal SQL query with bound parameters (no query text is
+  built from data, so no S608 suppression was needed).
+- **`runtime_idle.crawler` 60 -> 120 s.** `gau` is run with `--timeout=45`
+  and `--retries=1` (its own adapter constants), so one slow provider leaves it
+  legitimately silent for up to 90 s. The 60 s window killed it on every scan
+  (`gau killed after 60s idle at stage 117.4s, 1029 partial`). The window is a
+  silence bound, not a delay; a tool that finishes early still returns at once.
+  **Measured limit of this fix:** a fresh passive run still killed gau at 120 s
+  idle (`stage 219.7s, 479 partial`), so gau's stall outlasts its own configured
+  timeout; the kill is the tool's behavior, partial output is kept and the run
+  exits 0. `archive` stays 180 s: `urlfinder`'s request timeout is 30 s, so
+  180 s of silence is six dead requests, a real stall worth stopping.
+- Tests: `test_mock_only_hosts_are_hidden_from_reports` (mock-only hidden on a
+  mixed target, kept on a pure mock target, source-less host kept) and the
+  updated class-window assertions in `test_config.py`/`test_engine.py`.
 
 ### D108 (2026-11-21) - one setup script, and a stale venv that repairs itself
 

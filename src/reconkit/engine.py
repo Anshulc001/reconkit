@@ -31,7 +31,7 @@ from dotenv import dotenv_values
 
 from reconkit import __version__
 from reconkit.adapters import ADAPTERS
-from reconkit.adapters.base import USER_AGENT, BaseToolAdapter, running_as_root
+from reconkit.adapters.base import USER_AGENT, BaseToolAdapter, normalize_url, running_as_root
 from reconkit.adapters.pyscan import default_resolve
 from reconkit.adapters.registry import ToolSpec, load_tools
 from reconkit.config import AppConfig, UrlProbeConfig
@@ -650,6 +650,9 @@ class HostSnapshot:
     # duplicate, and the informational sibling note otherwise.
     duplicate_of: str | None = None
     www_note: str | None = None
+    # D110: a CDN/WAF name means the host's listener is the edge, not the
+    # origin, so its stored ports are not reportable (docs/05 rule 7).
+    waf: str | None = None
 
 
 def registry_tool_index() -> dict[str, tuple[Stage, Mode]]:
@@ -713,6 +716,7 @@ def host_snapshots(store: Store, target_id: int) -> list[HostSnapshot]:
                     str(row["duplicate_of"]) if isinstance(row["duplicate_of"], str) else None
                 ),
                 www_note=(str(row["www_note"]) if isinstance(row["www_note"], str) else None),
+                waf=(str(row["waf"]) if isinstance(row["waf"], str) else None),
             )
         )
     return rows
@@ -1055,6 +1059,21 @@ class Engine:
                     "ports: no ALIVE host from an earlier run; run `reconkit live` first"
                 )
                 continue
+            if stage is Stage.PORTS:
+                # docs/05 rule 7 (D110): a CDN/WAF edge answers on ports the
+                # origin never opened, so scanning it stores the edge's
+                # listeners as findings (Cloudflare answered 1, 3, 7, 9, 31337
+                # and 65389 on 2026-11-21, ~3000 "open" ports per host).
+                fronted = self.store.waf_fronted_hosts(target_id)
+                skipped_fronted = [host for host in hosts if host in fronted]
+                if skipped_fronted:
+                    hosts = [host for host in hosts if host not in fronted]
+                    self._progress(
+                        f"ports: {len(skipped_fronted)} CDN/WAF-fronted host(s) skipped"
+                        " (edge ports are not the origin's)"
+                    )
+                    if not hosts:
+                        continue
 
             dropped: list[str] = []
             ip_allowed: Callable[[str], bool] | None = None
@@ -2115,7 +2134,7 @@ class Engine:
         wildcard: WildcardResult | None = None,
     ) -> None:
         if stage is Stage.SUBS:
-            self._persist_discovery(target_id, run_id, results, opts)
+            self._persist_discovery(target_id, run_id, results, opts, target)
         elif stage is Stage.DNS:
             self._persist_dns(
                 target_id,
@@ -2128,15 +2147,29 @@ class Engine:
         elif stage is Stage.LIVE:
             self._persist_live(target_id, run_id, results, dns_results, target, hosts, opts, alive)
         elif stage is Stage.PORTS:
-            self._persist_ports(target_id, run_id, results, opts)
+            self._persist_ports(target_id, run_id, results, opts, target)
         elif stage is Stage.TECH:
             self._persist_tech(target_id, run_id, results, target)
         elif stage is Stage.URLS:
             self._persist_urls(target_id, run_id, results, opts, target)
 
     def _persist_discovery(
-        self, target_id: int, run_id: int, results: list[ToolResult], opts: ScanOptions
+        self,
+        target_id: int,
+        run_id: int,
+        results: list[ToolResult],
+        opts: ScanOptions,
+        target: str,
     ) -> None:
+        """Store the union of discovery tools, one row per canonical host.
+
+        An adapter's record is untrusted input: a source can print mixed case, a
+        trailing dot or a `*.` prefix, and a broken or malicious parser can name
+        a host outside the target. Canonicalizing here (not only in each adapter)
+        means the `subdomains` unique key sees one spelling and a foreign name is
+        never stored (PIT-69). `_clean_hosts` is the same gate every stage input
+        passes.
+        """
         groups: dict[str, tuple[set[str], list[SubdomainRecord]]] = {}
         for result in results:
             if result.status is not ToolStatus.OK:
@@ -2144,9 +2177,10 @@ class Engine:
             for record in result.records:
                 if not isinstance(record, SubdomainRecord):
                     continue
-                tools, records = groups.setdefault(record.fqdn, (set(), []))
-                tools.add(result.tool)
-                records.append(record)
+                for fqdn in self._clean_hosts([record.fqdn], target):
+                    tools, records = groups.setdefault(fqdn, (set(), []))
+                    tools.add(result.tool)
+                    records.append(record)
         for fqdn, (tools, _records) in groups.items():
             if len(tools) < opts.min_sources:
                 continue
@@ -2192,8 +2226,15 @@ class Engine:
                 continue
             for record in result.records:
                 if isinstance(record, UrlRecord):
-                    groups.setdefault(record.url, set()).add(result.tool)
-        known = self.store.url_strings(target_id)
+                    url = normalize_url(record.url)
+                    if url is not None:
+                        groups.setdefault(url, set()).add(result.tool)
+        # Compare canonical forms: a legacy row may be stored as the non-canonical
+        # spelling (`https://host`), and its canonical twin must not be inserted
+        # beside it (PIT-68).
+        stored_urls = self.store.url_strings(target_id)
+        known = {normalize_url(url) or url for url in stored_urls}
+        spelling = {normalize_url(url) or url: url for url in stored_urls}
         credited: set[str] = set()
         for result in results:
             if result.status is not ToolStatus.OK:
@@ -2202,8 +2243,8 @@ class Engine:
             for record in result.records:
                 if not isinstance(record, UrlRecord):
                     continue
-                url = record.url
-                if url in known or url in credited:
+                url = normalize_url(record.url)
+                if url is None or url in known or url in credited:
                     continue
                 if len(groups[url]) < opts.min_sources:
                     continue
@@ -2215,8 +2256,15 @@ class Engine:
                 continue
             host = self._url_host(url)
             source = "external" if host and not self._within_scope(host, target) else None
+            # Update a legacy row under its own spelling instead of inserting its
+            # canonical twin, so a re-scan neither duplicates nor freezes
+            # `last_seen_run` (PIT-68).
             self.store.upsert_url(
-                target_id, url, run_id=run_id, source_count=len(tools), source=source
+                target_id,
+                spelling.get(url, url),
+                run_id=run_id,
+                source_count=len(tools),
+                source=source,
             )
 
     # ------------------------------------------------------- D58 second resolve
@@ -3004,18 +3052,32 @@ class Engine:
             )
 
     def _persist_ports(
-        self, target_id: int, run_id: int, results: list[ToolResult], opts: ScanOptions
+        self,
+        target_id: int,
+        run_id: int,
+        results: list[ToolResult],
+        opts: ScanOptions,
+        target: str,
     ) -> None:
-        groups: dict[tuple[str, str, int], dict[str, list[PortRecord]]] = {}
+        """Store one row per (host, address, port, protocol) the tools agree on.
+
+        The natural key includes the protocol (docs/04 schema): `tcp/53` and
+        `udp/53` are different findings, and storing a UDP observation as TCP is
+        a false fact. The record's host is canonicalized and scope-filtered like
+        every other persisted host, so an adapter naming a foreign host cannot
+        create a row (PIT-70).
+        """
+        groups: dict[tuple[str, str, int, str], dict[str, list[PortRecord]]] = {}
         for result in results:
             if result.status is not ToolStatus.OK:
                 continue
             for record in result.records:
                 if not isinstance(record, PortRecord):
                     continue
-                key = (record.fqdn, record.ip, record.port)
-                groups.setdefault(key, {}).setdefault(result.tool, []).append(record)
-        for (fqdn, ip, port), by_tool in groups.items():
+                for fqdn in self._clean_hosts([record.fqdn], target):
+                    key = (fqdn, record.ip, record.port, record.protocol)
+                    groups.setdefault(key, {}).setdefault(result.tool, []).append(record)
+        for (fqdn, ip, port, protocol), by_tool in groups.items():
             tools = set(by_tool)
             if len(tools) < opts.min_sources:
                 continue
@@ -3040,6 +3102,7 @@ class Engine:
                 port,
                 run_id=run_id,
                 state=state,
+                protocol=protocol,
                 service=service,
                 version=version,
                 confidence=confidence.value,

@@ -99,6 +99,15 @@ class ExternalServiceGap(FetchFailed):
     """
 
 
+class FixtureMissing(FetchFailed):
+    """Mock mode has no fixture for this target.
+
+    The adapter was never exercised, so this is a skip, not a broken tool. It
+    used to become `FAILED`, which made `--mock` on any target without fixtures
+    exit 5 although nothing was wrong (PIT-71).
+    """
+
+
 # Signatures a third party produces, never a local fault. Matched against an
 # HTTP failure message or a binary's captured stdout+stderr.
 _GAP_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -194,15 +203,29 @@ def is_non_web_reference(value: str) -> bool:
 
 
 def normalize_url(value: str) -> str | None:
-    """Return one http(s) URL without its fragment, or None for anything else.
+    """Return one canonical http(s) URL, or None for anything else (PIT-68).
 
-    Crawlers and archives emit `http://host:80/path?q#frag`; the stored URL keeps
-    every meaningful part and drops the fragment, which never reaches a server.
+    Archives and crawlers emit every spelling of the same page: `https://host`,
+    `https://host/`, `https://HOST:443/`. Canonical means lower-case scheme and
+    host, no userinfo, no default port (80/443), an empty path written as `/`,
+    and no fragment, so one resource is one `urls` row. Userinfo is dropped
+    because credentials must never be stored (docs/05).
     """
     parts = urlsplit(value.strip())
-    if parts.scheme not in ("http", "https") or not parts.netloc or not parts.hostname:
+    scheme = parts.scheme.lower()
+    hostname = parts.hostname
+    if scheme not in ("http", "https") or not parts.netloc or not hostname:
         return None
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, ""))
+    try:
+        port = parts.port
+    except ValueError:
+        return None
+    host = hostname
+    if ":" in host:  # an IPv6 literal keeps its brackets in a netloc
+        host = f"[{host}]"
+    default_port = 80 if scheme == "http" else 443
+    netloc = host if port in (None, default_port) else f"{host}:{port}"
+    return urlunsplit((scheme, netloc, parts.path or "/", parts.query, ""))
 
 
 def normalize_subdomains(candidates: Iterable[str], source: str) -> list[Record]:
@@ -420,6 +443,16 @@ class BaseToolAdapter(ABC):
                         if produced is not None:
                             raw_text = capture_output(outcome.stdout, produced)
                     records = self.parse_output(outcome.stdout if produced is None else produced)
+        except FixtureMissing as exc:
+            # No fixture for this mock target: the adapter never ran, so the
+            # honest result is a skip with the reason (PIT-71).
+            return ToolResult(
+                tool=self.name,
+                status=ToolStatus.SKIPPED,
+                error=str(exc),
+                duration_s=duration or time.perf_counter() - started,
+                raw_text=raw_text,
+            )
         except (ParseError, FetchFailed, ToolFailed) as exc:
             return ToolResult(
                 tool=self.name,
@@ -475,7 +508,7 @@ class BaseToolAdapter(ABC):
         flat = sorted((self._fixtures_dir / "adapters").glob(f"{self.name}.synthetic.*"))
         if len(flat) == 1:
             return flat[0].read_text(encoding="utf-8")
-        raise FetchFailed(f"{self.name}: no fixture for {ctx.target}")
+        raise FixtureMissing(f"{self.name}: no fixture for {ctx.target}")
 
 
 def running_as_root() -> bool:
@@ -767,6 +800,16 @@ class HttpAdapter(BaseToolAdapter):
             return ToolResult(
                 tool=self.name,
                 status=ToolStatus.FAILED,
+                error=str(exc),
+                duration_s=time.perf_counter() - started,
+                raw_text=raw_text,
+            )
+        except FixtureMissing as exc:
+            # A mock target with no fixture is a skip, not a tool failure
+            # (PIT-71).
+            return ToolResult(
+                tool=self.name,
+                status=ToolStatus.SKIPPED,
                 error=str(exc),
                 duration_s=time.perf_counter() - started,
                 raw_text=raw_text,

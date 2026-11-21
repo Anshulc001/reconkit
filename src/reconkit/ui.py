@@ -63,6 +63,9 @@ class HostRow:
     # www/non-www metadata (D22): canonical host when this row is a duplicate.
     duplicate_of: str | None = None
     www_note: str | None = None
+    # Stored CDN/WAF name. A fronted host has no reportable ports: the edge
+    # answers, not the origin (docs/05 rule 7, D110).
+    waf: str | None = None
 
 
 ReportGate = Literal["always", "alive", "unknown"]
@@ -306,6 +309,10 @@ def make_console(stream: TextIO | None = None, *, no_color: bool = False) -> Con
 def host_note(row: HostRow, canonical: set[str]) -> str:
     """The Notes cell: how a www/non-www row relates to its sibling (D22)."""
 
+    if row.waf:
+        # Short on purpose: the Notes column folds, and the long form wrapped
+        # this cell to four lines on an 80-column dump (2026-11-21, D110).
+        return f"CDN: {row.waf}"
     if row.duplicate_of is not None:
         if row.status_code in _REDIRECT_CODES:
             return f"-> redirects to {row.duplicate_of}"

@@ -708,6 +708,7 @@ def _run_scan(
                     detail=item.detail,
                     duplicate_of=item.duplicate_of,
                     www_note=item.www_note,
+                    waf=item.waf,
                 )
                 for item in snapshots
             ]

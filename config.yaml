@@ -27,7 +27,9 @@ timeouts:
 # so it is killed and its partial output kept), or until the stage budget fires.
 # A single tool overrides its class with `idle_s:` in tools.yaml.
 runtime_idle:
-  crawler: 60
+  # 120, not 60: gau runs with its own 45 s request timeout and 1 retry, so one
+  # slow provider can stay silent for 90 s while it is still working (D109).
+  crawler: 120
   scanner: 120
   archive: 180
   api: 60

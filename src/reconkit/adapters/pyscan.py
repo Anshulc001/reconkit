@@ -17,7 +17,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from reconkit.adapters.base import BaseToolAdapter, records_output
+from reconkit.adapters.base import BaseToolAdapter, FixtureMissing, records_output
 from reconkit.core.runner import validate_host
 from reconkit.errors import ParseError
 from reconkit.models import PortRecord, Record, RunContext, Stage, ToolResult, ToolStatus
@@ -59,6 +59,14 @@ class PyscanAdapter(BaseToolAdapter):
             try:
                 fixture = self._read_fixture(ctx)
                 mock_records = self.parse_output(fixture)
+            except FixtureMissing as exc:
+                return ToolResult(
+                    tool=self.name,
+                    status=ToolStatus.SKIPPED,
+                    error=str(exc),
+                    duration_s=time.perf_counter() - started,
+                    raw_text=fixture,
+                )
             except ParseError as exc:
                 return ToolResult(
                     tool=self.name,

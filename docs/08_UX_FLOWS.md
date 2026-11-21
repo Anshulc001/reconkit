@@ -72,7 +72,7 @@ reconkit installs nothing: `install`, `update` and `doctor --fix` were removed o
 ## Flow 6 - Port scanning (active)
 
 1. `reconkit ports -d example.com --active` (connect scan, default port set)
-2. Each selected port scanner uses its own default port set; results are merged by host, IP and port.
+2. Each selected port scanner uses its own default port set; results are merged by host, IP, port and protocol (`tcp/53` and `udp/53` are different findings).
 3. Table columns: `Subdomain`, `State`, `Status`, `Ports`, `Sources`, `Trust`; the IP, service and per-port state are stored but not rendered as separate columns.
 4. The port set comes from the adapters by default; `--ports 80,443,8000-8100` overrides it for `pyscan` and `naabu` (docs/02 section 3).
 

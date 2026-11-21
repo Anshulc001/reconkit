@@ -50,6 +50,7 @@ tests/
   test_registry.py  test_package.py   # setup.sh staleness + install plan (D108)
   test_doctor.py
   test_tools_registry.py  # tools.yaml -> ToolSpec, version probes, source: strings
+  test_invariants.py     # registry/adapter/fixture/schema invariants (AGENTS 0e)
   test_no_shell_true.py  # scans src for shell=True / os.system
 ```
 
@@ -101,12 +102,15 @@ Type check:  mypy src/reconkit
 - Help assertions read `help_text(result)`, which strips ANSI styling, and invoke with `env=HELP_ENV` (`COLUMNS=120`). On GitHub Actions Typer sets `FORCE_TERMINAL`, so Rich styles the help even into a captured pipe and splits a name like `--only-alive` across escape runs; a raw substring check misses it even though the render is fine. `terminal_width=` is ignored by Typer's Rich help console — do not rely on it. Also assert help from a scope-free `tmp_path`, never from the repository's local `scope.yaml` (D88, D91, D92).
 - A CLI test that runs `--active` or `--full` either passes `--no-scope` (when it is testing mode/flag wiring) or `monkeypatch.chdir(tmp_path)` so the scope written by `make_config` is found; never rely on the repository's local `scope.yaml` (D89).
 - Adapter tests inject `finder`/`which` for companion binaries (`puredns` -> `massdns`) and set `ctx.workspace` to `tmp_path`; no test may require a system-installed tool or write under the repository's `workspaces/` (D90).
+- A mock target with no matching fixture is a **skip** (`no fixture for <target>`), never a failed tool: the fixture set only covers the targets it was recorded for, so `--mock` on an arbitrary target must still exit 0.
+- `tests/test_invariants.py` is the machine-checked half of AGENTS.md section 0e: every registry tool/adapter pair agrees on name and stage, every adapter has a fixture whose parsed records are canonical, every registry stage is a real stage, and the natural unique keys keep one row per fact. It runs in the default suite; never mark it skip.
 
 ## 9. Definition of Done
 
 - [ ] `pytest -q` passes
 - [ ] `ruff check .` and `ruff format --check .` pass
 - [ ] `mypy src/reconkit` passes
+- [ ] `pytest -q tests/test_invariants.py` passes
 - [ ] Changed commands verified with `--mock`
 - [ ] Critical flow tests above pass
 - [ ] No blocking errors; no unrun checks claimed as passed

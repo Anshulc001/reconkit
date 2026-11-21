@@ -36,7 +36,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from reconkit.adapters.base import BinaryAdapter, capture_output
+from reconkit.adapters.base import BinaryAdapter, capture_output, normalize_url
 from reconkit.core.runner import run_exec, validate_host
 from reconkit.models import Record, RunContext, Stage, ToolResult, ToolStatus, UrlRecord
 
@@ -146,7 +146,7 @@ class GowitnessAdapter(BinaryAdapter):
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
                 lines.append(json.dumps(entry, sort_keys=True))
-                records.append(UrlRecord(url=url, source=self.name))
+                records.append(UrlRecord(url=normalize_url(url) or url, source=self.name))
                 break
             else:
                 failures.append(f"{host}: no screenshot (no browser available?)")
@@ -183,7 +183,10 @@ class GowitnessAdapter(BinaryAdapter):
             text = line.strip()
             if not text or text.startswith("#"):
                 continue
-            records.append(UrlRecord(url=text, source=self.name))
+            url = normalize_url(text)
+            if url is None:
+                continue
+            records.append(UrlRecord(url=url, source=self.name))
         return records
 
 

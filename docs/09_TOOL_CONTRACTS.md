@@ -142,7 +142,7 @@ gap instead (D47, next section), and so is a request that never answered (D57, t
 - `dnspython` turns A/AAAA answers into `SubdomainRecord.ips` and CNAME into `.cnames`. It keeps the per-host outcome structured (`DnsResult.outcome`: `resolved`, `nxdomain`, `noanswer`, `servfail`, `timeout`, `error`), so a broken resolver is never only a string and never aborts the stage. Only NXDOMAIN maps to `HostStatusRecord(state=DEAD)`; "no answer", SERVFAIL and timeout never do (they are reported as counts in `ToolResult.error`), because a false DEAD is worse than a gap.
 - `pyprobe` never follows redirects: it records the status code and the raw `Location` in `HostStatusRecord.location`. It tries `https` then `http` per host, and a TLS failure on one scheme must not end the probe: the next scheme is tried, and a working one yields `ALIVE`. Only when no scheme answers and at least one failed with a TLS error is the record `state=UNKNOWN`; a plain connect failure on every scheme is no record (`unreachable=`). Never a crash and never `DEAD`. An `UNKNOWN` record carries the TLS failure text in `HostStatusRecord.detail` so the cause survives the run (`detail` is bounded and redacted by the store, not by the adapter - docs/04 section 5); records of any other state carry no `detail`.
 - `parse_output` normalizes and validates subdomain names; only names equal to or under `ctx.target` are kept before records are returned.
-- In `--mock` mode `run` reads `tests/fixtures/<name>/<target>.<ext>` (or the only file in that directory) instead of making a request. HTTP adapters use the raw response text; `python` adapters use JSON fixtures: `dnspython` maps host to `{ips, cnames}` or `{state: DEAD}`, `pyprobe` maps host to `{status_code, title, location}`, and `pyscan` is a list of `{fqdn, ip, port, state}`.
+- In `--mock` mode `run` reads `tests/fixtures/<name>/<target>.<ext>` (or the only file in that directory) instead of making a request. HTTP adapters use the raw response text; `python` adapters use JSON fixtures: `dnspython` maps host to `{ips, cnames}` or `{state: DEAD}`, `pyprobe` maps host to `{status_code, title, location}`, and `pyscan` is a list of `{fqdn, ip, port, state}`. When neither a target-specific file nor a single file exists (a directory holding several targets' fixtures), the adapter returns `SKIPPED` with `no fixture for <target>`; a missing fixture is never a failed tool (PIT-71).
 - **Fixture statuses are synthetic, never evidence (D41, 2026-11-19).** A mock fixture answers the question "does the code handle this shape?", not "what does the real target say?". `tests/fixtures/pyprobe/testfire.net.synthetic.json` answers `200` for both hosts while the real `https://testfire.net/` answers `-2` (its certificate is issued for `www.testfire.net`); a mock run's status code, state and confidence are only as true as the fixture, and a real-network claim needs a real run recorded in `docs/REVIEW_LOG.md`.
 
 - **Raw output (12a).** Every adapter run captures its output in `ToolResult.raw_text`, for every status - `ok`, `failed`, `timeout` and the selection-time skip is not a run at all. A binary adapter captures `stdout` followed by `stderr` under a `--- stderr ---` separator when stderr is non-empty (the runner's own `max_output_bytes` cap already limits each stream); an HTTP adapter captures the response body, or the failure message when the request failed before any body was read; the `python` adapters (`dnspython`, `pyprobe`, `pyscan`) have no child process, so they capture their per-host evidence as a JSON document (`records` plus the `error` counters) instead of hand-rolling a text format. A `--mock` run captures the fixture text it parsed. The field holds unredacted text in memory and is excluded from every serialization, so it never appears in `--json`. The engine, not the adapter, writes it: `Workspace.write` applies `store.redact()` and the `max_output_bytes` cap, and `raw_path` is set on the same result only after that write returns (docs/03 section 5). One executed tool is always exactly one file, even when the capture is empty; a failed write leaves `raw_path` at `None` and changes neither the status nor the error.
@@ -388,7 +388,7 @@ class carries one number - how long the tool may stay **silent**:
 
 | class | idle window | members today |
 |---|---|---|
-| `crawler` | 60 s | `gau`, `katana`, `hakrawler`, `gospider`, `subjs` |
+| `crawler` | 120 s | `gau`, `katana`, `hakrawler`, `gospider`, `subjs` |
 | `scanner` | 120 s | `nikto` |
 | `api` | 60 s | `crtsh`, `certspotter`, `otx`, `hackertarget`, `urlscan`, `chaos`, `github_subdomains` |
 | `archive` | 180 s | `urlfinder` |
@@ -398,6 +398,12 @@ class window is the only way to keep that behaviour without a cap. A tool with n
 `class:` has no window at all and is bounded by the stage budget alone; a typo in
 `class:` is a `ConfigError` rather than a silent "no window". One tool may
 override its class with `idle_s:` in its own `tools.yaml` row.
+
+**D109 (2026-11-21):** `crawler` is 120 s, not 60 s. `gau` runs with its own
+45 s request timeout and 1 retry, so one slow provider leaves it legitimately
+silent for 90 s while it is still working; the old 60 s window killed it on
+almost every scan (`gau killed after 60s idle, 1029 partial`). The window is a
+silence bound, not a delay: a tool that finishes early still returns at once.
 
 **How the kill works.** The engine watches every running tool (`IDLE_WATCH_TICK_S`
 = 0.1 s). It stops a tool when *every* running tool in the stage is silent past
@@ -1080,6 +1086,12 @@ truth). Two consequences for this table:
   - Responses that look like WAF/CDN blocks (for example 403/429 with CDN markers) still count as `ALIVE`.
 - **Port-scan pre-check (Phase 2):** port scans require a stored `live` result for the host. If none is stored, skip the host and print a warning (`run live first`). If the stored `HostStatusRecord.waf` is set (from the `httpx` CDN/WAF JSON fields), skip it as CDN/WAF-fronted. `cdncheck` and `wafw00f` both write that field
   (wave 2 and wave 4), so either tool's match can trigger the skip.
+  **Implemented 2026-11-21 (D110).** The engine calls `Store.waf_fronted_hosts()`
+  before the ports stage and drops those hosts; `Store.host_rows()` reports no
+  ports for a fronted host (the stored edge rows stay in the DB) and the row
+  note reads `CDN: <waf>`. A CDN edge is not a port
+  finding: Cloudflare accepted TCP on 1, 3, 7, 9, 31337 and 65389 in a measured
+  `slice.bank.in` scan, which produced ~3000 ports per host before the gate.
 - **Ports:** `open` if at least one tool saw it open. If one tool saw open and another (that scanned the same port) saw closed, store `unconfirmed` with both in `port_sources`. A service fingerprint (`nmap -sV`, a banner) raises confidence by one level and is stored in `ports.service` / `ports.version`; when two tools disagree (`nmap` says `http`, `smap` says `http?`) both fields stay empty rather than picking a winner, and a fingerprint never lifts an `unconfirmed` state. Before wave 6 `_persist_ports` discarded `service`/`version`, so the bump never fired; it now does.
 
 ### Which status code a host row keeps (D69, 2026-11-19)
@@ -1299,10 +1311,13 @@ touched.
 
 1. Entry in `tools.yaml` (stage, tier, mode, install, version command, rate flag).
 2. Adapter file with `parse_output` first; verify flags with the real tool.
-3. Sanitized fixture + tests (normal, empty, malformed).
+3. Sanitized fixture + tests (normal, empty, malformed, failure).
 4. Register in `adapters/__init__.py`.
 5. Update stage table above and docs if behavior changes.
-6. Run all checks in AGENTS.md section 6.
+6. Run all checks in AGENTS.md section 6, including `tests/test_invariants.py`
+   (AGENTS.md section 0e): the new row and adapter must agree on name and stage,
+   the fixture must parse into canonical records, and a mock run must not
+   duplicate a fact or store a host outside the target.
 
 ## 8. Tool Notes (verify before coding)
 

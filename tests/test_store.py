@@ -590,6 +590,66 @@ def test_scan_run_lifecycle(store: Store) -> None:
     assert row["finished_at"] == "2026-11-13T10:00:00Z"
 
 
+def test_cdn_fronted_host_reports_no_edge_ports(store: Store) -> None:
+    """docs/05 rule 7 (D110): a CDN/WAF edge's listeners are not the origin's.
+
+    A real `slice.bank.in` scan stored 2982 "open" ports for a Cloudflare host
+    (b.slice.bank.in) because TCP to ports 1, 3, 7, 9, 31337 and 65389 all
+    connected. Those rows must not become reportable ports.
+    """
+    target_id = store.create_target("example.com")
+    run_id = store.create_scan_run(target_id, "live")
+    cdn_id = store.upsert_subdomain(
+        target_id, "cdn.example.com", run_id=run_id, state="ALIVE", provenance="subs"
+    )
+    plain_id = store.upsert_subdomain(
+        target_id, "www.example.com", run_id=run_id, state="ALIVE", provenance="subs"
+    )
+    store.append_host_status(cdn_id, run_id, "ALIVE", waf="Cloudflare")
+    store.append_host_status(plain_id, run_id, "ALIVE")
+    for port in (1, 3, 65389):
+        store.upsert_port(cdn_id, "203.0.113.7", port, run_id=run_id, state="open")
+    store.upsert_port(plain_id, "203.0.113.8", 443, run_id=run_id, state="open")
+
+    assert store.waf_fronted_hosts(target_id) == {"cdn.example.com"}
+    rows = {row["fqdn"]: row for row in store.host_rows(target_id)}
+    assert rows["cdn.example.com"]["ports"] == ()
+    assert rows["cdn.example.com"]["waf"] == "Cloudflare"
+    assert rows["www.example.com"]["ports"] == (443,)
+
+
+def test_mock_only_hosts_are_hidden_from_reports(store: Store) -> None:
+    """D109: a fixture host seen only by a mock run never reaches a real report."""
+    target_id = store.create_target("example.com")
+    mock_run = store.create_scan_run(target_id, "subs", params=json.dumps({"mock": True}))
+    real_run = store.create_scan_run(target_id, "subs", params=json.dumps({"mock": False}))
+
+    fixture_id = store.upsert_subdomain(target_id, "api.example.com", run_id=mock_run)
+    store.add_subdomain_source(fixture_id, mock_run, "assetfinder")
+    real_id = store.upsert_subdomain(
+        target_id, "www.example.com", run_id=real_run, state="DNS_ONLY"
+    )
+    store.add_subdomain_source(real_id, real_run, "subfinder")
+    both_id = store.upsert_subdomain(target_id, "mail.example.com", run_id=mock_run)
+    store.add_subdomain_source(both_id, mock_run, "assetfinder")
+    store.upsert_subdomain(target_id, "mail.example.com", run_id=real_run, state="DNS_ONLY")
+    store.add_subdomain_source(both_id, real_run, "subfinder")
+    # A host with no source rows at all (DNS-only) is a real observation.
+    store.upsert_subdomain(target_id, "dns.example.com", run_id=real_run, state="DNS_ONLY")
+
+    expected = {"www.example.com", "mail.example.com", "dns.example.com"}
+    assert {row["fqdn"] for row in store.host_rows(target_id)} == expected
+    assert {row["fqdn"] for row in store.subdomains(target_id)} == expected
+
+    # A target whose only runs are mock keeps its fixture hosts: that is the
+    # report a `--mock` run is supposed to produce.
+    mock_target = store.create_target("onlymock.example.net")
+    mock_only_run = store.create_scan_run(mock_target, "subs", params=json.dumps({"mock": True}))
+    mock_sub = store.upsert_subdomain(mock_target, "www.onlymock.example.net", run_id=mock_only_run)
+    store.add_subdomain_source(mock_sub, mock_only_run, "subfinder")
+    assert [row["fqdn"] for row in store.host_rows(mock_target)] == ["www.onlymock.example.net"]
+
+
 def test_upsert_subdomain_does_not_duplicate(store: Store) -> None:
     target_id, run_a = make_run(store)
     _, run_b = make_run(store)

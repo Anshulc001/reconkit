@@ -3081,7 +3081,9 @@ def test_gowitness_writes_screenshots_and_manifest(
     monkeypatch.setattr(gowitness_module, "run_exec", fake)
     result = asyncio.run(adapter.run(ctx))
     assert result.status is ToolStatus.OK
-    assert [record.url for record in result.records] == ["https://testfire.net"]
+    # The record is canonical (PIT-68); the manifest keeps the URL that was
+    # actually requested, which is what the screenshot file shows.
+    assert [record.url for record in result.records] == ["https://testfire.net/"]
     manifest = results_root / "testfire.net" / "run1" / "screenshots.jsonl"
     entry = json.loads(manifest.read_text(encoding="utf-8").strip())
     assert set(entry) == {"url", "path", "timestamp"}

@@ -81,6 +81,11 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-65 | A tool installed anywhere but `~/.reconkit/bin` and the shell's `PATH` was invisible: `doctor` said `missing` for a `go install`/`pipx` copy, and a distro wrapper script could read `wrong program`, so the same install layout gave a different verdict per machine | `BinaryAdapter.binary_path()` and `toolcheck.installed_copy()` tried only the managed directory and `shutil.which`, and the identity probe environment was `{"HOME"}` only, so `~/go/bin`, `~/.local/bin` and a `/bin/sh` wrapper's `id`/`sudo` calls all depended on how the shell was started | `adapters.base.binary_search_dirs()` adds PATH, `$GOPATH/bin`, `~/.local/bin`, `~/go/bin`, `~/.gobin`, `/usr/local/bin`, `/usr/local/sbin`, `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`, `/snap/bin` and the `SUDO_USER` bin directories under sudo; both resolvers use that one list, and `identity_probe_env()` passes `HOME` plus a `PATH` led by the copy's own directory | `test_a_binary_outside_path_is_found_in_a_standard_dir` (`Regression: PIT-65`), `test_sudo_user_bin_dirs_are_searched`, `test_identity_probe_gets_a_path_led_by_the_program`, `test_installed_copy_finds_a_binary_outside_path` |
 | PIT-67 | `reconkit ports -d slice.bank.in --active` exited 0, ran **0 tools**, printed `Ports -` for all 13 hosts and wrote no `scan_runs` row, so a completed active scan looked like a ports scan that found nothing | `_stage_hosts(PORTS)` returns the in-memory `alive` set, which is only filled by a `live` stage in the same run; `_seed_from_store` ran only under `--resume`, so a standalone stage command had no hosts and `if stage is Stage.PORTS and not hosts: continue` skipped it silently | every run whose stage list contains none of `subs`/`dns`/`live` now seeds `discovered`/`alive` from `Store.subdomains()` (so `ports`/`tech`/`urls`/`vulns`/`shots` commands use what earlier runs stored). A `ports` run that still has no ALIVE host prints `ports: no ALIVE host from an earlier run; run \`reconkit live\` first` instead of exit 0 silence | `test_ports_stage_command_uses_stored_alive_hosts` (`Regression: PIT-67`) |
 | PIT-66 | A fresh `git clone` on Ubuntu could not follow the new install path: `./scripts/install-tools.sh` was `Permission denied`, and run with `bash` it skipped ProjectDiscovery's `httpx` and failed every apt tool | the script was committed `100644` while `bootstrap.sh` was `100755`; `have()` used `command -v`, so the project's own `httpx` dependency in `.venv/bin` counted as ProjectDiscovery's `httpx`; and apt installed all packages in one command, so four names Ubuntu does not package (`amass`, `findomain`, `massdns`, `rustscan`) aborted `nmap`, `nikto`, `sqlmap`, `whatweb`, `masscan` and `dig` too | the script is committed executable; the plan asks `reconkit doctor --json` and treats only `installed: yes` as present (managed/PATH fallback before reconkit exists); apt packages install one at a time with a warning naming each unavailable one; `amass` installs from its upstream Go module so Kali and Ubuntu share one source | `test_documented_scripts_are_executable`, plus the clean-clone sandbox rerun recorded under "2026-11-20 (D95)" |
+| PIT-68 | The real `slice.bank.in` database held **10 duplicate URL groups** (`https://b.slice.bank.in` and `https://b.slice.bank.in/`) although one page is one URL, and `gowitness` emitted the un-slashed form | `normalize_url()` lower-cased scheme/netloc but kept an empty path empty and a default port; `_persist_urls` wrote `record.url` straight into the unique key | `normalize_url()` returns one canonical spelling (lower-case scheme/host, no default port, empty path `/`, no fragment, no userinfo); `_persist_urls` canonicalizes before the unique key and updates a legacy row under its own spelling instead of inserting its twin | `test_regression_url_variants_store_one_canonical_row`, `test_every_fixture_parses_canonical_records` |
+| PIT-69 | A discovery adapter's mixed-case, trailing-dot or foreign record could create a second `subdomains` row, or a row for a host outside the target | `_persist_discovery` wrote `record.fqdn` straight into the unique key and had no `target` argument | Persistence canonicalizes and scope-filters every discovery record through `_clean_hosts()` before grouping, so one name is one row and a foreign name is never stored | `test_regression_discovery_records_are_canonical_and_in_scope`, `test_regression_two_identical_subs_runs_keep_one_row` |
+| PIT-70 | A ports run could store a UDP finding as TCP, and a port adapter naming a foreign host could create a `subdomains` row and a port for it | `_persist_ports` grouped on `(fqdn, ip, port)` and called `upsert_port` without `protocol`; it never scope-filtered the record | The group key and every `upsert_port` call include `record.protocol`, so tcp/53 and udp/53 are two rows; the host is canonicalized and dropped unless it is the target or under it | `test_regression_ports_keep_protocol_and_drop_a_foreign_host` |
+| PIT-71 | `--mock` on a target with no matching fixture exited 5 and reported `otx failed ... no fixture`: a test run looked broken although no adapter was wrong | `_read_fixture` raised `FetchFailed`, and every adapter maps that to `ToolStatus.FAILED` | A missing fixture raises `FixtureMissing`; the binary, HTTP and the three python adapters return `SKIPPED` with `no fixture for <target>`, so a mock run exits 0 on any target | `test_regression_missing_mock_fixture_is_a_skip_not_a_failure` |
+| PIT-72 | Deleting `results/` did not stay deleted: the next full test run recreated `results/mock/example.com/` with 280 run folders inside the repository | `make_config()` in `tests/test_cli.py` (used by 69 CLI tests) overrode `workspace_dir` and `db_path` but left `results_dir` at its `"results"` default, relative to the repo cwd | the shared test config points `results_dir` at `tmp_path / "results"`; a regression test asserts it stays under `tmp_path`; both gate modes now finish with `NO_RESULTS_DIR` | `test_cli_test_config_keeps_results_inside_tmp_path` (`Regression: PIT-72`) |
 
 ## 2026-11-20 (D100) - dnsreaper installs and runs in vulns; vulns is --full only
 
@@ -11101,3 +11106,444 @@ merged into one at the owner's request (docs/10 section 5 is rewritten), the
 container base pre-installed Go and the harness capped the Go build cache
 because the host has 9.3 GB free, and Docker's regenerable build cache was
 pruned for the same reason.
+
+## 2026-11-21 - fixture hosts never reach a real report (D109)
+
+**What the owner saw.** A real `reconkit active -d testfire.net` report listed
+`api.example.com`, `blog.example.com`, `dev.example.com` and `www.example.com`
+with sources `assetfinder`/`subfinder`, plus `⚠ 2 tool(s) stopped early` for
+`gau` and `urlfinder`, and 0 live hosts.
+
+**Cause, proven from the DB.** Run 69 was a mock run that wrote into the real
+`recon.db` before D30 isolated mock runs, and the report lists every known host
+for the target:
+
+```
+$ sqlite3 -header -column recon.db "select id,target_id,stage,started_at,params_json from scan_runs where id in (68,69,70);"
+id  target_id  stage  started_at            params_json
+69          1  subs   2026-11-17T16:40:46Z  {"scan_key": "a68ea2aceee9e6dc", "mode": "passive", "tools": [...], "mock": true, ...}
+
+$ sqlite3 -header -column recon.db "select s.id,s.fqdn,s.first_seen_run,s.last_seen_run from subdomains s join targets t on t.id=s.target_id where t.domain='testfire.net' and s.fqdn like '%example.com%';"
+25163  api.example.com   69  69
+25165  blog.example.com  69  69
+25164  dev.example.com   69  69
+25162  www.example.com   69  69
+```
+
+The real binaries do not emit those names:
+
+```
+$ assetfinder --subs-only testfire.net
+demo.testfire.net
+testfire.net
+www.testfire.net
+altoro.testfire.net
+```
+
+**Fix.** `Store._mock_only_ids()` selects hosts whose every source row belongs to
+a `scan_runs` row with `"mock": true`, and only when the target also has a
+non-mock run. `host_rows()` and `subdomains()` skip those ids. Rows are not
+deleted; a pure mock target keeps its fixtures. The query is one literal SQL
+statement with two bound `%\"mock\": true%` parameters, so ruff S608 stays clean
+without a suppression.
+
+**After the fix, same DB:**
+
+```
+$ python - <<'PY'
+from reconkit.core.store import Store
+s = Store("recon.db")
+tid = s._conn.execute("select id from targets where domain='testfire.net'").fetchone()[0]
+rows = [r["fqdn"] for r in s.host_rows(tid)]
+print("visible hosts:", len(rows), "| fixture hosts:", [r for r in rows if "example.com" in r])
+PY
+visible hosts: 40 | fixture hosts: []
+```
+
+**Crawler idle window.** `gau` is launched with `--timeout=45 --retries=1`, so a
+single slow provider leaves it silent for up to 90 s while it is still working;
+the 60 s window killed it on every scan (`killed after 60s idle at stage 117.4s,
+1029 partial`). `config.yaml` `runtime_idle.crawler` is now 120 s. Measured
+directly:
+
+```
+$ gau --json --timeout=45 --threads=5 --retries=1 testfire.net
+lines=0 total=57.5s last_line_at=0.0s rc=0
+```
+
+`archive` stays 180 s: `urlfinder` uses a 30 s request timeout, so 180 s of
+silence is six dead requests, a real stall.
+
+**The 0 live hosts are not a defect.** testfire.net refuses both ports from this
+network:
+
+```
+$ curl -sS -o /dev/null -w "https %{http_code}\n" --max-time 15 https://www.testfire.net/
+curl: (7) Failed to connect to www.testfire.net:443 after 366 ms: Could not connect to server
+```
+
+**Real runs after the change.** `reconkit passive -d testfire.net` and
+`reconkit active -d testfire.net --full` both exit 0 and write `report.pdf`
+(`results/testfire.net/20261121T190046Z`, `...T190738Z`). The full run's own
+report was produced by the already-imported old module, so it still lists the
+four fixture names once; the next run uses the filter.
+
+**Tests and gate.**
+
+```
+$ pytest -q
+1056 passed in 47.38s
+$ FORCE_TERMINAL=1 pytest -q
+1056 passed in 47.19s
+$ ruff check .
+All checks passed!
+$ ruff format --check .
+102 files already formatted
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+```
+
+New: `tests/test_store.py::test_mock_only_hosts_are_hidden_from_reports`
+(mock-only hidden on a mixed target, kept on a pure mock target, source-less
+host kept). Updated: `tests/test_config.py` and two `tests/test_engine.py`
+assertions from 60 to 120 for `crawler`.
+
+**Deviation.** The crawler window change is a behavior change, recorded in
+`docs/PROGRESS.md` "D109" and `docs/09_TOOL_CONTRACTS.md`. `archive` was left at
+180 s on purpose; raising it would add two minutes of waiting for a tool that is
+actually stalled.
+
+**Fresh run after the change (2026-11-21T19:26:26Z).**
+
+```
+$ reconkit passive -d testfire.net
+...
+⚠ 2 tool(s) stopped early — partial output kept
+  urlfinder: killed after 180s idle at stage 180.2s, 76 partial
+  gau: killed after 120s idle at stage 219.7s, 479 partial
+...
+exit=0
+
+$ grep -c 'example.com' results/testfire.net/20261121T192626Z/subdomains.txt
+0
+$ wc -l < results/testfire.net/20261121T192626Z/subdomains.txt
+40
+```
+
+The fixture leak is gone end to end. The 120 s crawler window did **not** stop
+the gau kill: gau stalls longer than its own `--timeout=45 --retries=1`, so the
+kill is the tool's behavior, not a window set too low. Partial output is kept
+and the run exits 0; the warning is accurate. Raising the window further would
+only add waiting for a process that is not producing output.
+
+**Active re-run on the fixed build (2026-11-21T19:36:58Z).**
+
+```
+$ reconkit active -d testfire.net
+urls: gau ok 1387 item(s)
+urls: urlfinder killed 72 item(s)
+40 hosts: 0 ALIVE, 8 DNS_ONLY, 0 SHUT_DOWN, 31 DEAD, 1 UNKNOWN | tools: 19 ok, 2 gap, 0 failed, 11 skipped, 1 killed
+subs: hackertarget: free quota exceeded, otx: rate limited (HTTP 429)
+exit=0
+
+$ grep -c 'example.com' results/testfire.net/20261121T193658Z/subdomains.txt
+0
+$ wc -l < results/testfire.net/20261121T193658Z/subdomains.txt
+40
+$ ls -l results/testfire.net/20261121T193658Z/report.pdf
+211147 bytes
+```
+
+With the 120 s window, gau completed on this run (`ok 1387 items`); on the
+19:26:26Z passive run it still stalled past 120 s. So the window helps but does
+not guarantee it, which is why the kill path stays as the bound. Both runs exit
+0, both reports are fixture-free, and `urlfinder` remains the one tool that
+stalls (180 s of silence against a 30 s request timeout).
+
+## 2026-11-21 - a CDN edge is not a port finding (D110)
+
+**The owner's question.** The `slice.bank.in` report showed
+`1,3,4,6,7,9,13,17,19,20,...` on ten hosts. Those are not the origin's ports.
+
+**Measured proof.**
+
+```
+$ sqlite3 -header -column recon.db "select s.fqdn, h.ips_json, count(p.port) as open_ports, min(p.port), max(p.port) from ... where t.domain='slice.bank.in' ..."
+b.slice.bank.in    ["172.65.64.158","172.65.64.159"]   2982   1   65389
+m.slice.bank.in    ["172.65.64.158","172.65.64.159"]   2976   1   65389
+slice.bank.in      ["172.65.64.158","172.65.64.159"]   3021   1   65389
+
+$ whois 172.65.64.158 | grep -E '^(NetName|OrgName)'
+NetName:        CLOUDFLARENET
+OrgName:        Cloudflare, Inc.
+
+$ python - <<'PY'   # TCP connect, 4 s timeout
+port 1: TCP CONNECTED in 196 ms
+port 3: TCP CONNECTED in 184 ms
+port 7: TCP CONNECTED in 183 ms
+port 9: TCP CONNECTED in 184 ms
+port 65389: TCP CONNECTED in 184 ms
+port 31337: TCP CONNECTED in 183 ms
+PY
+```
+
+A CDN/WAF edge terminates TCP on almost any port, so every "open" row describes
+Cloudflare, not the target.
+
+**Cause.** `docs/05` rule 7 and `docs/09` "Port-scan pre-check" both require
+skipping hosts whose stored `waf` is set. It was never implemented in
+`engine.py` (no `waf` reference outside the tech merge), so the ports stage ran
+on Cloudflare hosts.
+
+**Fix, verified on the real DB.**
+
+```
+$ python - <<'PY'
+from reconkit.core.store import Store
+s = Store("recon.db")
+tid = s._conn.execute("select id from targets where domain='slice.bank.in'").fetchone()[0]
+for r in s.host_rows(tid):
+    if r["state"] == "ALIVE":
+        print(f'{r["fqdn"]:28} ports={len(r["ports"]):5} waf={r["waf"]}')
+PY
+b.slice.bank.in              ports=    0 waf=Cloudflare
+blog.slice.bank.in           ports=    0 waf=Cloudflare
+...
+www.slice.bank.in            ports=    0 waf=Cloudflare
+```
+
+Changes: `Store.waf_fronted_hosts()`; `host_rows()` drops stored ports for a
+fronted host and returns `waf`; `HostSnapshot.waf` plus the row note
+`CDN: <waf>`; the engine skips those hosts in the ports
+stage and prints `ports: N CDN/WAF-fronted host(s) skipped`.
+
+**Tests and gate.**
+
+```
+$ pytest -q tests/test_store.py::test_cdn_fronted_host_reports_no_edge_ports \
+           tests/test_engine.py::test_ports_stage_skips_cdn_waf_fronted_hosts
+2 passed in 0.47s
+$ pytest -q
+1058 passed in 48.05s
+$ FORCE_TERMINAL=1 pytest -q
+1058 passed in 47.28s
+$ ruff check .
+All checks passed!
+$ ruff format --check .
+102 files already formatted
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+```
+
+**Limit of this fix.** It uses the stored `waf` from the `live` stage's `httpx
+-cdn` field (and `cdncheck`/`wafw00f` once tech has run). A CDN that `httpx`
+does not name will still be scanned and its ports still reported, because both
+gates key on a non-empty `waf`. Detection is `httpx -cdn` at live time, so a
+fronted host is covered before the ports stage in the same run. No `assert`, no
+new dependency, no suppression.
+
+**Fresh-state verification on `slice.bank.in` (2026-11-21, owner asked for both
+paths: keep the DB, then wipe and rescan).**
+
+Run 1, existing DB (`reconkit active -d slice.bank.in --no-scope`):
+
+```
+21 hosts (20 unique after www-dedup): 10 ALIVE, 2 DNS_ONLY, 1 DEAD, 8 UNKNOWN
+tools: 28 ok, 2 gap, 0 failed, 2 skipped, 1 killed (urlfinder, 2222 partial)
+Open ports: -   Notes: CDN: Cloudflare
+exit 0
+```
+
+The 8 UNKNOWN rows were IP addresses with no sources. Provenance check:
+
+```
+$ sqlite3 recon.db "select s.fqdn, s.provenance, s.first_seen_run, ... where t.domain='slice.bank.in' and s.fqdn glob '[0-9]*'"
+162.159.140.147    dns   201
+172.65.64.158      dns   201
+...
+$ sqlite3 recon.db "select stage, started_at from scan_runs where id=201"
+ports  2026-11-20T13:08:27Z
+```
+
+They are legacy rows from the pre-D110 ports run, not something the current
+stages create.
+
+Then the target was removed from the DB (backup at `/tmp/recon-before-slice-
+delete.db`) and `results/slice.bank.in/` was deleted:
+
+```
+port_sources: 51349 row(s)
+ports: 51313 row(s)
+host_status_history: 47 row(s)
+subdomain_sources: 203 row(s)
+urls: 2644 row(s)
+tool_runs: 144 row(s)
+scan_runs: 24 row(s)
+subdomains: 21 row(s)
+targets: 1 row(s)
+```
+
+Run 2, fresh target (`reconkit active -d slice.bank.in --no-scope`):
+
+```
+15 subdomains discovered; 12 live hosts identified
+tools: 29 ok, 2 gap, 0 failed, 2 skipped, 0 killed, 0 timeout
+subs: otx: rate limited (HTTP 429), hackertarget: free quota exceeded
+urlfinder ok 2222 item(s)   gau ok 1579 item(s)
+0 IP-literal subdomain rows, 0 port rows
+exit 0
+```
+
+Then the gate itself, on the fresh data:
+
+```
+$ reconkit ports -d slice.bank.in --no-scope --active
+ports: 12 CDN/WAF-fronted host(s) skipped (edge ports are not the origin's)
+15 hosts: 12 ALIVE ... | tools: 0 ok, 0 failed
+0 port rows stored
+exit 0
+```
+
+**Note length.** `<waf>-fronted; ports not scanned` wrapped to four lines in the
+Notes cell at 80 columns, so the note is now `CDN: <waf>` (`CDN: Cloudflare`).
+Docs 05 and 09 were updated with it. No behaviour change.
+
+**Not a defect.** `otx` 429 and `hackertarget` quota are upstream limits; the
+owner said to ignore them. `urlfinder` finished on both runs here.
+
+## 2026-11-21 - one fact, one row, and an honest mock skip (D111)
+
+**Owner request.** Two people push into this repository; a change must not
+create duplicate rows, drop a tool group, hand a stage the wrong input, or make
+`--mock` look broken. Prove it on `slice.bank.in` with the DB kept and then
+deleted, on the second authorized target `pentest-ground.com`, and keep every
+fix generic (no site-specific branch).
+
+**Measured before the fix** (existing `slice.bank.in` DB):
+
+```
+url rows=3097 canonical=3087 duplicate-groups=10
+  DUP https://b.slice.bank.in/ -> ['https://b.slice.bank.in', 'https://b.slice.bank.in/']
+  DUP https://blog.slice.bank.in/ -> [...]
+  ... 8 more hosts
+```
+
+Causes: `normalize_url()` kept an empty path empty and a default port; the
+engine wrote `record.url`/`record.fqdn` raw into unique keys; `_persist_ports`
+grouped on `(fqdn, ip, port)`, dropped `protocol`, and never scope-filtered;
+`_read_fixture` raised `FetchFailed` for a target with no fixture, which every
+adapter reported as a failed tool.
+
+**Fixes** (all generic): one canonical `normalize_url()` (case, default port,
+empty path `/`, fragment, userinfo); `_persist_urls` canonicalizes and updates a
+legacy row under its own spelling; `_persist_discovery` and `_persist_ports`
+canonicalize and scope-filter through `_clean_hosts()`; the ports key and
+`upsert_port` call include `protocol`; `FixtureMissing` returns `SKIPPED` in the
+binary, HTTP and three python adapters.
+
+**Run matrix.**
+
+1. `slice.bank.in`, existing DB, post-fix
+   (`reconkit active -d slice.bank.in --no-scope`):
+
+```
+15 hosts (14 unique after www-dedup): 12 ALIVE, 2 DNS_ONLY, 1 DEAD
+tools: 28 ok, 3 gap, 0 failed, 2 skipped, 0 timeout   exit 0
+DB: 3138 URLs, duplicate-groups still 10 (legacy), run 275 new-urls=0 non-canonical=0
+```
+
+2. Target deleted (`reconkit db delete --target slice.bank.in --yes`; output:
+   `Deleted 1 target, 15 subdomains, 3138 URLs, 99 tool runs, 18 stage runs.
+   Removed results/slice.bank.in/`), then a fresh run:
+
+```
+15 hosts: 12 ALIVE, 2 DNS_ONLY, 1 DEAD
+tools: 29 ok, 2 gap, 0 failed, 2 skipped, 0 timeout   exit 0
+DB: 3057 URLs / canonical 3057 / duplicate-groups 0 / ports 0 / ip rows 0
+```
+
+3. `pentest-ground.com` (authorized, own DB `/tmp/pentest-ground.db`):
+
+```
+43 hosts: 6 ALIVE, 5 DNS_ONLY, 31 DEAD, 1 UNKNOWN
+tools: 27 ok, 2 gap, 0 failed, 2 skipped, 2 killed (gau/urlfinder partial)
+DB: 390 URLs / duplicate-groups 0 / ports 0 / ip rows 0   exit 0
+```
+
+4. Generic mock, no scope and with the real scope file:
+
+```
+reconkit active -d example.org --mock --no-scope --db /tmp/mock-example2.db --json
+  exit 0, failed=[], skips: otx/hackertarget/dnspython/pyprobe "no fixture for example.org"
+reconkit active -d testfire.net --mock --db /tmp/mock-scope2.db --json
+  exit 0, 12 hosts, scope_mode=enforced, failed=[]
+```
+
+Before the mock fix both commands exited 5 with `otx failed ... no fixture`;
+the guard is `test_regression_missing_mock_fixture_is_a_skip_not_a_failure`.
+
+**Tests and gate.**
+
+```
+$ pytest -q
+1259 passed, 3 skipped in 47.27s
+$ FORCE_TERMINAL=1 pytest -q
+1259 passed, 3 skipped in 47.07s
+$ ruff check .
+All checks passed!
+$ ruff format --check .
+103 files already formatted
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+```
+
+New `tests/test_invariants.py` (registry/adapter name+stage parity, a fixture
+per adapter, canonical fixture records, real stages, natural keys). New PIT-68..
+71 regressions plus the stage-handoff invariant in `tests/test_engine.py`;
+`gowitness` records are canonical; the
+old missing-fixture test now asserts `SKIPPED`. Docs: AGENTS.md 0e, docs/04,
+docs/07, docs/08, docs/09.
+
+**Not a defect.** `otx` 429 / `hackertarget` quota are upstream gaps (exit 0).
+The two killed crawl tools kept their partial output by design (D52). Legacy
+duplicate URL rows in an existing DB are left in place: the fix prevents new
+ones and updates the legacy spelling, and no destructive migration was run.
+
+## 2026-11-21 - clean workspace and the trace-before-edit rule (D112)
+
+Owner asked for a clean DB and no `results/`, and for AGENTS.md to require
+investigating which files a change affects before touching any of them.
+
+```
+$ reconkit db wipe --yes
+  8 targets, 27669 subdomains, 13617 URLs, 1414 tool runs, 240 stage runs
+Wiped recon.db.
+$ rm -rf results        # 92 MB, including results/mock/
+```
+
+Pre-wipe backup: `/tmp/recon-before-clean-20261121T163914.db` (17 MB).
+Row counts after the wipe and the schema's real table list are in the gate run
+below; `results/` does not exist.
+
+AGENTS.md section 4.2 now requires grepping `src/`, `tests/`, `tools.yaml`,
+`config.yaml`, `scripts/` and every `*.md` (`AGENTS.md`, `COMMANDS.md`,
+`README.md`, `SETUP.md`, `docs/01`-`docs/10`) for the term being changed and
+reading every hit before editing; section 0b's loop points at it. The
+mock-skip rule that was only in docs/07 and docs/09 is now also in
+COMMANDS.md, docs/02 and README.md (0df7049).
+
+While verifying that the clean tree stayed clean, the suite recreated
+`results/mock/example.com/` with 280 folders: `make_config()` in
+`tests/test_cli.py` (69 call sites) never overrode `results_dir`, so every CLI
+test wrote into the repository. Fixed by pointing it at `tmp_path / "results"`
+and guarded by `test_cli_test_config_keeps_results_inside_tmp_path` (PIT-72).
+After the fix both gate modes end with `NO_RESULTS_DIR`:
+
+```
+$ pytest -q
+1260 passed, 3 skipped in 47.02s
+$ FORCE_TERMINAL=1 pytest -q
+1260 passed, 3 skipped in 46.70s
+$ ruff check . / ruff format --check . / mypy src/reconkit
+All checks passed! / 103 files already formatted / Success: no issues found in 66 source files
+```

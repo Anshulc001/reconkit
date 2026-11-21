@@ -98,6 +98,9 @@ def make_config(tmp_path: Path) -> Path:
     raw = yaml.safe_load((REPO / "config.yaml").read_text(encoding="utf-8"))
     raw["workspace_dir"] = str(tmp_path / "workspaces")
     raw["db_path"] = str(tmp_path / "recon.db")
+    # PIT-72: without this every mock run wrote results/mock/<target>/ into the
+    # repository instead of tmp_path (the default is "results" relative to cwd).
+    raw["results_dir"] = str(tmp_path / "results")
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     # D82: an active run now needs a scope file. Give every test that asks for
@@ -122,6 +125,12 @@ def scan_args(config: Path, command: str = "passive", *extra: str) -> list[str]:
         str(config),
         *extra,
     ]
+
+
+def test_cli_test_config_keeps_results_inside_tmp_path(tmp_path: Path) -> None:
+    """Regression: PIT-72 the shared CLI config must not write the repo's results/."""
+    raw = yaml.safe_load(make_config(tmp_path).read_text(encoding="utf-8"))
+    assert Path(raw["results_dir"]).is_relative_to(tmp_path)
 
 
 def test_cli_version_flag_prints_current_version() -> None:

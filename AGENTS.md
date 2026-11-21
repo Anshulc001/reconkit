@@ -22,7 +22,7 @@ Read this file first, every session. It points to the documents in `docs/`.
 
 ## 0b. Task loop
 
-plan (5-10 lines, assumptions) -> implement -> tests (normal, empty, malformed, failure) -> run checks -> update **every** doc the change touches -> update `docs/PROGRESS.md` RESUME + entry -> add a `docs/REVIEW_LOG.md` entry -> commit -> report -> stop.
+plan (5-10 lines, assumptions) -> trace every affected file (section 4.2) -> implement -> tests (normal, empty, malformed, failure) -> run checks -> update **every** doc the change touches -> update `docs/PROGRESS.md` RESUME + entry -> add a `docs/REVIEW_LOG.md` entry -> commit -> report -> stop.
 
 Every error found in a review, CI run or real scan gets a regression test in the
 same batch: reproduce it, then fix it. No error is closed by prose alone.
@@ -79,6 +79,53 @@ Still requires an owner ruling:
 
 If a decision is on neither list, stop and ask - one short question, not a paragraph.
 
+## 0e. Contribution invariants (machine-checked)
+
+`tests/test_invariants.py` and the `PIT-68`..`PIT-70` regressions in
+`tests/test_engine.py` are the executable form of this section. Run them before
+every commit, and add a case whenever you add a rule. Any change by anyone -
+owner, friend or agent - must keep these true:
+
+1. **Registry first.** A tool runs only if it has a `tools.yaml` row and an
+   adapter in `adapters/__init__.py`. A new tool ships in one batch: registry
+   row, adapter, fixture, parser tests (normal, empty, malformed, failure), and
+   the docs/09 stage table if the pool changed. No adapter without a row; no row
+   without an adapter unless it is an intrusive phase-3 tool (no adapter yet).
+2. **The adapter is not trusted.** `parse_output` may return any string. The
+   engine canonicalizes every host (`validate_host`: lower-case, no trailing
+   dot, no `*.`) and every URL (`normalize_url`: scheme/host case, default port,
+   empty path, fragment) before a unique key sees it, and drops any host outside
+   the target. Never add a persistence path that writes `record.fqdn` or
+   `record.url` raw.
+3. **One fact, one row.** The natural keys are `targets(domain)`,
+   `subdomains(target_id, fqdn)`, `ports(subdomain_id, ip, port, protocol)` and
+   `urls(target_id, url)`. All writes go through the `Store.upsert_*` helpers;
+   no raw `INSERT` in the engine or CLI. A schema change needs a migration, a
+   migration test and an update to docs/04 in the same commit. `tcp/53` and
+   `udp/53` are different rows; never default a protocol away.
+4. **Stage handoff is explicit.** `_stage_hosts()` is the one definition of what
+   each stage receives. A new stage must state its input (docs/03) and must not
+   silently narrow another stage's pool. A stage that runs zero tools must be
+   visible as a skip with a reason or a completion gap - never as a successful
+   empty stage.
+5. **Mock is a contract.** Every adapter needs at least one fixture that
+   `parse_output` accepts; `--mock` must never touch the network or spawn a
+   process. Mock fixtures are synthetic evidence, and a mock run must not create
+   rows a real report shows (D109). A fixture whose hosts are not the mock
+   target proves only the parser, not the pipeline. A target with no matching
+   fixture is a **skip** (`no fixture for <target>`), never a failed tool: `--mock`
+   must exit 0 on any target.
+6. **Verify both states.** A database change is verified on an existing
+   database **and** on a fresh one (target deleted from the DB, results folder
+   removed). "Works on my warm venv/warm DB" is not verification.
+7. **Before you commit:** `pytest -q`, `FORCE_TERMINAL=1 pytest -q`,
+   `ruff check .`, `ruff format --check .`, `mypy src/reconkit`, plus
+   `pytest -q tests/test_invariants.py`. Paste the real output in REVIEW_LOG.
+   No new dependency, flag, module or file outside the batch scope without the
+   owner's ruling (section 0d).
+8. **Never break a documented rule to make a test pass.** Fix the cause; if the
+   documented rule is wrong, change the docs first and record the deviation.
+
 ## 1. Project context
 
 - **Project:** reconkit
@@ -128,9 +175,17 @@ Do not contradict these documents. If code and docs disagree, stop and report th
 ## 4. Planning (non-trivial tasks)
 
 1. Read the relevant docs and code.
-2. List affected files, DB changes, CLI changes, tests needed.
-3. Write a short plan (5-10 lines) and state assumptions.
-4. Then implement.
+2. **Find every affected file before editing one.** Grep `src/`, `tests/`,
+   `tools.yaml`, `config.yaml`, `scripts/` and every `*.md` (`AGENTS.md`,
+   `COMMANDS.md`, `README.md`, `SETUP.md`, `docs/01`-`docs/10`) for the flag,
+   command, column, field, constant or term you are about to change. Read each
+   hit: the code that consumes the old shape, the tests that assert it, the docs
+   that describe it, the registry/config entries and any generated fixture. A
+   file you have not inspected is a file you may break; do not edit it until the
+   list is complete.
+3. List affected files, DB changes, CLI changes, tests needed.
+4. Write a short plan (5-10 lines) and state assumptions.
+5. Then implement.
 
 ## 5. Implementation
 

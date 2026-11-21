@@ -23,7 +23,7 @@ def test_load_real_config() -> None:
 def test_runtime_idle_windows_load_from_the_real_config() -> None:
     """D52: `runtime_idle:` is the only runtime bound, and it holds windows."""
     config = load_config(CONFIG)
-    assert config.runtime_idle["crawler"].idle == 60
+    assert config.runtime_idle["crawler"].idle == 120
     assert config.runtime_idle["scanner"].idle == 120
     assert config.runtime_idle["archive"].idle == 180
     assert config.runtime_idle["api"].idle == 60

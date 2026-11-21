@@ -20,6 +20,14 @@ from reconkit.errors import ConfigError, StorageError
 
 SCHEMA_VERSION = 12
 
+# D109: a mock run's fixture hosts are proof data, not observations. On a target
+# that also has real runs, a host whose only sources came from mock runs is hidden
+# from reports, resume seeds and the url-derived host set, so fixture names can
+# never surface in a real scan again. A pure mock target (its own DB) keeps them,
+# which is what a `--mock` report is supposed to show. The marker is a bound
+# parameter so no query text is built from data.
+_MOCK_PARAMS = '%"mock": true%'
+
 # D81: one target's children, deleted before the parent. `?` is the target id.
 _DELETE_PORT_SOURCES = """
 DELETE FROM port_sources WHERE port_id IN (
@@ -682,13 +690,63 @@ class Store:
             return None
         return {"id": int(row["id"]), "started_at": str(row["started_at"])}
 
-    def subdomains(self, target_id: int) -> list[dict[str, object]]:
-        """Known hosts and states for one target (engine resume seeds)."""
+    def waf_fronted_hosts(self, target_id: int) -> set[str]:
+        """Hosts whose latest stored status carries a CDN/WAF name (docs/05 rule 7).
+
+        A port scan against an edge finds the edge's listeners, not the
+        origin's: Cloudflare answered TCP on ports 1, 3, 7, 9, 31337 and 65389
+        when measured on 2026-11-21, which is how one `slice.bank.in` scan stored
+        ~3000 "open" ports per host. The ports stage skips these hosts and the
+        report shows no ports for them instead of the edge's ports.
+        """
         rows = self._conn.execute(
-            "SELECT fqdn, state FROM subdomains WHERE target_id = ? ORDER BY fqdn",
+            "SELECT s.fqdn FROM subdomains s"
+            " JOIN host_status_history h ON h.id = ("
+            "  SELECT MAX(latest.id) FROM host_status_history latest"
+            "  WHERE latest.subdomain_id = s.id)"
+            " WHERE s.target_id = ? AND TRIM(COALESCE(h.waf, '')) <> ''",
             (target_id,),
         ).fetchall()
-        return [dict(row) for row in rows]
+        return {str(row[0]) for row in rows}
+
+    def _mock_only_ids(self, target_id: int) -> set[int]:
+        """D109: subdomain ids whose only sources are mock runs, on a real target.
+
+        A host counts only when every `subdomain_sources` row points at a run
+        with `"mock": true`, and only when the target also has a non-mock run.
+        A pure mock target (its own DB) keeps its fixture hosts.
+        """
+        rows = self._conn.execute(
+            "SELECT s.id FROM subdomains s"
+            " WHERE s.target_id = ?"
+            " AND EXISTS (SELECT 1 FROM subdomain_sources m WHERE m.subdomain_id = s.id)"
+            " AND NOT EXISTS (SELECT 1 FROM subdomain_sources r"
+            "  LEFT JOIN scan_runs sr ON sr.id = r.run_id"
+            "  WHERE r.subdomain_id = s.id"
+            "  AND COALESCE(sr.params_json, '') NOT LIKE ?)"
+            " AND EXISTS (SELECT 1 FROM scan_runs tr"
+            "  WHERE tr.target_id = s.target_id"
+            "  AND COALESCE(tr.params_json, '') NOT LIKE ?)",
+            (target_id, _MOCK_PARAMS, _MOCK_PARAMS),
+        ).fetchall()
+        return {int(row[0]) for row in rows}
+
+    def subdomains(self, target_id: int) -> list[dict[str, object]]:
+        """Known hosts and states for one target (engine resume seeds).
+
+        D109: hosts first seen only by a mock run are not real observations, so
+        they are not seeded into a real scan.
+        """
+        hidden = self._mock_only_ids(target_id)
+        rows = self._conn.execute(
+            "SELECT s.id, s.fqdn, s.state FROM subdomains s WHERE s.target_id = ? ORDER BY s.fqdn",
+            (target_id,),
+        ).fetchall()
+        return [
+            {"fqdn": str(row["fqdn"]), "state": str(row["state"])}
+            for row in rows
+            if int(row["id"]) not in hidden
+        ]
 
     def host_rows(self, target_id: int) -> list[dict[str, object]]:
         """Latest host state, confidence, sources, status and open ports for the UI.
@@ -698,10 +756,11 @@ class Store:
         from `subdomains`. Nothing new is computed here: every value is a stored
         column, so the report can never show a value the run did not observe.
         """
+        hidden = self._mock_only_ids(target_id)
         rows = self._conn.execute(
-            "SELECT s.fqdn, s.state, s.confidence, s.source_count,"
+            "SELECT s.id, s.fqdn, s.state, s.confidence, s.source_count,"
             " h.status_code, h.detail, h.title, h.location, h.ips_json, h.tech_json,"
-            " h.duplicate_of, h.www_note,"
+            " h.duplicate_of, h.www_note, h.waf,"
             " COALESCE((SELECT GROUP_CONCAT(DISTINCT x.tool) FROM subdomain_sources x"
             "  WHERE x.subdomain_id = s.id), '') AS sources,"
             " COALESCE((SELECT GROUP_CONCAT(DISTINCT p.port) FROM ports p"
@@ -715,8 +774,11 @@ class Store:
         ).fetchall()
         result: list[dict[str, object]] = []
         for row in rows:
+            if int(row["id"]) in hidden:
+                continue
             sources = str(row["sources"] or "")
             ports = str(row["ports"] or "")
+            waf = None if row["waf"] is None else str(row["waf"])
             result.append(
                 {
                     "fqdn": str(row["fqdn"]),
@@ -729,12 +791,17 @@ class Store:
                         None if row["duplicate_of"] is None else str(row["duplicate_of"])
                     ),
                     "www_note": None if row["www_note"] is None else str(row["www_note"]),
+                    "waf": waf,
                     "title": None if row["title"] is None else str(row["title"]),
                     "location": None if row["location"] is None else str(row["location"]),
                     "ips": _text_list(row["ips_json"]),
                     "tech": _text_list(row["tech_json"]),
                     "sources": tuple(sorted(part for part in sources.split(",") if part)),
-                    "ports": tuple(sorted(int(part) for part in ports.split(",") if part)),
+                    # A CDN/WAF front stores the edge's listeners, not the
+                    # origin's, so it has no reportable ports (docs/05 rule 7).
+                    "ports": (
+                        () if waf else tuple(sorted(int(part) for part in ports.split(",") if part))
+                    ),
                 }
             )
         return result

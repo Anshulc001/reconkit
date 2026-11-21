@@ -590,14 +590,15 @@ async def test_mock_mode_reads_fixture_and_skips_network() -> None:
     assert calls == []
 
 
-async def test_mock_mode_without_fixture_fails(tmp_path: Path) -> None:
+async def test_mock_mode_without_fixture_is_a_skip(tmp_path: Path) -> None:
+    """Regression: PIT-71 a missing mock fixture is a skip, never a failure."""
     adapter = CrtshAdapter(
         transport=httpx.MockTransport(lambda _r: httpx.Response(200, text="[]")),
         fixtures_dir=tmp_path,
     )
     result = await adapter.run(make_ctx(mock=True))
-    assert result.status == ToolStatus.FAILED
-    assert "no fixture" in (result.error or "")
+    assert result.status == ToolStatus.SKIPPED
+    assert "no fixture for" in (result.error or "")
 
 
 def test_http_adapters_need_nothing_installed() -> None:
