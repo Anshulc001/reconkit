@@ -333,3 +333,46 @@ def test_browser_state_finds_only_the_browsers_gowitness_launches() -> None:
     assert (
         doctor.browser_state(which=lambda name: "/usr/bin/x" if name == "chrome" else None) == "yes"
     )
+
+
+def test_pdf_row_reports_the_installed_reportlab(tmp_path: Path) -> None:
+    """D108: the PDF dependency is a doctor row, not an import traceback."""
+    report = report_for(tmp_path)
+    assert report.pdf.startswith("reportlab ")
+    buffer = io.StringIO()
+    render_doctor(report, stderr=buffer)
+    assert "reportlab" in buffer.getvalue()
+
+
+def test_pdf_row_reports_missing_and_says_what_still_works(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(doctor, "pdf_support", lambda: MISSING)
+    report = report_for(tmp_path)
+    assert report.pdf == MISSING
+    buffer = io.StringIO()
+    render_doctor(report, stderr=buffer)
+    assert "reportlab" in buffer.getvalue()
+    # The Effect cell wraps in the table, so match the two halves.
+    assert "PDF reports fail" in buffer.getvalue()
+    assert "still written" in buffer.getvalue()
+
+
+def test_pdf_support_is_missing_when_reportlab_cannot_import(monkeypatch) -> None:
+    import importlib
+
+    real = importlib.import_module
+
+    def fake(name: str, package: str | None = None):
+        if name == "reportlab":
+            raise ImportError("no reportlab")
+        return real(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", fake)
+    assert doctor.pdf_support() == MISSING
+
+
+def test_doctor_json_carries_the_pdf_dependency(monkeypatch) -> None:
+    monkeypatch.setattr(doctor, "ADAPTERS", {})
+    result = CliRunner().invoke(app, ["doctor", "--json", "--config", str(REPO / "config.yaml")])
+    assert result.exit_code == 0
+    document = json.loads(result.output)
+    assert document["pdf"].startswith("reportlab ")

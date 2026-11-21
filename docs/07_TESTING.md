@@ -47,7 +47,7 @@ tests/
   test_branding.py       # banner, credits and live version (D107)
   test_logging.py        # levels, UTC timestamps, redaction, unique log paths (D107)
   test_pdf_report.py     # PDF sections, privacy mode, 600-host pagination (D107)
-  test_registry.py  test_package.py
+  test_registry.py  test_package.py   # setup.sh staleness + install plan (D108)
   test_doctor.py
   test_tools_registry.py  # tools.yaml -> ToolSpec, version probes, source: strings
   test_no_shell_true.py  # scans src for shell=True / os.system

@@ -6,8 +6,8 @@ one. To see which are present, run `reconkit doctor`.
 
 There is one optional, human-run shortcut for Kali/Debian/Ubuntu -
 `scripts/setup.sh`. It is a shell script, not a CLI command, and it covers a
-fresh clone in one command: the Python venv (`bootstrap.sh`), then every tool
-this registry can install automatically (`install-tools.sh`), then `doctor`. Kali packages every tool. Ubuntu 24.04 has no
+fresh clone in one command: the Python venv and editable install, then every
+tool this registry can install automatically, then `doctor`. Kali packages every tool. Ubuntu 24.04 has no
 `findomain`, `massdns` or `rustscan` package, so the script reports each one it
 cannot install and carries on with the rest; `amass` now installs from its
 upstream Go module (`github.com/owasp-amass/amass/v5/cmd/amass`) on every
@@ -205,20 +205,22 @@ are yours to run). Nothing in this repository names an official download page
 as a procedure or asks you to pipe a script into a shell; the `source:` strings
 are provenance and are never executed by the CLI.
 
-## 5. Setup scripts (optional, Kali/Debian/Ubuntu)
+## 5. Setup script (optional, Kali/Debian/Ubuntu)
 
-`scripts/setup.sh` is the single entry point for a fresh clone. It runs
-`scripts/bootstrap.sh` when the checkout has no working `.venv`, puts the
-checkout's `.venv/bin` and `~/.reconkit/bin` first on `PATH`, and then
-`exec`s `scripts/install-tools.sh` with every argument forwarded (`--check`,
-`--only`, `--dry-run`, `--yes`). The two scripts stay separate so the tool
-half can be re-run without touching the environment, and because install
-logic lives in exactly one place (the wrapper has none).
+`scripts/setup.sh` is the single setup entry point for a fresh clone and the
+only setup script (D108 merged the old `bootstrap.sh` and
+`install-tools.sh`). It owns both halves. The Python half creates `.venv`,
+installs reconkit in editable mode with its dev tools, sets the repo's git
+hooks and puts `~/.reconkit/bin` first on the venv `PATH`. It re-runs when
+`pyproject.toml` changed since the venv was installed (the
+`.venv/.reconkit-deps` stamp) or when the CLI no longer imports, so a
+`git pull` that adds a dependency re-syncs an existing checkout. The tool
+half has no catalogue of its own: it reads every `kind: binary` entry in
+`tools.yaml` and follows its `source:` string. `--check`, `--only`,
+`--dry-run`, `--update` and `--yes` apply to the tool half; the environment
+half always runs first.
 
-`scripts/install-tools.sh` is a bash script for a fresh machine, run by a
-human, outside the CLI (docs/MASTER_PLAN.md D21). It has no tool catalogue of
-its own: it reads every `kind: binary` entry in `tools.yaml` and follows its
-`source:` string.
+The script is run by a human, outside the CLI (docs/MASTER_PLAN.md D21).
 
 | `source:` shape | what the script runs |
 |---|---|
@@ -235,9 +237,9 @@ Rules it keeps:
 - **Run it as your normal user, never with `sudo`.** It escalates for `apt-get`
   itself. Run as root, Go would write to `/root/.reconkit/bin`, which no scan
   looks in, so the script refuses with that explanation. The file is committed
-executable (`100755`), so `./scripts/install-tools.sh` works after a fresh
-  `git clone` (2026-11-20: it was `100644`, and every new user hit `Permission
-denied`).
+  executable (`100755`), so `./scripts/setup.sh` works after a fresh
+  `git clone` (2026-11-20: the installer was `100644`, and every new user hit
+  `Permission denied`).
 - **"Already installed" means doctor says so.** Before planning it asks
   `reconkit doctor --json` and treats only `installed: yes` as present.
   `command -v` alone is not identity: the project's own `httpx` dependency puts
@@ -284,5 +286,6 @@ package (2026-11-20). The tools a distro *does* package still use `apt:`,
 - `--dry-run` prints every command, `--check` reports only, `--update` re-runs
   `apt`/`go`/`pipx` for every tool, `--only <pattern>` narrows to one tool.
 
-It is a bash script for Linux; it is not part of `pytest`, and `doctor` remains
-the thing that tells you what is present.
+It is a bash script for Linux. Its staleness decision (D108) is covered by
+`tests/test_package.py` without network access, and `doctor` remains the thing
+that tells you what is present.

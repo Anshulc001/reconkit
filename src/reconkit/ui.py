@@ -20,7 +20,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from reconkit.doctor import YES, DoctorReport, KeyCheck
+from reconkit.doctor import MISSING, YES, DoctorReport, KeyCheck
 from reconkit.engine import DiffSnapshot, HostSnapshot, RunSnapshot, ScanSummary, UrlSnapshot
 from reconkit.models import Confidence, HostState, Stage, ToolResult, ToolStatus
 
@@ -1495,6 +1495,8 @@ def doctor_document(report: DoctorReport) -> dict[str, object]:
         "warnings": list(report.warnings),
         # D35: absent browser = shots produces 0, and the run stays exit 0.
         "chromium": report.chromium,
+        # D108: the PDF writer's dependency, next to the browser row.
+        "pdf": report.pdf,
         "exit_code": 0,
     }
 
@@ -1552,16 +1554,25 @@ def render_doctor(
         ),
         soft_wrap=True,
     )
-    browser = Table(title="Browser", header_style="bold")
-    browser.add_column("Dependency", no_wrap=True)
-    browser.add_column("State", no_wrap=True)
-    browser.add_column("Effect")
-    browser.add_row(
+    dependencies = Table(title="Dependencies", header_style="bold")
+    dependencies.add_column("Dependency", no_wrap=True)
+    dependencies.add_column("State", no_wrap=True)
+    dependencies.add_column("Effect")
+    dependencies.add_row(
         Text("chromium"),
         Text(report.chromium, style="green" if report.chromium == YES else "red"),
         Text("-" if report.chromium == YES else "shots will produce 0 screenshots"),
     )
-    out.print(browser)
+    dependencies.add_row(
+        Text("reportlab"),
+        Text(report.pdf, style="green" if report.pdf != MISSING else "red"),
+        Text(
+            "-"
+            if report.pdf != MISSING
+            else "PDF reports fail; report.txt and report.json are still written"
+        ),
+    )
+    out.print(dependencies)
     environment = (
         f"python {report.python_version}{'' if report.python_ok else ' (too old; need 3.11+)'}"
         + f" | {report.scope_path} {'found' if report.scope_found else 'not found'}"

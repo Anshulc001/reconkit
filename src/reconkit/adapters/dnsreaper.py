@@ -1,7 +1,7 @@
 """dnsreaper adapter (docs/09_TOOL_CONTRACTS.md).
 
 dnsreaper is a Python project with no console script: `main.py` plus
-`requirements.txt`. `scripts/install-tools.sh` clones the pinned commit under
+`requirements.txt`. `scripts/setup.sh` clones the pinned commit under
 `~/.reconkit/opt/dnsreaper`, builds its own venv and writes the
 `~/.reconkit/bin/dnsreaper` launcher, so from the adapter's side it is one
 binary that takes arguments (D100).

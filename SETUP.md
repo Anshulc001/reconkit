@@ -19,9 +19,14 @@ source .venv/bin/activate
 reconkit in editable mode with its dev tools, sets the repo's git hooks, adds
 `~/.reconkit/bin` to the venv's `PATH`, installs every missing tool from
 `tools.yaml`, and finishes with `reconkit doctor`. Pass `--check`, `--only
-<tool>` or `--dry-run` to report instead of installing. The two steps are also
-available separately: `bootstrap.sh` (environment only) and `install-tools.sh`
-(tools only).
+<tool>`, `--dry-run`, `--update` or `--yes` to control the tool half.
+
+`setup.sh` is the only setup script: the environment half always runs first,
+then the tool half. Re-run it after every `git pull`. It records the
+`pyproject.toml` it installed from (`.venv/.reconkit-deps`) and bootstraps
+again when that file changed or the CLI no longer imports, so a dependency
+added by a pull reaches an existing `.venv` instead of failing later with
+`ModuleNotFoundError`. A venv that already matches is left alone.
 
 The manual equivalent:
 
@@ -51,12 +56,12 @@ call the script directly without activating: `.venv/bin/reconkit doctor`.
 
 **To check which scanning tools are available, run `reconkit doctor`.**
 `./scripts/setup.sh` already installs what the registry can install
-automatically (`apt`, `go install`, `pipx`); `./scripts/install-tools.sh` does
-only the tool half. Run either as your normal user, not with `sudo`.
+automatically (`apt`, `go install`, `pipx`), and `./scripts/setup.sh` is the
+only setup script. Run it as your normal user, not with `sudo`.
 
 ```bash
-./scripts/install-tools.sh --check   # report only
-./scripts/install-tools.sh --yes     # install everything missing
+./scripts/setup.sh --check   # report only
+./scripts/setup.sh --yes     # install everything missing
 ```
 
 Kali packages every tool. Ubuntu/Debian can lack `findomain`, `massdns` and
@@ -111,10 +116,11 @@ named (docs/05 rule 2). There is no speed preset or throttling.
 | Problem | Fix |
 |---|---|
 | `reconkit: command not found` | The venv is not active in this terminal: `source .venv/bin/activate`. Or run `.venv/bin/reconkit`. |
+| `ModuleNotFoundError: No module named 'reportlab'` (or any other dependency) after a `git pull` | The venv predates a dependency that `pyproject.toml` now declares. Re-run `./scripts/setup.sh`: it re-bootstraps a stale venv. Do not `pip install` the module by hand; a dependency missing from `pyproject.toml` and `setup.sh` is a bug. |
 | A tool shows `missing` although it is on the machine | Put it on `PATH` or in `~/.reconkit/bin` (checked first), then re-run `reconkit doctor`. A Go binary usually lands in `~/go/bin`. |
 | `naabu` fails with a `pcap.h` error | `naabu` needs `libpcap-dev`; `doctor` lists it under system packages. |
-| `httpx` runs the wrong program | Two different programs share the name. Put ProjectDiscovery's binary in `~/.reconkit/bin` (checked first); `bootstrap.sh` puts that directory first in the activated venv's `PATH`. Re-activate and run `reconkit doctor`. |
-| Python is older than 3.11 | Use Python 3.11+ from python.org or `uv`, then re-run `./scripts/bootstrap.sh`. |
+| `httpx` runs the wrong program | Two different programs share the name. Put ProjectDiscovery's binary in `~/.reconkit/bin` (checked first); `setup.sh` puts that directory first in the activated venv's `PATH`. Re-activate and run `reconkit doctor`. |
+| Python is older than 3.11 | Use Python 3.11+ from python.org or `uv`, then re-run `./scripts/setup.sh`. |
 
 ## Useful checks
 

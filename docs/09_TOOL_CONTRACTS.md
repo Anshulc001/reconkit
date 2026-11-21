@@ -6,7 +6,7 @@ This is the most-read file for agents. It defines the adapter interface, normali
 
 - Tools are listed only in `tools.yaml`. Each has a `stage`, `kind` (`http` | `python` | `binary`), `tier` (`core` | `opt_in` | `intrusive`), `mode` (`passive` | `active`).
 - A tool may list `keys`: a list of `{env, url, adds}` entries (`env` name, https sign-up URL, what the key adds). `keys` is the only per-tool key list; there is no `needs_key` field, and the loader rejects one. Free mode needs no keys (policy in `docs/05_SECURITY.md` §6.1). `registry.ToolSpec.keys` exposes them; `env` must match `^[A-Z][A-Z0-9_]*$`, `url` must be https, and a malformed entry raises `ConfigError`.
-- `registry.load_tools()` returns `dict[str, ToolSpec]` and `registry.load_system_packages()` returns the top-level `system_packages` tuple. `ToolSpec` is a frozen dataclass with `name`, `stage`, `kind`, `tier`, `mode`, `phase`, `keys: tuple[ToolKey, ...] = ()` and `requires_apt: tuple[str, ...] = ()`. (The `rate_flag` field was removed with speed control on 2026-11-17.) `requires_apt` is the per-tool apt dependency list (for example `naabu` needs `libpcap-dev`); `scripts/install-tools.sh` adds it to the packages it installs. Other entry fields (`install`, `version_cmd`, `binary`, `requires`, `notes`) are not part of `ToolSpec`.
+- `registry.load_tools()` returns `dict[str, ToolSpec]` and `registry.load_system_packages()` returns the top-level `system_packages` tuple. `ToolSpec` is a frozen dataclass with `name`, `stage`, `kind`, `tier`, `mode`, `phase`, `keys: tuple[ToolKey, ...] = ()` and `requires_apt: tuple[str, ...] = ()`. (The `rate_flag` field was removed with speed control on 2026-11-17.) `requires_apt` is the per-tool apt dependency list (for example `naabu` needs `libpcap-dev`); `scripts/setup.sh` adds it to the packages it installs. Other entry fields (`install`, `version_cmd`, `binary`, `requires`, `notes`) are not part of `ToolSpec`.
 - An adapter is one class in `src/reconkit/adapters/<tool>.py`.
 - Adapters never touch the DB, scope gate, or UI. They return data.
 - Targets are validated before reaching an adapter (see docs/05_SECURITY.md).
@@ -880,7 +880,7 @@ findomain 11.0.0, chaos 0.5.2, github-subdomains with no version flag):
 
 `dnsreaper` was left unadapted here (D15) because it is `main.py` +
 `requirements.txt` with no console script. D100 (2026-11-20) added it without a
-new adapter kind: `scripts/install-tools.sh` installs a launcher named
+new adapter kind: `scripts/setup.sh` installs a launcher named
 `dnsreaper` in `~/.reconkit/bin`, so the adapter drives one binary and reads the
 JSON file it writes with `--out` (section 4a9).
 

@@ -151,6 +151,12 @@ mypy src/reconkit
 
 Also run the changed command with `--mock` and report what you ran. Do not claim a check passed unless you ran it.
 
+After changing `pyproject.toml`, a `scripts/*.sh` file or any setup step, also
+run `./scripts/setup.sh --check` from the checkout: it must re-sync the venv
+(the install stamp, D108) and finish with `reconkit doctor`. Verify setup work
+from a clean environment (a fresh venv, or the Kali container check), never
+only from the already-warm developer venv.
+
 ## 7. Recipe: adding a tool
 
 1. Add an entry to `tools.yaml` (stage, tier, mode, install method, version command).
@@ -175,6 +181,29 @@ Every batch also updates:
 2. `docs/REVIEW_LOG.md` with the commands actually run, real output, tests added
    and the gate result.
 3. Any doc whose section number, example, table or claim the change invalidated.
+
+### 8b. New tools, dependencies, scripts and setup steps
+
+Adding a moving part is a full-stack change, not just a code change. In the
+same batch:
+
+1. `pyproject.toml` declares a new runtime dependency and `scripts/setup.sh`
+   installs it. `./scripts/setup.sh` must reach a working state on an
+   **existing** checkout, not only a fresh clone: the install stamp makes it
+   re-bootstrap when `pyproject.toml` changed (D108), and a re-run with a
+   matching venv is a no-op.
+2. Every place that lists it is updated: `SETUP.md`, `docs/03`, `docs/07`,
+   `docs/09`, `docs/10`, `README.md`, `COMMANDS.md` as applicable. Grep for the
+   dependency, script, flag or tool name and fix every live mention.
+3. It has a test: an adapter fixture/parser test, or a setup-script regression
+   test for the wrapper's behaviour. Shell changes get shell tests; prose alone
+   closes nothing.
+4. It is verified from a clean environment (fresh venv or the Kali container
+   check) and the real output is pasted into `docs/REVIEW_LOG.md`. A dependency
+   that only exists in your warm venv is not installed.
+5. A script may use only utilities present in a minimal Kali/Debian image
+   (`coreutils`, `grep`, `sed`, `git`, `python3`); `awk`, `curl` and `unzip` are
+   not guaranteed. Check with the container run before relying on one.
 
 ## 9. Conflict handling
 

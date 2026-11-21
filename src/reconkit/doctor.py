@@ -100,6 +100,29 @@ class DoctorReport:
     # D35: gowitness needs a Chromium-family browser for the shots stage; doctor
     # reports it as its own row so "shots produced 0" is never a mystery.
     chromium: str = MISSING
+    # D108: the PDF writer's dependency, so a missing reportlab is a doctor row
+    # instead of an ImportError before the CLI can start.
+    pdf: str = MISSING
+
+
+def pdf_support() -> str:
+    """The installed ReportLab version, or `missing` (D108).
+
+    The import is attempted, not only the metadata read: a half-installed
+    reportlab must read `missing`, which is exactly the state that used to kill
+    every command while `reconkit.cli` imported `pdf_report` at module load.
+    """
+    from importlib import import_module
+    from importlib.metadata import version
+
+    try:
+        import_module("reportlab")
+        installed = version("reportlab")
+    except Exception:
+        # A broken install can raise anything at import time; doctor reports a
+        # gap, it never crashes on one.
+        return MISSING
+    return f"reportlab {installed}"
 
 
 def default_status(spec: ToolSpec) -> InstallStatus:
@@ -329,4 +352,5 @@ def collect_report(
         manual=manual_tools(specs),
         warnings=tuple(warnings),
         chromium=browser_state(),
+        pdf=pdf_support(),
     )

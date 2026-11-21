@@ -47,7 +47,7 @@ reconkit/
   config.yaml  tools.yaml  scope.example.yaml  .env.example
   pyproject.toml
   docs/
-  scripts/bootstrap.sh
+  scripts/setup.sh          # single setup entry point: venv + tools (D108)
   src/reconkit/
     cli.py            # Typer app, command wiring only
     config.py         # load config.yaml, merge flags

@@ -46,7 +46,7 @@ The banner is printed once for a human scan (not for `--json`/`--silent`, and ne
 | OS | Kali Linux or Ubuntu (native). This is the only supported platform. |
 | Python | 3.11 or newer (the project is tested on 3.11–3.13 and runs on newer local interpreters). |
 | `git` | To clone the repository. |
-| External tools | Optional but expected for real scans; obtain them outside ReconKit, or use `scripts/install-tools.sh`. |
+| External tools | Optional but expected for real scans; obtain them outside ReconKit, or use `scripts/setup.sh`. |
 | PDF dependency | `reportlab` (installed with ReconKit; see `pyproject.toml`). |
 
 ReconKit never installs tools through its own CLI. `scripts/setup.sh` is the convenience path for a fresh Kali/Ubuntu machine; the tool registry and provenance are in `tools.yaml` and [docs/10_TOOL_SOURCES.md](docs/10_TOOL_SOURCES.md).
@@ -69,7 +69,8 @@ pip install -e ".[dev]"
 reconkit doctor
 ```
 
-`setup.sh` forwards `--check`, `--only <tool>` and `--dry-run` to `scripts/install-tools.sh`. Activate the venv in every new terminal (`source .venv/bin/activate`); otherwise use `.venv/bin/reconkit`. See [SETUP.md](SETUP.md) for the beginner walkthrough.
+`setup.sh` also accepts `--check`, `--only <tool>`, `--dry-run`, `--update` and `--yes`.
+Re-run it after a `git pull`: it re-syncs a venv whose dependencies changed. Activate the venv in every new terminal (`source .venv/bin/activate`); otherwise use `.venv/bin/reconkit`. See [SETUP.md](SETUP.md) for the beginner walkthrough.
 
 Optional API keys go in `.env` (copy `.env.example`). Keys are read from the environment only and are never printed, logged or stored.
 

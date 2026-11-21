@@ -4,6 +4,25 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-21, D108): **one setup script; a stale venv repairs itself.**
+  `scripts/setup.sh` is now the only setup script (owner request):
+  `bootstrap.sh` and `install-tools.sh` are merged into it, so one file owns
+  the venv/editable install/git hooks/PATH half and the `tools.yaml` installer
+  half. It records `.venv/.reconkit-deps` (SHA-256 of `pyproject.toml`) after a
+  successful install and bootstraps again when that hash changes, the stamp is
+  missing, or `import reconkit.cli` fails. That is the fix for the
+  `ModuleNotFoundError: No module named 'reportlab'` a `git pull` caused in an
+  existing venv (D107's dependency never reached it). Two container findings
+  are fixed too: the old bootstrap ended with `awk` (absent from minimal
+  Kali/Debian images) and ran `git config` without a `.git` check.
+  `reconkit doctor` now has a Dependencies table with a `reportlab` row
+  (`pdf` in `--json`), and `cli.py` imports the PDF writer lazily, so a
+  missing dependency is a doctor row, not an ImportError before any command
+  can run. New network-free tests in `tests/test_package.py` cover the
+  staleness paths and the no-`awk` rule. Gate: 1055 tests plain and `FORCE_TERMINAL=1`,
+  ruff/format/mypy clean. Full first run verified in a
+  `kalilinux/kali-rolling` container as a non-root user. Next action: none.
+
 - Status (2026-11-21, D107): **branding, PDF reports and per-scan logging ship
   as v1.1.0.** A human scan prints one ASCII banner (credits and live
   `__version__`) to stderr, never under `--json`/`--silent` and never from a
@@ -548,6 +567,33 @@ refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992
 There is no `core/consensus.py`: consensus lives in `engine.py`. Order and module names follow docs/01 section 8 and docs/03 section 5. Per-part hashes and full evidence are in `REVIEW_LOG`; the old table is in its archive.
 
 ## Deviations and assumptions
+
+### D108 (2026-11-21) - one setup script, and a stale venv that repairs itself
+
+- **The owner asked for one setup script.** `scripts/bootstrap.sh` and
+  `scripts/install-tools.sh` were merged into `scripts/setup.sh`, which now
+  owns the venv/editable install/git hooks/PATH half and the `tools.yaml`
+  installer half. docs/10 section 5 used to justify two scripts; it is
+  rewritten. `--check`, `--only`, `--dry-run`, `--update` and `--yes` keep
+  their meaning and now belong to `setup.sh`; the environment half always runs
+  first.
+- **`setup.sh` re-syncs a stale venv.** It writes `.venv/.reconkit-deps`
+  (SHA-256 of `pyproject.toml`) after a successful install and bootstraps again
+  when the hash differs, the stamp is missing, or `import reconkit.cli` fails.
+  That is what makes a `git pull` which adds a dependency (D107's `reportlab`)
+  reach an existing checkout.
+- **Two container findings fixed.** The old bootstrap's last line piped through
+  `awk`, which minimal Kali/Debian images do not ship, and `git config` ran
+  unconditionally, which aborts on a source tarball with no `.git`.
+- The setup tests are shell-level and network-free: a fake venv whose `python`
+  logs every call, answers `pip install` itself, and delegates the rest to the
+  test interpreter.
+- **The PDF dependency is now a doctor row.** `DoctorReport.pdf` and the
+  `pdf` key in `doctor --json` carry `reportlab <version>` or `missing`; the
+  human output shows it in the renamed Dependencies table next to chromium.
+  `cli.py` imports `pdf_report` inside the two write paths, so doctor and the
+  text/JSON reports still work when reportlab is absent (docs/02 section 5
+  updated).
 
 ### D107 (2026-11-21) - requested additions and one naming choice
 

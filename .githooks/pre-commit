@@ -18,7 +18,7 @@ if [ -f .venv/bin/activate ]; then
     # shellcheck disable=SC1091
     . .venv/bin/activate
 else
-    echo "pre-commit: .venv missing; run ./scripts/bootstrap.sh" >&2
+    echo "pre-commit: .venv missing; run ./scripts/setup.sh" >&2
     exit 1
 fi
 

@@ -40,7 +40,6 @@ from reconkit.engine import (
 from reconkit.errors import ConfigError, ScopeError, StorageError
 from reconkit.logs import ScanLog, open_scan_log
 from reconkit.models import HostState, Mode, Stage
-from reconkit.pdf_report import write_pdf_report
 from reconkit.ui import (
     REPORT_FIELDS,
     SCOPE_LIMITED_BANNER,
@@ -826,6 +825,10 @@ def _run_scan(
                 if scan_log is not None:
                     scan_log.info("Generating PDF report")
                 try:
+                    # D108: imported here, not at module load, so a missing
+                    # reportlab cannot stop `doctor` or the text/JSON reports.
+                    from reconkit.pdf_report import write_pdf_report
+
                     pdf_path = write_pdf_report(
                         directory,
                         target,
@@ -1329,6 +1332,8 @@ def report_command(
         pdf_path: Path | None = None
         if config.report.pdf:
             try:
+                from reconkit.pdf_report import write_pdf_report
+
                 pdf_path = write_pdf_report(
                     directory,
                     stored.target,

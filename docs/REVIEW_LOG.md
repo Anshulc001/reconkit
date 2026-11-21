@@ -48,6 +48,8 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-35 | A tool printed a valid version banner and exited nonzero (`masscan --version` exits 1), so the installer's identity probe called a real, working binary "wrong program" and doctor refused it | `installed_version()` returned `None` for any nonzero exit; exit code was treated as the identity signal instead of the program name in the output | A version probe may accept a nonzero exit only when the output names the program (`plan.binary` case-insensitive); any other failing probe stays not-usable | `test_masscan_version_counts_even_though_its_exit_code_is_1`, `test_a_nonzero_version_probe_with_unrelated_text_is_not_installed` |
 | PIT-33 | Three real docs-only commits (`cc70b15`, `722b2d1`, `046e0a2`) closed named Part 11 work but updated neither PROGRESS nor REVIEW_LOG; the RESUME block still read "11a is next" long after 11a shipped, and no 11c findings were ever logged | `.githooks/pre-commit` requires `docs/PROGRESS.md` only when `src/` or `tests/` change, so a docs-only commit is never forced to update the source of truth | Any commit that closes or advances a named task updates `docs/PROGRESS.md` in the same commit, docs-only included, and any finding gets a REVIEW_LOG entry whether or not code changed | n/a (tooling/process; the Part 11 findings backfill entry is the correction) |
 | PIT-36 | `reconkit -d X --active ...` ran subs+dns only and exited as if the requested active scan had run | The bare form is the `lite` shorthand, `_stages("lite", active)` ignores `active` by design, and no command rejected a flag it cannot honour | A flag a command cannot honour is a usage error (exit 2) whose message names the command that can honour it; never accept and ignore it | `test_bare_command_rejects_active_instead_of_running_lite`, `test_passive_only_commands_reject_active` |
+| PIT-37 | Every command died with `ModuleNotFoundError: No module named 'reportlab'` in a checkout that already had a `.venv`, after a `git pull` added the dependency | The setup script bootstrapped only when `.venv/bin/reconkit` was missing, so an existing venv was never re-synced | A setup script records what it installed (SHA-256 of `pyproject.toml`) and re-syncs when that changes, the stamp is missing, or the CLI no longer imports | `test_regression_setup_rebootstraps_a_venv_without_a_stamp`, `test_regression_setup_rebootstraps_when_pyproject_changes`, `test_regression_setup_rebootstraps_when_the_cli_import_fails` |
+| PIT-38 | A completed setup install exited 1 in a minimal Kali container; a source tarball (no `.git`) aborted the same way | The last line piped through `awk` (not in minimal images) and `git config` ran unconditionally | Setup scripts use only utilities a minimal image ships or install them, and guard repo-only steps with `[ -d .git ]` | `test_regression_setup_does_not_use_awk` (the `.git` guard is exercised by every setup test, whose checkout has no `.git`) |
 | PIT-37 | Every host ProjectDiscovery `httpx` got 200 on came back `UNKNOWN` from `pyprobe`, so 8 of 8 live hosts looked like two tools disagreeing | `_probe` returned a `UNKNOWN` record from inside the scheme loop on the first TLS `ConnectError`, so the `http` attempt never happened | A per-scheme failure must not end a multi-scheme probe; `UNKNOWN` requires "no scheme answered" plus a TLS error | `test_pyprobe_tls_failure_still_tries_http` |
 | PIT-38 | A stage whose whole pool had no adapter reported `results: []` and `tools_skipped: 0`, indistinguishable from "ran and found nothing" | The summary counted only executed `ToolResult`s and `StageOutcome` dropped the selection-time skip list | Selection-time skips belong to the stage outcome and the totals (`stages[].skipped`, `summary.tools_skipped`), not only to `tool_runs` | `test_a_stage_with_no_adapter_reports_its_skips` |
 
@@ -10941,3 +10943,161 @@ ReportLab are owner-requested; the artifact is `report.pdf` (not the brief's
 `recon_report.pdf`) to match the existing `report.*` naming; the banner is for
 scan commands only; version bumped to `1.1.0`; the multi-domain test ignores the
 new sibling `logs/` directory when counting report folders.
+
+## 2026-11-21 - one setup script and a self-healing venv (D108)
+
+**Request.** The owner hit `ModuleNotFoundError: No module named 'reportlab'`
+after a `git pull` + `./scripts/setup.sh`, asked for the PDF dependency to be
+installed properly and verified in a Kali Docker sandbox, then asked why setup
+was split across `bootstrap.sh`/`setup.sh`/`install-tools.sh` and asked for one
+script that does everything.
+
+**Cause.** `reportlab` was already declared in `pyproject.toml` (D107) and
+installed by `bootstrap.sh`; `setup.sh` ran that script only when
+`.venv/bin/reconkit` was absent, so an existing venv was never re-synced after
+the pull. The traceback came from importing `reconkit.cli`, which imports
+`pdf_report`, which imports `reportlab`.
+
+**Fix.**
+
+- `scripts/setup.sh` is now the only setup script: the environment half and the
+  `tools.yaml` installer half are merged, with one argument parser and one
+  usage block. `bootstrap.sh` and `install-tools.sh` are deleted.
+- It writes `.venv/.reconkit-deps` (SHA-256 of `pyproject.toml`) after a
+  successful install and bootstraps again when the hash differs, the stamp is
+  missing, or `import reconkit.cli` fails. A matching venv is left alone.
+- Two bugs the container run found and this batch fixes: the bootstrap's last
+  line piped through `awk` (minimal Kali/Debian images do not ship it, and
+  `set -e` turned that into a failed install), and `git config` ran without a
+  `.git` check (a source tarball aborted).
+- `reconkit doctor` now reports the PDF dependency: a Dependencies table row
+  (`reportlab 5.1.0` or `missing`) and a `pdf` key in `doctor --json`, with
+  `cli.py` importing `pdf_report` lazily at the two write sites. A missing
+  reportlab is now a doctor row and a failed PDF, not an ImportError that
+  stops every command.
+
+**Reproduction (before the merge).** A temp checkout with the committed
+`setup.sh`, a venv whose CLI import fails, and scripts that log when they run:
+
+```
+--- OLD setup.sh, stale venv (python import fails):
+install-tools.sh
+--- NEW setup.sh, same venv:
+bootstrap.sh
+install-tools.sh
+```
+
+The old wrapper never reached the environment half; the fixed one does. After
+the merge the same decision is covered by the tests below (the fake venv logs
+`pip install`), so no network is needed.
+
+**Tests (`tests/test_package.py`, all pass).**
+
+- `test_setup_bootstraps_a_fresh_checkout` (fake `python3` creates the venv)
+- `test_setup_skips_environment_when_the_venv_matches_pyproject`
+- `test_regression_setup_rebootstraps_a_venv_without_a_stamp` (the user's case)
+- `test_regression_setup_rebootstraps_when_pyproject_changes`
+- `test_regression_setup_rebootstraps_when_the_cli_import_fails`
+- `test_regression_setup_does_not_use_awk` (PIT-38)
+- `test_install_plan_checks_each_tool_by_its_own_name` (adapted: the merged
+  script is called with a fake venv and a fake doctor)
+- `test_documented_scripts_are_executable` (now `setup.sh` only)
+- `tests/test_doctor.py`: `test_pdf_row_reports_the_installed_reportlab`,
+  `test_pdf_row_reports_missing_and_says_what_still_works`,
+  `test_pdf_support_is_missing_when_reportlab_cannot_import`,
+  `test_doctor_json_carries_the_pdf_dependency`
+- `tests/test_cli.py`: `test_cli_imports_the_pdf_writer_lazily` (AST guard)
+
+**Gate (after the change).**
+
+```
+$ pytest -q
+1055 passed in 47.38s
+
+$ FORCE_TERMINAL=1 pytest -q
+1055 passed in 47.32s
+
+$ ruff check .
+All checks passed!
+
+$ ruff format --check .
+102 files already formatted
+
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+```
+
+**Kali container, full first run (attempt 1).** `kalilinux/kali-rolling`, a
+non-root `recon` user, `./scripts/setup.sh --yes`. The host had 9.3 GB free;
+the Go module + build caches filled it and the run died mid-way:
+
+```
+setup exit: 1
+not ready:
+  missing:findomain
+  ...
+  missing:nuclei
+FULL RUN CHECKS FAILED
+```
+
+That is the script reporting real failures, not a script bug: `df` showed
+`0` available. No image or container was deleted; only Docker's regenerable
+build cache was pruned (`docker builder prune -f`, 2.36 GB).
+
+**Kali container, full first run (attempt 2).** Same image and user. The
+container base pre-installed `python3`/`git`/`sudo`/`golang-go`, and a harness
+`go` wrapper cleared the Go build cache every five installs (the script itself
+is unmodified). Everything else was installed by `setup.sh`:
+
+```
+setup exit: 0
+== environment: venv + reconkit ==
+== apt (6) ==
+== go install (28) -> /home/recon/.reconkit/bin ==
+== pipx (1) ==
+== release archives (2) -> /home/recon/.reconkit/bin ==
+== source builds (1) -> /home/recon/.reconkit/bin ==
+== python checkouts (1) -> /home/recon/.reconkit/bin ==
+== verification: /work/reconkit/.venv/bin/reconkit doctor ==
+every installable registry binary is installed and identified correctly.
+PASS: setup.sh --yes exit 0
+
+===== 3. installed binaries in ~/.reconkit/bin =====
+32
+
+===== 4. reconkit doctor =====
+doctor exit: 0
+registry entries=48 binaries=40 usable=40 not-usable=0
+
+===== 5. real report.pdf from a mock scan =====
+scan exit: 0
+pdf: /work/reconkit/results/mock/example.com/20261121T182221Z/report.pdf
+PASS: report.pdf
+.../report.pdf: bytes=12912 pages=6
+
+===== result =====
+FULL RUN CHECKS PASSED
+```
+
+The fresh checkout contained `scripts/setup.sh` and neither
+`scripts/bootstrap.sh` nor `scripts/install-tools.sh`; the venv was created from
+scratch, `reportlab` was installed by the script, and the mock scan wrote a
+real 6-page PDF.
+
+**Doctor row (this host).**
+
+```
+$ reconkit doctor | grep -A4 Dependency
+┃ Dependency ┃ State           ┃ Effect                           ┃
+│ chromium   │ missing         │ shots will produce 0 screenshots │
+│ reportlab  │ reportlab 5.1.0 │ -                                │
+
+$ reconkit doctor --json | python -c '...'
+pdf: reportlab 5.1.0 | chromium: missing | missing: 0
+```
+
+**Deviation.** Recorded in `docs/PROGRESS.md` "D108": the three scripts were
+merged into one at the owner's request (docs/10 section 5 is rewritten), the
+container base pre-installed Go and the harness capped the Go build cache
+because the host has 9.3 GB free, and Docker's regenerable build cache was
+pruned for the same reason.

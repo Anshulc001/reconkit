@@ -133,6 +133,21 @@ def test_cli_version_flag_prints_current_version() -> None:
     assert result.stdout.strip() == f"reconkit v{__version__}"
 
 
+def test_cli_imports_the_pdf_writer_lazily() -> None:
+    """D108: a missing reportlab must not stop `doctor` or the text/JSON reports.
+
+    `reconkit.cli` used to import `pdf_report` (and therefore reportlab) at
+    module load, so one absent dependency killed every command before doctor
+    could report it.
+    """
+    tree = ast.parse(CLI.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            assert "pdf_report" not in (node.module or ""), node.lineno
+        elif isinstance(node, ast.Import):
+            assert all("pdf_report" not in alias.name for alias in node.names), node.lineno
+
+
 def test_cli_imports_only_the_allowed_layers() -> None:
     tree = ast.parse(CLI.read_text(encoding="utf-8"))
     imported: set[str] = set()
