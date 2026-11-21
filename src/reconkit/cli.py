@@ -848,7 +848,11 @@ def _run_scan(
                             "Stages run": ", ".join(stage.value for stage in stages),
                             "Tools requested": tools or "mode default",
                             "Minimum sources": str(min_sources),
-                            "URL probe limit": str(config.url_probe.max_urls),
+                            "URL probe limit": (
+                                "no cap"
+                                if config.url_probe.max_urls == 0
+                                else str(config.url_probe.max_urls)
+                            ),
                             "Report URL cap": (
                                 "no cap"
                                 if config.report.urls_max == 0

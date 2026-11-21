@@ -92,12 +92,13 @@ DEFAULT_RUNTIME_IDLE: dict[str, RuntimeClassConfig] = {
 class UrlProbeConfig(_StrictModel):
     """Bounds for the engine-owned `url_probe` stage (D23, docs/09 section 5).
 
-    `max_urls` bounds one pass (a bigger list is cut and the run says so),
-    `batch_size` how many URLs are committed per transaction, `threads` the
+    `max_urls` caps one pass; `0` means no cap (the default). When set, a bigger
+    list is cut and the run says so. `batch_size` is how many finished results
+    are committed per transaction (not a concurrency barrier), `threads` the
     concurrent requests and `timeout_s` the per-request HTTP timeout.
     """
 
-    max_urls: int = Field(default=5000, gt=0)
+    max_urls: int = Field(default=0, ge=0)
     batch_size: int = Field(default=200, gt=0)
     threads: int = Field(default=100, gt=0)
     timeout_s: int = Field(default=10, gt=0)

@@ -115,16 +115,18 @@ mismatched certificate is recorded as the fact it is instead of passing for a
 dead URL. It is engine-owned: there is no adapter and no `tools.yaml` entry, so it
 never appears in the Tools table, and it sends the honest `reconkit/<version>`
 User-Agent (docs/05 rule 8). Bounds come from the `url_probe:` block in
-`config.yaml`: `max_urls` (5000, the probe stops after that many and warns).
-`batch_size` (200), `threads` (100) and `timeout_s` (10) shape how it works, and
-one HTTP client is reused for the whole pass (D24). `--mock` never sends traffic,
+`config.yaml`: `max_urls` (0 = no cap; a positive value stops after that many and
+warns). `batch_size` (200), `threads` (100) and `timeout_s` (10) shape how it
+works: `threads` bounds requests in flight, and each answer is committed as it
+finishes in groups of `batch_size`, so a slow URL never stalls the next group.
+One HTTP client is reused for the whole pass (D24). `--mock` never sends traffic,
 so a mock run leaves every `status_code` at `NULL` and says so;
 `--skip-url-probe` does the same deliberately. `--reprobe-urls` probes **every**
 stored URL again instead of only the `NULL` ones, which is how a URL that has
 since gone dead is found; it overwrites the stored answer in place.
 
 The pass has a deadline (D26): `--phase-timeout`, or `timeouts.url_probe` (600 s)
-when the flag is absent. On timeout the batches that finished keep their answers,
+when the flag is absent. On timeout the answers already finished keep theirs,
 the URLs never reached stay `NULL`, the pass is recorded as `partial`, stderr
 prints `url_probe: timed out after Ns (M/N URL(s) probed)`, the run reports a
 completion gap (so `--json` says `complete_with_gaps`) and the exit code stays
@@ -338,7 +340,7 @@ appeared only in `urls` rows is not in it unless D58's second resolve reached it
 | `--user-agent STR` | Override the User-Agent for `httpx` and `pyprobe`. Without it, `config.yaml` `user_agent` applies, with `{version}` replaced by the package version (default `reconkit/{version}`) |
 | `--ffuf-wordlist PATH` | Wordlist for `ffuf` content discovery, replacing the packaged `common.txt` (about 110 paths, D13). The file must exist and be readable; a missing file is a failed `ffuf` result, never a silent fallback |
 | `--skip-url-probe` | Skip the `url_probe` stage for this run (D23): the archived URLs keep `status_code = NULL`, exactly as they were before the stage existed. Use it when the target's URL list is huge or the operator only wants discovery. The stage command `urls` never probes (it has no probe stage), so the flag is accepted and has nothing to skip |
-| `--reprobe-urls` | Probe every stored URL again, not only the ones with `status_code = NULL` (D24), so a URL that answered once and has since gone dead is found. It overwrites `urls.status_code` in place and keeps the usual `max_urls` cut and warning. With `--skip-url-probe` it has no stage to act on, so that combination prints `warning: --reprobe-urls has no effect with --skip-url-probe` and the run continues |
+| `--reprobe-urls` | Probe every stored URL again, not only the ones with `status_code = NULL` (D24), so a URL that answered once and has since gone dead is found. It overwrites `urls.status_code` in place and applies `max_urls` when one is configured (`0` = no cap), with the usual cut warning. With `--skip-url-probe` it has no stage to act on, so that combination prints `warning: --reprobe-urls has no effect with --skip-url-probe` and the run continues |
 | `--resolvers PATH` | Resolver list for `massdns` and `puredns`, replacing the packaged `src/reconkit/data/resolvers.txt` (16 public resolvers, D16). The file must exist and be readable; a missing file is a failed `massdns`/`puredns` result, never a silent fallback to the system resolver |
 | `--redact-headers` / `--show-headers` | Hide (default) or reveal header values in JSON and UI output |
 | `--min-sources N` | Hide results confirmed by fewer than N tools |

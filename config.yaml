@@ -37,8 +37,8 @@ runtime_idle:
 # URL liveness probe (D23, docs/09 section 5). One GET per stored URL that has
 # no status yet; a URL that does not answer is stored as -1 and never retried.
 url_probe:
-  max_urls: 5000      # a bigger list is cut, and the run says so
-  batch_size: 200     # URLs committed per transaction
+  max_urls: 0         # 0 = no cap; a positive value cuts the list and says so
+  batch_size: 200     # finished results committed per transaction
   threads: 100        # concurrent requests (raised from 50 on 2026-11-18, D24)
   timeout_s: 10       # per-request HTTP timeout
 

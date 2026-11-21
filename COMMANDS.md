@@ -139,7 +139,7 @@ any mode; they need an explicit `--tools sqlmap` etc.
 ```bash
 --phase-timeout <seconds>      # stage time limit (config default: 1800s; per-stage overrides in config.yaml)
                                # a stage killed at that deadline exits 5 by design (R13): raise it for a slow target
-                               # a timed-out url_probe keeps finished batches, reports a gap, exits 0;
+                               # a timed-out url_probe keeps finished answers, reports a gap, exits 0;
                                # a probe-ONLY run with nothing usable exits 4 (docs/02_CLI_UX.md:132)
 --mock                         # fixtures only; a target with no fixture is skipped, exit 0
 --no-keys                      # force free-tier behavior even when .env has keys
@@ -483,16 +483,17 @@ $ sqlite3 recon.db "SELECT status_code, COUNT(*) FROM urls GROUP BY status_code"
 -1|4021
 ```
 
-Bounds and switches live in `config.yaml` under `url_probe:` (`max_urls` 5000,
-`batch_size` 200, `threads` 100, `timeout_s` 10), and one HTTP client is reused
-for the whole pass (D24). `--mock` never touches the network, so a mock run
+Bounds and switches live in `config.yaml` under `url_probe:` (`max_urls` 0 = no
+cap, `batch_size` 200, `threads` 100, `timeout_s` 10), and one HTTP client is
+reused for the whole pass (D24). Answers are committed as they finish in groups
+of `batch_size`, so one slow URL does not hold up the rest. `--mock` never touches the network, so a mock run
 leaves every `status_code` at `NULL`. `--reprobe-urls` overwrites the stored
 answer in place, which is how a URL that has since gone dead is found; adding
 `--skip-url-probe` makes it a no-op and the run says so.
 
 The pass is bounded by `--phase-timeout`, or by `timeouts.url_probe` (600 s) in
 `config.yaml` when the flag is absent (D26). A pass that hits the deadline keeps
-every batch it already committed, leaves the rest `NULL`, prints
+every answer it already committed, leaves the rest `NULL`, prints
 `url_probe: timed out after Ns (M/N URL(s) probed)`, reports a completion gap and
 still exits 0.
 

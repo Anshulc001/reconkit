@@ -4,6 +4,20 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-21, D114): **`url_probe` no longer waits for a 200-URL
+  batch, and its URL cap defaults to none.** `threads` still bounds requests in
+  flight; each finished answer is committed in groups of `batch_size`, so one
+  slow URL (or its `timeout_s` tail) no longer stalls the next group.
+  `max_urls: 0` (new default) means no cap; a positive value keeps the old
+  cut-and-warn behavior. Measured on the same 2,848-candidate `slice.bank.in`
+  pool: **335 s -> 177 s** (1.9x); the 158 s saved is about 15 batches x one
+  10 s tail. Of 3,013 stored URLs, 159 are out-of-target and 6 sit on
+  DEAD/DNS_ONLY hosts, so 2,848 were probed. Tests:
+  `test_url_probe_commits_finished_answers_before_a_slow_one` and
+  `test_url_probe_with_no_cap_probes_every_url`; the timeout regression still
+  keeps finished answers. Gate: 1262 passed plain and `FORCE_TERMINAL=1`, 3
+  skipped, ruff/format/mypy clean, invariants 195 passed. Next action: none.
+
 - Status (2026-11-21, D113): the contribution workflow is unconditional and
   version/tag/docs must agree. AGENTS.md hard rule 11: every change, whether or
   not the request asks for it, keeps the pipeline working, implements the

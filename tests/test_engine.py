@@ -3863,6 +3863,23 @@ async def test_url_probe_uses_the_url_probe_config_bounds(tmp_path: Path) -> Non
     assert int(left[0][0]) == 3
 
 
+async def test_url_probe_with_no_cap_probes_every_url(tmp_path: Path) -> None:
+    """`max_urls: 0` means no cap: every candidate is probed, with no warning."""
+    calls: list[str] = []
+    transport = _probe_transport({}, calls)
+    engine = _probe_engine(
+        tmp_path,
+        [f"https://www.example.com/{index}" for index in range(5)],
+        transport=transport,
+    )
+    engine.config.url_probe.max_urls = 0
+    summary = await engine.run("example.com", ScanOptions(active=True))
+    assert len(calls) == 5
+    assert not [note for note in summary.warnings if "probed the first" in note]
+    left = rows(engine.store, "SELECT COUNT(*) FROM urls WHERE status_code IS NULL")
+    assert int(left[0][0]) == 0
+
+
 async def test_url_probe_is_skipped_in_mock_mode(tmp_path: Path) -> None:
     """`--mock` sends no traffic and leaves every status NULL, saying so."""
     calls: list[str] = []
@@ -4048,6 +4065,37 @@ async def test_url_probe_timeout_keeps_the_batches_it_finished(tmp_path: Path) -
     assert stored == {"https://www.example.com/fast": 200, "https://www.example.com/slow": None}
     assert any("(1/2 URL(s) probed)" in note for note in summary.warnings)
     assert summary.exit_code is ExitCode.SUCCESS
+
+
+async def test_url_probe_commits_finished_answers_before_a_slow_one(tmp_path: Path) -> None:
+    """No batch barrier: fast answers land while a slow URL is still pending."""
+    calls: list[str] = []
+    transport = _slow_transport({"https://www.example.com/slow": 1.2}, calls)
+    engine = _probe_engine(
+        tmp_path,
+        [
+            "https://www.example.com/slow",
+            "https://www.example.com/fast-a",
+            "https://www.example.com/fast-b",
+        ],
+        transport=transport,
+    )
+    engine.config.url_probe.batch_size = 2
+    task = asyncio.create_task(engine.run("example.com", ScanOptions(active=True)))
+    await asyncio.sleep(0.3)
+    mid = {
+        str(row["url"]): row["status_code"]
+        for row in rows(engine.store, "SELECT url, status_code FROM urls")
+    }
+    assert mid["https://www.example.com/fast-a"] == 200
+    assert mid["https://www.example.com/fast-b"] == 200
+    assert mid["https://www.example.com/slow"] is None
+    await task
+    final = {
+        str(row["url"]): row["status_code"]
+        for row in rows(engine.store, "SELECT url, status_code FROM urls")
+    }
+    assert final["https://www.example.com/slow"] == 200
 
 
 async def test_url_probe_uses_the_config_timeout_when_no_flag_is_given(tmp_path: Path) -> None:

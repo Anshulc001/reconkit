@@ -1255,7 +1255,7 @@ Tools table, because there is no external program to run.
 | Write | `urls.status_code` = the HTTP status, `-1` when unreachable, `-2` when its certificate did not verify |
 | Transport | one `GET` per URL through httpx, honest `reconkit/<version>` UA, no retries |
 | Report counters | `urls_probed_this_run` and, when non-zero, `urls_skipped_already_probed` (D78, 2026-11-20): the same numbers the header prints (`urls: N total, M probed this run, K already probed`). Under `--reprobe-urls` the skipped count is 0. The pass never re-checks a stored answer unless asked. |
-| Bounds | `config.yaml` `url_probe:` - `max_urls` 5000, `batch_size` 200, `threads` 100, `timeout_s` 10 |
+| Bounds | `config.yaml` `url_probe:` - `max_urls` 0 (no cap), `batch_size` 200, `threads` 100, `timeout_s` 10. `batch_size` is the commit group size only: answers are committed as they finish, so a slow URL cannot stall a group behind it. |
 | Off switch | `--skip-url-probe`; `--reprobe-urls` probes every stored URL, not only the `NULL` ones |
 | Mock | sends nothing, leaves `status_code` `NULL`, says so on stderr |
 
@@ -1270,6 +1270,13 @@ the same 158 stored URLs it took **9.19 s** and called the 58 certificate-invali
 URLs `200`, while the Python transport took **3.44 s** with `-2` for all 58. The
 probe therefore keeps the Python client, reuses one client per pass and raises
 `threads` from 50 to 100.
+
+**One answer at a time, no batch barrier (D114, 2026-11-21).** `threads` bounds
+requests in flight, and each finished answer is committed in groups of
+`batch_size`. The earlier loop gathered a 200-URL batch and waited for its
+slowest request before starting the next one, so one `timeout_s` tail cost every
+group; on the 2,848-candidate `slice.bank.in` pool that measured **335 s**, and
+the streaming loop measured **177 s** on the same pool and target.
 
 **DEAD-host filter (D54, 2026-11-19).** The probe skips a URL whose host the latest
 state pass already recorded as `DEAD` - that host did not resolve or went silent, so

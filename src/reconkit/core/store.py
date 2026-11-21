@@ -1140,7 +1140,7 @@ class Store:
         return int(row["id"])
 
     def probe_candidates(
-        self, target_id: int, *, limit: int, reprobe: bool = False
+        self, target_id: int, *, limit: int | None = None, reprobe: bool = False
     ) -> ProbeCandidates:
         """The target's URLs the `url_probe` stage should send a request to (D23).
 
@@ -1156,7 +1156,7 @@ class Store:
         are enough to skip: a URL whose host has no `subdomains` row (never
         resolved), whose host is ALIVE/SHUT_DOWN/UNKNOWN, or whose host cannot
         be parsed is kept. The filter runs before the limit is filled, so a
-        skipped row never eats a probe slot.
+        skipped row never eats a probe slot. `limit=None` means no cap.
         """
         if reprobe:
             sql = "SELECT id, url FROM urls WHERE target_id = ? ORDER BY id"
@@ -1171,7 +1171,7 @@ class Store:
                 skipped += 1
                 continue
             found.append({"id": int(row["id"]), "url": url})
-            if len(found) >= limit:
+            if limit is not None and len(found) >= limit:
                 break
         return ProbeCandidates(rows=found, skipped_unreachable=skipped)
 

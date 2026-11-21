@@ -2596,15 +2596,14 @@ class Engine:
         goes through (docs/05 rule 2).
         """
         settings = self.config.url_probe
-        plan = self.store.probe_candidates(
-            target_id, limit=settings.max_urls + 1, reprobe=opts.reprobe_urls
-        )
+        limit = settings.max_urls + 1 if settings.max_urls else None
+        plan = self.store.probe_candidates(target_id, limit=limit, reprobe=opts.reprobe_urls)
         rows = plan.rows
         if plan.skipped_unreachable:
             self._progress(
                 f"url_probe: skipping {plan.skipped_unreachable} URL(s) whose host is unreachable"
             )
-        if len(rows) > settings.max_urls:
+        if settings.max_urls and len(rows) > settings.max_urls:
             rows = rows[: settings.max_urls]
             note = (
                 f"url_probe: probed the first {settings.max_urls} URL(s) only; "
@@ -2665,21 +2664,44 @@ class Engine:
 
         self._progress(f"url_probe: probing {len(pending)} URL(s)")
         done = 0
-        # One client for the whole pass: a fresh connection pool per batch paid
-        # its TLS setup again for every 200 URLs (D24).
+        buffer: list[tuple[int, int]] = []
+
+        def commit() -> None:
+            """Flush finished answers; `batch_size` is the transaction size only."""
+            nonlocal done
+            if not buffer:
+                return
+            with self.store.transaction():
+                for url_id, status in buffer:
+                    self.store.set_url_status(url_id, status)
+            done += len(buffer)
+            buffer.clear()
+            self._url_probe_progress = (done, len(pending))
+            if done < len(pending):
+                self._progress(f"url_probe: {done}/{len(pending)} URL(s) probed")
+
+        # One client for the whole pass (D24). Results are committed as they
+        # come in: a 200-URL gather used to make the slowest URL in each group
+        # stall the next group, so one 10 s timeout cost the whole pass ~10 s.
         async with self._url_probe_client(settings) as client:
-            for start in range(0, len(pending), settings.batch_size):
-                batch = pending[start : start + settings.batch_size]
-                answers = await self._probe_url_batch(client, batch, settings)
-                # Commit per batch, inside the loop: a pass killed by its
-                # deadline keeps every batch that finished (D26).
-                with self.store.transaction():
-                    for url_id, status in answers:
-                        self.store.set_url_status(url_id, status)
-                done += len(answers)
-                self._url_probe_progress = (done, len(pending))
-                if done < len(pending):
-                    self._progress(f"url_probe: {done}/{len(pending)} URL(s) probed")
+            semaphore = asyncio.Semaphore(settings.threads)
+
+            async def probe(row: dict[str, object]) -> tuple[int, int]:
+                async with semaphore:
+                    return await self._probe_one(client, int(cast(int, row["id"])), str(row["url"]))
+
+            tasks = [asyncio.create_task(probe(row)) for row in pending]
+            try:
+                for finished in asyncio.as_completed(tasks):
+                    buffer.append(await finished)
+                    if len(buffer) >= settings.batch_size:
+                        commit()
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                # A pass killed by its deadline keeps every finished answer (D26).
+                commit()
         self._progress(f"url_probe: finished {done} URL(s)")
         self.store.finish_scan_run(run_id, "completed", finished_at=self._now())
         return outcome, None
@@ -2723,30 +2745,15 @@ class Engine:
             transport=self._url_probe_transport,
         )
 
-    async def _probe_url_batch(
-        self,
-        client: httpx.AsyncClient,
-        batch: list[dict[str, object]],
-        settings: UrlProbeConfig,
-    ) -> list[tuple[int, int]]:
-        """One GET per URL, bounded by `threads`; an answer code per URL."""
-        semaphore = asyncio.Semaphore(settings.threads)
-
-        async def one(url_id: int, url: str) -> tuple[int, int]:
-            async with semaphore:
-                try:
-                    response = await client.get(url)
-                except (httpx.HTTPError, OSError, ValueError) as exc:
-                    if _certificate_not_verified(exc):
-                        return (url_id, UNTRUSTED)
-                    return (url_id, UNREACHABLE)
-                return (url_id, int(response.status_code))
-
-        return list(
-            await asyncio.gather(
-                *(one(int(cast(int, row["id"])), str(row["url"])) for row in batch)
-            )
-        )
+    async def _probe_one(self, client: httpx.AsyncClient, url_id: int, url: str) -> tuple[int, int]:
+        """One GET; an answer code, `UNREACHABLE` or `UNTRUSTED`."""
+        try:
+            response = await client.get(url)
+        except (httpx.HTTPError, OSError, ValueError) as exc:
+            if _certificate_not_verified(exc):
+                return (url_id, UNTRUSTED)
+            return (url_id, UNREACHABLE)
+        return (url_id, int(response.status_code))
 
     @staticmethod
     def _url_host(url: str) -> str:

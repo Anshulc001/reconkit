@@ -11581,3 +11581,72 @@ The version was aligned to the tag the owner chose: `__version__`,
 and the annotated tag is `v1.0.0` on the release commit; `v1.1.0` was deleted
 locally and on GitHub. GitHub Actions on that commit: success for 3.11, 3.12
 and 3.13.
+
+## 2026-11-21 - url_probe streams answers and has no default URL cap (D114)
+
+Owner: keep the Python client and `-1`/`-2`, remove the batch barrier, test it
+on the ~2.5k `slice.bank.in` URLs they already had, and remove the 5,000-URL
+cap. The old loop gathered every 200-URL group and waited for its slowest
+request before starting the next one, so one 10 s timeout stalled a whole group;
+2,848 candidates are 15 groups.
+
+Code: `Engine._run_url_probe` now creates one task per candidate, bounds them
+with a `threads` semaphore, consumes `asyncio.as_completed`, and commits each
+finished answer in groups of `batch_size`. `_probe_url_batch` became
+`_probe_one`. A timeout flushes the answers already finished before the
+`CancelledError` propagates. `UrlProbeConfig.max_urls` defaults to `0` (no cap),
+`Store.probe_candidates(limit=None)` means unlimited, and `config.yaml`,
+docs/02, docs/03, docs/09, COMMANDS.md and the doctor's `URL probe limit` row
+(now `no cap`) were updated.
+
+Real measurement, same target and same 2,848-candidate set (the temp DB was a
+copy; the operator's `recon.db` was not touched):
+
+```
+$ reconkit active -d slice.bank.in --no-scope \
+    --config /tmp/slice-bench-config.yaml \
+    --exclude subs,dns,live,tech,urls --reprobe-urls
+wall_ms=177586 rc=4
+url_probe: skipping 6 URL(s) whose host is unreachable
+url_probe: probing 2848 URL(s)
+... 14 progress lines ...
+url_probe: finished 2848 URL(s)
+
+scan_runs: url_probe 177.0s (old run on the same pool: 335.0s)
+```
+
+`3013` stored URLs = `159` out-of-target URLs (kept in `urls`, never probed) +
+`6` URLs on DEAD/DNS_ONLY hosts (skipped) + `2848` probed. The 158 s saved is
+about 15 groups x one 10 s tail, which matches the barrier diagnosis. The
+benchmark's all-stages-excluded shape selected zero tools and therefore exited
+`4` (the no-tool code); the probe itself completed with no timeout and kept
+every answer.
+
+Caveat: the immediate second pass saw **35 `429`s** (the original first pass saw
+none), and 27 previously-`200` URLs became `429`; Cloudflare rate limiting from
+re-probing the same pool is the likely cause. The timing and candidate set are
+the comparison; the status deltas are not a claim that the loop changes status
+classifications. A first pass on a fresh URL set is the meaningful run.
+
+Tests: `test_url_probe_commits_finished_answers_before_a_slow_one` proves a
+fast answer lands while a slow URL is still pending (commit group 2, slow URL
+1.2 s, DB checked at 0.3 s); `test_url_probe_with_no_cap_probes_every_url`
+proves `max_urls: 0` probes every candidate with no cut warning. The existing
+timeout test still keeps the finished answer with `batch_size = 1`.
+
+Gate:
+
+```
+$ pytest -q
+1262 passed, 3 skipped in 48.95s
+$ FORCE_TERMINAL=1 pytest -q
+1262 passed, 3 skipped in 48.20s
+$ ruff check .
+All checks passed!
+$ ruff format --check .
+103 files already formatted
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+$ pytest -q tests/test_invariants.py
+195 passed, 3 skipped in 0.20s
+```
