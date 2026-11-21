@@ -295,19 +295,19 @@ reconkit full -d testfire.net
 ### Full scan ignoring the scope file
 
 ```bash
-reconkit full -d target.com --no-scope --only-alive --status-codes 200,301,302
+reconkit full -d target.example --no-scope --only-alive --status-codes 200,301,302
 ```
 
 ### Port scan
 
 ```bash
-reconkit full -d target.com --no-scope --ports 80,443,8080,8443 --only-alive
+reconkit full -d target.example --no-scope --ports 80,443,8080,8443 --only-alive
 ```
 
 ### Authenticated requests
 
 ```bash
-reconkit active -d target.com --no-scope \
+reconkit active -d target.example --no-scope \
   --header "Authorization: Bearer $TOKEN" \
   --header "Cookie: session=abc123" \
   --user-agent "Mozilla/5.0 (custom recon)"
@@ -318,8 +318,8 @@ Only httpx and pyprobe send these headers.
 ### Specific tools / skip noisy ones
 
 ```bash
-reconkit full -d target.com --no-scope --tools naabu,nuclei,httpx
-reconkit full -d target.com --no-scope --exclude ffuf,nikto,gowitness
+reconkit full -d target.example --no-scope --tools naabu,nuclei,httpx
+reconkit full -d target.example --no-scope --exclude ffuf,nikto,gowitness
 ```
 
 ### Several domains
@@ -357,13 +357,13 @@ reconkit full -d example.com --mock --no-scope
 ### With a custom config and DB
 
 ```bash
-reconkit active -d target.com --config my-config.yaml --db my-scan.db
+reconkit active -d target.example --config my-config.yaml --db my-scan.db
 ```
 
 ### As root (only masscan needs it)
 
 ```bash
-echo kali | sudo -S env PATH=$PATH HOME=$HOME reconkit full -d target.com --no-scope
+echo kali | sudo -S env PATH=$PATH HOME=$HOME reconkit full -d target.example --no-scope
 ```
 
 `sudo` changes `HOME`, which breaks `~/.reconkit/bin/` discovery and the tool

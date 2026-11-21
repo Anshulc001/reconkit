@@ -4,10 +4,21 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-21, D116): **real target names removed from the tracked
+  tree.** D79's scrub missed 54 lines in 7 files; all real-target variants are
+  now `target.example`, and the older registrable `.com` placeholder was
+  migrated to the same reserved name. Scratch names derived from the target are
+  `target-*`. A grep for the removed target names returns nothing; the only
+  remaining matches are the ordinary English word. Public demo and vendor
+  domains (`testfire.net`, `github.com`, `example.com`) are intentionally left.
+  The untracked `scope.yaml`, local `recon.db`/`results/` and git history still
+  contain the real target; removing it from history needs a filter rewrite and
+  force-push, not done. Docs/comments only; gate 1262 passed, 3 skipped.
+
 - Status (2026-11-21, D115): **clean-DB and clean-results first pass
   verified.** Backed up `recon.db` and `results/` to `/tmp`, wiped the DB
   (0 targets, 0 subdomains, 0 URLs, 0 scan runs) and removed `results/`, then
-  ran the real `reconkit active -d slice.bank.in --no-scope`. Exit 0, **522 s**
+  ran the real `reconkit active -d target.example --no-scope`. Exit 0, **522 s**
   wall; stages: subs 23 s, dns 1 s, live 34 s, tech 53 s, urls 198 s,
   `url_probe` **178 s**. The probe reported `probing 2853 URL(s)` and
   `finished 2853 URL(s)`; 6 URLs on unreachable hosts were skipped, with no cap
@@ -22,7 +33,7 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
   flight; each finished answer is committed in groups of `batch_size`, so one
   slow URL (or its `timeout_s` tail) no longer stalls the next group.
   `max_urls: 0` (new default) means no cap; a positive value keeps the old
-  cut-and-warn behavior. Measured on the same 2,848-candidate `slice.bank.in`
+  cut-and-warn behavior. Measured on the same 2,848-candidate `target.example`
   pool: **335 s -> 177 s** (1.9x); the 158 s saved is about 15 batches x one
   10 s tail. Of 3,013 stored URLs, 159 are out-of-target and 6 sit on
   DEAD/DNS_ONLY hosts, so 2,848 were probed. Tests:
@@ -65,7 +76,7 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
   and `udp/53` cannot collapse. A mock target with no matching fixture is now
   `SKIPPED` (`no fixture for <target>`), never a failed tool. Measured on the
   real DB: 10 duplicate URL groups before, 0 after a fresh scan; run 2 on the
-  existing DB added 0 non-canonical URLs. Fresh `slice.bank.in`: 15 hosts, 12
+  existing DB added 0 non-canonical URLs. Fresh `target.example`: 15 hosts, 12
   ALIVE, 3057 URLs / 0 duplicate groups / 0 ports / 0 IP rows, exit 0.
   `pentest-ground.com` (authorized, own DB): 43 hosts, 6 ALIVE, 390 URLs / 0
   duplicates, exit 0. Mock on `example.org` (no scope) and `testfire.net`
@@ -81,10 +92,10 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
   engine drops those hosts before the ports stage (docs/05 rule 7, which was
   documented but never implemented), and `host_rows()` returns no ports for a
   fronted host plus the note `CDN: <waf>`. Stored rows are
-  kept. This is the `slice.bank.in` report showing 2982 "open" ports for
-  `b.slice.bank.in`: Cloudflare (172.65.64.158) answered TCP on **every** port
+  kept. This is the `target.example` report showing 2982 "open" ports for
+  `b.target.example`: Cloudflare (172.65.64.158) answered TCP on **every** port
   tried (1, 3, 7, 9, 31337, 65389, all ~184 ms), so the scan recorded the
-  edge's listeners. All 10 ALIVE `slice.bank.in` hosts are Cloudflare and now
+  edge's listeners. All 10 ALIVE `target.example` hosts are Cloudflare and now
   report 0 ports. Tests: `test_cdn_fronted_host_reports_no_edge_ports`,
   `test_ports_stage_skips_cdn_waf_fronted_hosts`. Gate: 1058 tests plain and
   `FORCE_TERMINAL=1`, ruff/format/mypy clean. Next action: none.
@@ -229,7 +240,7 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
   here let the first commit of `setup.sh` land as 100644. Next action: none.
 
 - Status (2026-11-20, D96): **a standalone stage command now uses stored
-  hosts.** `reconkit ports -d slice.bank.in --active` after a completed active
+  hosts.** `reconkit ports -d target.example --active` after a completed active
   scan exited 0 with 0 tools and `Ports -`: `_stage_hosts(PORTS)` only saw the
   in-memory `alive` set, which a `live`-less run never fills, and
   `_seed_from_store` was `--resume`-only. Any run without `subs`/`dns`/`live`
@@ -403,8 +414,8 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 - Status (2026-11-20, D79): **no real target names remain in the repo.** The two
   targets used for real verification (a university domain and a bank domain) and
   the mock fixture name leaked into comments, fixtures, scripts and docs: 219
-  matching lines in 22 files. All are now `example.com` / `target.com` /
-  `example.test` (subdomains keep their label: `b.target.com`,
+  matching lines in 22 files. All are now `example.com` / `target.example` /
+  `example.test` (subdomains keep their label: `b.target.example`,
   `www.example.com`). The six mock fixtures are `example.test.*`, the capture
   script is `scripts/capture_example.sh`, and the fixture title is `Example
   Bank`. No code logic changed; suite stays 1023. The batch named a pyprobe
@@ -455,15 +466,15 @@ written authorization); waybackurls CDX (upstream); urlfinder idle (deferred by 
   Five non-doc files changed, exactly the item's limit. See D71 in REVIEW_LOG.
 - Status (2026-11-19, D70): **a URL-derived host gets DNS and (in active) a live check - never tech, never a crawl.**
   The D58 pass runs after `urls`, so the last annotating stage has already finished; measured
-  `api`/`assets.target.com` as UNKNOWN with no status row and empty tech. Not implemented: a tech/crawl
+  `api`/`assets.target.example` as UNKNOWN with no status row and empty tech. Not implemented: a tech/crawl
   step needs stage machinery (its own `scan_runs`/`tool_runs`, budget, per-host scope). New finding: a
   plain follow-up run cannot pick the host up either - `discovered` is seeded from the store only for
   `--resume`, and `url_only_hosts()` skips an existing row. Documented as a gap in docs/09 with the
   enabler. Suite 999 (no code change).
 - Status (2026-11-19, D69): **an ALIVE host keeps the HTTP status the live pool saw.**
   `_persist_live` used to hand `_write_host` the first ALIVE `HostStatusRecord` in
-  completion order, and `httprobe`/`tlsx` carry no status, so `target.com` run 203
-  stored NULL for all 9 ALIVE hosts while `url_probe` had 200 for `b.target.com`.
+  completion order, and `httprobe`/`tlsx` carry no status, so `target.example` run 203
+  stored NULL for all 9 ALIVE hosts while `url_probe` had 200 for `b.target.example`.
   `_best_live_record()` now ranks records: ALIVE, then 2xx < 3xx < other known code <
   no code, tie by tool name. `tech` was already innocent (`update_host_extras` never
   writes `status_code`) and now has a guard test. Suite 996 -> 999. Historical rows
@@ -523,9 +534,9 @@ refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992
   Passive resolves and stops - DNS already happens in passive, HTTP does not. Bounded: candidates are read once, never
   re-extracted, no new config key, and the pass runs under a stage budget (`urls` passive, `url_probe` active) that
   never fails the run. Rows keep `provenance = 'dns'` plus one `subdomain_sources` sentinel `url-derived`. Suite
-  974 -> 978, `ruff`/`format`/`mypy` clean, `scope.yaml` byte-identical, no scan run. On `target.com` the count is the
+  974 -> 978, `ruff`/`format`/`mypy` clean, `scope.yaml` byte-identical, no scan run. On `target.example` the count is the
   3 hosts / 43 URLs the analysis found. See D58 and the D58 entry in REVIEW_LOG.
-- Analysis (2026-11-19, no code): **a passive run stores URLs and never reads them back** - nothing in-run consumes them, so the 3 hosts that only the `target.com` archives revealed (`nb.target.com` 40 URLs, `api.target.com` 2, `assets.target.com` 1) have no row, no state and no report line; `url_probe` is its own stage after `urls`, absent from `MODE_STAGES["passive"]`. Liveness of a prepared hostname list works today via `reconkit live -l hosts.txt --active --scope ...` (each line is its own target; URLs are rejected by `validate_target`), while `export`, `db list` and `db export` are Part-8 stubs. Four stage-order options and a recommendation (Option 4 now, Option 2 as a separate dated decision) are in REVIEW_LOG and await an owner ruling; no flag, order or code changed.
+- Analysis (2026-11-19, no code): **a passive run stores URLs and never reads them back** - nothing in-run consumes them, so the 3 hosts that only the `target.example` archives revealed (`nb.target.example` 40 URLs, `api.target.example` 2, `assets.target.example` 1) have no row, no state and no report line; `url_probe` is its own stage after `urls`, absent from `MODE_STAGES["passive"]`. Liveness of a prepared hostname list works today via `reconkit live -l hosts.txt --active --scope ...` (each line is its own target; URLs are rejected by `validate_target`), while `export`, `db list` and `db export` are Part-8 stubs. Four stage-order options and a recommendation (Option 4 now, Option 2 as a separate dated decision) are in REVIEW_LOG and await an owner ruling; no flag, order or code changed.
 
 - Status (2026-11-19, D57): **a timeout from an external API is a gap, so one slow third party no longer exits 5.**
   The final run's only failure was `crtsh: request timed out` (30.71 s); `HttpAdapter._request` now raises
@@ -703,14 +714,14 @@ There is no `core/consensus.py`: consensus lives in `engine.py`. Order and modul
 
 ### D110 (2026-11-21) - a CDN edge is not a port finding
 
-- **What the owner saw.** `reconkit active -d slice.bank.in` reported ports
+- **What the owner saw.** `reconkit active -d target.example` reported ports
   `1,3,4,6,7,9,13,17,...` on ten hosts — impossible as an origin's service list.
 - **Cause.** `docs/05` rule 7 and `docs/09` both require the ports stage to skip
   a host whose stored status has `waf` set. The rule was never implemented:
   `engine.py` had no `waf` reference outside the tech merge. So the stage
   scanned Cloudflare's edge IPs. Measured: `172.65.64.158` is
   `NetName: CLOUDFLARENET` and accepted TCP on ports 1, 3, 7, 9, 31337 and
-  65389 in ~184 ms each; the DB held 2982 ports for `b.slice.bank.in`.
+  65389 in ~184 ms each; the DB held 2982 ports for `b.target.example`.
 - **Fix (two read-side gates, no data deleted).**
   1. `Store.waf_fronted_hosts(target_id)` returns hosts whose latest
      `host_status_history.waf` is non-empty. `engine.run()` drops them from the
@@ -938,7 +949,7 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
 
 - **D58 (2026-11-19): a bounded second resolve after `urls` gives URL-only hosts a row (owner's Option 2).** The
   prior analysis showed a passive run stores URLs and never reads them back, leaving 3 hosts and 43 URLs on
-  `target.com` with no row, no state and no report line because `_persist_urls()` writes only `urls`. One pass now
+  `target.example` with no row, no state and no report line because `_persist_urls()` writes only `urls`. One pass now
   runs immediately after the `urls` stage and before `url_probe`: `Store.url_only_hosts()` returns the distinct
   hostnames in this target's URL rows that have no `subdomains` row, the `dns` stage's own `dnspython` adapter resolves
   them and `_persist_dns()` applies the normal state rule (including the two-NXDOMAIN rule, so one miss never becomes
@@ -955,7 +966,7 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   diff. `--mock` runs both adapters in their mock form (fixtures, no network, no subprocess). Docs first in the same
   batch: docs/03 stage section, docs/09 section 5, docs/04 section 5. Suite 974 -> 978, four tests
   (`test_second_resolve_adds_url_only_hosts_in_passive`, `..._live_checks_new_hosts_in_active`,
-  `..._does_not_duplicate_existing_hosts`, `..._is_one_pass`). No scan re-run; the target.com numbers are the
+  `..._does_not_duplicate_existing_hosts`, `..._is_one_pass`). No scan re-run; the target.example numbers are the
   analysis counts, not a new measurement.
 
 - **D57 (2026-11-19): a timeout from an external API is a gap, so one slow third party stops exiting 5.** The final

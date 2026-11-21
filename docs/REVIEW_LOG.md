@@ -77,11 +77,11 @@ cannot be tested is marked UNTESTED and listed under "Not verified".
 | PIT-62 | PD `httpx` v1.12.0 looks like the faster probe transport but is not usable for liveness: it has **no `-insecure` flag** and skips TLS verification by default, so `https://testfire.net/` (certificate issued for `www.testfire.net`) returns `200`; a URL that fails produces **no JSON line at all**; and its default UA is a random browser string | The option list has `-probe`, `-tls-grab`, `-ztls` but no verification switch, and failures are simply absent from JSONL instead of being reported with an error field | The `url_probe` stage keeps the Python httpx transport (D24) - only it can distinguish "answered, certificate did not verify" (`-2`) from "no answer" (`-1`) with verification on. PD `httpx` remains the `httpx`/`httpx_tech` adapter, where a `200` and a technology list are all that is needed | `test_url_probe_marks_an_unverified_certificate_apart_from_unreachable`, `test_url_probe_sees_a_certificate_error_in_the_context_chain` |
 | PIT-55 | A real `reconkit run -d example.com --active --no-scope` exited `5` although nothing on this box was wrong: the three subs sources had been refused by their providers (`otx` 429, `hackertarget` free quota, `crtsh` 502), so the scan looked broken | The runner had one failure bucket: any 429/5xx or quota body became `FetchFailed` → `ToolStatus.FAILED`, and `_exit_code` counts every non-`ok` tool as a partial run. External availability was indistinguishable from a broken binary | `base.classify_external_gap()` is the one classifier (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx); `HttpAdapter` raises `ExternalServiceGap` for a 429/5xx, a parser raises it for a quota body, and `BaseToolAdapter.run` classifies a non-zero binary exit. All three return `ToolStatus.GAP`, which is excluded from the failure total and becomes a completion gap (exit `0`, `completion.gaps`, `tool_runs.status='gap'`). A 404, a refused connection, a TLS error and a parse error stay `failed` | `test_429_is_a_gap_and_not_retried` (`Regression: PIT-55`), `test_a_5xx_from_the_upstream_is_a_gap`, `test_a_404_is_still_a_failure_not_a_gap`, `test_hackertarget_quota_answer_is_a_gap`, `test_classify_external_gap_matches_only_third_party_signatures`, `test_an_external_service_gap_exits_zero_and_is_named_in_the_gaps`, `test_a_gap_never_masks_a_real_failure`, `test_v7_database_rebuilds_tool_runs_for_the_gap_status` |
 | PIT-54 | The first **real** ports run stored `80/443/8080` with no `service` and no `version`, so docs/09 section 5's "verified by a service fingerprint (nmap -sV, banner) raises confidence by one level" had never once fired: `nmap -sV` reported `Apache Tomcat/Coyote JSP engine 1.1` and the database showed an empty column | `_persist_ports` grouped records as `tool -> [state]` (strings, not the `PortRecord`s), so `service`/`version` were discarded before `Store.upsert_port` - which has accepted both since the table was created - could be given them | `_persist_ports` groups the `PortRecord`s themselves, `_fingerprint()` stores a value only when every reporting tool agrees (`nmap` `http` vs `smap` `http?` stores neither), and a fingerprint raises `LOW`->`MEDIUM`/`MEDIUM`->`HIGH` through `FINGERPRINT_BUMP` while never lifting `unconfirmed` | `test_a_service_fingerprint_is_stored_and_raises_port_confidence` (`Regression: PIT-54`), `test_two_tools_disagreeing_on_the_service_store_no_fingerprint` |
-| PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `target.com` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.target.com/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
+| PIT-64 | An ALIVE host's HTTP status was `-` in the report although the live pool had probed it: `target.example` run 203 stored `status_code = NULL` for all 9 ALIVE hosts (tech populated by the `tech` stage), while `url_probe` got 200 for `https://b.target.example/` in the same scan | `_persist_live` passed the **first ALIVE `HostStatusRecord` in completion order** to `_write_host`, and `httprobe`/`tlsx` records carry no status, so a statusless answer landing first discarded `pyprobe`/`httpx`'s 200 at random | `_best_live_record()` ranks the pass's records: ALIVE first, then 2xx < 3xx < any other known code < no code, then the tool name. A statusless record can never displace one with a code, and completion order cannot decide the row. `tech` still only merges tech/waf and never writes `status_code` | `test_alive_host_has_status_code_in_report` (`Regression: PIT-64`), `test_multiple_live_adapters_prefer_200_over_other`, `test_tech_stage_does_not_clear_host_status` |
 | PIT-65 | A tool installed anywhere but `~/.reconkit/bin` and the shell's `PATH` was invisible: `doctor` said `missing` for a `go install`/`pipx` copy, and a distro wrapper script could read `wrong program`, so the same install layout gave a different verdict per machine | `BinaryAdapter.binary_path()` and `toolcheck.installed_copy()` tried only the managed directory and `shutil.which`, and the identity probe environment was `{"HOME"}` only, so `~/go/bin`, `~/.local/bin` and a `/bin/sh` wrapper's `id`/`sudo` calls all depended on how the shell was started | `adapters.base.binary_search_dirs()` adds PATH, `$GOPATH/bin`, `~/.local/bin`, `~/go/bin`, `~/.gobin`, `/usr/local/bin`, `/usr/local/sbin`, `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`, `/snap/bin` and the `SUDO_USER` bin directories under sudo; both resolvers use that one list, and `identity_probe_env()` passes `HOME` plus a `PATH` led by the copy's own directory | `test_a_binary_outside_path_is_found_in_a_standard_dir` (`Regression: PIT-65`), `test_sudo_user_bin_dirs_are_searched`, `test_identity_probe_gets_a_path_led_by_the_program`, `test_installed_copy_finds_a_binary_outside_path` |
-| PIT-67 | `reconkit ports -d slice.bank.in --active` exited 0, ran **0 tools**, printed `Ports -` for all 13 hosts and wrote no `scan_runs` row, so a completed active scan looked like a ports scan that found nothing | `_stage_hosts(PORTS)` returns the in-memory `alive` set, which is only filled by a `live` stage in the same run; `_seed_from_store` ran only under `--resume`, so a standalone stage command had no hosts and `if stage is Stage.PORTS and not hosts: continue` skipped it silently | every run whose stage list contains none of `subs`/`dns`/`live` now seeds `discovered`/`alive` from `Store.subdomains()` (so `ports`/`tech`/`urls`/`vulns`/`shots` commands use what earlier runs stored). A `ports` run that still has no ALIVE host prints `ports: no ALIVE host from an earlier run; run \`reconkit live\` first` instead of exit 0 silence | `test_ports_stage_command_uses_stored_alive_hosts` (`Regression: PIT-67`) |
+| PIT-67 | `reconkit ports -d target.example --active` exited 0, ran **0 tools**, printed `Ports -` for all 13 hosts and wrote no `scan_runs` row, so a completed active scan looked like a ports scan that found nothing | `_stage_hosts(PORTS)` returns the in-memory `alive` set, which is only filled by a `live` stage in the same run; `_seed_from_store` ran only under `--resume`, so a standalone stage command had no hosts and `if stage is Stage.PORTS and not hosts: continue` skipped it silently | every run whose stage list contains none of `subs`/`dns`/`live` now seeds `discovered`/`alive` from `Store.subdomains()` (so `ports`/`tech`/`urls`/`vulns`/`shots` commands use what earlier runs stored). A `ports` run that still has no ALIVE host prints `ports: no ALIVE host from an earlier run; run \`reconkit live\` first` instead of exit 0 silence | `test_ports_stage_command_uses_stored_alive_hosts` (`Regression: PIT-67`) |
 | PIT-66 | A fresh `git clone` on Ubuntu could not follow the new install path: `./scripts/install-tools.sh` was `Permission denied`, and run with `bash` it skipped ProjectDiscovery's `httpx` and failed every apt tool | the script was committed `100644` while `bootstrap.sh` was `100755`; `have()` used `command -v`, so the project's own `httpx` dependency in `.venv/bin` counted as ProjectDiscovery's `httpx`; and apt installed all packages in one command, so four names Ubuntu does not package (`amass`, `findomain`, `massdns`, `rustscan`) aborted `nmap`, `nikto`, `sqlmap`, `whatweb`, `masscan` and `dig` too | the script is committed executable; the plan asks `reconkit doctor --json` and treats only `installed: yes` as present (managed/PATH fallback before reconkit exists); apt packages install one at a time with a warning naming each unavailable one; `amass` installs from its upstream Go module so Kali and Ubuntu share one source | `test_documented_scripts_are_executable`, plus the clean-clone sandbox rerun recorded under "2026-11-20 (D95)" |
-| PIT-68 | The real `slice.bank.in` database held **10 duplicate URL groups** (`https://b.slice.bank.in` and `https://b.slice.bank.in/`) although one page is one URL, and `gowitness` emitted the un-slashed form | `normalize_url()` lower-cased scheme/netloc but kept an empty path empty and a default port; `_persist_urls` wrote `record.url` straight into the unique key | `normalize_url()` returns one canonical spelling (lower-case scheme/host, no default port, empty path `/`, no fragment, no userinfo); `_persist_urls` canonicalizes before the unique key and updates a legacy row under its own spelling instead of inserting its twin | `test_regression_url_variants_store_one_canonical_row`, `test_every_fixture_parses_canonical_records` |
+| PIT-68 | The real `target.example` database held **10 duplicate URL groups** (`https://b.target.example` and `https://b.target.example/`) although one page is one URL, and `gowitness` emitted the un-slashed form | `normalize_url()` lower-cased scheme/netloc but kept an empty path empty and a default port; `_persist_urls` wrote `record.url` straight into the unique key | `normalize_url()` returns one canonical spelling (lower-case scheme/host, no default port, empty path `/`, no fragment, no userinfo); `_persist_urls` canonicalizes before the unique key and updates a legacy row under its own spelling instead of inserting its twin | `test_regression_url_variants_store_one_canonical_row`, `test_every_fixture_parses_canonical_records` |
 | PIT-69 | A discovery adapter's mixed-case, trailing-dot or foreign record could create a second `subdomains` row, or a row for a host outside the target | `_persist_discovery` wrote `record.fqdn` straight into the unique key and had no `target` argument | Persistence canonicalizes and scope-filters every discovery record through `_clean_hosts()` before grouping, so one name is one row and a foreign name is never stored | `test_regression_discovery_records_are_canonical_and_in_scope`, `test_regression_two_identical_subs_runs_keep_one_row` |
 | PIT-70 | A ports run could store a UDP finding as TCP, and a port adapter naming a foreign host could create a `subdomains` row and a port for it | `_persist_ports` grouped on `(fqdn, ip, port)` and called `upsert_port` without `protocol`; it never scope-filtered the record | The group key and every `upsert_port` call include `record.protocol`, so tcp/53 and udp/53 are two rows; the host is canonicalized and dropped unless it is the target or under it | `test_regression_ports_keep_protocol_and_drop_a_foreign_host` |
 | PIT-71 | `--mock` on a target with no matching fixture exited 5 and reported `otx failed ... no fixture`: a test run looked broken although no adapter was wrong | `_read_fixture` raised `FetchFailed`, and every adapter maps that to `ToolStatus.FAILED` | A missing fixture raises `FixtureMissing`; the binary, HTTP and the three python adapters return `SKIPPED` with `no fixture for <target>`, so a mock run exits 0 on any target | `test_regression_missing_mock_fixture_is_a_skip_not_a_failure` |
@@ -246,9 +246,9 @@ underlying scripts were verified end-to-end on a fresh Ubuntu clone in D95.
 
 ## 2026-11-20 (D96) - a stage command uses the hosts earlier runs stored
 
-Found while running the authorized `slice.bank.in` scan: the `--active` run
+Found while running the authorized `target.example` scan: the `--active` run
 completed (13 hosts, 10 ALIVE), then
-`reconkit ports -d slice.bank.in --active --no-scope` exited 0 after scanning
+`reconkit ports -d target.example --active --no-scope` exited 0 after scanning
 nothing - `Ports` stayed `-`, the summary said `tools: 0 ok`, and no `ports`
 row was written. The `ports` command had no `live` stage of its own, so
 `_stage_hosts(PORTS)` saw an empty in-memory `alive` set; `_seed_from_store`
@@ -269,7 +269,7 @@ was gated on `--resume`, and the stage was skipped by
 ### Evidence
 
 ```
-before: reconkit ports -d slice.bank.in --active --no-scope
+before: reconkit ports -d target.example --active --no-scope
         -> 0 tools, Ports -, no scan_runs row, exit 0
 after:  same command: ports: running 5 tool(s)
         smap ok 93, naabu ok 0, rustscan ok 45229, pyscan ok 48,
@@ -737,7 +737,7 @@ AGENTS.md scripts/ .github/`).
 | Before | After |
 |---|---|
 | university domain, its `www` and `admission` subdomains | `example.com`, `www.example.com`, `admission.example.com` |
-| bank domain, same labels (`api`, `b`, `blog`, `nb`, `assets`, `temp`) | `target.com`, same labels (`api.target.com`, ...) |
+| bank domain, same labels (`api`, `b`, `blog`, `nb`, `assets`, `temp`) | `target.example`, same labels (`api.target.example`, ...) |
 | mock fixture name (six files) | `example.test` |
 | capture script name | `scripts/capture_example.sh` |
 | capture dir and scratch DB/config names | `captures/example`, `v4-example.db`, `reconkit-example-config.yaml` |
@@ -786,7 +786,7 @@ sides; docs/02 section 1 carries the retry.**
 
 ### D76 - third-party URLs stay out of hosts and folders
 
-**Symptom.** A real `target.com` run (20261119T213006Z) wrote
+**Symptom.** A real `target.example` run (20261119T213006Z) wrote
 `hosts/www.google.com/`, `hosts/www.facebook.com/`, `hosts/apps.apple.com/` and
 `hosts/fonts.googleapis.com/`: the URL pool legitimately names other people's
 assets, and the report treated every URL host as a host of the target.
@@ -959,8 +959,8 @@ Acceptance (`--mock` against a copy of the target DB, no network):
 
 ```
 $ cp recon.db /tmp/item5.db
-$ reconkit run -d target.com --active --mock --db /tmp/item5.db --scope /tmp/scope-d73.yaml
-report: results/mock/target.com/20261119T205138Z/report.txt ...
+$ reconkit run -d target.example --active --mock --db /tmp/item5.db --scope /tmp/scope-d73.yaml
+report: results/mock/target.example/20261119T205138Z/report.txt ...
 $ grep '^urls:' report.txt
 urls: 3124 total, 3124 shown (2856 already probed in earlier runs; use --reprobe-urls to re-check)
 $ python -c '...urls_already_probed...'
@@ -1079,8 +1079,8 @@ DB copy:
 $ sqlite3 /tmp/item1.db "SELECT s.fqdn, s.state, h.status_code, h.tech_json, h.run_id
   FROM subdomains s LEFT JOIN host_status_history h ON h.id=(SELECT max(id) ...)
   WHERE s.fqdn IN (SELECT ... subdomain_sources.tool='url-derived')"
-api.target.com     UNKNOWN  NULL  NULL  (no status row)
-assets.target.com  UNKNOWN  NULL  NULL  (no status row)
+api.target.example     UNKNOWN  NULL  NULL  (no status row)
+assets.target.example  UNKNOWN  NULL  NULL  (no status row)
 ```
 
 **Answer.** Passive: DNS only. Active/full: DNS plus a `pyprobe` live check.
@@ -1098,24 +1098,24 @@ starts empty unless `--resume` (`_seed_from_store` is guarded by `resumed`), and
 `Store.url_only_hosts()` skips a host that already has a row. So the name is
 invisible to that run's `tech` stage and to the pass. The stored row and its
 URLs stay correct and appear in the report; only tech/crawl evidence is missing.
-That is the state of `api`/`assets.target.com` today.
+That is the state of `api`/`assets.target.example` today.
 
 ## 2026-11-19 (D69) - an ALIVE host keeps the HTTP status the live pool observed
 
-**Symptom (owner report).** `results/target.com/20261119T200322Z/report.txt`
-listed 9 ALIVE hosts, all with `HTTP status code = -`, although `b.target.com`
+**Symptom (owner report).** `results/target.example/20261119T200322Z/report.txt`
+listed 9 ALIVE hosts, all with `HTTP status code = -`, although `b.target.example`
 had technologies (`Amazon CloudFront`, `Cloudflare`) from the `tech` stage.
 
 **Diagnosis (case a: the live pass wrote the wrong record's status).**
 
 ```
 $ sqlite3 /tmp/item1.db "SELECT s.fqdn, h.state, h.status_code, h.tech_json ..."
-b.target.com            ALIVE    NULL  ["Amazon CloudFront", "Amazon
-blog.target.com         ALIVE    NULL  ["Cloudflare", "Google Font AP ...
+b.target.example            ALIVE    NULL  ["Amazon CloudFront", "Amazon
+blog.target.example         ALIVE    NULL  ["Cloudflare", "Google Font AP ...
 ... 9 rows, every status_code NULL, run_id 203
-$ sqlite3 /tmp/item1.db "SELECT url, status_code FROM urls WHERE url LIKE '%b.target.com%'"
-https://b.target.com/                       200
-http://b.target.com/                         -1
+$ sqlite3 /tmp/item1.db "SELECT url, status_code FROM urls WHERE url LIKE '%b.target.example%'"
+https://b.target.example/                       200
+http://b.target.example/                         -1
 $ sqlite3 /tmp/item1.db "SELECT tool, status, item_count FROM tool_runs WHERE run_id=203"
 httprobe ok 9 | httpx ok 9 | pyprobe ok 9 (unreachable=3) | tlsx ok 13
 ```
@@ -1403,18 +1403,18 @@ Tests (2): `test_scope_limited_run_marks_the_report`,
 allowing scope file prints no banner). Gate: `992 passed`, ruff/format/mypy
 clean.
 
-## 2026-11-19 - state check: `api`/`assets.target.com` never held DNS_ONLY
+## 2026-11-19 - state check: `api`/`assets.target.example` never held DNS_ONLY
 
 Reported as a DNS_ONLY -> UNKNOWN regression between the 18:36 passive run and
 the 19:13 active run. The stored rows say otherwise:
 
 ```
-subdomains: api.target.com    UNKNOWN  source_count=1  provenance=dns  first_seen_run=181  last_seen_run=181
-            assets.target.com UNKNOWN  source_count=1  provenance=dns  first_seen_run=181  last_seen_run=181
-subdomain_sources: (api.target.com, run 181, 'url-derived')
-                   (assets.target.com, run 181, 'url-derived')
+subdomains: api.target.example    UNKNOWN  source_count=1  provenance=dns  first_seen_run=181  last_seen_run=181
+            assets.target.example UNKNOWN  source_count=1  provenance=dns  first_seen_run=181  last_seen_run=181
+subdomain_sources: (api.target.example, run 181, 'url-derived')
+                   (assets.target.example, run 181, 'url-derived')
 host_status_history: no row for either host
-target history at run 180 (dns): 13 rows, all DNS_ONLY except temp.target.com DEAD
+target history at run 180 (dns): 13 rows, all DNS_ONLY except temp.target.example DEAD
 target history at run 191 (live): 12 rows, the same hosts, 9 ALIVE + 3 DNS_ONLY
 ```
 
@@ -1435,13 +1435,13 @@ state, or keeps the previous state when one exists. No code change.
 ## 2026-11-19 (D62) - a saved report carries a domain tree and its URLs
 
 **Real-run check (2026-11-19, loop item 1): CONFIRMED.** A report written
-during the loop, `results/target.com/20261119T193822Z/`, is the first one
+during the loop, `results/target.example/20261119T193822Z/`, is the first one
 saved after `0062f11` (19:08:14Z), and it has the new shape:
 
 ```
-$ grep -c '=== Domains ===\|=== URLs by host ===' results/target.com/20261119T193822Z/report.txt
+$ grep -c '=== Domains ===\|=== URLs by host ===' results/target.example/20261119T193822Z/report.txt
 2
-$ jq 'keys' results/target.com/20261119T193822Z/report.json
+$ jq 'keys' results/target.example/20261119T193822Z/report.json
 ['type','target','generated_at','selection','scope_warnings','fields','hosts',
  'urls_total','urls_shown','urls_truncated','roots','urls_by_host']
 $ jq '.urls_total, .urls_shown, .urls_truncated' .../report.json
@@ -1452,8 +1452,8 @@ $ jq '.roots[0].host_count, (.hosts|length)' .../report.json
 
 Before that report appeared, every report on disk predated D62: `example.com`
 has 15:06:46Z, 16:52:32Z and 18:50:30Z, all with the old 7 keys and 0 `===`
-headings, and `results/target.com/` held no report until 19:38Z. The same
-real report also shows `api.target.com` / `assets.target.com` as
+headings, and `results/target.example/` held no report until 19:38Z. The same
+real report also shows `api.target.example` / `assets.target.example` as
 `UNKNOWN`, `url-derived`, source count 1 - the D63 loop note's finding,
 confirmed on a live artifact rather than only in the DB.
 
@@ -1556,17 +1556,17 @@ Added to docs/02 section 2 (`### Existing list: which hosts are live?`):
 Evidence behind those three statements (no new run needed; all from the shipped code and the existing artifacts):
 
 ```
-$ reconkit db list -d target.com
+$ reconkit db list -d target.example
 db list is not wired in Part 8; no data was read.
-$ reconkit export -d target.com --format json
+$ reconkit export -d target.example --format json
 export is not wired in Part 8; no report was written.
-$ reconkit db export -d target.com
+$ reconkit db export -d target.example
 db export is not wired in Part 8; no data was written.
 $ reconkit live -l /tmp/urls.txt --active --mock --no-color --db /tmp/d57probe.db
 invalid domain label: 'https://nb'
 $ reconkit live -l /tmp/hosts.txt --active --mock --no-color --db /tmp/d57probe.db
 1 hosts: 0 ALIVE, 0 DNS_ONLY, 0 SHUT_DOWN, 0 DEAD, 1 UNKNOWN | tools: 3 ok, 0 gap, 1 failed, 0 skipped, 0 timeout
-report: results/mock/nb.target.com/20261119T173241Z/report.txt
+report: results/mock/nb.target.example/20261119T173241Z/report.txt
 ```
 
 The first three are the exact stub strings the CLI prints (and the reason the doc points at `report.json` instead);
@@ -1677,14 +1677,14 @@ mypy src/reconkit       Success: no issues found in 62 source files
 
 Not verified: a real run of the pass against a live third party (no scan was run and no request was sent); `--resume`
 after a run whose `urls` stage completed (the hook does not re-run for a completed stage - this is by construction, not
-measured); and the pass under a firing budget (the `wait_for` path is code-reviewed, not exercised). The target.com
+measured); and the pass under a firing budget (the `wait_for` path is code-reviewed, not exercised). The target.example
 figures (3 hosts / 43 URLs) are the earlier analysis counts, not a new measurement.
 
 ## 2026-11-19 (analysis) - what consumes URLs in a passive run, and four stage-order options
 
 Investigation only. No `src/`/`tests/` change, no stage reordering, no new flag, no scan, no network request to
-`target.com` or `example.com`. Baseline `d5caeed`, 974 tests, tree clean, `scope.yaml` sha256
-`d45a3c90...eeee8b` before and after. All run evidence is read from `results/target.com/20261119T170839Z/` and
+`target.example` or `example.com`. Baseline `d5caeed`, 974 tests, tree clean, `scope.yaml` sha256
+`d45a3c90...eeee8b` before and after. All run evidence is read from `results/target.example/20261119T170839Z/` and
 `recon.db` (target 7). MASTER_PLAN holds no D52-D57 entry (they live in PROGRESS); the D52-D57 rulings were re-read
 there.
 
@@ -1780,13 +1780,13 @@ url_hosts  in_subdomains  url_only  root_itself
 === the three URL-only hosts, by URL count ===
         fqdn          urls
 --------------------  ----
-nb.target.com        40
-api.target.com        2
-assets.target.com     1
+nb.target.example        40
+api.target.example        2
+assets.target.example     1
 ```
 
-**The A.3 number: 3 URL-only hostnames, carrying 43 of the 2 253 URLs** (`nb.target.com` 40, `api.target.com` 2,
-`assets.target.com` 1). None of them has a `subdomains` row, so none was ever resolved, none has a host state, and
+**The A.3 number: 3 URL-only hostnames, carrying 43 of the 2 253 URLs** (`nb.target.example` 40, `api.target.example` 2,
+`assets.target.example` 1). None of them has a `subdomains` row, so none was ever resolved, none has a host state, and
 none appears in `report.json` or `report.txt` (grep count 0 for all three in both files). The `subdomains` table for the
 target holds 12 rows (11 DNS_ONLY, 1 DEAD) - the 12 "in_subdomains" hosts including the root.
 
@@ -1910,7 +1910,7 @@ $ reconkit scope import --help
 Every file-reading option in `cli.py` (`grep -n 'Path'` / `read_text`): `-l/--list` (target file), `--ffuf-wordlist`,
 `--resolvers`, `--config`, `--scope`, `--db`. Only `--list` is a user data file, and `_targets()` parses it with
 **`validate_target()`**, one root domain per line. It is not a hosts file and not a URLs file: a line like
-`https://nb.target.com/x` is rejected before any run (`invalid domain label: 'https://nb'`, observed with `--mock`
+`https://nb.target.example/x` is rejected before any run (`invalid domain label: 'https://nb'`, observed with `--mock`
 against a throwaway `--db /tmp/d57probe.db`).
 
 Three of the four pasted commands do not work at all yet: `export`, `db list` and `db export` are Part-8 stubs that
@@ -1927,7 +1927,7 @@ reconkit live -l hosts.txt --active --scope scope.yaml
 ```
 
 Proven end to end with `--mock` (no network, throwaway DB and a temp scope file in `/tmp`): the file
-`nb.target.com` produced `1 hosts: ... 3 ok, 1 failed` with `pyprobe`, `httpx`, `httprobe`, `tlsx` selected for it;
+`nb.target.example` produced `1 hosts: ... 3 ok, 1 failed` with `pyprobe`, `httpx`, `httprobe`, `tlsx` selected for it;
 the same command against the real `scope.yaml` refused it with exit 3, exactly as the gate should, because `scope.yaml`
 lists only testfire.net and friends. Caveats to state plainly: each line becomes a separate target row, the run is
 per-host (one report per hostname), URLs are not accepted, and no liveness result is written back to the original
@@ -1954,15 +1954,15 @@ domain names and never need a resolved host; the crawl tools would break, but no
 passive is the only mode where this is even coherent (active `urls` needs `alive`, which needs `live`, which needs
 `dns`). What it does **not** do on its own: make anything resolve the URL hosts. `_persist_urls()` writes only the
 `urls` table, and the `discovered` set the DNS stage reads is built from subdomain records, so a reordering alone still
-leaves `nb.target.com` without a row. It also moves a 3-minute stage in front of a 4-second one and would need an
+leaves `nb.target.example` without a row. It also moves a 3-minute stage in front of a 4-second one and would need an
 extraction step (URL host -> `validate_host()` -> subdomain row) to be worth anything.
 
 **Option 2 - one bounded second resolve pass after `urls`, then stop.** After `urls`, extract distinct hosts from the
 URL rows, keep the ones with no `subdomains` row, resolve those, and in active/full run one more live check on the
 newly resolved hosts; no third pass, and the pass is idempotent so a resume does not repeat it. Cost on
-`target.com`: **3 DNS names** (two of them one label deep) and, if active, 3 live probes - on the order of a couple of
-seconds, versus the 488 s full run. What it would surface: `nb.target.com` (40 URLs, archive paths that look like a
-real corporate site), `api.target.com`, `assets.target.com`. Whether `nb.target.com` answers today is not
+`target.example`: **3 DNS names** (two of them one label deep) and, if active, 3 live probes - on the order of a couple of
+seconds, versus the 488 s full run. What it would surface: `nb.target.example` (40 URLs, archive paths that look like a
+real corporate site), `api.target.example`, `assets.target.example`. Whether `nb.target.example` answers today is not
 knowable without traffic, which this batch did not send; the value is that the host would gain a row, a state and a
 report line, and any ALIVE result would then hand its 40 URLs to `url_probe` as a normal live host instead of the
 "unreachable filter keeps it because nothing is known" path. The real cost is behavioural, not CPU: a passive run would
@@ -10776,7 +10776,7 @@ Harness (51 checks, one command at a time, isolated `/tmp/rk-harness` config):
 H2: --help for every command, --version, bare help, 11 x no-target error
 H3: mock passive/active/full, run --active/--full, bare -d shorthand,
     subs/dns and live/ports/tech/urls/vulns, doctor/status/diff/report
-H3b: active -d slice.bank.in --mock -> exit 3, "not in scope" (no traffic)
+H3b: active -d target.example --mock -> exit 3, "not in scope" (no traffic)
 HARNESS: PASS=51 FAIL=0
 ```
 
@@ -11262,16 +11262,16 @@ stalls (180 s of silence against a 30 s request timeout).
 
 ## 2026-11-21 - a CDN edge is not a port finding (D110)
 
-**The owner's question.** The `slice.bank.in` report showed
+**The owner's question.** The `target.example` report showed
 `1,3,4,6,7,9,13,17,19,20,...` on ten hosts. Those are not the origin's ports.
 
 **Measured proof.**
 
 ```
-$ sqlite3 -header -column recon.db "select s.fqdn, h.ips_json, count(p.port) as open_ports, min(p.port), max(p.port) from ... where t.domain='slice.bank.in' ..."
-b.slice.bank.in    ["172.65.64.158","172.65.64.159"]   2982   1   65389
-m.slice.bank.in    ["172.65.64.158","172.65.64.159"]   2976   1   65389
-slice.bank.in      ["172.65.64.158","172.65.64.159"]   3021   1   65389
+$ sqlite3 -header -column recon.db "select s.fqdn, h.ips_json, count(p.port) as open_ports, min(p.port), max(p.port) from ... where t.domain='target.example' ..."
+b.target.example    ["172.65.64.158","172.65.64.159"]   2982   1   65389
+m.target.example    ["172.65.64.158","172.65.64.159"]   2976   1   65389
+target.example      ["172.65.64.158","172.65.64.159"]   3021   1   65389
 
 $ whois 172.65.64.158 | grep -E '^(NetName|OrgName)'
 NetName:        CLOUDFLARENET
@@ -11301,15 +11301,15 @@ on Cloudflare hosts.
 $ python - <<'PY'
 from reconkit.core.store import Store
 s = Store("recon.db")
-tid = s._conn.execute("select id from targets where domain='slice.bank.in'").fetchone()[0]
+tid = s._conn.execute("select id from targets where domain='target.example'").fetchone()[0]
 for r in s.host_rows(tid):
     if r["state"] == "ALIVE":
         print(f'{r["fqdn"]:28} ports={len(r["ports"]):5} waf={r["waf"]}')
 PY
-b.slice.bank.in              ports=    0 waf=Cloudflare
-blog.slice.bank.in           ports=    0 waf=Cloudflare
+b.target.example              ports=    0 waf=Cloudflare
+blog.target.example           ports=    0 waf=Cloudflare
 ...
-www.slice.bank.in            ports=    0 waf=Cloudflare
+www.target.example            ports=    0 waf=Cloudflare
 ```
 
 Changes: `Store.waf_fronted_hosts()`; `host_rows()` drops stored ports for a
@@ -11342,10 +11342,10 @@ gates key on a non-empty `waf`. Detection is `httpx -cdn` at live time, so a
 fronted host is covered before the ports stage in the same run. No `assert`, no
 new dependency, no suppression.
 
-**Fresh-state verification on `slice.bank.in` (2026-11-21, owner asked for both
+**Fresh-state verification on `target.example` (2026-11-21, owner asked for both
 paths: keep the DB, then wipe and rescan).**
 
-Run 1, existing DB (`reconkit active -d slice.bank.in --no-scope`):
+Run 1, existing DB (`reconkit active -d target.example --no-scope`):
 
 ```
 21 hosts (20 unique after www-dedup): 10 ALIVE, 2 DNS_ONLY, 1 DEAD, 8 UNKNOWN
@@ -11357,7 +11357,7 @@ exit 0
 The 8 UNKNOWN rows were IP addresses with no sources. Provenance check:
 
 ```
-$ sqlite3 recon.db "select s.fqdn, s.provenance, s.first_seen_run, ... where t.domain='slice.bank.in' and s.fqdn glob '[0-9]*'"
+$ sqlite3 recon.db "select s.fqdn, s.provenance, s.first_seen_run, ... where t.domain='target.example' and s.fqdn glob '[0-9]*'"
 162.159.140.147    dns   201
 172.65.64.158      dns   201
 ...
@@ -11368,8 +11368,8 @@ ports  2026-11-20T13:08:27Z
 They are legacy rows from the pre-D110 ports run, not something the current
 stages create.
 
-Then the target was removed from the DB (backup at `/tmp/recon-before-slice-
-delete.db`) and `results/slice.bank.in/` was deleted:
+Then the target was removed from the DB (backup at `/tmp/recon-before-target-
+delete.db`) and `results/target.example/` was deleted:
 
 ```
 port_sources: 51349 row(s)
@@ -11383,7 +11383,7 @@ subdomains: 21 row(s)
 targets: 1 row(s)
 ```
 
-Run 2, fresh target (`reconkit active -d slice.bank.in --no-scope`):
+Run 2, fresh target (`reconkit active -d target.example --no-scope`):
 
 ```
 15 subdomains discovered; 12 live hosts identified
@@ -11397,7 +11397,7 @@ exit 0
 Then the gate itself, on the fresh data:
 
 ```
-$ reconkit ports -d slice.bank.in --no-scope --active
+$ reconkit ports -d target.example --no-scope --active
 ports: 12 CDN/WAF-fronted host(s) skipped (edge ports are not the origin's)
 15 hosts: 12 ALIVE ... | tools: 0 ok, 0 failed
 0 port rows stored
@@ -11415,16 +11415,16 @@ owner said to ignore them. `urlfinder` finished on both runs here.
 
 **Owner request.** Two people push into this repository; a change must not
 create duplicate rows, drop a tool group, hand a stage the wrong input, or make
-`--mock` look broken. Prove it on `slice.bank.in` with the DB kept and then
+`--mock` look broken. Prove it on `target.example` with the DB kept and then
 deleted, on the second authorized target `pentest-ground.com`, and keep every
 fix generic (no site-specific branch).
 
-**Measured before the fix** (existing `slice.bank.in` DB):
+**Measured before the fix** (existing `target.example` DB):
 
 ```
 url rows=3097 canonical=3087 duplicate-groups=10
-  DUP https://b.slice.bank.in/ -> ['https://b.slice.bank.in', 'https://b.slice.bank.in/']
-  DUP https://blog.slice.bank.in/ -> [...]
+  DUP https://b.target.example/ -> ['https://b.target.example', 'https://b.target.example/']
+  DUP https://blog.target.example/ -> [...]
   ... 8 more hosts
 ```
 
@@ -11443,8 +11443,8 @@ binary, HTTP and three python adapters.
 
 **Run matrix.**
 
-1. `slice.bank.in`, existing DB, post-fix
-   (`reconkit active -d slice.bank.in --no-scope`):
+1. `target.example`, existing DB, post-fix
+   (`reconkit active -d target.example --no-scope`):
 
 ```
 15 hosts (14 unique after www-dedup): 12 ALIVE, 2 DNS_ONLY, 1 DEAD
@@ -11452,9 +11452,9 @@ tools: 28 ok, 3 gap, 0 failed, 2 skipped, 0 timeout   exit 0
 DB: 3138 URLs, duplicate-groups still 10 (legacy), run 275 new-urls=0 non-canonical=0
 ```
 
-2. Target deleted (`reconkit db delete --target slice.bank.in --yes`; output:
+2. Target deleted (`reconkit db delete --target target.example --yes`; output:
    `Deleted 1 target, 15 subdomains, 3138 URLs, 99 tool runs, 18 stage runs.
-   Removed results/slice.bank.in/`), then a fresh run:
+   Removed results/target.example/`), then a fresh run:
 
 ```
 15 hosts: 12 ALIVE, 2 DNS_ONLY, 1 DEAD
@@ -11585,7 +11585,7 @@ and 3.13.
 ## 2026-11-21 - url_probe streams answers and has no default URL cap (D114)
 
 Owner: keep the Python client and `-1`/`-2`, remove the batch barrier, test it
-on the ~2.5k `slice.bank.in` URLs they already had, and remove the 5,000-URL
+on the ~2.5k `target.example` URLs they already had, and remove the 5,000-URL
 cap. The old loop gathered every 200-URL group and waited for its slowest
 request before starting the next one, so one 10 s timeout stalled a whole group;
 2,848 candidates are 15 groups.
@@ -11603,8 +11603,8 @@ Real measurement, same target and same 2,848-candidate set (the temp DB was a
 copy; the operator's `recon.db` was not touched):
 
 ```
-$ reconkit active -d slice.bank.in --no-scope \
-    --config /tmp/slice-bench-config.yaml \
+$ reconkit active -d target.example --no-scope \
+    --config /tmp/target-bench-config.yaml \
     --exclude subs,dns,live,tech,urls --reprobe-urls
 wall_ms=177586 rc=4
 url_probe: skipping 6 URL(s) whose host is unreachable
@@ -11651,9 +11651,9 @@ $ pytest -q tests/test_invariants.py
 195 passed, 3 skipped in 0.20s
 ```
 
-## 2026-11-21 - clean DB and clean results first pass on slice.bank.in (D115)
+## 2026-11-21 - clean DB and clean results first pass on target.example (D115)
 
-Owner: test after cleaning the DB and results too, no scope, on slice. This is
+Owner: test after cleaning the DB and results too, no scope, on the target. This is
 the both-states check AGENTS 0e.6 asks for: D114 measured on a copy of the warm
 DB; this run starts from an empty DB and no results tree.
 
@@ -11678,15 +11678,15 @@ results/ absent
 The real command (no `--exclude`, no `--mock`, no warm rows):
 
 ```
-$ reconkit active -d slice.bank.in --no-scope --verbose
-[18:24:25] Starting reconnaissance on slice.bank.in (active)
+$ reconkit active -d target.example --no-scope --verbose
+[18:24:25] Starting reconnaissance on target.example (active)
 ...
 url_probe: skipping 6 URL(s) whose host is unreachable
 url_probe: probing 2853 URL(s)
 ... 14 progress lines ...
 url_probe: finished 2853 URL(s)
 ...
-[18:33:07] Reconnaissance completed for slice.bank.in
+[18:33:07] Reconnaissance completed for target.example
 BENCH rc=0 wall_s=522
 ```
 
@@ -11722,9 +11722,9 @@ The mock contract was checked on an isolated DB/results tree (the real
 `recon.db` was not touched):
 
 ```
-$ reconkit active -d slice.bank.in --mock --no-scope --config /tmp/slice-mock-config.yaml
+$ reconkit active -d target.example --mock --no-scope --config /tmp/target-mock-config.yaml
 url_probe: skipped in --mock (7 URL(s) left unprobed)
-[18:34:58] Reconnaissance completed for slice.bank.in
+[18:34:58] Reconnaissance completed for target.example
 MOCK_RC=0
 ```
 
@@ -11735,6 +11735,81 @@ $ pytest -q
 1262 passed, 3 skipped in 48.27s
 $ FORCE_TERMINAL=1 pytest -q
 1262 passed, 3 skipped in 48.06s
+$ ruff check .
+All checks passed!
+$ ruff format --check .
+103 files already formatted
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+```
+
+## 2026-11-21 - real target names scrubbed from the tracked tree (D116)
+
+Owner: remove real domain names everywhere in the docs, using a placeholder
+such as `example.com` / `target.example`, not the real name. This closes the
+leak D79 missed.
+
+Inventory before the edit (the target pattern is intentionally not reproduced
+here):
+
+```
+$ git grep -l -i -E '<redacted target pattern>'
+docs/05_SECURITY.md
+docs/09_TOOL_CONTRACTS.md
+docs/PROGRESS.md
+docs/REVIEW_LOG.md
+src/reconkit/core/store.py
+tests/test_engine.py
+tests/test_store.py
+$ git grep -n -i -E '<redacted target pattern>' | wc -l
+54
+```
+
+Only the bank target remained; the older university and mock names were already
+gone. Replacement was text-only:
+
+| Before | After |
+|---|---|
+| the bank target and its labels (`b.`, `api.`, `blog.`, `nb.`, `www.`) | `target.example`, labels kept (`b.target.example`, ...) |
+| the old registrable `.com` placeholder from D79 | `target.example` (`.example` is reserved by RFC 2606) |
+| scratch names derived from the target (`*-clean`, `*-mock`, `*-bench`) | `target-clean`, `target-mock`, `target-bench` |
+
+The placeholder replacement used a word-boundary-safe expression so the
+`hackertarget` API host was not touched. The history entries now read
+`target.example`; D116 is the note that the name was redacted, not a change to
+what happened.
+
+After the edit:
+
+```
+$ git grep -n -i -E '<redacted target pattern>'
+(no output)
+$ git grep -n -E '<old placeholder pattern>'
+(no output)
+```
+
+The only remaining matches for the target word are the ordinary English word in
+historical test notes and the ports manual. Published demo and vendor references
+are intentionally left: they are not the scanned target, and replacing them
+would rewrite hundreds of legitimate tool references.
+
+Limits: the untracked `scope.yaml` still lists public demo sites, the local
+`recon.db` and `results/` still contain the real target from the D115 run, and
+git history still contains the target name in older commits. Removing it from
+history requires a filter rewrite plus a force-push, which is destructive and
+was not done. The current tree is clean.
+
+No test was added: this is text redaction with no executable behavior, and a
+regression test would have to embed the name it is meant to keep out. The full
+suite is unchanged.
+
+Gate:
+
+```
+$ pytest -q
+1262 passed, 3 skipped in 48.08s
+$ FORCE_TERMINAL=1 pytest -q
+1262 passed, 3 skipped in 47.95s
 $ ruff check .
 All checks passed!
 $ ruff format --check .

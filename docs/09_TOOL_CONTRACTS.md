@@ -1091,7 +1091,7 @@ truth). Two consequences for this table:
   ports for a fronted host (the stored edge rows stay in the DB) and the row
   note reads `CDN: <waf>`. A CDN edge is not a port
   finding: Cloudflare accepted TCP on 1, 3, 7, 9, 31337 and 65389 in a measured
-  `slice.bank.in` scan, which produced ~3000 ports per host before the gate.
+  `target.example` scan, which produced ~3000 ports per host before the gate.
 - **Ports:** `open` if at least one tool saw it open. If one tool saw open and another (that scanned the same port) saw closed, store `unconfirmed` with both in `port_sources`. A service fingerprint (`nmap -sV`, a banner) raises confidence by one level and is stored in `ports.service` / `ports.version`; when two tools disagree (`nmap` says `http`, `smap` says `http?`) both fields stay empty rather than picking a winner, and a fingerprint never lifts an `unconfirmed` state. Before wave 6 `_persist_ports` discarded `service`/`version`, so the bump never fired; it now does.
 
 ### Which status code a host row keeps (D69, 2026-11-19)
@@ -1101,9 +1101,9 @@ URL, `tlsx` reads a certificate) and adapters that do (`pyprobe`'s local probe
 and the `httpx` binary). `_persist_live` used to pass the **first ALIVE record
 in completion order** to `_write_host`, so the stored `status_code` depended on
 which tool finished first: a 200 from `pyprobe` was discarded whenever
-`httprobe`'s statusless record landed first. Measured on `target.com` run
+`httprobe`'s statusless record landed first. Measured on `target.example` run
 203: four live tools, 9 ALIVE hosts, every `status_code` `NULL`, while the URL
-probe stored 200 for `https://b.target.com/` in the same scan.
+probe stored 200 for `https://b.target.example/` in the same scan.
 
 One rule now picks the record whose fields the row keeps:
 
@@ -1153,7 +1153,7 @@ only when some row has a note, so an ordinary table keeps its six columns), the
 The `urls` stage stores URLs, not hosts. A name that only an archive reported -
 no `subs` tool and no `dns` answer - therefore had no `subdomains` row, no state
 and no line in `report.json`, and in passive mode nothing ever read its URL back
-(measured 2026-11-19: 3 such hosts, 43 URLs, on `target.com`). After `urls`
+(measured 2026-11-19: 3 such hosts, 43 URLs, on `target.example`). After `urls`
 completes, the engine runs exactly one extra pass for the hosts in that run's
 URL rows that have no `subdomains` row (`Store.url_only_hosts()`):
 
@@ -1275,7 +1275,7 @@ probe therefore keeps the Python client, reuses one client per pass and raises
 requests in flight, and each finished answer is committed in groups of
 `batch_size`. The earlier loop gathered a 200-URL batch and waited for its
 slowest request before starting the next one, so one `timeout_s` tail cost every
-group; on the 2,848-candidate `slice.bank.in` pool that measured **335 s**, and
+group; on the 2,848-candidate `target.example` pool that measured **335 s**, and
 the streaming loop measured **177 s** on the same pool and target. A clean-DB,
 clean-results first pass on 2,853 URLs measured **178 s** (D115).
 

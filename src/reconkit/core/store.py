@@ -695,7 +695,7 @@ class Store:
 
         A port scan against an edge finds the edge's listeners, not the
         origin's: Cloudflare answered TCP on ports 1, 3, 7, 9, 31337 and 65389
-        when measured on 2026-11-21, which is how one `slice.bank.in` scan stored
+        when measured on 2026-11-21, which is how one `target.example` scan stored
         ~3000 "open" ports per host. The ports stage skips these hosts and the
         report shows no ports for them instead of the edge's ports.
         """

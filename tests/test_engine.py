@@ -307,7 +307,7 @@ async def test_ports_stage_command_uses_stored_alive_hosts(tmp_path: Path) -> No
     The stage command has no `live` stage, so `_stage_hosts(PORTS)` only saw the
     in-memory alive set, which was empty; the stage was skipped, no scan_runs
     row existed, and the table showed `Ports -` with exit 0 (a real
-    `reconkit ports -d slice.bank.in` after a completed `--active` run,
+    `reconkit ports -d target.example` after a completed `--active` run,
     2026-11-20). Seed every run that has no discovery stage of its own from the
     hosts an earlier run already stored.
     """
@@ -337,7 +337,7 @@ async def test_ports_stage_command_uses_stored_alive_hosts(tmp_path: Path) -> No
 async def test_ports_stage_skips_cdn_waf_fronted_hosts(tmp_path: Path) -> None:
     """docs/05 rule 7 (D110): scanning a CDN/WAF edge records the edge's ports.
 
-    A real `slice.bank.in` scan stored 2982 "open" ports for b.slice.bank.in
+    A real `target.example` scan stored 2982 "open" ports for b.target.example
     (Cloudflare, 172.65.64.158): TCP connected on 1, 3, 7, 9, 31337 and 65389.
     The pre-check was documented but not implemented, so the stage must now skip
     a host whose stored status carries a CDN/WAF name and scan the rest.
@@ -4728,7 +4728,7 @@ async def test_alive_host_has_status_code_in_report(tmp_path: Path) -> None:
     Regression: `_persist_live` took the first ALIVE record in completion order,
     so a live pool mixing adapters with a status (`pyprobe`, `httpx`) and
     adapters without one (`httprobe`, `tlsx`) could store `NULL` while the
-    report showed `-` for an ALIVE host. Measured on `target.com` run 203.
+    report showed `-` for an ALIVE host. Measured on `target.example` run 203.
     """
     rec = Recorder()
     specs = {"live-fake": tool("live-fake", Stage.LIVE, mode=Mode.ACTIVE)}

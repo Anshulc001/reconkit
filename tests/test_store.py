@@ -593,8 +593,8 @@ def test_scan_run_lifecycle(store: Store) -> None:
 def test_cdn_fronted_host_reports_no_edge_ports(store: Store) -> None:
     """docs/05 rule 7 (D110): a CDN/WAF edge's listeners are not the origin's.
 
-    A real `slice.bank.in` scan stored 2982 "open" ports for a Cloudflare host
-    (b.slice.bank.in) because TCP to ports 1, 3, 7, 9, 31337 and 65389 all
+    A real `target.example` scan stored 2982 "open" ports for a Cloudflare host
+    (b.target.example) because TCP to ports 1, 3, 7, 9, 31337 and 65389 all
     connected. Those rows must not become reportable ports.
     """
     target_id = store.create_target("example.com")

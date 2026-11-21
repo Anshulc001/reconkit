@@ -1420,8 +1420,8 @@ class Engine:
     def _within_scope(host: str, target: str) -> bool:
         """The target itself, or a name under it (D76).
 
-        One predicate for the URL pool and the report: `target.com` is in
-        scope, `*.target.com` is in scope, and `www.google.com` is not.
+        One predicate for the URL pool and the report: `target.example` is in
+        scope, `*.target.example` is in scope, and `www.google.com` is not.
         """
         return host == target or host.endswith(f".{target}")
 
@@ -2283,7 +2283,7 @@ class Engine:
 
         A `urls` pass writes URLs, never hosts: a name an archive mentions but no
         subdomain source reports has no `subdomains` row, no state and no report
-        line (measured 2026-11-19: 3 hosts carrying 43 URLs on target.com).
+        line (measured 2026-11-19: 3 hosts carrying 43 URLs on target.example).
         This runs once, immediately after `urls`, and never re-extracts - the
         candidates come from the URL rows already stored, so its own output can
         never feed a second round.
