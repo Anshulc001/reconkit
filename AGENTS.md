@@ -22,7 +22,10 @@ Read this file first, every session. It points to the documents in `docs/`.
 
 ## 0b. Task loop
 
-plan (5-10 lines, assumptions) -> implement -> tests (normal, empty, malformed, failure) -> run checks -> update touched docs -> update `docs/PROGRESS.md` -> commit -> report -> stop.
+plan (5-10 lines, assumptions) -> implement -> tests (normal, empty, malformed, failure) -> run checks -> update **every** doc the change touches -> update `docs/PROGRESS.md` RESUME + entry -> add a `docs/REVIEW_LOG.md` entry -> commit -> report -> stop.
+
+Every error found in a review, CI run or real scan gets a regression test in the
+same batch: reproduce it, then fix it. No error is closed by prose alone.
 
 ## 0c. Rules learned from reviews
 
@@ -38,6 +41,9 @@ plan (5-10 lines, assumptions) -> implement -> tests (normal, empty, malformed, 
 - No `assert` in `src/`. No new lint suppressions except scoped per-file ignores with a reason in `pyproject.toml`.
 - No new dependencies without asking me.
 - Every deviation from the docs goes in the report AND in `docs/PROGRESS.md` "Deviations". Docs change first, then code.
+- **Update all affected docs after every change, in the same commit.** That means the doc for the area you touched (`docs/01`-`docs/10`), plus `docs/PROGRESS.md` (RESUME status and a dated `D<n>` entry) and a `docs/REVIEW_LOG.md` evidence entry with the real commands and their output. A later session must be able to resume from the docs alone; do not leave that knowledge only in the chat.
+- **Every error gets a test case.** A failing check, CI failure, or bug found in a real run is reproduced by a regression test in the same batch, then fixed. CI failures count: fix the test or the code, never the assertion's honesty.
+- **Run the gate the way CI does.** GitHub Actions sets `FORCE_TERMINAL`, so run both `pytest -q` and `FORCE_TERMINAL=1 pytest -q` before pushing. Rich styling has broken raw substring assertions that passed locally (2026-11-21).
 - Adapters never import `store`, `scope`, `ui`, `cli`.
 - Do not create modules, files or CLI commands that are not in `docs/03` and `docs/02`. If one seems needed, change the docs first and tell me.
 
@@ -54,7 +60,7 @@ Pre-approved without asking:
 4. `tools.yaml` `version_cmd` / `version_regex` edits derived from real `--help` / `--version` output (paste the raw output, commit the edit).
 5. Removing "install:" / "reconkit install" / "reconkit update" residue anywhere in the repo (D4).
 6. `config.yaml` `tool_versions` stays removed; do not re-add.
-7. Scope-file writes in interactive mode only, with an explicit `y` (the `[a]` option). Never in non-interactive mode.
+7. Scope-file writes never happen from the CLI (the interactive `[a]` path was removed in D104). The operator edits `scope.yaml`; the CLI only reads it.
 8. The `--no-scope` flag, per the scope-bypass amendment in rule 2.
 9. `--full` narrowing CLI `--active` to subs+dns+live (dated deviation).
 10. Consistency audits across help text, docs and code; fix stale text in the same batch and disclose in the F-map.
@@ -137,6 +143,7 @@ Do not contradict these documents. If code and docs disagree, stop and report th
 ```bash
 source .venv/bin/activate
 pytest -q
+FORCE_TERMINAL=1 pytest -q   # the way GitHub Actions runs it
 ruff check .
 ruff format --check .
 mypy src/reconkit
@@ -155,7 +162,19 @@ Also run the changed command with `--mock` and report what you ran. Do not claim
 
 ## 8. Documentation updates
 
-Update the matching doc in the same change when you alter: commands/flags, DB schema, adapter contract, security rules, tool-source/doctor behavior, or config keys.
+Update the matching doc in the same change when you alter: commands/flags, DB
+schema, adapter contract, security rules, tool-source/doctor behavior, or config
+keys. Then update the rest of the docs that mention the changed behavior - grep
+for the flag, command, section number or term and fix every live reference.
+Historical evidence in `docs/PROGRESS.md` and `docs/REVIEW_LOG.md` is the
+exception: it records what happened and is not rewritten.
+
+Every batch also updates:
+
+1. `docs/PROGRESS.md` RESUME (status + next action) and a dated `D<n>` entry.
+2. `docs/REVIEW_LOG.md` with the commands actually run, real output, tests added
+   and the gate result.
+3. Any doc whose section number, example, table or claim the change invalidated.
 
 ## 9. Conflict handling
 

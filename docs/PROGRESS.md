@@ -4,6 +4,13 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-21, D106): **the session handoff rule is now in AGENTS.md.**
+  Every change must update all affected docs plus the PROGRESS RESUME and a
+  REVIEW_LOG entry in the same commit; every error (review, CI, real run) gets
+  a regression test; the gate runs both plain and `FORCE_TERMINAL=1`. Also
+  removed the stale "scope-file writes in interactive mode" pre-approval, since
+  D104 deleted that path. Next action: none.
+
 - Status (2026-11-21, D105): **console ports are ALIVE-only, like the report.**
   A `DNS_ONLY`/`DEAD` row no longer prints stored ports that no ports stage ran
   for this scan; the column is omitted when no row is ALIVE. Also fixed
@@ -1317,6 +1324,16 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   excluded. **Not changed, needs a ruling:** `live`/`ports`/`tech`/`urls`/
   `vulns` still accept `--full` and ignore it - the same "a flag a command
   cannot honour" family as PIT-36.
+
+- **D106 (2026-11-21): the docs handoff and regression-test rules are in
+  AGENTS.md (owner request).** Section 0b now requires updating every affected
+  doc, the PROGRESS RESUME and a REVIEW_LOG entry in the same commit, and a
+  regression test for every error (CI included). Section 0c adds the same as a
+  standing rule and requires the gate to run with `FORCE_TERMINAL=1` as CI
+  does. Section 6 lists that command. Section 8 now says to grep for every live
+  reference, not just the nearest doc. The stale pre-approval 7 ("scope-file
+  writes in interactive mode") is replaced: the CLI never writes `scope.yaml`
+  after D104.
 
 - **D105 (2026-11-21): the console `Ports` column is `ALIVE`-only (owner
   request).** `ports` table rows are history: a host that was ALIVE in an

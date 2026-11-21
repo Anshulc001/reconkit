@@ -10820,3 +10820,23 @@ Gate, both plain and with `FORCE_TERMINAL=1`: `1033 passed in 43.08s`;
 `ruff check .` -> `All checks passed!`; `ruff format --check .` -> `96 files
 already formatted`; `mypy src/reconkit` -> `Success: no issues found in 63
 source files`.
+
+## 2026-11-21 - handoff rules written into AGENTS.md (D106)
+
+Owner request: after every change the next agent/session must be able to resume
+from the docs alone, and every error must leave a test behind. Added to
+`AGENTS.md`:
+
+- 0b: task loop now ends with "update every doc the change touches -> PROGRESS
+  RESUME + entry -> REVIEW_LOG entry"; every error gets a regression test.
+- 0c: standing rules - update all affected docs in the same commit; every error
+  gets a test (CI included); run `pytest -q` both plain and with
+  `FORCE_TERMINAL=1` before pushing.
+- 6: the validation block now includes `FORCE_TERMINAL=1 pytest -q`.
+- 8: grep for every live reference, not only the nearest doc; historical
+  PROGRESS/REVIEW_LOG evidence is the exception.
+- 0d item 7 replaced: the CLI never writes `scope.yaml` (the interactive `[a]`
+  path is gone with D104).
+
+This entry itself follows the rule. No code or test changed; the gate below is
+the same commit's gate.
