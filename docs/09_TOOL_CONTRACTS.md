@@ -1276,7 +1276,8 @@ requests in flight, and each finished answer is committed in groups of
 `batch_size`. The earlier loop gathered a 200-URL batch and waited for its
 slowest request before starting the next one, so one `timeout_s` tail cost every
 group; on the 2,848-candidate `slice.bank.in` pool that measured **335 s**, and
-the streaming loop measured **177 s** on the same pool and target.
+the streaming loop measured **177 s** on the same pool and target. A clean-DB,
+clean-results first pass on 2,853 URLs measured **178 s** (D115).
 
 **DEAD-host filter (D54, 2026-11-19).** The probe skips a URL whose host the latest
 state pass already recorded as `DEAD` - that host did not resolve or went silent, so

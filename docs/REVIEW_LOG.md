@@ -11650,3 +11650,95 @@ Success: no issues found in 66 source files
 $ pytest -q tests/test_invariants.py
 195 passed, 3 skipped in 0.20s
 ```
+
+## 2026-11-21 - clean DB and clean results first pass on slice.bank.in (D115)
+
+Owner: test after cleaning the DB and results too, no scope, on slice. This is
+the both-states check AGENTS 0e.6 asks for: D114 measured on a copy of the warm
+DB; this run starts from an empty DB and no results tree.
+
+Backups were taken first, then both stores were reset:
+
+```
+$ cp recon.db /tmp/recon-before-clean-20261121T182406.db
+$ tar -czf /tmp/results-before-clean-20261121T182406.tar.gz results
+$ reconkit db wipe --yes
+⚠ This will delete ALL targets and data from recon.db. Are you sure?
+  1 target, 15 subdomains, 3013 URLs, 33 tool runs, 6 stage runs
+Wiped recon.db.
+$ rm -rf results
+$ sqlite3 recon.db "select count(*) from targets; ... from subdomains; ... from urls; ... from scan_runs;"
+0
+0
+0
+0
+results/ absent
+```
+
+The real command (no `--exclude`, no `--mock`, no warm rows):
+
+```
+$ reconkit active -d slice.bank.in --no-scope --verbose
+[18:24:25] Starting reconnaissance on slice.bank.in (active)
+...
+url_probe: skipping 6 URL(s) whose host is unreachable
+url_probe: probing 2853 URL(s)
+... 14 progress lines ...
+url_probe: finished 2853 URL(s)
+...
+[18:33:07] Reconnaissance completed for slice.bank.in
+BENCH rc=0 wall_s=522
+```
+
+All six stage rows are `completed`, all with `scope_mode =
+'unrestricted_flag'`:
+
+```
+subs       23 s
+dns         1 s
+live       34 s
+tech       53 s
+urls      198 s
+url_probe 178 s
+```
+
+The new pool is 3,019 URLs: 160 out-of-target URLs kept in `urls` and never
+probed, 6 URLs on unreachable hosts skipped, and 2,853 probed. The probe
+finished all 2,853, with **no cap cut, no timeout and no failed tool**. Status
+counts after the pass:
+
+```
+404 1240   200 1219   301 208   NULL 166   302 88
+429   56   403   32   -1   9   525   1
+```
+
+Caveat: 56 `429`s on a clean DB. The IP had just run the 2,848-URL benchmark
+and an immediate reprobe minutes earlier, so the network state is not clean
+even though the DB is. The timing and the 2,853/2,853 coverage are the clean
+result; the status mix is not a controlled before/after. Suppressing those
+429s would require pacing, which D3 forbids, so no code was changed.
+
+The mock contract was checked on an isolated DB/results tree (the real
+`recon.db` was not touched):
+
+```
+$ reconkit active -d slice.bank.in --mock --no-scope --config /tmp/slice-mock-config.yaml
+url_probe: skipped in --mock (7 URL(s) left unprobed)
+[18:34:58] Reconnaissance completed for slice.bank.in
+MOCK_RC=0
+```
+
+Gate after the doc edits (no `src/` or `tests/` change):
+
+```
+$ pytest -q
+1262 passed, 3 skipped in 48.27s
+$ FORCE_TERMINAL=1 pytest -q
+1262 passed, 3 skipped in 48.06s
+$ ruff check .
+All checks passed!
+$ ruff format --check .
+103 files already formatted
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+```

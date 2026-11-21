@@ -4,6 +4,19 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-21, D115): **clean-DB and clean-results first pass
+  verified.** Backed up `recon.db` and `results/` to `/tmp`, wiped the DB
+  (0 targets, 0 subdomains, 0 URLs, 0 scan runs) and removed `results/`, then
+  ran the real `reconkit active -d slice.bank.in --no-scope`. Exit 0, **522 s**
+  wall; stages: subs 23 s, dns 1 s, live 34 s, tech 53 s, urls 198 s,
+  `url_probe` **178 s**. The probe reported `probing 2853 URL(s)` and
+  `finished 2853 URL(s)`; 6 URLs on unreachable hosts were skipped, with no cap
+  cut and 0 timeouts. Stored 3,019 URLs = 160 out-of-target + 6 unreachable +
+  2,853 probed. This pass saw 56 `429`s (the IP had just been re-probed); the
+  timing and coverage are the clean result, the status mix is not a pristine
+  control. `--mock` on an isolated `/tmp` DB exited 0 and skipped `url_probe`
+  (`7 URL(s) left unprobed`). Next action: none.
+
 - Status (2026-11-21, D114): **`url_probe` no longer waits for a 200-URL
   batch, and its URL cap defaults to none.** `threads` still bounds requests in
   flight; each finished answer is committed in groups of `batch_size`, so one
