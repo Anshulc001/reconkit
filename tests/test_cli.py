@@ -88,7 +88,8 @@ SCAN_COMMANDS = (
     "urls",
     "vulns",
     "passive",
-    "lite",
+    "active",
+    "full",
     "run",
 )
 
@@ -376,10 +377,10 @@ def test_bad_flags_exit_two_without_a_traceback(
     assert "Traceback" not in result.stderr
 
 
-def test_bare_command_rejects_active_instead_of_running_lite(tmp_path: Path) -> None:
+def test_bare_command_rejects_active_instead_of_running_passive(tmp_path: Path) -> None:
     """Regression: 11d-findings-f, bare `--active` was silently a no-op.
 
-    `reconkit -d X --active` is the `lite` shorthand (docs/02 section 2) and ran
+    `reconkit -d X --active` is the bare passive form (docs/02 section 2) and ran
     subs+dns only, with no warning that the requested active stages never ran.
     """
     config = make_config(tmp_path)
@@ -389,15 +390,15 @@ def test_bare_command_rejects_active_instead_of_running_lite(tmp_path: Path) -> 
     assert result.exit_code == 2
     message = " ".join(result.stderr.split())
     assert "passive-only" in message
-    assert "reconkit run -d X --active" in message
-    # The remedy must survive the 80-column console without a mid-command break.
-    assert "reconkit run -d X --active" in result.stderr
+    # 2026-11-21: the remedy names the `active` command first, `run --active` second.
+    assert "reconkit active -d X" in message
+    assert "run -d X --active" in message
     assert "Traceback" not in result.stderr
     # A scan that would have run is not started at all.
     assert not (tmp_path / "recon.db").exists()
 
 
-@pytest.mark.parametrize("command", ["lite", "passive", "subs", "dns"])
+@pytest.mark.parametrize("command", ["passive", "subs", "dns"])
 def test_passive_only_commands_reject_active(tmp_path: Path, command: str) -> None:
     config = make_config(tmp_path)
     result = CliRunner().invoke(app, scan_args(config, command, "--active"))
@@ -846,6 +847,38 @@ def test_full_implies_include_noisy(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         tmp_path, monkeypatch, mode_args(make_config(tmp_path), "--full", "--no-scope")
     )
     assert options.include_noisy is True
+
+
+@pytest.mark.parametrize(
+    ("command", "flag", "mode"),
+    [("passive", [], "passive"), ("active", ["--active"], "active"), ("full", ["--full"], "full")],
+)
+def test_mode_commands_are_the_same_run_as_the_flag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    flag: list[str],
+    mode: str,
+) -> None:
+    """docs/02 section 2: `active -d X` is `run -d X --active` (2026-11-21).
+
+    The three modes now have three commands; each must select the same stages,
+    mode, permission gate and tier set as the flag form, not a near copy.
+    """
+    config = make_config(tmp_path)
+    (by_name,) = captured_options(tmp_path, monkeypatch, scan_args(config, command, "--no-scope"))
+    (by_flag,) = captured_options(tmp_path, monkeypatch, mode_args(config, *flag, "--no-scope"))
+    assert by_name.stages == by_flag.stages == MODE_STAGES[mode]
+    assert by_name.mode == by_flag.mode == mode
+    assert by_name.active is by_flag.active
+    assert by_name.include_noisy is by_flag.include_noisy
+
+
+def test_lite_is_no_longer_a_command() -> None:
+    """`lite` was a duplicate spelling of `passive`; removed 2026-11-21."""
+    result = CliRunner().invoke(app, ["lite", "-d", "example.com"])
+    assert result.exit_code == 2
+    assert "No such command" in result.stderr
 
 
 def _stage(document: dict[str, object], name: str) -> dict[str, object]:

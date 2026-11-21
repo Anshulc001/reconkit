@@ -24,9 +24,10 @@ reconkit run -d example.com     # passive scan, no prompts
 | Command | What it does |
 |---|---|
 | `subs`, `dns`, `live`, `ports`, `tech`, `urls`, `vulns` | run one stage |
-| `passive` | the passive pipeline (subs, dns, urls) |
-| `lite` | same pipeline as `passive`; also what bare `reconkit -d X` means |
-| `run` | the only command that accepts `--active`/`--full` |
+| `passive` | the passive pipeline (subs, dns, urls); also what bare `reconkit -d X` means |
+| `active` | the active mode by name (same as `run --active`) |
+| `full` | the full mode by name (same as `run --full`) |
+| `run` | the flag-driven form: `--active`/`--full` pick the mode |
 | `doctor` | tool inventory (installed, version, path, identity) |
 | `status` | recent runs from the DB |
 | `report -d X` | rebuild a saved report from the DB; no network, no adapter |
@@ -62,11 +63,14 @@ and the run. Results go to `results/<domain>/<timestamp>/` as `report.txt` and
 
 ## Scan modes
 
-| Mode | Stages that run | Tool modes | Tiers |
-|---|---|---|---|
-| **passive** (default) | subs, dns, urls | passive | core, opt_in* |
-| **active** (`--active`) | subs, dns, live, tech, urls, url_probe | passive + active | core, opt_in* |
-| **full** (`--full`) | all 8: subs, dns, live, ports, tech, urls, shots, vulns | passive + active | core, opt_in, intrusive |
+| Mode | Command | Stages that run | Tool modes | Tiers |
+|---|---|---|---|---|
+| **passive** (default) | `passive` | subs, dns, urls | passive | core, opt_in* |
+| **active** | `active` | subs, dns, live, tech, urls, url_probe | passive + active | core, opt_in* |
+| **full** | `full` | all 9: subs, dns, live, ports, tech, urls, url_probe, shots, vulns | passive + active | core, opt_in, intrusive |
+
+Each mode has a command and the same mode as a `run` flag: `active -d X` and
+`run -d X --active` are the same run (same stages, tiers and scope gate).
 
 `*` `opt_in` needs `--include-noisy` unless the mode is `full` (which implies it).
 `--full` also implies `--active`.
@@ -77,12 +81,13 @@ There is no `shots` command.
 **Exploitation tools** (`sqlmap`, `dalfox`, `crlfuzz`) never run automatically in
 any mode; they need an explicit `--tools sqlmap` etc.
 
-`--active` and `--full` are usage errors (exit 2) on `passive`, `lite`, `subs`
-and `dns`, because those commands run no active stage.
+`--active` and `--full` are usage errors (exit 2) on `passive`, `subs` and
+`dns`, because those commands run no active stage; the message points at
+`active` (or `run --active`).
 
 ---
 
-## `run` — flags
+## Scan flags (shared by `run`, `passive`, `active`, `full` and the stage commands)
 
 ### Target (one of)
 
@@ -91,11 +96,11 @@ and `dns`, because those commands run no active stage.
 -l, --list <path>              # file with one root domain per line
 ```
 
-### Mode (none = passive)
+### Mode (`run` only; the `active`/`full` commands imply their flag)
 
 ```bash
---active                       # subs + dns + live + tech + urls
---full                         # all 8 stages (implies --active + --include-noisy)
+--active                       # active mode: subs + dns + live + tech + urls + url_probe
+--full                         # full mode: all 9 stages (implies --active + --include-noisy)
 ```
 
 ### Scope
@@ -178,8 +183,8 @@ reconkit vulns -d <domain>     # vulnerability checks
 ```
 
 They accept the same flags as `run` but execute only their own stage.
-`passive` runs subs+dns+urls; `lite` is the same pipeline (bare `reconkit -d X`
-is `lite`). There is no `shots` command.
+`passive` runs subs+dns+urls (bare `reconkit -d X` is `passive`); `active` and
+`full` are the other two modes by name. There is no `shots` command.
 
 ### Vulnerability scanning (current state)
 

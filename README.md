@@ -48,14 +48,16 @@ reconkit diff -d <authorized-domain>
 
 | Command | What it does |
 |---|---|
-| `passive` / `lite` | Passive subs + dns + urls pipeline for one target (passive tools only); no scope file needed |
+| `passive` | Passive subs + dns + urls pipeline for one target (passive tools only); no scope file needed. Also what bare `reconkit -d X` and `run -d X` mean |
+| `active` | Active mode: subs+dns+live+tech+urls+url_probe; needs `--active`-equivalent scope rules (scope file or `--no-scope`). Same as `run -d X --active` |
+| `full` | Full mode: all nine stages including `ports` and `shots`, `opt_in` enabled. Same as `run -d X --full` |
 | `subs`, `dns` | Run one passive stage |
 | `live` | ALIVE / DNS_ONLY / SHUT_DOWN / DEAD; needs `--active` (uses any present scope file) |
 | `ports` | Port scan over each adapter's default port set (`--ports` overrides); needs `--active` |
 | `tech` | Technology, WAF and CDN inventory; needs `--active` |
 | `urls` | URL discovery from archives and crawlers; needs `--active` |
 | `vulns` | Vulnerability checks: `nuclei`, `subzy`, `dnsreaper` (core), `nikto`, `ffuf` (opt_in); needs `--active`. Findings are not persisted |
-| `run` | `passive` (subs+dns+urls) by default; `--active` = subs+dns+live+tech+urls+url_probe; `--full` = all eight stages (`shots` included) with `opt_in` enabled. The mode table is in [docs/02_CLI_UX.md](docs/02_CLI_UX.md) |
+| `run` | Flag-driven form of the three modes: `run` = `passive`, `--active` = `active`, `--full` = `full`. The mode table is in [docs/02_CLI_UX.md](docs/02_CLI_UX.md) |
 | `diff` | New, gone, state-changed and port-changed items vs the previous run |
 | `status` | Recent scans (`--json` for scripts) |
 | `report` | Rebuild `report.txt`/`report.json` from stored rows (`--target`, `--run`, `--out`); read-only, no network |

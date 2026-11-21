@@ -10661,3 +10661,53 @@ exit code: 0
 
 **Gate on the docs commit:** `950 passed`, `ruff check .` clean, `96 files already formatted`,
 `mypy src/reconkit` clean; `scope.yaml` sha256 unchanged.
+
+## 2026-11-21 - three modes, three commands; `lite` removed (D101)
+
+Reported as CLI confusion: `run` appeared in some invocations and not others,
+and `lite` and `passive` were the same thing under two names.
+
+Raw before the change (`grep -n 'lite' src/reconkit/cli.py`): `_SCAN_COMMANDS`
+held `passive`, `lite`, `run`; `_stages()` returned `_PASSIVE_STAGES` for
+`{"passive", "lite"}`; `main()` passed the literal `"lite"` for the bare form.
+
+After:
+
+```
+$ reconkit active --help                      -> exit 0
+$ reconkit full --help                        -> exit 0
+$ reconkit lite -d example.com                -> exit 2 ("No such command 'lite'.")
+$ reconkit passive -d example.com --active --mock
+  -> exit 2, "'passive' is passive-only; --active needs: reconkit active -d X
+     (or run -d X --active)"
+```
+
+Equivalence is proven by a test, not asserted: the three cases of
+`test_mode_commands_are_the_same_run_as_the_flag[passive|active|full]` capture
+`ScanOptions` from `active -d X` and `run -d X --active` and compare `stages`,
+`mode`, `active` and `include_noisy`.
+
+Mock smoke, every one exit 0: bare `reconkit -d example.com --mock`, `passive`,
+`active --no-scope`, `live --active --no-scope`, `ports`, `tech`, `urls`,
+`vulns`, `run --active`, `full`, `run --full`. Full-run tail:
+
+```
+25 hosts: 2 ALIVE, 1 DNS_ONLY, 0 SHUT_DOWN, 1 DEAD, 21 UNKNOWN | tools: 42 ok, 0
+gap, 0 failed, 6 skipped, 0 timeout
+warning: url_probe: skipped in --mock (21 URL(s) left unprobed)
+report: results/mock/example.com/20261121T082229Z-3/report.txt and report.json
+```
+
+Gate on the commit: `1059 passed in 47.15s`; `ruff check .` -> `All checks
+passed!`; `ruff format --check .` -> `97 files already formatted`; `mypy
+src/reconkit` -> `Success: no issues found in 63 source files`. Suite 1055 ->
+1059 (+3 mode-equivalence cases, +1 `lite`-removal regression, +1 help case for
+the two new commands, -1 `lite` case dropped from the passive-only
+parametrization).
+
+**Disclosed config edit:** `pyproject.toml` ruff `extend-exclude` gained
+`sahmiye`, because the untracked third-party reference copy in `sahmiye/`
+produced 243 lint errors (`shell=True`, bare `except`, unused imports) that
+belong to that script, not to us. `ruff check .` was run and failed on exactly
+those files before the exclude; nothing under `src/`, `tests/` or `docs/` was
+excluded.

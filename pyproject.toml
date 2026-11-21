@@ -57,7 +57,7 @@ reconkit = ["data/*.txt", "data/wordlists/*.txt"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = ["docs"]   # Markdown examples are contracts, not runnable code
+extend-exclude = ["docs", "sahmiye"]   # docs examples are contracts, not code; sahmiye/ is a third-party reference copy, not ours
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "S"]

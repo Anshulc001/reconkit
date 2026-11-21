@@ -12,7 +12,7 @@
 
 ## 2. Command Grammar
 
-`reconkit <command> [target] [flags]`. Target is `-d DOMAIN` or `-l FILE` (one domain per line). With no command, `reconkit -d X` is shorthand for `lite` (the passive pipeline). A scan command with **neither** `-d` nor `-l` on a terminal asks questions instead of failing (section 2b); with a target flag present nothing changes and nothing is asked.
+`reconkit <command> [target] [flags]`. Target is `-d DOMAIN` or `-l FILE` (one domain per line). With no command, `reconkit -d X` is shorthand for `passive` (the passive pipeline). A scan command with **neither** `-d` nor `-l` on a terminal asks questions instead of failing (section 2b); with a target flag present nothing changes and nothing is asked.
 
 ### Scan modes (source of truth)
 
@@ -25,9 +25,9 @@ same two dicts.
 
 | Mode | Stages | Tool modes included | Tool tiers included | CLI | Interactive |
 |---|---|---|---|---|---|
-| `passive` | `subs`, `dns`, `urls` | passive only | `core`, `opt_in`* | (default) | `passive` |
-| `active` | `subs`, `dns`, `live`, `tech`, `urls`, `url_probe` | passive + active | `core`, `opt_in`* | `--active` | `active` |
-| `full` | all: `subs`, `dns`, `live`, `ports`, `tech`, `urls`, `url_probe`, `shots`, `vulns` | passive + active | `core`, `opt_in`, `intrusive` | `--full` | `full` |
+| `passive` | `subs`, `dns`, `urls` | passive only | `core`, `opt_in`* | `passive` command, the bare form, or `run` (default) | `passive` |
+| `active` | `subs`, `dns`, `live`, `tech`, `urls`, `url_probe` | passive + active | `core`, `opt_in`* | `active` command or `run --active` | `active` |
+| `full` | all: `subs`, `dns`, `live`, `ports`, `tech`, `urls`, `url_probe`, `shots`, `vulns` | passive + active | `core`, `opt_in`, `intrusive` | `full` command or `run --full` | `full` |
 
 \*`opt_in` requires `--include-noisy`, unless the mode is `full` (which implies
 it). `--full` also implies `--active`.
@@ -169,14 +169,23 @@ selection skip, and a stage left with none is a completion gap (exit `0`).
 ### Workflows
 | Command | Pipeline |
 |---|---|
-| `lite -d X` | passive only (quick) |
-| `run -d X` | passive mode: subs + dns + urls |
-| `run -d X --active` | active mode: subs + dns + live + tech + urls + url_probe; resumable |
-| `run -d X --full` | full mode: all nine stages (the eight discovery stages plus `shots`), `opt_in` enabled; implies `--active` and `--include-noisy` |
+| `passive -d X` | passive mode: subs + dns + urls (also `run -d X`, and bare `reconkit -d X`) |
+| `active -d X` | active mode: subs + dns + live + tech + urls + url_probe; resumable (also `run -d X --active`) |
+| `full -d X` | full mode: all nine stages (`ports`, `url_probe` and `shots` included), `opt_in` enabled; implies `--active` and `--include-noisy` (also `run -d X --full`) |
+| `run -d X` | passive mode; `--active`/`--full` select the other two, exactly as the commands above do |
 
-`passive` is the stage command: it runs the subs, dns and urls stages for one target, with passive tools only. `lite` is the workflow shortcut for exactly that passive pipeline and nothing active; adapters, flags and exit codes are the same. Only `run` includes active stages (and `run` is where `--full` applies).
+The three modes are also three commands: `passive`, `active` and `full` each run
+their own mode's stages with that mode's tool modes and tiers, and are the same
+run as `run` with the matching flag. `run` remains the flag-driven form, so
+`active -d X` and `run -d X --active` are interchangeable. `lite` was removed on
+2026-11-21: it was a second spelling of `passive` with no other difference.
 
-`--active` is a usage error (exit `2`) on every passive-only command - the bare form, `lite`, `passive`, `subs` and `dns` - because none of them runs an active stage and accepting the flag would promise work the command cannot do. The message names `run` as the active workflow. Use `run -d X --active`, or an active stage command (`live`, `ports`, `tech`, `urls`, `vulns`), for active stages.
+`--active`/`--full` are a usage error (exit `2`) on every passive-only command -
+the bare form, `passive`, `subs` and `dns` - because none of them runs an active
+stage and accepting the flag would promise work the command cannot do. The message
+names `active` as the command that can: use `reconkit active -d X` (or
+`run -d X --active`). The active stage commands (`live`, `ports`, `tech`, `urls`,
+`vulns`) take `--active` as their permission gate, as before.
 
 **A stage command works on the hosts earlier runs stored.** `live`, `ports`, `tech`, `urls` and `vulns` do not repeat discovery, so they seed their host list from the database (ALIVE hosts for `ports`/`tech`/`urls`/`vulns`, every known name for `live`). Run an active or live pass first: `reconkit live -d X --active`, then `reconkit ports -d X --active`. A `ports` run with no stored ALIVE host now prints `ports: no ALIVE host from an earlier run; run 'reconkit live' first` instead of silently reporting `Ports -` with exit 0 (2026-11-20).
 
@@ -312,7 +321,7 @@ appeared only in `urls` rows is not in it unless D58's second resolve reached it
 
 A scan command given **neither `-d` nor `-l`** asks a short question series
 instead of failing with "provide a target". This applies to `subs`, `dns`, `live`, `ports`,
-`tech`, `urls`, `vulns`, `passive`, `lite` and `run`. Two hard conditions:
+`tech`, `urls`, `vulns`, `passive`, `active`, `full` and `run`. Two hard conditions:
 
 - **Any target flag at all means no questions.** If `-d` or `-l` is present, the
   command behaves exactly as section 2 describes - no prompt is shown and no
@@ -388,7 +397,7 @@ This is the whole runtime flow in one place. The prompt text below is the exact
 text the CLI prints (typer renders a yes/no question as `[Y/n]` or `[y/N]`).
 
 1. **Launch.** `reconkit subs` (or `dns`, `live`, `ports`, `tech`, `urls`,
-   `vulns`, `passive`, `lite`, `run`) with no `-d` and no `-l`, on a terminal.
+   `vulns`, `passive`, `active`, `full`, `run`) with no `-d` and no `-l`, on a terminal.
 2. **Target.** `Domain, or path to a file of domains (one per line)` - a domain,
    or a path to a file that is read exactly like `-l`.
 3. **Scope file.** `Do you have a scope file? [Y/n]`; on `y`,

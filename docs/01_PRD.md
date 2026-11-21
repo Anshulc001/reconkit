@@ -104,8 +104,8 @@
   - `db list`, `db export` and `export` are Phase 3 stubs in this build: they exit 1 and write nothing (docs/02).
   - `--json` is supported on the scan commands, `doctor`, `diff` and `status`; it is not accepted by the stubs.
 
-### Feature 9 - Workflows (`lite`, `run`)
-- `lite` = passive pipeline. `run` = passive, live, ports, then selected checks, with per-phase timeouts and resume of an interrupted run.
+### Feature 9 - Workflows (`passive`, `active`, `full`, `run`)
+- `passive`, `active` and `full` are the three modes by name; `run` selects one of them by flag (`--active`, `--full`), with per-phase timeouts and resume of an interrupted run. The old `lite` alias is gone (2026-11-21); it was identical to `passive`.
 
 ## 7. Non-Goals (this version)
 
@@ -126,7 +126,7 @@
 - Adapters: crtsh, certspotter, otx, hackertarget, subfinder, assetfinder, dnspython, pyprobe, httpx, pyscan, naabu.
 - Tests passing on Linux (fixtures only, no tools needed).
 
-**Phase 3 (one adapter or feature per prompt):** remaining tools in `tools.yaml`, `urls`/`tech`/`vulns`/`shots`, `lite`/`run` polish, `monitor` with webhook, `scope import`, URL pattern sorting (xss/sqli/ssrf/lfi/redirect candidate lists), intrusive tier.
+**Phase 3 (one adapter or feature per prompt):** remaining tools in `tools.yaml`, `urls`/`tech`/`vulns`/`shots`, `passive`/`active`/`full`/`run` polish, `monitor` with webhook, `scope import`, URL pattern sorting (xss/sqli/ssrf/lfi/redirect candidate lists), intrusive tier.
 
 ## 9. Success Metrics
 

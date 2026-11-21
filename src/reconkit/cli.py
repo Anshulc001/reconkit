@@ -132,7 +132,8 @@ _SCAN_COMMANDS = (
     "urls",
     "vulns",
     "passive",
-    "lite",
+    "active",
+    "full",
     "run",
 )
 _ACTIVE_ONLY = frozenset({"live", "ports", "tech", "urls", "vulns"})
@@ -141,7 +142,7 @@ _PASSIVE_STAGES = MODE_STAGES["passive"]
 # Commands that run no active stage at all, so `--active` promises nothing.
 # `urls` is deliberately absent: its active tools need `--active`, and its
 # passive tools run without it since the 2026-11-17 mode expansion.
-_PASSIVE_ONLY_COMMANDS = frozenset({"subs", "dns", "passive", "lite"})
+_PASSIVE_ONLY_COMMANDS = frozenset({"subs", "dns", "passive"})
 
 
 def _stage_list(mode: str) -> str:
@@ -306,8 +307,11 @@ def _stages(command: str, active: bool, full: bool = False) -> tuple[Stage, ...]
         return (Stage.SUBS,)
     if command == "dns":
         return (Stage.DNS,)
-    if command in {"passive", "lite"}:
-        return _PASSIVE_STAGES
+    if command in {"passive", "active", "full"}:
+        # The three modes are also three commands (docs/02 section 2). A flag
+        # can only widen the request, never narrow it: `active --full` is a
+        # full run, and `passive --active`/`--full` is refused before this runs.
+        return MODE_STAGES[command]
     if command == "live":
         return (Stage.LIVE,)
     if command == "ports":
@@ -881,7 +885,8 @@ def _run_scan(
         # legitimately choose active from the bare command).
         if plan is None and command in _PASSIVE_ONLY_COMMANDS and is_active:
             raise ConfigError(
-                f"{command!r} is passive-only; --active needs: reconkit run -d X --active"
+                f"{command!r} is passive-only; --active needs: reconkit active -d X "
+                "(or run -d X --active)"
             )
         # docs/02 section 2: the passive-only commands run no active stage, so
         # accepting --active would promise work the command cannot do.
@@ -1297,7 +1302,12 @@ def _scan_command(
     scope_path: Annotated[Path | None, typer.Option("--scope", help="Scope file path.")] = None,
     db_path: Annotated[Path | None, typer.Option("--db", help="SQLite database path.")] = None,
 ) -> None:
-    name = ctx.info_name or "lite"
+    name = ctx.info_name or "passive"
+    # `active`/`full` are the mode commands: they imply the flag that selects
+    # the same mode in `run`, so the scope gate, tier rules and `requested_mode`
+    # are decided in exactly one place (docs/02 section 2).
+    active = active or name == "active"
+    full = full or name == "full"
     raise typer.Exit(
         code=_run_scan(
             name,
@@ -1434,7 +1444,7 @@ def main(
         return
     raise typer.Exit(
         code=_run_scan(
-            "lite",
+            "passive",
             domain=domain,
             list_file=list_file,
             json_output=json_output,

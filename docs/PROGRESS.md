@@ -4,6 +4,17 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-21, D101): **the three modes are three commands; `lite` is
+  gone.** `reconkit active -d X` and `reconkit full -d X` now exist and are the
+  same run as `run -d X --active` / `run -d X --full`: a parametrized test
+  captures `ScanOptions` from both spellings and compares stages, mode, `active`
+  and `include_noisy`. `lite` was an exact duplicate of `passive` and was
+  removed; the bare `reconkit -d X` form is now `passive` internally and in
+  every doc. Refusals are unchanged (`passive --active` still exits 2; the
+  message now names `reconkit active -d X`). Gate: 1059 tests, ruff/format/mypy
+  clean, plus a mock smoke of all 10 scan commands and 3 refusals. Deviation:
+  ruff `extend-exclude` gained `sahmiye`. Next action: none.
+
 - Status (2026-11-20, D100): **dnsreaper is installed by setup and adapted, and
   `vulns` is documented as full-only.** New `python:` source shape builds the
   pinned checkout (`c1588b2`) in `~/.reconkit/opt/dnsreaper` with its own venv
@@ -1256,6 +1267,23 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   run ends with one `ℹ` line. **Disclosed correction:** D73's count included
   every stored URL; with D76 it must be the in-scope pool, or the header could
   say "3 total, 7 already probed".
+
+- **D101 (2026-11-21): `active` and `full` are commands; `lite` is removed
+  (owner-approved).** The CLI had one mode command (`passive`) and two flag-only
+  modes (`run --active`, `run --full`), so the same three modes had three
+  different spellings, and `lite` duplicated `passive` exactly. `_SCAN_COMMANDS`
+  now carries `passive`, `active`, `full`, `run`; `_stages()` reads the three
+  mode names straight out of `MODE_STAGES`, and the command name implies its
+  flag (`active` -> `active=True`, `full` -> `full=True`), so the scope gate,
+  the tier rule and `requested_mode` still have exactly one implementation.
+  `lite` is gone everywhere (docs/01, docs/02, README, COMMANDS.md); bare
+  `reconkit -d X` is `passive`. **Disclosed config edit:** ruff
+  `extend-exclude` gained `sahmiye`, because the untracked third-party
+  reference copy in `sahmiye/` produced 243 lint errors of its own and would
+  otherwise fail `ruff check .`; nothing under `src/`, `tests/` or `docs/` is
+  excluded. **Not changed, needs a ruling:** `live`/`ports`/`tech`/`urls`/
+  `vulns` still accept `--full` and ignore it - the same "a flag a command
+  cannot honour" family as PIT-36.
 
 - **Batch commit (2026-11-20):** D76-D78 land in one commit, not the three the
   prompt named. They share `_persist_urls` (D76's tagging and D77's counting are
