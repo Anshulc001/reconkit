@@ -27,3 +27,6 @@ dist/
 # scale fixtures and capture data (2026-11-19): generated, never committed
 bench/
 captures/
+
+# third-party reference copy, read-only study material (2026-11-21): never committed
+sahmiye/
