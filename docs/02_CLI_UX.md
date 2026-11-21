@@ -12,7 +12,7 @@
 
 ## 2. Command Grammar
 
-`reconkit <command> [target] [flags]`. Target is `-d DOMAIN` or `-l FILE` (one domain per line). With no command, `reconkit -d X` is shorthand for `passive` (the passive pipeline), and bare `reconkit` with no arguments is the same passive shorthand - so on a terminal it starts the interactive questions. A scan command with **neither** `-d` nor `-l` on a terminal asks questions instead of failing (section 2b); with a target flag present nothing changes and nothing is asked.
+`reconkit <command> [target] [flags]`. Target is `-d DOMAIN` or `-l FILE` (one domain per line). With no command, `reconkit -d X` is shorthand for `passive` (the passive pipeline). Every scan command requires `-d` or `-l`: omitting both is a usage error (`provide a target with -d/--domain or -l/--list`, exit `2`), and bare `reconkit` prints help (exit `2`). There is no prompt and no interactive mode (D104, 2026-11-21).
 
 ### Scan modes (source of truth)
 
@@ -20,14 +20,13 @@ A scan mode is three things at once: **which stages run**, **which tool modes
 are included** (the `mode:` field in `tools.yaml`), and **which tool tiers are
 included** (`tier:` in `tools.yaml`). This table is the single definition. The
 engine implements it in `MODE_STAGES` and `MODE_TOOLS` in `reconkit/engine.py`,
-and the CLI help strings and the interactive question are generated from those
-same two dicts.
+and the CLI help strings are generated from those same two dicts.
 
-| Mode | Stages | Tool modes included | Tool tiers included | CLI | Interactive |
-|---|---|---|---|---|---|
-| `passive` | `subs`, `dns`, `urls` | passive only | `core`, `opt_in`* | `passive` command, the bare form, or `run` (default) | `passive` |
-| `active` | `subs`, `dns`, `live`, `tech`, `urls`, `url_probe` | passive + active | `core`, `opt_in`* | `active` command or `run --active` | `active` |
-| `full` | all: `subs`, `dns`, `live`, `ports`, `tech`, `urls`, `url_probe`, `shots`, `vulns` | passive + active | `core`, `opt_in`, `intrusive` | `full` command or `run --full` | `full` |
+| Mode | Stages | Tool modes included | Tool tiers included | CLI |
+|---|---|---|---|---|
+| `passive` | `subs`, `dns`, `urls` | passive only | `core`, `opt_in`* | `passive` command, the bare form, or `run` (default) |
+| `active` | `subs`, `dns`, `live`, `tech`, `urls`, `url_probe` | passive + active | `core`, `opt_in`* | `active` command or `run --active` |
+| `full` | all: `subs`, `dns`, `live`, `ports`, `tech`, `urls`, `url_probe`, `shots`, `vulns` | passive + active | `core`, `opt_in`, `intrusive` | `full` command or `run --full` |
 
 \*`opt_in` requires `--include-noisy`, unless the mode is `full` (which implies
 it). `--full` also implies `--active`.
@@ -52,7 +51,7 @@ delays the findings stage.
 - an **active** urls tool (`katana`, and later `hakrawler`, `gospider`, `subjs`)
   crawls what answered, so it receives the alive hosts, as before. In `passive`
   mode it is skipped at selection with `tool mode not included in passive mode`
-  before any input question arises.
+  before any input is built.
 
 The `tech` stage takes the alive hosts and runs only in `active` and `full`.
 
@@ -194,7 +193,7 @@ names `active` as the command that can: use `reconkit active -d X` (or
 - **No scope file at that path** - active and full runs are **refused before any traffic** with exit code 3: `Error: No scope.yaml found. Active scanning requires a scope file. If you intend to scan without scope restrictions, you must explicitly pass --no-scope.` Passive stages still work. `--no-scope` is the only way to run actively without a file (docs/05 rule 2, D82).
 - **A scope file is present** - it is enforced exactly as before (`authorization`, `expires`, `allow_active`, `in_scope`, `out_of_scope`); a violation exits 3 and the file is only ever read, never rewritten or deleted.
 
-The `--active` `--help` text says this in one sentence: `A scope.yaml is required; without one, active scanning is refused unless --no-scope is passed explicitly.` The interactive mode asks the scope question before the mode question, so the same branch applies there (section 2b).
+The `--active` `--help` text says this in one sentence: `A scope.yaml is required; without one, active scanning is refused unless --no-scope is passed explicitly.`
 
 **Ports run `pyscan`, `naabu`, `nmap`, `rustscan`, `smap` and `masscan` (wave 6).** `naabu` is scope-mode dependent (owner decision 2026-11-17, superseding the 12i permanent block): with **`--no-scope`** it runs unrestricted like any other active tool, receiving the discovered hostnames; with a **scope file present** the engine resolves each in-scope target itself, verifies every address against `in_scope_cidrs`, and passes `naabu` only those verified IPs - never a bare domain - skipping any target whose resolution fails or resolves out of scope (docs/05 rule 6, docs/09 section 4). Because two port adapters can now run, a port both report can reach `MEDIUM` confidence; a single-scanner result stays `LOW` and the open/closed disagreement rule only fires when both report. When `naabu` is absent or its targets cannot be verified, `pyscan` alone is the fallback and the ceiling is `LOW` again. `nmap` adds a `-sV` service/version fingerprint, `rustscan` a fast greppable sweep, and `smap` passive Shodan data filtered to `--ports`. `masscan` is `opt_in` **and needs root**: as a normal user it is `skipped (requires root / sudo)` and the stage continues; `sudo reconkit full ...` or `setcap cap_net_raw+ep` on the binary is the operator's call, never something the adapter does (docs/09 section 4a6).
 
@@ -317,144 +316,11 @@ names in its first column). That report contains hosts only - a name that
 appeared only in `urls` rows is not in it unless D58's second resolve reached it
 (see `docs/03` and `docs/09` section 5).
 
-## 2b. Interactive scan mode (no target flags)
-
-A scan command given **neither `-d` nor `-l`** asks a short question series
-instead of failing with "provide a target". This applies to bare `reconkit`
-(no command, shorthand for `passive`) and to `subs`, `dns`, `live`, `ports`,
-`tech`, `urls`, `vulns`, `passive`, `active`, `full` and `run`. Two hard conditions:
-
-- **Any target flag at all means no questions.** If `-d` or `-l` is present, the
-  command behaves exactly as section 2 describes - no prompt is shown and no
-  input is read. Every scripted invocation, and the whole automated test suite,
-  is in this branch.
-- **Interactive input requires a terminal on stdin.** With stdin redirected from a
-  pipe or `/dev/null` (CI, cron, `ssh host reconkit passive`), the command keeps
-  today's behaviour: `provide a target with -d/--domain or -l/--list` and exit `2`.
-  Nothing ever blocks waiting for input that cannot arrive.
-
-The questions:
-
-1. **Target.** A single domain, or a path to a file of domains (one per line). A
-   value naming an existing file is read with the same loader as `-l`: blank
-   lines and `#` comments skipped, duplicates removed, every line validated with
-   `validate_target()`. Anything else is treated as one domain. Both paths end in
-   the same `_targets()` handling `-d`/`-l` use, so there is no second target path.
-2. **Scope file.** `yes` asks for a path and uses it exactly as `--scope` does.
-   `no` leaves the scope location at its default (`./scope.yaml` if present,
-   otherwise no scope file). A scope file that **is present** is enforced exactly
-   as today: active stages need `allow_active`, a live `authorization`, an
-   unexpired `expires`, and the target in `in_scope`/not in `out_of_scope` (exit
-   `3` otherwise). With **no scope file**, an active or full plan is refused
-   with exit `3` before any traffic (docs/05 rule 2, D82); answer the scope
-   question with a real file, or pass `--no-scope` explicitly on the command.
-3. **Scan mode.** No default: the question is asked and re-asked until one of the
-   three words is typed (an empty line or any other word prints
-   `invalid scan mode '...'` and asks again). The scan never starts on an
-   assumed mode. The legend is generated from `MODE_STAGES`/`MODE_TOOLS` and
-   says, for each choice, the stages and the tool modes/tiers - the same words
-   as the "Scan modes (source of truth)" table:
-
-   ```
-   Scan mode:
-     passive  - subs, dns, urls stages; passive tools only
-     active   - subs, dns, live, tech, urls stages; passive+active tools
-     full     - all stages (subs, dns, live, ports, tech, urls, shots, vulns);
-                passive+active+intrusive
-   Choice [passive/active/full]:
-   ```
-
-   `active` and `full` set `--active`, so the scope gate applies unchanged.
-   `full` additionally sets `--full` and `--include-noisy`. Exploitation-class
-   tools still require `--tools`. `tech` and `vulns` have adapters, but a tool
-   that is not installed is still skipped at selection: an `active` or `full`
-   choice can report those skips and finish as **completion gaps** (exit `0`,
-   section 6) - the same rule as a flag-based `run --active`/`--full`, stated
-   before the run starts.
-4. **Report fields.** A numbered menu built from fields `reconkit` actually
-   stores (host state, confidence, discovery sources, source count, IPs, status
-   code, title, redirect location, open ports, technology, and the `UNKNOWN`
-   reason). The answer is a comma-separated list like `1,3,5` or `all`. Fields
-   that only make sense for a host that answered on the web (status code, title,
-   redirect location, technology, open ports) are written as `not applicable` for
-   every host whose state is not `ALIVE`, and the reason field only for `UNKNOWN`
-   hosts; no value is ever guessed for a host the run did not observe.
-5. **Aggressive scanning.** A separate yes/no asked when the answer to 3 was
-   `passive` or `active` (a `full` run already includes every stage).
-   `yes` adds the active `live` and `ports` stages (and sets `--active`), and it
-   states plainly what that means in this build: TCP connect scanning by
-   `pyscan` and (`naabu` when installed) - with `--no-scope` `naabu` runs on the
-   hostnames, with a scope file it runs only on IPs the engine resolved and
-   verified against `in_scope_cidrs`; **service/version detection is not wired**
-   (`nmap -sV` has no adapter). `no` changes nothing.
-
-After the last answer the CLI echoes the resolved plan (targets, stages, active
-or not, field numbers) and runs the ordinary engine once per target. Results also
-land on disk, one folder per domain per run (section 5).
-
-### The flow end to end (2026-11-17)
-
-This is the whole runtime flow in one place. The prompt text below is the exact
-text the CLI prints (typer renders a yes/no question as `[Y/n]` or `[y/N]`).
-
-1. **Launch.** `reconkit subs` (or `dns`, `live`, `ports`, `tech`, `urls`,
-   `vulns`, `passive`, `active`, `full`, `run`) with no `-d` and no `-l`, on a terminal.
-2. **Target.** `Domain, or path to a file of domains (one per line)` - a domain,
-   or a path to a file that is read exactly like `-l`.
-3. **Scope file.** `Do you have a scope file? [Y/n]`; on `y`,
-   `Scope file path` (an existing path is required, used exactly like `--scope`).
-   On `n` the scope location stays at its default: `./scope.yaml` if it exists.
-4. **Scan mode.** The legend above, then `Choice [passive/active/full]` - no
-   default, re-asked until valid. `passive`, `active` and `full` mean what the
-   table says.
-5. **Report fields.** The numbered menu of stored fields, then
-   `Fields [all]` (`1,3,5`, `all`, ...).
-6. **Scan parameters (active/full only).** In this order:
-   `Ignore scope file and run unrestricted? [y/N]` (a `y` prints the loud
-   `--no-scope` warning and asks `This disables scope enforcement. Continue?`),
-   `Ports to scan (comma or ranges, blank = default)`,
-   `Only show ALIVE, all, or custom states? [alive/all/custom]` (with
-   `States (comma list)` for `custom`),
-   `Only keep HTTP status codes? (comma, blank = all)`,
-   `Extra HTTP headers? [y/N]` (then `Header`, repeated until blank), and
-   `Custom User-Agent? [y/N]`.
-7. **Aggressive scanning (passive/active only).**
-   `Also run aggressive scanning (port scan + version detection)? [y/N]`; `y`
-   adds `live` + `ports` and sets `--active`. A `full` run skips this question.
-8. **Plan echo.** Two lines, for example:
-   `plan: example.com; mode full; scope enforced (scope file); stages subs, dns,
-   live, ports, tech, urls, shots, vulns; tools passive+active+intrusive; fields 12` and,
-   when anything was injected,
-   `inject: ports 80,443; status_codes 200,301; states ALIVE; headers 2;
-   user_agent custom`.
-9. **Out-of-scope prompt (scope file present, `--no-scope` not chosen).** When
-   the present scope file blocks the target, the run offers
-   `[a] add <target> to scope.yaml` (asks `This will modify scope.yaml. Proceed?`,
-   and only a `y` appends the entry), `[b] ignore scope and run unrestricted
-   (--no-scope)`, `[c] scan an in-scope target instead`, `[d] abort` (exit `2`,
-   nothing written). Only `[a]` ever writes scope.yaml, and only after the
-   explicit `y`.
-10. **Run.** The ordinary engine runs once per target, results are stored, and a
-    report folder per domain is written (section 5).
-11. **Scope branch at run time.** With **`--no-scope`**,
-    the active/full stages run unrestricted against the target(s) the operator
-    named and everything discovered under them (docs/05 rule 2 and section 3).
-    With a scope file **present** and `--no-scope` absent, the unchanged gate
-    applies (exit `3` on a missing `allow_active`, expired scope or out-of-scope
-    target) and `naabu` runs only on IPs reconkit resolved and verified against
-    `in_scope_cidrs`, skipping a target whose resolution fails or resolves out
-    of scope (docs/05 rule 6).
-12. **No speed option.** There is no `--speed`, `--delay`, preset or throttle
-    question anywhere in this flow, and none in `--help` (docs/03 section 7).
-
-The interactive path adds **no flags**: `--help` for a scan command is unchanged,
-and there is no `--interactive` switch. Omitting the target is the whole trigger.
-
 ## 3. Flags
 
 | Flag | Meaning |
 |---|---|
-| `-d, --domain` / `-l, --list` | Target or file of targets. Omitting both on a scan command starts the interactive mode (section 2b); that is the only trigger and it adds no flag |
+| `-d, --domain` / `-l, --list` | Target or file of targets. Required on every scan command; omitting both is a usage error (exit `2`) |
 | `--version` | Print `reconkit v<version>` and exit 0 (root command; D84) |
 | `--active` | Run active stages: `subs`, `dns`, `live`, `tech`, `urls`, `url_probe`. Passive stages still run. Uses passive and active tools; no intrusive/aggressive tools. A `scope.yaml` is required; without one, active scanning is refused unless `--no-scope` is passed explicitly. Full rule: section 2 |
 | `--full` | Run a full scan: all stages (`subs`, `dns`, `live`, `ports`, `tech`, `urls`, `shots`, `vulns`), using passive, active and intrusive-tier tools (exploitation-class tools still need `--tools`). Implies `--active` and `--include-noisy`, so `opt_in` tools run, `shots`/`gowitness` included. `shots` is full-only: no other mode and no stage command requests it |
@@ -525,9 +391,8 @@ the exit code is `3`):
     - scan an in-scope target instead
 ```
 
-The non-interactive exit-3 message is:
+The exit-3 message is:
 `active scan refused: example.com not in scope.yaml. Re-run with --no-scope or add example.com to scope.yaml.`
-The interactive equivalent offers `[a]`/`[b]`/`[c]`/`[d]` (section 2b point 9).
 
 **A scope-limited run says so twice (D64, 2026-11-19).** The pre-flight block
 above tells the operator what *will* be skipped; after the run, one more line
@@ -561,10 +426,18 @@ The `slow`/`normal`/`fast` presets, `--speed`, `--delay`, the pacer (delays, hos
 ```
 Subdomain          State      Status  Ports    Sources                    Trust       Notes
 api.example.com    ALIVE      200     80,443   crtsh, subfinder, otx      HIGH (3)    canonical
-vpn.example.com    DNS_ONLY   -       443      assetfinder, naabu         MEDIUM (2)  -
+vpn.example.com    DNS_ONLY   -       -        assetfinder, naabu         MEDIUM (2)  -
 old.example.com    SHUT_DOWN  -       -        crtsh                      LOW (1)     -
 new.example.com    UNKNOWN    -       -        certspotter, hackertarget  MEDIUM (2)  -
 ```
+
+The **Ports** column is `ALIVE`-only (2026-11-21). Only a host that answered
+can have been through the `ports` stage, so a `DNS_ONLY`/`SHUT_DOWN`/`DEAD`/
+`UNKNOWN` row prints `-` even when the `ports` table still holds rows from an
+earlier run. The table and the saved report agree (`report.txt` prints
+`not applicable`, `report.json` writes `null`). When no row is `ALIVE` the
+column is left out entirely, like **Notes**, because a column of `-` says
+nothing.
 
 The **Notes** column (D22, 2026-11-18) explains a www/non-www pair instead of
 hiding a row: `-> redirects to <host>` for a 3xx duplicate, `-> duplicate of
@@ -702,14 +575,12 @@ script can tell "the run found nothing" from "the run did not write this file".
   never written into. When two runs start within the same second the later one
   gets a `-2`, `-3`, ... suffix, so no run can overwrite another.
 - Both files are always written, whatever field selection was made. A field the
-  run could not observe prints `not applicable` (section 2b point 4) rather than
-  a guessed value.
-- **Every scan writes these two files** (changed 2026-11-18). The interactive
-  questions only *choose the columns*; a `-d`/`-l` run has no question to answer,
-  so it writes every stored field (`REPORT_FIELDS`, the same set as answering
-  `all`). Until this change a flagged run wrote nothing at all, which left the
-  operator with a terminal table and no artifact; the inconsistency was reported
-  from a real scan on 2026-11-18.
+  run could not observe prints `not applicable` rather than a guessed value.
+- **Every scan writes these two files** (changed 2026-11-18). The report always
+  carries every stored field (`REPORT_FIELDS`); the display flags narrow what is
+  shown, never what is saved. Until this change a flagged run wrote nothing at
+  all, which left the operator with a terminal table and no artifact; the
+  inconsistency was reported from a real scan on 2026-11-18.
 - **The report follows the display filters, and says so.** A run with
   `--only-alive` writes only the `ALIVE` hosts to `report.txt`/`report.json`,
   so the artifact matches the table you just read instead of hiding 34 `DEAD`

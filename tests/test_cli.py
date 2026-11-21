@@ -2054,3 +2054,64 @@ def test_report_from_db_is_read_only(tmp_path: Path) -> None:
     finally:
         database.chmod(0o644)
     assert hashlib.sha256(database.read_bytes()).hexdigest() == digest
+
+
+# ------------------------------------------------- input path is flags only (D104)
+
+
+def test_scan_without_a_target_is_a_usage_error(tmp_path: Path) -> None:
+    """No `-d`/`-l` means no question series any more: the same exit-2 error."""
+    config = make_config(tmp_path)
+    result = CliRunner().invoke(app, ["passive", "--mock", "--config", str(config)])
+    assert result.exit_code == 2
+    assert "provide a target with -d/--domain or -l/--list" in result.stderr
+
+
+def test_bare_reconkit_shows_help_instead_of_scanning() -> None:
+    """No argument is a usage error that prints help (Typer/Click exit 2)."""
+    # GitHub Actions sets FORCE_TERMINAL, so Rich styles the help even to a
+    # pipe; `help_text()` strips the escapes and COLUMNS keeps it untruncated.
+    result = CliRunner().invoke(app, [], env=HELP_ENV)
+    assert result.exit_code == 2
+    assert "Usage: reconkit" in " ".join(help_text(result).split())
+    assert "provide a target" not in result.stderr
+
+
+def test_an_empty_target_file_is_a_usage_error(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    targets = tmp_path / "empty.txt"
+    targets.write_text("# nothing here\n\n", encoding="utf-8")
+    result = CliRunner().invoke(
+        app, ["passive", "-l", str(targets), "--mock", "--config", str(config)]
+    )
+    assert result.exit_code == 2
+    assert "contains no domains" in " ".join(result.stderr.split())
+
+
+def test_a_multi_domain_file_scans_each_domain_separately(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(d) A file of domains dispatches once per domain, not one joined target."""
+    monkeypatch.chdir(tmp_path)
+    config = make_config(tmp_path)
+    raw = yaml.safe_load(config.read_text(encoding="utf-8"))
+    raw["results_dir"] = str(tmp_path / "results")
+    config.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    targets = tmp_path / "domains.txt"
+    targets.write_text("# two domains\nexample.com\ntestfire.net\n", encoding="utf-8")
+    calls: list[str] = []
+
+    async def fake_run(
+        self: Engine, target: str, options: ScanOptions | None = None
+    ) -> ScanSummary:
+        calls.append(target)
+        return ScanSummary(target=target, target_id=1)
+
+    monkeypatch.setattr(Engine, "run", fake_run)
+    result = CliRunner().invoke(
+        app, ["passive", "-l", str(targets), "--mock", "--config", str(config)]
+    )
+    assert result.exit_code == 0, result.stderr
+    assert calls == ["example.com", "testfire.net"]
+    folders = sorted(path.name for path in (tmp_path / "results" / "mock").iterdir())
+    assert folders == ["example.com", "testfire.net"]

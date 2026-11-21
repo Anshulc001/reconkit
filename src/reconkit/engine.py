@@ -101,8 +101,8 @@ STAGE_ORDER: tuple[Stage, ...] = (
 class ModeRules:
     """What one scan mode includes: tool modes plus tiers (docs/02, docs/03).
 
-    `MODE_TOOLS` is the only place the tier/tool-mode rule lives; the CLI, the
-    interactive prompt and every doc quote this table instead of restating it.
+    `MODE_TOOLS` is the only place the tier/tool-mode rule lives; the CLI and
+    every doc quote this table instead of restating it.
     """
 
     tool_modes: frozenset[Mode]
@@ -630,8 +630,8 @@ class HostSnapshot:
     """One stored host row, already decided by the engine (UI input).
 
     The first seven fields are the documented table/`--json` shape. The rest are
-    stored values the interactive report menu can include (docs/02 section 5);
-    they default to empty so the table and the JSON document are unchanged.
+    stored values the saved report can include (docs/02 section 5); they default
+    to empty so the table and the JSON document are unchanged.
     """
 
     fqdn: str

@@ -14,10 +14,11 @@ modes, defined in the "Scan modes (source of truth)" table in docs/02 section 2:
 `passive` (default: `subs` + `dns` + `urls`, passive tools only), `active` (the
 same plus `live` and `tech`, passive and active tools), `full` (all eight stages,
 `shots` included, `opt_in` enabled, implies `--active` and `--include-noisy`). Exploitation-class tools never run
-automatically in any mode. Without a target flag on a terminal the same choice
-is question 3 (docs/02 section 2b). With no `scope.yaml` an active/full run is
-unrestricted; with one present, a blocked target prints the pre-flight block and
-exits `3` unless `--no-scope` is given (docs/02 section 3.1).
+automatically in any mode. A scan command given neither `-d` nor `-l` is a
+usage error (exit `2`); there is no prompt. With no `scope.yaml` an active/full
+run is refused (exit `3`) unless `--no-scope` is given; with one present, a
+blocked target prints the pre-flight block and exits `3` too (docs/02 section
+3.1).
 
 - **Success:** exit code 0 with warnings listed.
 - **Failure:** Python < 3.11 or an unreadable `config.yaml`: clear message, exit code 1. `doctor` runs on every platform; reconkit installs nothing anywhere, so there is no platform-specific install path (docs/10 §4).

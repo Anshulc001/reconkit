@@ -95,7 +95,7 @@ workspaces/<domain>/
 - Raw adapter output is written by the engine as `<stage>/<run_id>-<tool>.txt`: one file per executed tool per stage run (`run_id` is the `scan_runs` id), so two tools in one stage and the same tool in two runs never collide, and a rerun never overwrites an earlier run's evidence. The `dns` stage has no raw directory of its own - the workspace keeps exactly the six documented directories - so its files go to `meta/`, which also holds `vulns` and `shots` output: a vulns finding file is `meta/<run_id>-<tool>.txt`, and those findings are not persisted to SQLite (docs/09 section 6). `write` returns the path and the engine stores it unchanged in `ToolResult.raw_path`, so it is relative while `workspace_dir` is relative (the shipped `config.yaml` value) and absolute when the caller passed an absolute root. The path is not shown in the human tables (docs/02) but does appear in `--json` under `stages[].results`, because that object is the docs/09 `ToolResult` schema.
 - Raw tool output uses `subs`, `live`, `ports`, `urls` or `tech`; run metadata and summaries use `meta`. No other directory is created.
 
-### Saved reports (`results/`, interactive mode only)
+### Saved reports (`results/`, every scan)
 
 ```
 <results_dir>/<domain>/<YYYYmmddTHHMMSSZ>/
@@ -119,11 +119,11 @@ workspaces/<domain>/
   already owns every rendering of the same snapshot rows and imports only the
   standard library, Rich and shared output types. A new module would have meant a
   new file outside docs/03, which G3 forbids.
-- **Both paths call them** (changed 2026-11-18, D20). The interactive path
-  (docs/02 section 2b) passes the fields the operator picked; a `-d`/`-l` run has
-  no question to answer and passes every `REPORT_FIELDS` key. Until this change
-  the call was gated on the interactive plan, so a flagged run saved no report at
-  all - the inconsistency the owner reported from a real scan.
+- **Every run calls them** (changed 2026-11-18, D20). A scan passes every
+  `REPORT_FIELDS` key; the display flags narrow what is shown, never what is
+  saved. Until this change the call was gated on an interactive plan (removed
+  in D104), so a flagged run saved no report at all - the inconsistency the
+  owner reported from a real scan.
 
 ### Engine API (`engine.py`)
 
@@ -145,7 +145,7 @@ workspaces/<domain>/
   finished, so a phase-timeout cancellation still leaves it out and gets its
   `timeout` row.
 - `Engine.host_rows(target_id)` returns typed `HostSnapshot` rows (fqdn, state, confidence, sources, status code, open ports) for the UI; `HostSnapshot`
-  also carries the extra stored values the interactive report menu needs -
+  also carries the extra stored values the saved report can include -
   `source_count`, `ips`, `title`, `location`, `tech` - read from the existing
   `subdomains`/`host_status_history` columns. They are additive with defaults, so
   the human table and the `--json` document stay byte-identical. `Engine.diff(target)` returns the latest two same-kind run comparison; `Engine.recent_runs(limit)` returns recent stage runs for `status`.
@@ -180,8 +180,8 @@ two module-level tables and one helper:
 - `MODE_STAGES`: `passive` = `(SUBS, DNS, URLS)`; `active` = `(SUBS, DNS,
   LIVE, TECH, URLS, URL_PROBE)`; `full` = all nine stages in `STAGE_ORDER`
   (the eight discovery stages plus `SHOTS`, which is full-only). Every tuple is
-  in `STAGE_ORDER`, so help text and the interactive legend list the stages in
-  the order they actually run; `URLS` always follows `LIVE` when `LIVE` runs.
+  in `STAGE_ORDER`, so help text lists the stages in the order they actually
+  run; `URLS` always follows `LIVE` when `LIVE` runs.
   A mode's stage of a pipeline can therefore have no input: in `passive` the
   `urls` stage has no alive host, which is exactly why passive urls tools are fed
   the domain list (see the next bullet).
@@ -204,8 +204,8 @@ named (`exploitation tool requires explicit --tools`); a tier outside
 included in <mode> mode`, never bypassed); then no-adapter and not-installed
 checks. `ScanOptions.mode` is derived (`full` wins over `active`, else
 `passive`), so no caller can invent a fourth mode. The CLI's `_stages()` and
-both help strings read `MODE_STAGES`; the interactive legend reads the same
-tables, which is why the three surfaces cannot disagree.
+the help strings read `MODE_STAGES`, which is why the two surfaces cannot
+disagree.
 
 ## 6. Data Flow (example: `reconkit live -d example.com --active`)
 
@@ -254,8 +254,8 @@ Speed control was removed on 2026-11-17 at the owner's request (docs/MASTER_PLAN
 
 - `ui.render(summary, hosts, *, json_output=False, silent=False, no_color=False, stdout=None, stderr=None, console=None) -> int` writes the human tables/progress to stderr or the single JSON document to stdout, then returns `int(summary.exit_code)`.
 - `ui.render_progress(stage, tool, done, total, ...)` writes one progress line to
-  stderr. It is wired into every scan (interactive and flag-based, `--json`
-  included) and suppressed only by `--silent`; it never writes to stdout, so the
+  stderr. It is wired into every scan (`--json` included) and suppressed only by
+  `--silent`; it never writes to stdout, so the
   one-document `--json` contract on stdout is untouched (docs/02 section 5).
   `Engine` receives it as an injected `progress` callback, so the engine still
   prints nothing itself.

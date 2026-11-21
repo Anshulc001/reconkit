@@ -4,6 +4,25 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-21, D105): **console ports are ALIVE-only, like the report.**
+  A `DNS_ONLY`/`DEAD` row no longer prints stored ports that no ports stage ran
+  for this scan; the column is omitted when no row is ALIVE. Also fixed
+  `test_bare_reconkit_shows_help_instead_of_scanning`, which failed on GitHub
+  Actions because `FORCE_TERMINAL` styles piped help; it now uses the existing
+  `help_text()`/`HELP_ENV` helper. Gate run both plain and with
+  `FORCE_TERMINAL=1`: 1033 tests, ruff/format/mypy clean. Next action: none.
+
+- Status (2026-11-21, D104): **interactive mode is removed; one input path.**
+  Every prompt, the plan dataclass, the `[a/b/c/d]` out-of-scope menu and
+  `ui.report_fields()` are gone; bare `reconkit` prints help (exit 2) and a scan
+  command without `-d`/`-l` keeps `provide a target with -d/--domain or
+  -l/--list` (exit 2). `tests/test_interactive_scan.py` is deleted; its
+  non-interactive coverage moved to `test_cli.py` (4) and `test_ui.py` (4).
+  Docs/02 section 2b, COMMANDS.md's interactive section and README's line are
+  removed. This reverses D103 and the interactive half of Part 13. Gate: 1031
+  tests, ruff/format/mypy clean, plus a CLI/mock harness and real runs on
+  testfire.net. Next action: none.
+
 - Status (2026-11-21, D103): **bare `reconkit` starts the interactive scan.**
   `no_args_is_help=True` on the root `typer.Typer` printed usage before the
   callback, so the documented no-command launch never reached the question
@@ -1298,6 +1317,30 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   excluded. **Not changed, needs a ruling:** `live`/`ports`/`tech`/`urls`/
   `vulns` still accept `--full` and ignore it - the same "a flag a command
   cannot honour" family as PIT-36.
+
+- **D105 (2026-11-21): the console `Ports` column is `ALIVE`-only (owner
+  request).** `ports` table rows are history: a host that was ALIVE in an
+  earlier run keeps `state='open'` rows after it becomes `DNS_ONLY` or `DEAD`,
+  and no later ports stage revisits it. `_host_table` now shows a value only
+  for an `ALIVE` row and omits the column entirely when no row is ALIVE, which
+  is the same gate the saved report already applies (`not applicable`/`null`).
+  Stored data is untouched, so `diff` still has the full history. **Disclosed
+  test fix:** `test_bare_reconkit_shows_help_instead_of_scanning` used raw
+  `stdout`, which is styled on GitHub Actions (`FORCE_TERMINAL`); it now uses
+  `help_text()`/`HELP_ENV` like the other help tests.
+
+- **D104 (2026-11-21): interactive mode removed permanently (owner request).**
+  The owner judged two input paths too expensive to keep in sync as the flag
+  surface grows, and asked for a flags-only CLI. Deleted `_InteractivePlan`,
+  the plan branch in `_run_scan`, `_tools_label`, `_mode_legend`, `_stdin_is_tty`, the
+  ten `_ask_*` helpers, `_interactive_plan`, `_append_scope_entry`,
+  `_ask_out_of_scope` and the unused `ui.report_fields()` (346 lines from
+  `cli.py`). `_run_scan` now refuses a scan with no `-d`/`-l` in `_targets()`
+  exactly as before the feature existed, and `no_args_is_help` is back to
+  `True`, so bare `reconkit` prints help and exits 2. This reverses D103 and
+  deletes `tests/test_interactive_scan.py`; the four non-interactive CLI cases
+  moved to `test_cli.py` and the four UI/report cases to `test_ui.py`. No
+  behavior outside the prompt path changed.
 
 - **D103 (2026-11-21): bare `reconkit` reaches the interactive scan.** The
   interactive question series existed and `reconkit passive`/`active`/`full`

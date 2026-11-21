@@ -82,8 +82,8 @@ class ReportField:
     gate: ReportGate = "always"
 
 
-# The interactive report menu (docs/02 section 2b). Every key maps to a stored
-# value in `subdomains`/`host_status_history`: nothing here is computed here.
+# The saved-report fields (docs/02 section 5). Every key maps to a stored value
+# in `subdomains`/`host_status_history`: nothing here is computed here.
 REPORT_FIELDS: tuple[ReportField, ...] = (
     ReportField("hostname", "Hostname"),
     ReportField("state", "Host state"),
@@ -100,13 +100,6 @@ REPORT_FIELDS: tuple[ReportField, ...] = (
 )
 
 NOT_APPLICABLE = "not applicable"
-
-
-def report_fields(numbers: Iterable[int]) -> tuple[ReportField, ...]:
-    """Map 1-based menu numbers to fields, keeping menu order and no duplicates."""
-
-    wanted = {number - 1 for number in numbers}
-    return tuple(field for index, field in enumerate(REPORT_FIELDS) if index in wanted)
 
 
 def _applicable(row: HostSnapshot, field: ReportField) -> bool:
@@ -330,7 +323,15 @@ def _host_table(rows: list[HostRow]) -> Table:
     table.add_column("Subdomain")
     table.add_column("State", no_wrap=True)
     table.add_column("Status", no_wrap=True)
-    table.add_column("Ports")
+    # Stored ports are only meaningful for a host that answered (D104). A
+    # DNS_ONLY/DEAD host keeps the rows an earlier run wrote, but no ports
+    # stage ran on it now, so showing them next to a passive run would claim
+    # knowledge this run does not have. The saved report already gates them the
+    # same way; the two outputs must agree. With no ALIVE host there is nothing
+    # to show, so the column is omitted rather than printed empty.
+    alive = any(row.state is HostState.ALIVE for row in rows)
+    if alive:
+        table.add_column("Ports")
     table.add_column("Sources")
     table.add_column("Trust", no_wrap=True, min_width=15)
     canonical = {row.duplicate_of for row in rows if row.duplicate_of is not None}
@@ -345,13 +346,18 @@ def _host_table(rows: list[HostRow]) -> Table:
             Text(row.fqdn),
             Text(format_state(row.state), style=_STATE_STYLES[row.state]),
             Text(str(row.status_code) if row.status_code is not None else "-"),
-            Text(format_ports(row.ports)),
-            Text(", ".join(row.sources) if row.sources else "-"),
-            Text(
-                format_confidence(row.confidence, row.sources),
-                style=_CONFIDENCE_STYLES[row.confidence],
-            ),
         ]
+        if alive:
+            cells.append(Text(format_ports(row.ports) if row.state is HostState.ALIVE else "-"))
+        cells.extend(
+            [
+                Text(", ".join(row.sources) if row.sources else "-"),
+                Text(
+                    format_confidence(row.confidence, row.sources),
+                    style=_CONFIDENCE_STYLES[row.confidence],
+                ),
+            ]
+        )
         if notes:
             cells.append(Text(host_note(row, canonical)))
         table.add_row(*cells)

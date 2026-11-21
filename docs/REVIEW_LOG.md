@@ -10743,3 +10743,80 @@ New regressions: `test_bare_reconkit_asks_the_questions`,
 Gate: `1062 passed in 47.33s`; `ruff check .` -> `All checks passed!`;
 `ruff format --check .` -> `97 files already formatted`; `mypy src/reconkit` ->
 `Success: no issues found in 63 source files`. Suite 1059 -> 1062 (+3).
+
+## 2026-11-21 - interactive mode removed, flags only (D104)
+
+Owner decision: keep one input path. The question series, the mode legend and
+the out-of-scope `[a/b/c/d]` menu are deleted, `no_args_is_help` is back to
+`True`, and `ui.report_fields()` (only the interactive menu used it) is gone.
+`cli.py` lost 346 lines; no scan behavior outside the prompt path changed.
+
+Before/after:
+
+```
+$ reconkit                                  -> help, exit 2 (was: question series)
+$ reconkit passive --mock --config C        -> "provide a target ...", exit 2
+$ reconkit passive -d example.com --mock    -> exit 0, report written
+```
+
+`tests/test_interactive_scan.py` is deleted. Its non-interactive cases moved to
+`test_cli.py` (no-target error, bare help, empty `-l` file, multi-domain `-l`) and
+`test_ui.py` (alive-gated fields, UNKNOWN reason, run-folder collision, traversal).
+
+Harness (51 checks, one command at a time, isolated `/tmp/rk-harness` config):
+
+```
+H2: --help for every command, --version, bare help, 11 x no-target error
+H3: mock passive/active/full, run --active/--full, bare -d shorthand,
+    subs/dns and live/ports/tech/urls/vulns, doctor/status/diff/report
+H3b: active -d slice.bank.in --mock -> exit 3, "not in scope" (no traffic)
+HARNESS: PASS=51 FAIL=0
+```
+
+Real runs on the authorized `testfire.net` (scope file, no `--mock`):
+
+```
+passive: exit 0, 37 hosts (0 ALIVE, 8 DNS_ONLY, 29 DEAD), report written;
+         14 ok, 2 gap (otx 429, crtsh 502), 2 idle-killed (gau, urlfinder)
+active:  exit 5 (one gap: otx 429), 37 hosts (8 ALIVE), 29 ok, 1 timeout
+         (urlfinder at the 240 s phase budget), report written
+```
+
+Gate after the removal: `1031 passed in 42.69s`; `ruff check .` -> `All checks
+passed!`; `ruff format --check .` -> `96 files already formatted`; `mypy
+src/reconkit` -> `Success: no issues found in 63 source files`. Suite 1062 ->
+1031 because the 39-test interactive file went and 8 cases were kept.
+
+## 2026-11-21 - console ports match the report, CI help test fixed (D105)
+
+Owner spotted `DNS_ONLY` rows printing `80,443,8080` in the console while the
+saved report said `not applicable`. Root cause: `Store.host_rows()` aggregates
+every `ports.state='open'` row for the subdomain, and a host that was ALIVE in an
+earlier run keeps those rows after it stops answering; the `ports` stage only
+ever receives ALIVE hosts (`Engine._stage_hosts`).
+
+Fix in `_host_table`: a value only for an `ALIVE` row, and the column is omitted
+when no row is ALIVE. The stored rows are untouched, so `diff` keeps the history.
+
+```
+before: vpn.example.com  DNS_ONLY  -  443    assetfinder  MEDIUM (2)
+after:  vpn.example.com  DNS_ONLY  -  -      assetfinder  MEDIUM (2)
+        (and no Ports header at all when every row is non-ALIVE)
+```
+
+New tests: `test_the_console_ports_column_is_alive_only`,
+`test_the_ports_column_is_omitted_when_no_host_is_alive`. docs/02 section 5 now
+documents the gate and the omitted column.
+
+**CI fix, disclosed:** the first push of the interactive removal failed on
+GitHub Actions in `test_bare_reconkit_shows_help_instead_of_scanning`:
+`FORCE_TERMINAL` makes Rich style help written to a pipe, so the raw
+`"Usage: reconkit"` substring split across escape runs. The test now uses the
+existing `help_text()`/`HELP_ENV` helper like every other help test. The local
+gate had passed because `FORCE_TERMINAL` is not set here; the suite was re-run
+with `FORCE_TERMINAL=1` to reproduce CI.
+
+Gate, both plain and with `FORCE_TERMINAL=1`: `1033 passed in 43.08s`;
+`ruff check .` -> `All checks passed!`; `ruff format --check .` -> `96 files
+already formatted`; `mypy src/reconkit` -> `Success: no issues found in 63
+source files`.

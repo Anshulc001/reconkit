@@ -13,8 +13,8 @@ below was checked against `reconkit --help`, `reconkit run --help` and
 source .venv/bin/activate       # activate the venv once per shell
 
 reconkit doctor                 # which tools are installed, with versions
-reconkit                        # interactive mode (asks what to scan)
-reconkit passive -d example.com     # passive scan, no prompts
+reconkit --help                 # every command and flag
+reconkit passive -d example.com     # passive scan
 ```
 
 ---
@@ -38,26 +38,6 @@ reconkit passive -d example.com     # passive scan, no prompts
 | `db wipe` | delete every DB row and recreate the schema; `results/` untouched |
 | `db list -d X`, `db export -d X` | **not in this build** (Phase 3 stubs, exit 1) |
 | `export -d X --format json\|md\|html` | **not in this build** (Phase 3 stub, exits 1) |
-
----
-
-## Interactive mode (no target flag)
-
-`reconkit` (or any scan command) with neither `-d` nor `-l` on a terminal asks
-questions instead of failing:
-
-1. **Target** — a domain, or a path to a file of domains (read like `-l`)
-2. **Scope file** — `Do you have a scope file? [Y/n]`, then `Scope file path`
-3. **Scan mode** — `passive` / `active` / `full` (no default, re-asked until valid)
-4. **Report fields** — numbered menu, answer `all` or `1,3,5`
-5. **Scan parameters** *(active/full only)* — ignore scope file?, ports, states,
-   status codes, extra headers, custom User-Agent
-6. **Aggressive scanning** *(passive/active only)* — `Also run aggressive
-   scanning (port scan + version detection)? [y/N]`
-
-Then the plan echo, the out-of-scope prompt if a scope file blocks the target,
-and the run. Results go to `results/<domain>/<timestamp>/` as `report.txt` and
-`report.json`.
 
 ---
 
@@ -566,7 +546,7 @@ Raw output before and after any change; no claim without it.
 
 ## References
 
-- `docs/02_CLI_UX.md` — CLI surface, modes, interactive flow, exit codes
+- `docs/02_CLI_UX.md` — CLI surface, modes, flags, exit codes
 - `docs/03_ARCHITECTURE.md` — pipeline, engine internals, adapter contract
 - `docs/04_DATABASE.md` — schema and migrations
 - `docs/05_SECURITY.md` — scope model, `--no-scope` semantics, redaction

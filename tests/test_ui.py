@@ -1156,3 +1156,126 @@ def test_tool_table_shows_unique_count() -> None:
     line = next(line for line in rendered.splitlines() if "gau" in line)
     assert "Unique" in rendered
     assert "100" in line and "15" in line
+
+
+# ------------------------------------------- saved-report fields and folders (D104)
+
+
+def test_alive_only_fields_are_not_applicable_for_non_alive_hosts() -> None:
+    dead = HostSnapshot(
+        fqdn="gone.example.com",
+        state=HostState.DEAD,
+        confidence=Confidence.LOW,
+        sources=(),
+        status_code=None,
+        ports=(),
+        title=None,
+        location=None,
+        tech=(),
+    )
+    alive = HostSnapshot(
+        fqdn="www.example.com",
+        state=HostState.ALIVE,
+        confidence=Confidence.HIGH,
+        sources=("crtsh", "subfinder", "pyprobe"),
+        status_code=200,
+        ports=(80, 443),
+        title="Example Domain",
+        location="https://example.com/",
+        tech=("nginx",),
+        ips=("203.0.113.5",),
+        source_count=3,
+    )
+    for field in ui.REPORT_FIELDS:
+        if field.gate != "alive":
+            continue
+        assert ui.field_value(dead, field) is None
+        assert ui.format_field_value(dead, field) == "not applicable"
+        assert ui.field_value(alive, field) is not None
+        assert ui.format_field_value(alive, field) != "not applicable"
+    assert ui.format_field_value(dead, ui.REPORT_FIELDS[0]) == "gone.example.com"
+    assert ui.format_field_value(alive, ui.REPORT_FIELDS[0]) == "www.example.com"
+
+
+def test_the_unknown_reason_is_only_for_unknown_hosts() -> None:
+    unknown = HostSnapshot(
+        fqdn="mystery.example.com",
+        state=HostState.UNKNOWN,
+        confidence=Confidence.LOW,
+        sources=("pyprobe",),
+        status_code=None,
+        ports=(),
+        detail="tls: untrusted CA",
+    )
+    alive = HostSnapshot(
+        fqdn="www.example.com",
+        state=HostState.ALIVE,
+        confidence=Confidence.HIGH,
+        sources=(),
+        status_code=200,
+        ports=(),
+        detail="stale text that must never be shown",
+    )
+    reason = next(field for field in ui.REPORT_FIELDS if field.key == "detail")
+    assert ui.format_field_value(unknown, reason) == "tls: untrusted CA"
+    assert ui.format_field_value(alive, reason) == "not applicable"
+
+
+def test_two_runs_of_one_domain_never_share_a_folder(tmp_path: Path) -> None:
+    root = tmp_path / "results"
+    stamp = datetime(2026, 11, 16, 12, 0, 0, tzinfo=UTC)
+    first = ui.report_directory(root, "example.com", stamp)
+    row = HostSnapshot(
+        fqdn="www.example.com",
+        state=HostState.ALIVE,
+        confidence=Confidence.HIGH,
+        sources=("crtsh",),
+        status_code=200,
+        ports=(),
+    )
+    ui.write_field_report(first, "example.com", [row], ui.REPORT_FIELDS[:1], run_at=stamp)
+    second = ui.report_directory(root, "example.com", stamp)
+    assert first != second
+    assert first.is_dir() and second.is_dir()
+    assert (first / "report.json").is_file()
+    assert not (second / "report.json").exists()
+    ui.write_field_report(second, "example.com", [], ui.REPORT_FIELDS[:1], run_at=stamp)
+    assert "www.example.com" in (first / "report.json").read_text(encoding="utf-8")
+    assert "www.example.com" not in (second / "report.json").read_text(encoding="utf-8")
+
+
+def test_report_directory_refuses_a_traversing_target(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        ui.report_directory(tmp_path, "../escape", datetime.now(UTC))
+
+
+def test_the_console_ports_column_is_alive_only() -> None:
+    """Stored ports on a non-ALIVE host are history, not this run's finding."""
+    hosts = [
+        ui.HostRow("www.example.com", HostState.ALIVE, Confidence.HIGH, ("crtsh",), 200, (80, 443)),
+        ui.HostRow(
+            "vpn.example.com", HostState.DNS_ONLY, Confidence.MEDIUM, ("crtsh",), None, (12345,)
+        ),
+        ui.HostRow("dead.example.com", HostState.DEAD, Confidence.LOW, ("crtsh",), None, (23456,)),
+    ]
+    _, _, err = render_text(hosts=hosts)
+    flat = " ".join(err.split())
+    assert "Ports" in flat
+    alive_line = next(line for line in err.splitlines() if "www.example.com" in line)
+    vpn_line = next(line for line in err.splitlines() if "vpn.example.com" in line)
+    dead_line = next(line for line in err.splitlines() if "dead.example.com" in line)
+    assert "80,443" in alive_line
+    assert "12345" not in vpn_line
+    assert "23456" not in dead_line
+
+
+def test_the_ports_column_is_omitted_when_no_host_is_alive() -> None:
+    hosts = [
+        ui.HostRow(
+            "vpn.example.com", HostState.DNS_ONLY, Confidence.MEDIUM, ("crtsh",), None, (443,)
+        ),
+        ui.HostRow("dead.example.com", HostState.DEAD, Confidence.LOW, ("crtsh",), None, (22,)),
+    ]
+    _, _, err = render_text(hosts=hosts)
+    assert "Ports" not in err
+    assert "443" not in err

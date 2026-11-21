@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import re
 import shutil
-import sys
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -25,9 +24,6 @@ from reconkit.core.scope import (
     preflight_warning,
     scope_present,
 )
-from reconkit.core.scope import (
-    scope_path as resolve_scope_path,
-)
 from reconkit.core.store import configure_redaction, redact
 from reconkit.doctor import collect_report
 from reconkit.engine import (
@@ -45,7 +41,6 @@ from reconkit.ui import (
     REPORT_FIELDS,
     SCOPE_LIMITED_BANNER,
     HostRow,
-    ReportField,
     ReportSelection,
     activity_spinner,
     make_console,
@@ -57,7 +52,6 @@ from reconkit.ui import (
     render_progress,
     render_status,
     report_directory,
-    report_fields,
     write_field_report,
 )
 
@@ -65,10 +59,7 @@ app = typer.Typer(
     name="reconkit",
     help="Reconnaissance orchestrator for authorized security testing.",
     add_completion=False,
-    # Bare `reconkit` must reach the callback: it is the passive shorthand and,
-    # with no -d/-l on a terminal, the interactive question series (docs/02
-    # section 2b). `no_args_is_help=True` would print help and exit instead.
-    no_args_is_help=False,
+    no_args_is_help=True,
 )
 scope_app = typer.Typer(help="Inspect or import scope.yaml.", no_args_is_help=True)
 db_app = typer.Typer(help="Query stored assets.", no_args_is_help=True)
@@ -140,8 +131,6 @@ _SCAN_COMMANDS = (
     "run",
 )
 _ACTIVE_ONLY = frozenset({"live", "ports", "tech", "urls", "vulns"})
-# The passive-only stage tuple is the mode table's entry, never a copy.
-_PASSIVE_STAGES = MODE_STAGES["passive"]
 # Commands that run no active stage at all, so `--active` promises nothing.
 # `urls` is deliberately absent: its active tools need `--active`, and its
 # passive tools run without it since the 2026-11-17 mode expansion.
@@ -436,298 +425,6 @@ def _configure_redaction() -> None:
     configure_redaction(value for value in values.values() if value is not None)
 
 
-@dataclass(frozen=True)
-class _InteractivePlan:
-    """The answers, already resolved into the ordinary scan inputs."""
-
-    domain: str | None
-    list_file: Path | None
-    scope_path: Path | None
-    stages: tuple[Stage, ...]
-    active: bool
-    fields: tuple[ReportField, ...]
-    full: bool = False
-    no_scope: bool = False
-    ports: tuple[int, ...] = ()
-    status_codes: tuple[int, ...] = ()
-    only_states: tuple[str, ...] = ()
-    headers: tuple[tuple[str, str], ...] = ()
-    user_agent: str | None = None
-
-
-def _tools_label(mode: str) -> str:
-    if mode == "full":
-        return "passive+active+intrusive"
-    if mode == "active":
-        return "passive+active"
-    return "passive only"
-
-
-def _mode_legend() -> str:
-    """The interactive legend, generated from `MODE_STAGES` (docs/02 section 2b).
-
-    Same words as the "Scan modes (source of truth)" table: the stage list is
-    `_stage_list()` and the tool modes come from `_tools_label()`, so the prompt
-    cannot drift from the engine.
-    """
-    lines = ["Scan mode:"]
-    for mode in ("passive", "active", "full"):
-        stages = _stage_list(mode)
-        if mode == "full":
-            lines.append(f"  {mode:<8} — all stages ({stages}); {_tools_label(mode)}")
-        else:
-            lines.append(f"  {mode:<8} — {stages} stages; {_tools_label(mode)} tools")
-    return "\n".join(lines)
-
-
-def _stdin_is_tty() -> bool:
-    """True only when a real terminal is on stdin (docs/02 section 2b).
-
-    Without a terminal the interactive questions would block on input that can
-    never arrive, so the command keeps the documented "provide a target" error.
-    Tests drive the interactive path by monkeypatching this function.
-    """
-    try:
-        return bool(sys.stdin.isatty())
-    except (AttributeError, ValueError):
-        return False
-
-
-def _ask_target() -> tuple[str | None, Path | None]:
-    """Question 1: one domain, or a path to a file of domains."""
-    answer = ""
-    while not answer:
-        answer = str(
-            typer.prompt("Domain, or path to a file of domains (one per line)", err=True)
-        ).strip()
-    candidate = Path(answer).expanduser()
-    if candidate.is_file():
-        return None, candidate
-    return answer, None
-
-
-def _ask_scope() -> Path | None:
-    """Question 2: an optional scope file, used exactly like `--scope`."""
-    if not typer.confirm("Do you have a scope file?", default=True, err=True):
-        return None
-    raw = str(typer.prompt("Scope file path", err=True)).strip()
-    path = Path(raw).expanduser()
-    if not path.is_file():
-        raise ConfigError(f"scope file {path} does not exist")
-    return path
-
-
-def _ask_mode(*, no_color: bool) -> tuple[tuple[Stage, ...], bool, str]:
-    """Question 3: passive, active or full (docs/02 section 2b).
-
-    The legend is generated from `MODE_STAGES`/`MODE_TOOLS`, so the prompt says
-    exactly what the CLI help and docs/02 say. There is no default and no
-    assumed mode; the prompt repeats until one of the three words is typed.
-    """
-    while True:
-        render_message(_mode_legend(), no_color=no_color)
-        answer = str(typer.prompt("Choice [passive/active/full]", err=True))
-        mode = answer.strip().lower()
-        if mode in MODE_STAGES:
-            return MODE_STAGES[mode], mode != "passive", mode
-        render_error(
-            f"invalid scan mode {answer!r}; expected passive, active or full",
-            no_color=no_color,
-        )
-
-
-def _ask_no_scope(*, no_color: bool) -> bool:
-    """Ask whether to ignore a scope file, with the loud warning and a confirm (y/N)."""
-    if not typer.confirm("Ignore scope file and run unrestricted?", default=False, err=True):
-        return False
-    render_message(
-        "--no-scope: active stages will run WITHOUT scope enforcement; no scope "
-        "file is read, checked, or enforced. The run records "
-        "scope_mode = unrestricted_flag.",
-        no_color=no_color,
-    )
-    return bool(
-        typer.confirm("This disables scope enforcement. Continue?", default=False, err=True)
-    )
-
-
-def _ask_ports() -> tuple[int, ...]:
-    answer = str(
-        typer.prompt("Ports to scan (comma or ranges, blank = default)", default="", err=True)
-    )
-    return _ports(answer.strip() or None)
-
-
-def _ask_only_states(*, no_color: bool) -> tuple[str, ...]:
-    answer = (
-        str(
-            typer.prompt(
-                "Only show ALIVE, all, or custom states? [alive/all/custom]",
-                default="all",
-                err=True,
-            )
-        )
-        .strip()
-        .lower()
-    )
-    if answer in {"all", ""}:
-        return ()
-    if answer == "alive":
-        return (HostState.ALIVE.value,)
-    raw = str(typer.prompt("States (comma list)", default="ALIVE", err=True))
-    states: list[str] = []
-    for part in raw.split(","):
-        value = part.strip().upper()
-        if not value:
-            continue
-        try:
-            states.append(HostState(value).value)
-        except ValueError:
-            render_error(f"invalid host state {part!r}", no_color=no_color)
-    return tuple(states)
-
-
-def _ask_headers() -> tuple[tuple[str, str], ...]:
-    if not typer.confirm("Extra HTTP headers?", default=False, err=True):
-        return ()
-    pairs: list[tuple[str, str]] = []
-    while True:
-        raw = str(typer.prompt("Header", default="", err=True)).strip()
-        if not raw:
-            break
-        name, sep, value = raw.partition(":")
-        if not sep or not _HEADER_NAME.fullmatch(name.strip()) or not value.strip():
-            raise ConfigError(f"invalid header {raw!r}; expected 'Name: Value'")
-        pairs.append((name.strip(), value.strip()))
-    return tuple(pairs)
-
-
-def _ask_user_agent() -> str | None:
-    if not typer.confirm("Custom User-Agent?", default=False, err=True):
-        return None
-    value = str(typer.prompt("User-Agent", default="", err=True)).strip()
-    return value or None
-
-
-def _ask_fields(*, no_color: bool) -> tuple[ReportField, ...]:
-    """Question 4: which stored fields the saved report should contain."""
-    lines = ["Report fields (numbers like 1,3,5, or 'all'):"]
-    for number, field in enumerate(REPORT_FIELDS, start=1):
-        gate = "" if field.gate == "always" else f"  [{field.gate} hosts only]"
-        lines.append(f"  {number}. {field.label}{gate}")
-    render_message("\n".join(lines), no_color=no_color)
-    answer = str(typer.prompt("Fields", default="all", err=True)).strip().lower()
-    if answer in {"all", "*"}:
-        return REPORT_FIELDS
-    numbers: list[int] = []
-    for part in answer.replace(" ", "").split(","):
-        if not part:
-            continue
-        if not part.isdigit():
-            raise ConfigError(f"invalid report field {part!r}; expected a number or 'all'")
-        number = int(part)
-        if not 1 <= number <= len(REPORT_FIELDS):
-            raise ConfigError(f"report field {number} is out of range (1-{len(REPORT_FIELDS)})")
-        numbers.append(number)
-    if not numbers:
-        raise ConfigError("no report fields selected")
-    return report_fields(numbers)
-
-
-def _ask_aggressive(*, no_color: bool) -> bool:
-    """Question 5: port scan + version detection, whatever the mode was."""
-    answer = typer.confirm(
-        "Also run aggressive scanning (port scan + version detection)?",
-        default=False,
-        err=True,
-    )
-    if answer:
-        # docs/02 section 2b: state the real capability, never a guess.
-        render_message(
-            "aggressive: TCP connect scanning by pyscan, plus naabu when installed "
-            "(with a scope file, naabu runs only on IPs reconkit resolved and "
-            "verified against in_scope_cidrs); service/version detection is not "
-            "wired in this build (nmap -sV has no adapter).",
-            no_color=no_color,
-        )
-    return answer
-
-
-def _interactive_plan(*, no_color: bool) -> _InteractivePlan:
-    """Ask the questions and resolve them into ordinary scan inputs (docs/02 2b)."""
-    domain, list_file = _ask_target()
-    scope_path = _ask_scope()
-    stages, active, mode = _ask_mode(no_color=no_color)
-    fields = _ask_fields(no_color=no_color)
-    no_scope = active and _ask_no_scope(no_color=no_color)
-    ports: tuple[int, ...] = ()
-    status_codes: tuple[int, ...] = ()
-    only_states: tuple[str, ...] = ()
-    headers: tuple[tuple[str, str], ...] = ()
-    user_agent: str | None = None
-    if active:
-        ports = _ask_ports()
-        only_states = _ask_only_states(no_color=no_color)
-        status_codes = _status_codes(
-            str(
-                typer.prompt(
-                    "Only keep HTTP status codes? (comma, blank = all)", default="", err=True
-                )
-            )
-            or None
-        )
-        headers = _ask_headers()
-        user_agent = _ask_user_agent()
-    aggressive = False
-    if mode != "full":
-        aggressive = _ask_aggressive(no_color=no_color)
-    if aggressive:
-        wanted = set(stages) | {Stage.LIVE, Stage.PORTS}
-        stages = tuple(stage for stage in STAGE_ORDER if stage in wanted)
-        active = True
-    label = domain if domain is not None else str(list_file)
-    if no_scope:
-        scope_label = "unrestricted (--no-scope)"
-    elif scope_present(scope_path):
-        scope_label = "enforced (scope file)"
-    else:
-        scope_label = "no scope file"
-    render_message(
-        f"plan: {label}; mode {mode}; scope {scope_label}; "
-        f"stages {', '.join(stage.value for stage in stages)}; "
-        f"tools {_tools_label(mode)}; fields {len(fields)}",
-        no_color=no_color,
-    )
-    inject: list[str] = []
-    if ports:
-        inject.append("ports " + ",".join(str(port) for port in ports))
-    if status_codes:
-        inject.append("status_codes " + ",".join(str(code) for code in status_codes))
-    if only_states:
-        inject.append("states " + ",".join(only_states))
-    if headers:
-        inject.append(f"headers {len(headers)}")
-    if user_agent:
-        inject.append("user_agent custom")
-    if inject:
-        render_message("inject: " + "; ".join(inject), no_color=no_color)
-    return _InteractivePlan(
-        domain,
-        list_file,
-        scope_path,
-        stages,
-        active,
-        fields,
-        full=mode == "full",
-        no_scope=no_scope,
-        ports=ports,
-        status_codes=status_codes,
-        only_states=only_states,
-        headers=headers,
-        user_agent=user_agent,
-    )
-
-
 def _report_error(message: str, code: int, *, no_color: bool, verbose: bool = False) -> int:
     if verbose:
         # A chained exception (`__cause__`/`__context__`) is rendered into this
@@ -747,60 +444,6 @@ def _no_scope_warning(targets: list[str]) -> str:
             '  a scan_runs record will be written with scope_mode = "unrestricted_flag".',
         ]
     )
-
-
-def _append_scope_entry(path: Path, target: str) -> None:
-    """Add `target` under `in_scope:` without rewriting the file's other text.
-
-    Line-based on purpose: a YAML round-trip would drop the `authorization`
-    comment block and reorder keys (F2 is frozen). Only reached from the
-    interactive `[a]` path, and only after an explicit `y`.
-    """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ConfigError(f"cannot read {path}: {exc}") from None
-    lines = text.splitlines()
-    for index, line in enumerate(lines):
-        if line.strip().split("#", 1)[0].strip() != "in_scope:":
-            continue
-        insert_at = index + 1
-        while insert_at < len(lines) and lines[insert_at].lstrip().startswith("- "):
-            insert_at += 1
-        lines.insert(insert_at, f"  - {target}")
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        return
-    raise ConfigError(f"{path} has no 'in_scope:' list to append to")
-
-
-def _ask_out_of_scope(target: str, scope_path: Path, *, no_color: bool) -> tuple[str, str | None]:
-    """The four interactive choices for a target a present scope file blocks."""
-    render_message(
-        f"{target} is not in scope.yaml. Options:\n"
-        f"  [a] add {target} to scope.yaml (modifies scope.yaml)\n"
-        "  [b] ignore scope and run unrestricted (--no-scope)\n"
-        "  [c] scan an in-scope target instead\n"
-        "  [d] abort",
-        no_color=no_color,
-    )
-    answer = str(typer.prompt("Choice [a/b/c/d]", default="d", err=True)).strip().lower()
-    if answer.startswith("a"):
-        if not typer.confirm("This will modify scope.yaml. Proceed?", default=False, err=True):
-            return "abort", None
-        _append_scope_entry(scope_path, target)
-        render_message(f"added {target} to {scope_path}", no_color=no_color)
-        return "proceed", None
-    if answer.startswith("b"):
-        render_message(_no_scope_warning([target]), no_color=no_color)
-        if not typer.confirm("This disables scope enforcement. Continue?", default=False, err=True):
-            return "abort", None
-        return "noscope", None
-    if answer.startswith("c"):
-        replacement = str(typer.prompt("In-scope domain", default="", err=True)).strip()
-        if not replacement:
-            return "abort", None
-        return "retarget", validate_target(replacement)
-    return "abort", None
 
 
 def _run_scan(
@@ -841,24 +484,6 @@ def _run_scan(
 ) -> int:
     engine: Engine | None = None
     try:
-        # docs/02 section 2b: the questions are asked only when a scan command got
-        # neither -d nor -l and a terminal is on stdin. Any target flag keeps the
-        # flag-based path byte-identical, which is what every script relies on.
-        plan: _InteractivePlan | None = None
-        if domain is None and list_file is None and command in _SCAN_COMMANDS and _stdin_is_tty():
-            try:
-                plan = _interactive_plan(no_color=no_color)
-            except (EOFError, typer.Abort):
-                raise ConfigError("interactive scan cancelled") from None
-            domain, list_file = plan.domain, plan.list_file
-            scope_path = plan.scope_path
-            full = plan.full or full
-            no_scope = plan.no_scope or no_scope
-            only_states = plan.only_states or only_states
-            ports = plan.ports or ports
-            status_codes = plan.status_codes or status_codes
-            headers = plan.headers or headers
-            user_agent = plan.user_agent or user_agent
         if full:
             # docs/02 section 2: full implies both, in that order.
             active = True
@@ -881,19 +506,17 @@ def _run_scan(
             raise ConfigError(
                 f"contradictory: --include and --exclude both name {contradictions[0]}"
             )
-        is_active = active if plan is None else (plan.active or active)
+        is_active = active
         if command in _ACTIVE_ONLY and not is_active:
             raise ConfigError(f"{command} requires --active")
-        # Only the flag path: an interactive run decides its own mode (and may
-        # legitimately choose active from the bare command).
-        if plan is None and command in _PASSIVE_ONLY_COMMANDS and is_active:
+        # docs/02 section 2: the passive-only commands run no active stage, so
+        # accepting --active would promise work the command cannot do.
+        if command in _PASSIVE_ONLY_COMMANDS and is_active:
             raise ConfigError(
                 f"{command!r} is passive-only; --active needs: reconkit active -d X "
                 "(or run -d X --active)"
             )
-        # docs/02 section 2: the passive-only commands run no active stage, so
-        # accepting --active would promise work the command cannot do.
-        stages = plan.stages if plan is not None else _stages(command, is_active, full)
+        stages = _stages(command, is_active, full)
         if skip_url_probe:
             # D23: the flag only narrows this run; a stage command never has the
             # stage to begin with, so it is a no-op there (docs/02 section 3).
@@ -969,22 +592,6 @@ def _run_scan(
             )
         if no_scope and is_active:
             render_message(_no_scope_warning(targets), console=progress_console, no_color=no_color)
-        # Item 7: an interactive run that a present scope file blocks asks what
-        # to do instead of just refusing. Never runs for the flag path.
-        if plan is not None and len(targets) == 1 and is_active and not no_scope:
-            if preflight_warning(targets[0], path=scope_path) is not None:
-                try:
-                    action, replacement = _ask_out_of_scope(
-                        targets[0], resolve_scope_path(scope_path), no_color=no_color
-                    )
-                except (EOFError, typer.Abort):
-                    raise ConfigError("interactive scan cancelled") from None
-                if action == "abort":
-                    return int(ExitCode.USAGE)
-                if action == "noscope":
-                    no_scope = True
-                elif action == "retarget" and replacement is not None:
-                    targets = [replacement]
         if json_output and len(targets) > 1:
             raise ConfigError("--json accepts one target per invocation; use -d")
         # Progress goes to stderr for every scan, --json included; only --silent
@@ -1131,9 +738,8 @@ def _run_scan(
                 injections=injections,
                 hidden=frozenset(excluded.sections),
             )
-            # Every scan saves its report, interactive or not (docs/02 section 5).
-            # The questions only choose the columns; a `-d`/`-l` run has no
-            # question to answer, so it gets every stored field.
+            # Every scan saves its report with every stored field (docs/02
+            # section 5); flags narrow what is shown, never what is saved.
             # D30: mock runs write under results/mock/<target>/ so they cannot
             # overwrite a real run's report.
             results_root = config.results_dir
@@ -1141,12 +747,11 @@ def _run_scan(
                 results_root = str(Path(config.results_dir) / "mock")
             run_at = datetime.now(UTC)
             directory = report_directory(results_root, target, run_at)
-            report_fields_for_run = plan.fields if plan is not None else REPORT_FIELDS
             report_text_path, report_json_path = write_field_report(
                 directory,
                 target,
                 report_rows,
-                report_fields_for_run,
+                REPORT_FIELDS,
                 run_at=run_at,
                 selection=selection,
                 # D56: the report carries the same warning stderr showed, so a
