@@ -112,6 +112,37 @@ def test_no_target_and_no_terminal_keeps_the_old_error(tmp_path: Path) -> None:
     assert "provide a target with -d/--domain or -l/--list" in result.stderr
 
 
+def test_bare_reconkit_asks_the_questions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`reconkit` with no arguments is the passive shorthand (docs/02 section 2).
+
+    On a terminal that means the interactive question series, not help: the old
+    `no_args_is_help=True` printed usage and never reached the callback, so the
+    documented launch was unreachable.
+    """
+    config = make_config(tmp_path)
+    as_tty(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, ["--mock", "--config", str(config)], input=PASSIVE_ANSWERS)
+    assert result.exit_code == 0, result.stderr
+    assert "Domain, or path to a file of domains" in result.stderr
+    assert "plan: example.com; mode passive" in " ".join(result.stderr.split())
+
+
+def test_bare_reconkit_without_a_terminal_keeps_the_error(tmp_path: Path) -> None:
+    """Bare `reconkit` follows the same no-TTY rule as every scan command."""
+    config = make_config(tmp_path)
+    result = CliRunner().invoke(app, ["--mock", "--config", str(config)])
+    assert result.exit_code == 2
+    assert "provide a target with -d/--domain or -l/--list" in result.stderr
+
+
+def test_help_is_still_reachable_without_arguments() -> None:
+    """`no_args_is_help=False` must not take `--help` away."""
+    result = CliRunner().invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "Usage: reconkit" in " ".join(result.stdout.split())
+
+
 def test_a_prompt_that_hits_end_of_input_is_cancelled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

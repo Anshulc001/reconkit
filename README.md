@@ -32,6 +32,7 @@ cd reconkit
 source .venv/bin/activate
 
 reconkit doctor                        # what is installed, what is missing
+reconkit                               # interactive: asks target, scope, mode, fields
 # `setup.sh` forwards --check, --only <tool> and --dry-run to install-tools.sh.
 # The reconkit CLI itself installs nothing; tools come from tools.yaml `source:`.
 # Provenance for every tool is in docs/10_TOOL_SOURCES.md.

@@ -65,7 +65,10 @@ app = typer.Typer(
     name="reconkit",
     help="Reconnaissance orchestrator for authorized security testing.",
     add_completion=False,
-    no_args_is_help=True,
+    # Bare `reconkit` must reach the callback: it is the passive shorthand and,
+    # with no -d/-l on a terminal, the interactive question series (docs/02
+    # section 2b). `no_args_is_help=True` would print help and exit instead.
+    no_args_is_help=False,
 )
 scope_app = typer.Typer(help="Inspect or import scope.yaml.", no_args_is_help=True)
 db_app = typer.Typer(help="Query stored assets.", no_args_is_help=True)

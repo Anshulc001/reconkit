@@ -10711,3 +10711,35 @@ produced 243 lint errors (`shell=True`, bare `except`, unused imports) that
 belong to that script, not to us. `ruff check .` was run and failed on exactly
 those files before the exclude; nothing under `src/`, `tests/` or `docs/` was
 excluded.
+
+## 2026-11-21 - bare `reconkit` reaches the interactive scan (D103)
+
+Reported as "interactive shell ... haven't implemented it". It was implemented
+(`_interactive_plan`, docs/02 section 2b) and reachable through
+`reconkit passive`/`reconkit active` with no target flag, but **not through bare
+`reconkit`**: `typer.Typer(no_args_is_help=True)` printed usage and exited
+before the root callback ran, so the launch COMMANDS.md and docs/02 already
+documented never happened.
+
+Fix: `no_args_is_help=False` on the root app only (`scope`/`db` keep it). The
+bare callback is the `passive` shorthand, so on a terminal it now starts the
+question series, and without one it keeps the scan-command error.
+
+```
+$ reconkit                       # no TTY
+provide a target with -d/--domain or -l/--list        -> exit 2
+$ reconkit --help
+Usage: reconkit [OPTIONS] COMMAND [ARGS]...           -> exit 0
+$ reconkit --mock                # PTY, answers: example.com/n/passive/all/n
+Domain, or path to a file of domains (one per line): example.com
+Choice [passive/active/full]: passive
+plan: example.com; mode passive; ...                  -> exit 0
+```
+
+New regressions: `test_bare_reconkit_asks_the_questions`,
+`test_bare_reconkit_without_a_terminal_keeps_the_error`,
+`test_help_is_still_reachable_without_arguments`.
+
+Gate: `1062 passed in 47.33s`; `ruff check .` -> `All checks passed!`;
+`ruff format --check .` -> `97 files already formatted`; `mypy src/reconkit` ->
+`Success: no issues found in 63 source files`. Suite 1059 -> 1062 (+3).

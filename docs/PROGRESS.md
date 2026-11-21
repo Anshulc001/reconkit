@@ -4,6 +4,14 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-21, D103): **bare `reconkit` starts the interactive scan.**
+  `no_args_is_help=True` on the root `typer.Typer` printed usage before the
+  callback, so the documented no-command launch never reached the question
+  series. It is now `False`; the bare callback is the `passive` shorthand, so
+  a terminal gets the questions and a pipe keeps the `provide a target` error.
+  `--help` still exits 0. Gate: 1062 tests, ruff/format/mypy clean. Next
+  action: none.
+
 - Status (2026-11-21, D102): **user-facing docs now use the new mode commands.**
   COMMANDS.md, README, docs/02, docs/08 and docs/09 spell mode invocations as
   `passive`/`active`/`full` instead of `run --active`/`run --full`; `run`
@@ -1290,6 +1298,16 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   excluded. **Not changed, needs a ruling:** `live`/`ports`/`tech`/`urls`/
   `vulns` still accept `--full` and ignore it - the same "a flag a command
   cannot honour" family as PIT-36.
+
+- **D103 (2026-11-21): bare `reconkit` reaches the interactive scan.** The
+  interactive question series existed and `reconkit passive`/`active`/`full`
+  with no target flag reached it, but bare `reconkit` did not: the root
+  `typer.Typer` had `no_args_is_help=True`, which prints usage and exits before
+  the callback runs, so COMMANDS.md's documented "`reconkit` = interactive
+  mode" was false. Only the root app changed; `scope` and `db` keep
+  `no_args_is_help=True`. `reconkit --help` still exits 0, and a bare run with
+  no terminal keeps `provide a target with -d/--domain or -l/--list` and exit
+  `2`, the same rule as every scan command.
 
 - **D102 (2026-11-21): doc consistency pass - user-facing docs use the new
   mode commands.** COMMANDS.md, README, docs/02, docs/08 and docs/09 now

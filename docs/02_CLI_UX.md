@@ -12,7 +12,7 @@
 
 ## 2. Command Grammar
 
-`reconkit <command> [target] [flags]`. Target is `-d DOMAIN` or `-l FILE` (one domain per line). With no command, `reconkit -d X` is shorthand for `passive` (the passive pipeline). A scan command with **neither** `-d` nor `-l` on a terminal asks questions instead of failing (section 2b); with a target flag present nothing changes and nothing is asked.
+`reconkit <command> [target] [flags]`. Target is `-d DOMAIN` or `-l FILE` (one domain per line). With no command, `reconkit -d X` is shorthand for `passive` (the passive pipeline), and bare `reconkit` with no arguments is the same passive shorthand - so on a terminal it starts the interactive questions. A scan command with **neither** `-d` nor `-l` on a terminal asks questions instead of failing (section 2b); with a target flag present nothing changes and nothing is asked.
 
 ### Scan modes (source of truth)
 
@@ -320,7 +320,8 @@ appeared only in `urls` rows is not in it unless D58's second resolve reached it
 ## 2b. Interactive scan mode (no target flags)
 
 A scan command given **neither `-d` nor `-l`** asks a short question series
-instead of failing with "provide a target". This applies to `subs`, `dns`, `live`, `ports`,
+instead of failing with "provide a target". This applies to bare `reconkit`
+(no command, shorthand for `passive`) and to `subs`, `dns`, `live`, `ports`,
 `tech`, `urls`, `vulns`, `passive`, `active`, `full` and `run`. Two hard conditions:
 
 - **Any target flag at all means no questions.** If `-d` or `-l` is present, the
