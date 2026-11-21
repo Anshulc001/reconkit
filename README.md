@@ -18,7 +18,7 @@ Developed by **Pritam & Anshul**.
    Advanced Reconnaissance Framework
 
    Made with ♥ by Pritam & Anshul
-   Version: 1.1.0
+   Version: 1.0.0
 ```
 
 The banner is printed once for a human scan (not for `--json`/`--silent`, and never from a child process), followed by a separator. The version comes from `reconkit.__version__`, the same value `reconkit --version` prints.

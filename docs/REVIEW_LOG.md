@@ -11547,3 +11547,37 @@ $ FORCE_TERMINAL=1 pytest -q
 $ ruff check . / ruff format --check . / mypy src/reconkit
 All checks passed! / 103 files already formatted / Success: no issues found in 66 source files
 ```
+
+## 2026-11-21 - unconditional workflow and version consistency (D113)
+
+Owner: a change must never break the workflow, must be implemented properly,
+must add tests for new behavior and update all docs after every change whether
+or not the request says so; the package version, tag and docs must not disagree.
+
+AGENTS.md hard rule 11 makes the task loop unconditional (proper implementation,
+a regression test for every new behavior or fixed defect, every affected doc in
+the same commit; "just do X" waives none of it). Hard rule 12 makes consistency
+a correctness requirement: `__version__`, `pyproject.toml`, the release tag, the
+banner/README examples, CLI help, flags, defaults and docs must agree, and a
+mismatch is fixed as a defect in the same batch.
+
+Gate after the edit:
+
+```
+$ pytest -q
+1260 passed, 3 skipped in 46.72s
+$ FORCE_TERMINAL=1 pytest -q
+1260 passed, 3 skipped in 46.73s
+$ ruff check .
+All checks passed!
+$ ruff format --check .
+103 files already formatted
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+```
+
+The version was aligned to the tag the owner chose: `__version__`,
+`pyproject.toml`, `tests/test_package.py` and the README banner now say `1.0.0`,
+and the annotated tag is `v1.0.0` on the release commit; `v1.1.0` was deleted
+locally and on GitHub. GitHub Actions on that commit: success for 3.11, 3.12
+and 3.13.

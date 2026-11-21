@@ -11,7 +11,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def test_version_is_set() -> None:
-    assert __version__ == "1.1.0"
+    assert __version__ == "1.0.0"
 
 
 def test_package_version_matches_pyproject() -> None:

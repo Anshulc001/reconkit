@@ -27,6 +27,10 @@ plan (5-10 lines, assumptions) -> trace every affected file (section 4.2) -> imp
 Every error found in a review, CI run or real scan gets a regression test in the
 same batch: reproduce it, then fix it. No error is closed by prose alone.
 
+This loop is unconditional. It applies to a one-line fix, a docs edit, or a
+request that mentions neither tests nor documentation; the request never has to
+ask for the gate, the regression test or the doc updates.
+
 ## 0c. Rules learned from reviews
 
 - Never add AI attribution trailers to a commit (`Co-Authored-By:`,
@@ -171,6 +175,20 @@ Do not contradict these documents. If code and docs disagree, stop and report th
 8. **Honest User-Agent:** `reconkit/<version>` for our own HTTP requests. No User-Agent rotation or evasion features.
 9. **Tests never touch the network or require installed tools.** Use fixtures in `tests/fixtures/`.
 10. **Paths:** use `pathlib.Path`. No hard-coded `/` or `\` separators.
+11. **The workflow is not optional and not request-dependent.** Whether or not
+    the user asks for it, every change must (a) keep the existing pipeline and
+    commands working, (b) implement the behavior properly instead of a narrow
+    patch that only satisfies the example, (c) add a regression test for every
+    new behavior or fixed defect, and (d) update every affected doc
+    (`AGENTS.md`, `COMMANDS.md`, `README.md`, `SETUP.md`, `docs/01`-`docs/10`,
+    `docs/PROGRESS.md`, `docs/REVIEW_LOG.md`) in the same commit. "Just do X"
+    never waives the gate, the tests, the docs, or section 0e's invariants.
+12. **Consistency is part of correctness.** `__version__`, `pyproject.toml`, the
+    release tag, the banner and README examples, CLI help, flag names, defaults
+    and docs must all say the same thing. Change one, grep for the others and
+    update them in the same commit; find a mismatch, treat it as a defect and
+    fix it then. A tag that disagrees with the package version is a broken
+    release, not a cosmetic detail.
 
 ## 4. Planning (non-trivial tasks)
 

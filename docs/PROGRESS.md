@@ -4,6 +4,17 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-21, D113): the contribution workflow is unconditional and
+  version/tag/docs must agree. AGENTS.md hard rule 11: every change, whether or
+  not the request asks for it, keeps the pipeline working, implements the
+  behavior properly, adds a regression test for new behavior or fixed defects,
+  and updates every affected doc in the same commit. Hard rule 12: `__version__`,
+  `pyproject.toml`, the release tag, banner/README examples, CLI help, flags,
+  defaults and docs must all say the same thing; a mismatch is a defect fixed in
+  the same batch. The package version and release tag are now both `1.0.0` and
+  `v1.0.0`; `v1.1.0` was deleted locally and on GitHub. Gate: 1260 passed,
+  3 skipped. Next action: none.
+
 - Status (2026-11-21, D112): workspace reset, and a rule to trace before
   touching. `reconkit db wipe --yes` removed 8 targets, 27,669 subdomains,
   13,617 URLs, 1,414 tool runs and 240 stage runs; the 92 MB `results/` tree was
