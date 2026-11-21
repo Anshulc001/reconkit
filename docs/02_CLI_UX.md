@@ -149,7 +149,7 @@ findings come from `run --full` or `reconkit vulns`.
 
 ```bash
 reconkit vulns -d example.com --active
-reconkit run -d example.com --full
+reconkit full -d example.com
 ```
 
 **Findings are not persisted.** `_persist_stage` has no `VULNS` branch and there
@@ -196,7 +196,7 @@ names `active` as the command that can: use `reconkit active -d X` (or
 
 The `--active` `--help` text says this in one sentence: `A scope.yaml is required; without one, active scanning is refused unless --no-scope is passed explicitly.` The interactive mode asks the scope question before the mode question, so the same branch applies there (section 2b).
 
-**Ports run `pyscan`, `naabu`, `nmap`, `rustscan`, `smap` and `masscan` (wave 6).** `naabu` is scope-mode dependent (owner decision 2026-11-17, superseding the 12i permanent block): with **`--no-scope`** it runs unrestricted like any other active tool, receiving the discovered hostnames; with a **scope file present** the engine resolves each in-scope target itself, verifies every address against `in_scope_cidrs`, and passes `naabu` only those verified IPs - never a bare domain - skipping any target whose resolution fails or resolves out of scope (docs/05 rule 6, docs/09 section 4). Because two port adapters can now run, a port both report can reach `MEDIUM` confidence; a single-scanner result stays `LOW` and the open/closed disagreement rule only fires when both report. When `naabu` is absent or its targets cannot be verified, `pyscan` alone is the fallback and the ceiling is `LOW` again. `nmap` adds a `-sV` service/version fingerprint, `rustscan` a fast greppable sweep, and `smap` passive Shodan data filtered to `--ports`. `masscan` is `opt_in` **and needs root**: as a normal user it is `skipped (requires root / sudo)` and the stage continues; `sudo reconkit run ...` or `setcap cap_net_raw+ep` on the binary is the operator's call, never something the adapter does (docs/09 section 4a6).
+**Ports run `pyscan`, `naabu`, `nmap`, `rustscan`, `smap` and `masscan` (wave 6).** `naabu` is scope-mode dependent (owner decision 2026-11-17, superseding the 12i permanent block): with **`--no-scope`** it runs unrestricted like any other active tool, receiving the discovered hostnames; with a **scope file present** the engine resolves each in-scope target itself, verifies every address against `in_scope_cidrs`, and passes `naabu` only those verified IPs - never a bare domain - skipping any target whose resolution fails or resolves out of scope (docs/05 rule 6, docs/09 section 4). Because two port adapters can now run, a port both report can reach `MEDIUM` confidence; a single-scanner result stays `LOW` and the open/closed disagreement rule only fires when both report. When `naabu` is absent or its targets cannot be verified, `pyscan` alone is the fallback and the ceiling is `LOW` again. `nmap` adds a `-sV` service/version fingerprint, `rustscan` a fast greppable sweep, and `smap` passive Shodan data filtered to `--ports`. `masscan` is `opt_in` **and needs root**: as a normal user it is `skipped (requires root / sudo)` and the stage continues; `sudo reconkit full ...` or `setcap cap_net_raw+ep` on the binary is the operator's call, never something the adapter does (docs/09 section 4a6).
 
 ### State and output
 | Command | Purpose |

@@ -96,7 +96,7 @@ reconkit installs nothing: `install`, `update` and `doctor --fix` were removed o
 ## Flow 9 - Interrupt and resume
 
 1. User presses Ctrl+C. The engine stops launching new tools, marks the stage run `interrupted`, and exits 130. A child process already running is not explicitly killed in this build.
-2. `reconkit run -d example.com --active --resume` continues from the unfinished stage; completed stages are not repeated, and the interrupted stage is rerun from its start.
+2. `reconkit active -d example.com --resume` continues from the unfinished stage; completed stages are not repeated, and the interrupted stage is rerun from its start.
 
 ## Flow 10 - Export (Phase 3 stub in this build)
 

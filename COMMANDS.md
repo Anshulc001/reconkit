@@ -14,7 +14,7 @@ source .venv/bin/activate       # activate the venv once per shell
 
 reconkit doctor                 # which tools are installed, with versions
 reconkit                        # interactive mode (asks what to scan)
-reconkit run -d example.com     # passive scan, no prompts
+reconkit passive -d example.com     # passive scan, no prompts
 ```
 
 ---
@@ -193,7 +193,7 @@ They accept the same flags as `run` but execute only their own stage.
 ```bash
 reconkit vulns -d <domain> --active                 # nuclei + subzy (installed)
 reconkit vulns -d <domain> --active --include-noisy # adds nikto and ffuf
-reconkit run -d <domain> --full                     # vulns is the last stage
+reconkit full -d <domain>                     # vulns is the last stage
 reconkit vulns -d <domain> --active --tools nuclei  # one adapter
 ```
 
@@ -300,33 +300,33 @@ reconkit db export -d <domain> [--new-only]         # Phase 3 stub: exits 1
 ### Escalate a fresh target
 
 ```bash
-reconkit run -d example.com --no-scope
-reconkit run -d example.com --active --no-scope --only-alive
-reconkit run -d example.com --full --no-scope --only-alive
+reconkit passive -d example.com --no-scope
+reconkit active -d example.com --no-scope --only-alive
+reconkit full -d example.com --no-scope --only-alive
 ```
 
 ### Full scan of an in-scope target (uses `./scope.yaml`)
 
 ```bash
-reconkit run -d testfire.net --full
+reconkit full -d testfire.net
 ```
 
 ### Full scan ignoring the scope file
 
 ```bash
-reconkit run -d target.com --full --no-scope --only-alive --status-codes 200,301,302
+reconkit full -d target.com --no-scope --only-alive --status-codes 200,301,302
 ```
 
 ### Port scan
 
 ```bash
-reconkit run -d target.com --full --no-scope --ports 80,443,8080,8443 --only-alive
+reconkit full -d target.com --no-scope --ports 80,443,8080,8443 --only-alive
 ```
 
 ### Authenticated requests
 
 ```bash
-reconkit run -d target.com --active --no-scope \
+reconkit active -d target.com --no-scope \
   --header "Authorization: Bearer $TOKEN" \
   --header "Cookie: session=abc123" \
   --user-agent "Mozilla/5.0 (custom recon)"
@@ -337,14 +337,14 @@ Only httpx and pyprobe send these headers.
 ### Specific tools / skip noisy ones
 
 ```bash
-reconkit run -d target.com --full --no-scope --tools naabu,nuclei,httpx
-reconkit run -d target.com --full --no-scope --exclude ffuf,nikto,gowitness
+reconkit full -d target.com --no-scope --tools naabu,nuclei,httpx
+reconkit full -d target.com --no-scope --exclude ffuf,nikto,gowitness
 ```
 
 ### Several domains
 
 ```bash
-reconkit run -l domains.txt --active --no-scope
+reconkit active -l domains.txt --no-scope
 ```
 
 ### Review and compare
@@ -370,19 +370,19 @@ already there.
 ### No network at all
 
 ```bash
-reconkit run -d example.com --full --mock --no-scope
+reconkit full -d example.com --mock --no-scope
 ```
 
 ### With a custom config and DB
 
 ```bash
-reconkit run -d target.com --active --config my-config.yaml --db my-scan.db
+reconkit active -d target.com --config my-config.yaml --db my-scan.db
 ```
 
 ### As root (only masscan needs it)
 
 ```bash
-echo kali | sudo -S env PATH=$PATH HOME=$HOME reconkit run -d target.com --full --no-scope
+echo kali | sudo -S env PATH=$PATH HOME=$HOME reconkit full -d target.com --no-scope
 ```
 
 `sudo` changes `HOME`, which breaks `~/.reconkit/bin/` discovery and the tool
@@ -478,9 +478,9 @@ certificate that does not verify). No adapter and no `--tools` name is
 involved.
 
 ```
-$ reconkit run -d example.com --active --no-scope         # probe runs after urls
-$ reconkit run -d example.com --active --no-scope --skip-url-probe   # leave NULLs alone
-$ reconkit run -d example.com --active --no-scope --reprobe-urls     # ask again, even answered URLs
+$ reconkit active -d example.com --no-scope         # probe runs after urls
+$ reconkit active -d example.com --no-scope --skip-url-probe   # leave NULLs alone
+$ reconkit active -d example.com --no-scope --reprobe-urls     # ask again, even answered URLs
 $ sqlite3 recon.db "SELECT status_code, COUNT(*) FROM urls GROUP BY status_code"
 200|1184
 301|96
@@ -514,10 +514,10 @@ probe times out.
 reconkit doctor | tail -3
 # Expected: "Missing tools: N. Scans will use the tools that are installed..."
 
-reconkit run -d example.com --full --mock --no-scope
+reconkit full -d example.com --mock --no-scope
 # Expected: exit 0, tables for each stage that has an adapter
 
-reconkit run -d testfire.net --active --no-scope --only-alive
+reconkit active -d testfire.net --no-scope --only-alive
 # Expected: ALIVE hosts with status codes
 
 reconkit status
@@ -531,7 +531,7 @@ reconkit diff -d testfire.net
 | Item | Reality | Workaround |
 |---|---|---|
 | **Screenshots (gowitness)** | Needs a Chrome binary gowitness can exec (`google-chrome`); this box has `/usr/bin/chromium`, which gowitness does not pick up, and even a manual `--chrome-path /usr/bin/chromium` run reported `have-screenshot=false`. The adapter never guesses a browser path, so a real run yields 0 items with an error string, not a failure | install `google-chrome-stable`, or accept the mock/manifest proof |
-| **`--active`/`--full` on passive commands** | Rejected by design (exit 2) | use `run` |
+| **`--active`/`--full` on passive commands** | Rejected by design (exit 2) | use `active`/`full` (or `run --active`/`--full`) |
 | **masscan** | Needs raw sockets; non-root runs skip it with `requires root / sudo` | run as root or `setcap cap_net_raw+ep` on the binary |
 | **dnsreaper** | Not adapted (no PyPI package, no console script — D15) | `subzy` covers takeover |
 | **sqlmap, dalfox, crlfuzz** | Exploitation-class; never auto-run (no `--intrusive` flag exists) | `--tools sqlmap` explicitly |

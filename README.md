@@ -78,7 +78,7 @@ stage command, or as the last stage of `--full`:
 
 ```bash
 reconkit vulns -d example.com --active
-reconkit run -d example.com --full          # vulns is the last stage
+reconkit full -d example.com          # vulns is the last stage
 ```
 
 - `nuclei`, `subzy` and `dnsreaper` (`core`) run with the stage.

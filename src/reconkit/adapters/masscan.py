@@ -12,7 +12,7 @@ $ masscan -p80 127.0.0.1 --output-format json -oJ /tmp/m.json --rate 100
 so the adapter checks `os.geteuid()` **before** building the command and
 returns `skipped (requires root / sudo)` when the process is not root. It never
 runs `sudo` itself (AGENTS rule 1) and never sets capabilities on the binary:
-`sudo reconkit run ...` or a one-time `setcap cap_net_raw+ep` is the operator's
+`sudo reconkit full ...` or a one-time `setcap cap_net_raw+ep` is the operator's
 decision.
 
 Flags come from the installed tool, not from memory:

@@ -4,6 +4,12 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-21, D102): **user-facing docs now use the new mode commands.**
+  COMMANDS.md, README, docs/02, docs/08 and docs/09 spell mode invocations as
+  `passive`/`active`/`full` instead of `run --active`/`run --full`; `run`
+  remains for flag-driven cases. Tag `v1.0.0` re-cut on the current HEAD and
+  pushed. Next action: none.
+
 - Status (2026-11-21, D101): **the three modes are three commands; `lite` is
   gone.** `reconkit active -d X` and `reconkit full -d X` now exist and are the
   same run as `run -d X --active` / `run -d X --full`: a parametrized test
@@ -1284,6 +1290,14 @@ index, not a new decision. Every ruling is already applied; none is re-decided h
   excluded. **Not changed, needs a ruling:** `live`/`ports`/`tech`/`urls`/
   `vulns` still accept `--full` and ignore it - the same "a flag a command
   cannot honour" family as PIT-36.
+
+- **D102 (2026-11-21): doc consistency pass - user-facing docs use the new
+  mode commands.** COMMANDS.md, README, docs/02, docs/08 and docs/09 now
+  spell mode invocations as `passive`/`active`/`full` where the mode is the
+  only point, keeping `run` for flag-driven cases (`--tools`, `--header`,
+  `--skip-url-probe`, `--reprobe-urls`, resume, custom config/DB). Historical
+  evidence logs (PROGRESS.md, REVIEW_LOG.md) keep their original command text,
+  as they record what was actually run.
 
 - **Batch commit (2026-11-20):** D76-D78 land in one commit, not the three the
   prompt named. They share `_persist_urls` (D76's tagging and D77's counting are

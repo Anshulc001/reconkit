@@ -742,7 +742,7 @@ raw sockets: on this box, as `kali`, it exits 2 with `[-] FAIL: permission
 denied` and `[hint] need to sudo or run as root or something`. Nothing in the
 build shells out to `sudo` (AGENTS rule 1, and a scan must not stop mid-run for
 a password) and nothing calls `setcap` on the operator's binary. Running
-`sudo reconkit run ...` (or a one-time `sudo setcap cap_net_raw+ep
+`sudo reconkit full ...` (or a one-time `sudo setcap cap_net_raw+ep
 /usr/bin/masscan`, the operator's choice on their own box) is what enables it;
 both are operator actions documented here, not adapter behaviour.
 
