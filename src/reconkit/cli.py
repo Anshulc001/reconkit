@@ -64,8 +64,8 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
 )
-scope_app = typer.Typer(help="Inspect or import scope.yaml.", no_args_is_help=True)
-db_app = typer.Typer(help="Query stored assets.", no_args_is_help=True)
+scope_app = typer.Typer(help="Inspect scope.yaml.", no_args_is_help=True)
+db_app = typer.Typer(help="Delete or wipe stored data.", no_args_is_help=True)
 app.add_typer(scope_app, name="scope")
 app.add_typer(db_app, name="db")
 
@@ -1209,12 +1209,6 @@ def scope_check(
     raise typer.Exit(code=0 if decision.startswith("ALLOWED") else int(ExitCode.SCOPE))
 
 
-@scope_app.command("import")
-def scope_import() -> None:
-    render_error("scope import is Phase 3 and is not available in this build.")
-    raise typer.Exit(code=int(ExitCode.ERROR))
-
-
 @app.command("diff")
 def diff_command(
     domain: Annotated[str, typer.Option("-d", "--domain", help="Domain to compare.")],
@@ -1503,36 +1497,3 @@ def db_wipe(
         'Note: results/ folders are untouched; use "rm -rf results/" manually'
         " if you want a full reset."
     )
-
-
-@db_app.command("list")
-def db_list(
-    domain: Annotated[str, typer.Option("-d", "--domain", help="Target to list.")],
-) -> None:
-    del domain
-    render_error("db list is not wired in Part 8; no data was read.")
-    raise typer.Exit(code=int(ExitCode.ERROR))
-
-
-@db_app.command("export")
-def db_export(
-    domain: Annotated[str, typer.Option("-d", "--domain", help="Target to export.")],
-    new_only: Annotated[
-        bool, typer.Option("--new-only", help="Only items new since the previous run.")
-    ] = False,
-) -> None:
-    del domain, new_only
-    render_error("db export is not wired in Part 8; no data was written.")
-    raise typer.Exit(code=int(ExitCode.ERROR))
-
-
-@app.command("export")
-def export_command(
-    domain: Annotated[str, typer.Option("-d", "--domain", help="Target to export.")],
-    output_format: Annotated[
-        str, typer.Option("--format", help="Report format: json, md or html.")
-    ] = "json",
-) -> None:
-    del domain, output_format
-    render_error("export is not wired in Part 8; no report was written.")
-    raise typer.Exit(code=int(ExitCode.ERROR))

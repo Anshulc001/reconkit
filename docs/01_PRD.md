@@ -97,12 +97,12 @@
 - **Was:** `--speed`/`--delay` presets, a pacer and rate limiting.
 - **Now:** removed at the owner's request (docs/MASTER_PLAN.md D3, "user-requested removal, no throttling desired"). Tools run at their own natural pace; there is no speed flag, delay flag, pacer or rate limiter, and `scope.yaml` `max_speed` is accepted but ignored.
 
-### Feature 8 - Change tracking (`diff`, `status`, `db`, `export`)
+### Feature 8 - Change tracking (`diff`, `status`, `db`, `report`)
 - **Acceptance criteria:**
   - `diff` shows only new, gone, state-changed and port-changed items vs the previous run.
   - `status --json` reports phase, counts and elapsed time of running or finished scans.
-  - `db list`, `db export` and `export` are Phase 3 stubs in this build: they exit 1 and write nothing (docs/02).
-  - `--json` is supported on the scan commands, `doctor`, `diff` and `status`; it is not accepted by the stubs.
+  - `report --target X` rebuilds `report.txt`/`report.json`/`report.pdf` from stored rows without scanning. The former `export`, `db list`, `db export` and `scope import` stubs were removed on 2026-11-22 (D119): those commands do not exist (docs/02).
+  - `--json` is supported on the scan commands, `doctor`, `diff` and `status`; `report` writes files instead and `db delete`/`db wipe` do not take it.
 
 ### Feature 9 - Workflows (`passive`, `active`, `full`, `run`)
 - `passive`, `active` and `full` are the three modes by name; `run` selects one of them by flag (`--active`, `--full`), with per-phase timeouts and resume of an interrupted run. The old `lite` alias is gone (2026-11-21); it was identical to `passive`.
@@ -123,11 +123,11 @@
 **Phase 2 (working core) - Must have** (the phase names below are the original
 plan; the shipped build is v1.0.0, 2026-11-21):
 - Skeleton, config, scope gate, SQLite store, consensus engine, `--mock`.
-- Commands: `doctor`, `passive`, `live`, `ports`, `diff`, `status`; `db list`, `db export`, `export` and `scope import` are explicit Phase 3 stubs (exit 1) in this build, and docs/02 marks them as such. (`install`, `update` and `doctor --fix` existed in Phase 2 and were removed on 2026-11-17.)
+- Commands: `doctor`, `passive`, `live`, `ports`, `diff`, `status`, `report`, `db delete`, `db wipe`, `scope check`. (`install`, `update` and `doctor --fix` existed in Phase 2 and were removed on 2026-11-17; the `export`, `db list`, `db export` and `scope import` stubs were removed on 2026-11-22, D119.)
 - Adapters: crtsh, certspotter, otx, hackertarget, subfinder, assetfinder, dnspython, pyprobe, httpx, pyscan, naabu.
 - Tests passing on Linux (fixtures only, no tools needed).
 
-**Phase 3 (one adapter or feature per prompt):** shipped in v1.0.0 - the rest of `tools.yaml` (47 adapters), `urls`/`tech`/`vulns`/`shots`, the `passive`/`active`/`full`/`run` commands, PDF reports and per-scan logging. **Still open:** `monitor` with webhook, `scope import`, `export`/`db list`/`db export` (stubs, exit 1), URL candidate-pattern tagging (`urls.patterns_json`, docs/04 section 3.1), adapters for the three intrusive tools (`dalfox`, `crlfuzz`, `sqlmap`), and a findings table (docs/04 section 3).
+**Phase 3 (one adapter or feature per prompt):** shipped in v1.0.0 - the rest of `tools.yaml` (47 adapters), `urls`/`tech`/`vulns`/`shots`, the `passive`/`active`/`full`/`run` commands, PDF reports and per-scan logging. **Still open:** `monitor` with webhook, a row-level import/export (the `export`/`db list`/`db export` stubs were removed in D119; `report` covers reports), URL candidate-pattern tagging (`urls.patterns_json`, docs/04 section 3.1), adapters for the three intrusive tools (`dalfox`, `crlfuzz`, `sqlmap`), and a findings table (docs/04 section 3).
 
 ## 9. Success Metrics
 

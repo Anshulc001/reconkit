@@ -111,7 +111,10 @@ Active and full scans need `scope.yaml`; without one they fail closed (exit `3`)
 | `scope check -d X` | Show whether a target is allowed by `scope.yaml`. |
 | `db delete --target X` | Delete one target, every row that belongs to it and its `results/X/` folder. |
 | `db wipe` | Delete every row and recreate the schema. |
-| `db list`, `db export`, `export`, `scope import` | Documented Phase 3 stubs: exit `1`, no data is read or written. |
+
+There is no `export`, `db list`, `db export` or `scope import` command: the four
+Phase 3 stubs were removed on 2026-11-22 (D119). `report` rebuilds the saved
+report from the database, and `scope.yaml` is written by the operator, not the CLI.
 
 **Scan flags:** `--active`, `--full`, `--no-scope`, `--tools`, `--exclude`, `--include`, `--include-noisy`, `--min-sources`, `--phase-timeout`, `--mock`, `--resume`, `--no-keys`, `--only-alive`, `--only-states`, `--ports`, `--status-codes`, `--header`, `--user-agent`, `--redact-headers/--show-headers`, `--ffuf-wordlist`, `--resolvers`, `--skip-url-probe`, `--reprobe-urls`, `--json`, `--no-color`, `-q/--silent`, `-v/--verbose`, and the root `--config/--scope/--db`.
 
@@ -238,7 +241,7 @@ ReconKit is intended for **authorized security testing only**. Use it only on sy
 ## Future improvements
 
 - Persist vulnerability-stage findings in SQLite and include them in the PDF.
-- First-class import/export (`db list`, `db export`, `export`) replacing the Phase 3 stubs.
+- Row-level import/export (JSON/CSV) of stored hosts, ports and URLs: the `export`/`db list`/`db export` stubs were removed on 2026-11-22 because `report` already covers reports.
 - Optional scheduled scans and change notifications (the webhook configuration exists but is not wired).
 - Report branding assets (logo file, custom cover subtitle) configurable per engagement.
 - Screenshot gallery page in the PDF for `shots` runs.

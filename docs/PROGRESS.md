@@ -4,6 +4,25 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-22, D119): **the four Phase 3 stub commands are gone.**
+  `export`, `db list`, `db export` and `scope import` were removed from
+  `cli.py` on the owner's instruction: they only printed "not wired in Part 8"
+  and exited 1, `report` already rebuilds the saved report from the database,
+  and `scope.yaml` is written by the operator. Nothing else referenced them, so
+  the pipeline is untouched; the commands now fail as unknown commands (exit
+  2) and the `scope`/`db` group help no longer advertises them. Docs updated:
+  `docs/01` (Feature 8, section 8), `docs/02` (setup table, state/output table,
+  db section, the list-from-a-previous-run note, the `--json` note), `docs/05`
+  (the HTML-export line, which never matched a shipped feature), `docs/08`
+  (Flow 10 is now `report`), `COMMANDS.md` (glance table, db section, exit-code
+  table, known-limits row, and the stale `report -d X` spelling, which is
+  `--target`), `README.md`. New tests: the Typer tree has no such commands, all
+  four invocations exit 2 with `No such command`, and `scope`/`db` help does
+  not mention them. Gate: 1266 passed / 3 skipped plain and
+  `FORCE_TERMINAL=1`, invariants 196 passed / 3 skipped, ruff/format/mypy
+  clean, `--mock` run exit 0. `__version__` stays `1.0.0`: the removal is a
+  post-tag commit, and cutting a release needs the owner. Next action: none.
+
 - Status (2026-11-22, D118): **audit found no gate or CI failure; the docs
   still described shipped work as future.** Baseline on this checkout: `pytest
   -q` 1262 passed / 3 skipped, the same with `FORCE_TERMINAL=1`, ruff, format
@@ -723,6 +742,33 @@ refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992
 There is no `core/consensus.py`: consensus lives in `engine.py`. Order and module names follow docs/01 section 8 and docs/03 section 5. Per-part hashes and full evidence are in `REVIEW_LOG`; the old table is in its archive.
 
 ## Deviations and assumptions
+
+### D119 (2026-11-22) - the four Phase 3 stub commands are removed
+
+- Owner instruction: retire `export`, `db list`, `db export` and `scope
+  import` because `report` supersedes them and four dead `--help` entries are
+  the only rough edge a new user hits. No other command, flag or pipeline
+  changed.
+- The docs changed first in the same batch (`docs/01`, `docs/02`, `docs/05`,
+  `docs/08`, `COMMANDS.md`, `README.md`), then the code. The commands are now
+  unknown to Typer: invoking one exits `2` with `No such command 'export'.`
+  rather than exit `1` with a stub message, which is a visible behaviour change
+  for any script that called them.
+- `db` keeps only `delete` and `wipe`; `scope` keeps only `check`. The two
+  group help strings changed to match (`Inspect scope.yaml.`,
+  `Delete or wipe stored data.`), because they still advertised `import` and
+  "query".
+- Uncovered by the same pass: `COMMANDS.md` said `report -d X`; the command
+  takes `--target`, so the row was corrected (docs/02 already said
+  `--target`).
+- `docs/05` rule 8 and its checklist promised "escape before writing HTML
+  exports" / "HTML export escapes content" although no HTML writer ships; the
+  wording now says "report output", and the checklist line was dropped.
+- `__version__`, `pyproject.toml` and the `v1.0.0` tag are unchanged: removing
+  the stubs is a commit after the tag, and a version bump or release is the
+  owner's call, not part of this batch.
+- Not verified: behaviour of a third-party script that called the removed
+  commands; the batch only proves the CLI now refuses them.
 
 ### D112 (2026-11-21) - a clean workspace and the trace-before-edit rule
 

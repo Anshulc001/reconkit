@@ -30,14 +30,15 @@ reconkit passive -d example.com     # passive scan
 | `run` | the flag-driven form: `--active`/`--full` pick the mode |
 | `doctor` | tool inventory (installed, version, path, identity) |
 | `status` | recent runs from the DB |
-| `report -d X` | rebuild a saved report from the DB; no network, no adapter |
+| `report --target X` | rebuild a saved report from the DB; no network, no adapter |
 | `diff -d X` | new/gone/changed items vs the previous run |
 | `scope check -d X` | is this target allowed by `scope.yaml`? |
-| `scope import` | **not in this build** (Phase 3, exits 1) |
 | `db delete --target X` | delete one target, all its rows and `results/<target>/` |
 | `db wipe` | delete every DB row and recreate the schema; `results/` untouched |
-| `db list -d X`, `db export -d X` | **not in this build** (Phase 3 stubs, exit 1) |
-| `export -d X --format json\|md\|html` | **not in this build** (Phase 3 stub, exits 1) |
+
+There is no `export`, `db list`, `db export` or `scope import` command: the four
+stubs were removed on 2026-11-22 (D119). `report` rebuilds the saved report from
+the database, and `scope.yaml` is edited by hand.
 
 ---
 
@@ -243,8 +244,8 @@ set `report.pdf: false` in `config.yaml` to turn it off.
 reconkit scope check -d <domain> [--scope PATH]   # exit 0 allowed, 3 blocked
 ```
 
-`scope import` prints `scope import is Phase 3 and is not available in this
-build.` and exits 1.
+The CLI never writes `scope.yaml` (there is no `scope import` - removed
+2026-11-22, D119): the operator edits the file, and `scope check` only reads it.
 
 ```bash
 reconkit db delete --target <domain> [--yes]        # target + rows + results/<domain>/
@@ -265,14 +266,10 @@ current schema and leaves `results/` alone. It prints the manual reset line:
 want a full reset.`
 
 Both commands use the root `--db`/`--config` options, **before** `db`, e.g.
-`reconkit --db /tmp/copy.db db delete --target example.com --yes`. `db list`
-and `db export` remain Phase 3 stubs (exit 1).
-
-```bash
-reconkit export -d <domain> --format json|md|html   # Phase 3 stub: exits 1, writes nothing
-reconkit db list -d <domain>                        # Phase 3 stub: exits 1
-reconkit db export -d <domain> [--new-only]         # Phase 3 stub: exits 1
-```
+`reconkit --db /tmp/copy.db db delete --target example.com --yes`. The `db`
+group holds only `delete` and `wipe`; `db list` and `db export` do not exist
+(removed 2026-11-22, D119). To get the stored rows back out, use
+`reconkit report --target <domain>`.
 
 ---
 
@@ -377,7 +374,7 @@ at selection with `requires root / sudo` and the run still exits 0.
 | Code | Meaning |
 |---|---|
 | **0** | Success, including "completed with gaps" (a stage whose only tools are absent, or a tool refused by an external service: 429/quota/upstream 5xx) |
-| **1** | Unexpected error; also the Phase 3 stubs (`export`, `db list`, `db export`, `scope import`) |
+| **1** | Unexpected error |
 | **2** | Usage error (bad flags, `--active` on a passive-only command, cancelled prompt) |
 | **3** | Scope violation when a scope file is present (blocked, unauthorized, expired) |
 | **4** | No usable tool anywhere: every requested stage executed no tools |
@@ -533,7 +530,6 @@ reconkit diff -d testfire.net
 | **sqlmap, dalfox, crlfuzz** | Exploitation-class; never auto-run (no `--intrusive` flag exists) | `--tools sqlmap` explicitly |
 | **vulns findings** | Not persisted to the DB or the saved report | read `--json` or `workspaces/<domain>/meta/<run_id>-<tool>.txt` |
 | **WAF** | One string per host, merged by `waf_priority` (D12) | n/a |
-| **`export`, `db list/export`, `scope import`** | Phase 3 stubs: exit 1, do nothing | use `--json` on scan commands, `reconkit report`, or `db delete`/`db wipe` |
 | **`shots` in passive/active** | Not requested by any other mode (D19) | use `--full` |
 
 48 tools are registered and 44 have adapters; the four without are `dnsreaper`

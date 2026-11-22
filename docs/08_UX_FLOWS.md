@@ -100,10 +100,17 @@ reconkit installs nothing: `install`, `update` and `doctor --fix` were removed o
 1. User presses Ctrl+C. The engine stops launching new tools, marks the stage run `interrupted`, and exits 130. A child process already running is not explicitly killed in this build.
 2. `reconkit active -d example.com --resume` continues from the unfinished stage; completed stages are not repeated, and the interrupted stage is rerun from its start.
 
-## Flow 10 - Export (Phase 3 stub in this build)
+## Flow 10 - Rebuild a saved report (`report`)
 
-`export`, `db export`, `db list` and `scope import` exit 1 with a clear "not wired" message; the steps below describe the intended Phase 3 behavior.
+There is no `export`, `db export`, `db list` or `scope import` command: the four
+Phase 3 stubs were removed on 2026-11-22 (D119), and `scope.yaml` is written by
+the operator, never by the CLI.
 
-1. `reconkit export -d example.com --format md -o report.md`
-2. Formats: `json`, `md`, `html`. HTML content is escaped.
-3. Report includes scope header (program, authorization note), scan dates, tools used, results with sources and trust.
+1. `reconkit report --target example.com` rebuilds `report.txt`, `report.json`
+   and `report.pdf` from the stored rows; `--run ID` picks an older run and
+   `--out DIR` writes elsewhere (D65, D107).
+2. The connection is read-only, no adapter starts and no traffic is sent; a run
+   id that does not belong to the target is exit `2` and writes nothing.
+3. Every scan already writes the same three files into
+   `results/<target>/<timestamp>/`, so `report` is the way to get them again
+   without scanning. A row-level JSON/CSV export is still open (README).

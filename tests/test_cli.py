@@ -223,14 +223,10 @@ def test_every_scan_command_has_help(command: str) -> None:
     [
         ["scope", "--help"],
         ["scope", "check", "--help"],
-        ["scope", "import", "--help"],
         ["diff", "--help"],
         ["status", "--help"],
         ["doctor", "--help"],
         ["db", "--help"],
-        ["db", "list", "--help"],
-        ["db", "export", "--help"],
-        ["export", "--help"],
     ],
 )
 def test_every_non_scan_command_has_help(args: list[str]) -> None:
@@ -909,6 +905,41 @@ def test_lite_is_no_longer_a_command() -> None:
     result = CliRunner().invoke(app, ["lite", "-d", "example.com"])
     assert result.exit_code == 2
     assert "No such command" in result.stderr
+
+
+def test_stub_commands_were_removed_from_the_tree() -> None:
+    """D119: `export`, `db list/export` and `scope import` no longer exist."""
+    root = get_command(app).commands
+    assert "export" not in root
+    assert set(root["db"].commands) == {"delete", "wipe"}
+    assert set(root["scope"].commands) == {"check"}
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["export", "-d", "example.com"],
+        ["db", "list", "-d", "example.com"],
+        ["db", "export", "-d", "example.com"],
+        ["scope", "import"],
+    ],
+)
+def test_removed_stub_commands_exit_with_a_usage_error(args: list[str]) -> None:
+    """A removed command must fail as an unknown command, not as a stub."""
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 2
+    assert "No such command" in result.stderr
+    assert "not wired" not in result.stderr
+
+
+@pytest.mark.parametrize("group", ["scope", "db"])
+def test_group_help_does_not_advertise_a_removed_command(group: str) -> None:
+    """D119: `scope` has no `import` and `db` no `list`/`export`; help says so."""
+    result = CliRunner().invoke(app, [group, "--help"], env=HELP_ENV)
+    assert result.exit_code == 0
+    rendered = help_text(result)
+    assert "import" not in rendered.replace("imported", "").replace("imports", "")
+    assert "list" not in rendered
 
 
 def _stage(document: dict[str, object], name: str) -> dict[str, object]:

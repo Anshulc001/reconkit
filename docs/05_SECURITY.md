@@ -86,7 +86,7 @@ This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 fla
 ## 10. Input Handling
 
 - Validate all target input (domain, list files) before any use.
-- Treat all tool and HTTP output as untrusted: parse with strict parsers, never `eval`, escape before writing HTML exports.
+- Treat all tool and HTTP output as untrusted: parse with strict parsers, never `eval`, escape before writing report output.
 - `yaml.safe_load` only.
 
 ## 11. Security Checklist
@@ -95,11 +95,10 @@ This is the API-key policy. Related details live in `docs/02_CLI_UX.md` (§3 fla
 - [ ] No `shell=True` anywhere (`ruff` rule + grep test)
 - [ ] Targets validated before reaching subprocess
 - [ ] No install/download path exists; `tools.yaml` `source:` stays inert text
-- [ ] No secrets in logs, DB, errors or exports
+- [ ] No secrets in logs, DB, errors or reports
 - [ ] No hidden throttling: no pacer, delay or rate-limiter path remains
 - [ ] Opt-in and intrusive tiers gated by `MODE_TOOLS`; exploitation-class tools gated by `exploitation: true`
 - [ ] `--no-scope` prints its warning and records `scope_mode = unrestricted_flag`
-- [ ] HTML export escapes content
 - [ ] Dependencies reviewed and pinned in `pyproject.toml`
 ## Rule 6 addendum (D56, 2026-11-19): excluded CIDRs
 

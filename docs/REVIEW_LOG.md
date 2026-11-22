@@ -11990,3 +11990,85 @@ Success: no issues found in 66 source files
   `./scripts/setup.sh --only dnsreaper --yes`); the active venv is Python 3.14.6
   while the CI matrix is 3.11-3.13; and the untracked `recon.db` / `results/`
   from the D115 run are still present locally (ignored, not pushed).
+
+## 2026-11-22 - retire the four Phase 3 stub commands (D119)
+
+- **Task (owner instruction):** remove `export`, `db list`, `db export` and
+  `scope import`. `report` rebuilds a saved report from the database, and the
+  CLI never writes `scope.yaml`, so the four commands only ever printed a stub
+  message and exited 1.
+- **Trace before edit:** `grep -rn "scope import\|db list\|db export\|\bexport\b"`
+  over `src/`, `tests/`, every `docs/*.md`, `COMMANDS.md`, `README.md`,
+  `SETUP.md` and `tools.yaml`. Hits outside history: `cli.py:1214,1513,1525,1537`
+  (the four bodies), `tests/test_cli.py:232-233` (four `--help` cases),
+  `docs/01:104,126,130`, `docs/02:90,211,273,313`, `docs/05:102`,
+  `docs/08:105`, `COMMANDS.md:36,39,40,246,268,273,380,536`, `README.md:114,241`.
+  No adapter, engine, store or UI module referenced them.
+- **Code:** four functions deleted (`scope_import`, `db_list`, `db_export`,
+  `export_command`), 39 lines. The `scope` and `db` group help strings changed
+  from `Inspect or import scope.yaml.` / `Query stored assets.` to
+  `Inspect scope.yaml.` / `Delete or wipe stored data.` because they advertised
+  a command that no longer exists.
+- **Behaviour, real CLI (scratch dir, `--config <repo>/config.yaml`):**
+
+```
+$ reconkit export -d example.test        ; exit=2  No such command 'export'. Did you mean 'report', 'ports'?
+$ reconkit db list -d example.test       ; exit=2  No such command 'list'.
+$ reconkit db export -d example.test     ; exit=2  No such command 'export'.
+$ reconkit scope import                  ; exit=2  No such command 'import'.
+$ reconkit db --help
+ Usage: reconkit db [OPTIONS] COMMAND [ARGS]...
+ Delete or wipe stored data.
+   delete  db delete: remove one target and all its rows (D81).
+   wipe    db wipe: remove every target and recreate the schema (D81).
+$ reconkit --help
+   ... subs dns live ports tech urls vulns passive active full run diff status
+   report doctor scope db      (no export, no list/import entry)
+```
+
+- **Regression tests** (`tests/test_cli.py`): the four `--help`
+  parametrizations are gone; added
+
+```
+test_stub_commands_were_removed_from_the_tree
+    root = get_command(app).commands
+    "export" not in root; db.commands == {"delete","wipe"}; scope.commands == {"check"}
+test_removed_stub_commands_exit_with_a_usage_error  (4 params)
+    exit_code == 2 and "No such command" in stderr and "not wired" not in stderr
+test_group_help_does_not_advertise_a_removed_command  (scope, db)
+    "import" / "list" not in the rendered group help
+```
+
+  They fail on the pre-change tree (`export` was a subcommand; `--help` exited
+  0) and pass now.
+- **Docs:** `docs/01` (Feature 8 title and criteria, section 8 command list and
+  "still open"), `docs/02` (setup table, state/output table, db-management
+  note, the list-from-a-previous-run note, the `--json` note), `docs/05`
+  (HTML-export wording: no HTML writer ships), `docs/08` (Flow 10 became
+  "Rebuild a saved report (`report`)"), `COMMANDS.md` (glance table, `scope
+  import` paragraph, db section, exit-code 1 row, known-limits row), `README.md`
+  (command table note, future-improvements bullet). Same-fix consistency: the
+  `report` row said `-d`, the command takes `--target`.
+- **Gate:**
+
+```
+$ pytest -q
+1266 passed, 3 skipped in 60.72s (0:01:00)
+$ FORCE_TERMINAL=1 pytest -q
+1266 passed, 3 skipped in 60.75s (0:01:00)
+$ pytest -q tests/test_invariants.py
+196 passed, 3 skipped in 0.31s
+$ ruff check .
+All checks passed!
+$ ruff format --check .
+103 files already formatted
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+```
+
+- **`--mock` smoke after the change** (scratch dir, `example.test`):
+  exit 0, `1 hosts: 0 ALIVE, 1 DNS_ONLY`, `16 ok, 0 failed, 8 skipped`,
+  `results/mock/example.test/20261122T094730Z/report.{txt,json,pdf}` written.
+- **Not a defect:** the four commands never did anything, so no data or output
+  path is lost. `__version__` stays `1.0.0` (post-tag commit; a release is the
+  owner's call).

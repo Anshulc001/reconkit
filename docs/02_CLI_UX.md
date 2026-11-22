@@ -87,7 +87,9 @@ section 4.
 |---|---|---|
 | `doctor` | Tools, versions, system packages, API key names + Keys table, per-stage coverage | 2 |
 | `scope check -d DOMAIN` | Show whether a target is allowed by `scope.yaml` | 2 |
-| `scope import` | Build `scope.yaml` from a bug bounty program | 3 |
+
+There is no `scope import` (removed 2026-11-22, D119): the operator writes
+`scope.yaml`, and the CLI only ever reads it (docs/05 rule 2).
 
 ### Stages (single stage per command)
 | Command | Mode | Needs `--active` | Phase |
@@ -208,8 +210,10 @@ The `--active` `--help` text says this in one sentence: `A scope.yaml is require
 | `report --target X [--run ID] [--out DIR]` | Rebuild a saved `report.txt`/`report.json`/`report.pdf` from stored rows; read-only connection, no network, no adapter (D65, D107, section 5) |
 | `db delete --target X [--yes]` | Delete one target, all its rows and `results/X/`; asks first, default no (D81, D85) |
 | `db wipe [--yes]` | Delete every row, recreate the current schema; `results/` is kept (D81) |
-| `db list\|export -d X [--new-only]` | **Phase 3 stub** in this build: exits 1 with a clear message; no data is read |
-| `export -d X --format json\|md\|html` | **Phase 3 stub** in this build: exits 1 with a clear message; no report is written |
+
+There is no `export`, `db list` or `db export` command (the three stubs were
+removed 2026-11-22, D119): `report` rebuilds the saved report from the database,
+and every scan already writes `results/<target>/<timestamp>/report.{txt,json,pdf}`.
 
 **`diff` semantics.** `diff` compares the two latest completed discovery runs for the target: `scan_runs` rows for the `subs` stage whose status is `completed` or `partial`, newest first. Resume does not change which runs these are (a resumed stage produces its own row like any other run); no other stage takes part in the comparison. A host is **`GONE` only after two consecutive misses**: it must have been seen in the run *before* the previous one and be missing from both the previous run and the latest run. One miss is not a change and is never reported as `GONE`, because a single flaky passive source (a CT log timing out, a subfinder run returning fewer names) is indistinguishable from a real removal in one run. Consequences a user will see: a host that is missing from only the latest run is silent in the table and is listed once under `Not reported as GONE yet (needs two consecutive misses)`; a host that comes back after one miss is neither `NEW` (its first sighting is not reset) nor `GONE`; a real removal appears as `GONE` on the run after the second consecutive miss; and with fewer than three completed discovery runs nothing can be confirmed gone, so `gone` is empty and `diff` says so. A host is **`NEW`** when the latest completed discovery run is its first sighting by any discovery tool: a host that the `dns` stage resolved before any discovery tool returned it is stored with `provenance` `dns`, appears in `status` with no sources, and is never reported NEW - the first discovery run that returns it is the run that reports it new.
 
@@ -270,8 +274,9 @@ Note: results/ folders are untouched; use "rm -rf results/" manually if you want
 ```
 
 Both commands take the root `--db`/`--config` options, which must come **before**
-the `db` subcommand (`reconkit --db /tmp/copy.db db wipe --yes`). `db list` and
-`db export` stay Phase 3 stubs (exit 1).
+the `db` subcommand (`reconkit --db /tmp/copy.db db wipe --yes`). The `db` group
+holds only `delete` and `wipe`; there is no `db list`/`db export` (removed
+2026-11-22, D119). Use `report` to rebuild a report from the stored rows.
 
 ### Existing list: which hosts are live? (D59, 2026-11-19)
 
@@ -309,11 +314,10 @@ the CLI's layering rule (`tests/test_cli.py` asserts only `engine`, `ui`,
 list the engine accepts, plus an owner ruling for the flag.
 
 **Getting the list out of a previous run.** `reconkit report --target <domain>`
-rebuilds the saved report from the database (D65, section 5). `export`, `db
-list` and `db export` remain Phase 3 stubs in this build: they print `... is
-not wired in Part 8` and exit `1` without reading the database - `report`
-supersedes what they were going to do for the host list. The export every run
-already writes is `results/<target>/<timestamp>/report.json`,
+rebuilds the saved report from the database (D65, section 5) - it is the only
+read-back path, because the `export`, `db list` and `db export` stubs were
+removed on 2026-11-22 (D119). The export every run already writes is
+`results/<target>/<timestamp>/report.json`,
 where `hosts[].hostname` is the hostname list (and `report.txt` carries the same
 names in its first column). That report contains hosts only - a name that
 appeared only in `urls` rows is not in it unless D58's second resolve reached it
@@ -495,7 +499,7 @@ Header values are redacted as `***` unless `--show-headers` was given. `ToolResu
 
 `stages[].skipped` lists every tool the engine selected out before it ran, as `{"tool":"<name>","reason":"<why>"}` objects - `no adapter yet (phase N)`, `tool mode not included in <mode> mode`, `tier not included in <mode> mode`, `exploitation tool requires explicit --tools`, `not installed`, or the naabu scope-mode skip from docs/05 rule 6 (resolution failed or resolved outside `in_scope_cidrs`). A stage that has no adapter for any tool in its pool therefore shows its skips instead of an empty `results` array, so `results: []` means "ran, found nothing" only when `skipped` is empty too. `summary.tools_skipped` counts these rows along with any executed tool whose status is `skipped`; it is the total, not a per-tool count of executed results.
 
-`diff --json` writes one document with `type: diff`, the run ids it compared (`baseline_run_id`, `previous_run_id`, `latest_run_id`; `baseline_run_id` is `null` until a third completed discovery run exists), and arrays `new`, `gone`, `pending_gone`, `state_changes`, `ports_opened` and `ports_closed`. `pending_gone` holds the hosts that are missing from the latest run only: the same list the human output prints under "not reported as GONE yet", so a script can apply its own tolerance without re-querying. `gone` follows the two-consecutive-miss rule above. `status --json` writes one document with `type: status` and a `runs` array; each run carries `id`, `target`, `stage`, `status`, `started_at` and `finished_at` (the `speed` field was removed with speed control on 2026-11-17). `scope check` and the `db` and `export` stubs do not accept `--json` in this build.
+`diff --json` writes one document with `type: diff`, the run ids it compared (`baseline_run_id`, `previous_run_id`, `latest_run_id`; `baseline_run_id` is `null` until a third completed discovery run exists), and arrays `new`, `gone`, `pending_gone`, `state_changes`, `ports_opened` and `ports_closed`. `pending_gone` holds the hosts that are missing from the latest run only: the same list the human output prints under "not reported as GONE yet", so a script can apply its own tolerance without re-querying. `gone` follows the two-consecutive-miss rule above. `status --json` writes one document with `type: status` and a `runs` array; each run carries `id`, `target`, `stage`, `status`, `started_at` and `finished_at` (the `speed` field was removed with speed control on 2026-11-17). `scope check`, `db delete`, `db wipe` and `report` do not take `--json`: `report` writes its files instead.
 
 ### Colors (Rich theme)
 
