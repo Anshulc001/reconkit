@@ -11851,11 +11851,18 @@ stay on this box.
 
 ```
 $ git push origin main
-   6239806..<D117 commit>  main -> main
+To https://github.com/Anshulc001/reconkit.git
+   6239806..0095109  main -> main
 $ git tag -f -a v1.0.0 -m "reconkit v1.0.0"
+Updated tag 'v1.0.0' (was a13d267)
 $ git push --force origin refs/tags/v1.0.0
-   v1.0.0 -> v1.0.0 (forced update)
+To https://github.com/Anshulc001/reconkit.git
+ + a13d267...4b4a450 v1.0.0 -> v1.0.0 (forced update)
 ```
+
+The push above is the one that carries D117; the docs-only commit that records
+this evidence moved `main` and the tag one commit further, and both were
+re-pointed to it so the branch tip and the release tag still agree.
 
 `v1.0.0` is an annotated tag with the same message it carried before; only its
 target moved, from `6239806` to the D117 commit. Version consistency (hard rule
