@@ -4,6 +4,20 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-21, D117): **the tracked tree is verified clean, `main` is
+  pushed, and `v1.0.0` points at the released commit.** An exact-pattern grep
+  (every spelling of the real target name, case-insensitive) returns nothing
+  in any tracked file; the only `slice` hits left are the
+  ordinary English word (`identity slice`, `distributed scan slice`) in
+  `docs/REVIEW_LOG.md` and `docs/tool_manuals/ports.md`. `main` fast-forwarded
+  from `6239806` and the annotated tag `v1.0.0` was re-created on the same
+  commit and force-pushed, so branch, tag, `pyproject.toml` and `__version__`
+  all say `1.0.0`. Still holding the real target, and deliberately out of this
+  batch: git history (an owner-approved filter rewrite plus force-push would be
+  needed), the untracked `recon.db` and the `results/` tree from the D115 run -
+  neither is tracked or pushed. Gate: 1262 passed, 3 skipped, plain and
+  `FORCE_TERMINAL=1`; ruff, format and mypy clean. Next action: none.
+
 - Status (2026-11-21, D116): **real target names removed from the tracked
   tree.** D79's scrub missed 54 lines in 7 files; all real-target variants are
   now `target.example`, and the older registrable `.com` placeholder was

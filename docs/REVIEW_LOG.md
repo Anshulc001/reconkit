@@ -11817,3 +11817,69 @@ $ ruff format --check .
 $ mypy src/reconkit
 Success: no issues found in 66 source files
 ```
+
+## 2026-11-21 - push and tag move after the name scrub (D117)
+
+- **Task:** publish the four commits that closed D113-D116, and make the release
+  tag point at the published head instead of the older release commit.
+- **Decision:** the tracked tree is published as is. Git history and the
+  untracked local artefacts are **not** rewritten here: a filter rewrite is
+  destructive, needs the owner's explicit approval, and would invalidate the
+  hundreds of commit hashes this log cites as evidence.
+- **Verification before publishing**, two passes - the exact target patterns,
+  then the bare target word to catch any surviving fragment:
+
+```
+$ git grep -n -i -E '<redacted target pattern>' -- .
+(no output, exit 1)
+
+$ git grep -n -i -E 'slice|sakec' -- .
+docs/REVIEW_LOG.md:4153:  passed, 63 deselected`), green after (identity slice `11 passed`; full suite 580).
+docs/REVIEW_LOG.md:8149:- **Implemented:** `BinaryAdapter.identity_require_all` (default `True`) drives
+docs/REVIEW_LOG.md:8282:- **Green after:** `4 passed, 67 deselected` on the targeted slice; full suite **587 passed**
+docs/REVIEW_LOG.md:10034:The first edit of this part (`5c770da`) used a slice that started at `## Open risks`
+docs/tool_manuals/ports.md:182:   -shard string                   distributed scan slice as index/total, 1-based (e.g. 1/4)
+```
+
+Every hit is the ordinary English word for a slice of work, a test slice or a
+scan shard - not the target. `--untracked-files=all` is empty, so every
+untracked file is ignored by `.gitignore` and none of them can reach the push:
+the local `recon.db` (one target row, the real name), `results/` and `scope.yaml`
+stay on this box.
+
+- **Published:**
+
+```
+$ git push origin main
+   6239806..<D117 commit>  main -> main
+$ git tag -f -a v1.0.0 -m "reconkit v1.0.0"
+$ git push --force origin refs/tags/v1.0.0
+   v1.0.0 -> v1.0.0 (forced update)
+```
+
+`v1.0.0` is an annotated tag with the same message it carried before; only its
+target moved, from `6239806` to the D117 commit. Version consistency (hard rule
+12): `pyproject.toml` `version = "1.0.0"`, `src/reconkit/__init__.py`
+`__version__ = "1.0.0"`, tag `v1.0.0`, and `reconkit --version` prints
+`reconkit v1.0.0` - no edit was needed, they already agreed.
+
+- **Limits:** the real target is still in 21 historical commits, which are
+  already public, and in the untracked local `recon.db` / `results/`. Removing
+  either is a separate, owner-approved action (filter rewrite + force-push, or a
+  local wipe). Nothing in this batch changes code, so no test was added and the
+  suite count is unchanged.
+
+Gate:
+
+```
+$ pytest -q
+1262 passed, 3 skipped in 48.57s
+$ FORCE_TERMINAL=1 pytest -q
+1262 passed, 3 skipped in 48.18s
+$ ruff check .
+All checks passed!
+$ ruff format --check .
+103 files already formatted
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+```
