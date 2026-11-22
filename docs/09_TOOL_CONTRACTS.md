@@ -61,11 +61,11 @@ class PortRecord(BaseModel):
     version: str | None = None
     source: str
 
-class UrlRecord(BaseModel):         # Phase 3
+class UrlRecord(BaseModel):         # urls stage (v1.0.0)
     url: str
     source: str
 
-class FindingRecord(BaseModel):     # Phase 3
+class FindingRecord(BaseModel):     # vulns stage (v1.0.0); not persisted (docs/04)
     fqdn: str
     kind: str
     # `unknown` is real: 42 of the installed nuclei templates declare it and
@@ -149,18 +149,26 @@ gap instead (D47, next section), and so is a request that never answered (D57, t
 
 ## 4. Stage Registry (who runs where)
 
-Phase 2 = working adapter in the first build. Phase 3 = listed in `tools.yaml`, added one at a time.
+Every pool member below has a working adapter in this build (`v1.0.0`) except
+the intrusive-tier tools (`dalfox`, `crlfuzz`, `sqlmap`): those have a registry
+row but no adapter yet and run only when named with an explicit `--tools`
+(AGENTS.md section 0e rule 1). `tests/test_invariants.py`
+(`test_regression_docs_stage_table_describes_the_shipped_build`) keeps this table
+and `tools.yaml` from drifting apart.
 
-| Stage | Mode | Pool (tier core unless noted) | Phase 2 working |
-|---|---|---|---|
-| subs | passive | crtsh, certspotter, otx, hackertarget, urlscan, subfinder, assetfinder, amass, findomain, chaos, github_subdomains | crtsh, certspotter, otx, hackertarget, subfinder, assetfinder |
-| dns | passive | dnspython, dnsx, puredns (+massdns), dig | dnspython, dnsx |
-| live | active | pyprobe, httpx, httprobe, tlsx | pyprobe, httpx, tlsx, httprobe |
-| ports | active (smap passive) | pyscan, naabu, nmap, rustscan, smap; masscan (opt_in) | pyscan, naabu |
-| tech | active | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze |
-| urls | passive/active | gau, waybackurls, katana, hakrawler, gospider, subjs, unfurl, urlfinder | gau, katana, waybackurls, hakrawler, gospider, subjs, unfurl, urlfinder |
-| vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) | nuclei, subzy, dnsreaper, nikto, ffuf |
-| shots | active | gowitness (opt_in) | full mode only (D19) |
+| Stage | Mode | Pool (tier core unless noted) |
+|---|---|---|
+| subs | passive | crtsh, certspotter, otx, hackertarget, urlscan, subfinder, assetfinder, amass, findomain, chaos, github_subdomains |
+| dns | passive | dnspython, dnsx, puredns (+massdns), dig |
+| live | active | pyprobe, httpx, httprobe, tlsx |
+| ports | active (smap passive) | pyscan, naabu, nmap, rustscan, smap; masscan (opt_in) |
+| tech | active | httpx_tech, whatweb, wafw00f, cdncheck, webanalyze |
+| urls | passive/active | gau, waybackurls, katana, hakrawler, gospider, subjs, unfurl, urlfinder |
+| vulns | active | nuclei, subzy, dnsreaper; nikto, ffuf (opt_in); dalfox, crlfuzz, sqlmap (intrusive) |
+| shots | active | gowitness (opt_in) |
+
+`shots` runs in `full` only (D19); `smap` is the one passive member of `ports`
+(it reads Shodan data and sends nothing to the target).
 
 Selection rules (2026-11-17: the mode tables in docs/02 section 2 and `MODE_STAGES`/`MODE_TOOLS` in `engine.py` are the source): use adapters that are installed (or http/python kind), allowed by tier for the mode (`allowed_tiers`: `opt_in` only with `--include-noisy` or a `full` run; `intrusive` only with `full` or an explicit `--tools` name), allowed by tool mode (an active tool in `passive` mode is skipped with `tool mode not included in passive mode` even when named `--tools`, **except** a name in `--include`, which is the one documented override - D63, 2026-11-19; it also prints the forced-contact banner), never `exploitation: true` unless named with `--tools` (`--include` does not lift that rule), and filtered by `--tools` / `--exclude`. `tools.yaml` may carry `exploitation: true` on an intrusive entry (`sqlmap`, `dalfox`, `crlfuzz`); the registry parses it into `ToolSpec.exploitation` (a non-bool is a `ConfigError`) and the engine skips such a tool automatically in every mode with `exploitation tool requires explicit --tools`. Missing tools are reported as `skipped`, never fatal unless no adapter remains (exit 4). A `needs_root` tool in a non-root process is skipped the same way with `requires root / sudo` (section 4a6). Every selection-time skip is recorded in `tool_runs` **and** reported to the caller: `stages[].skipped` in the `--json` document and the Tools table list each tool with its reason, and `summary.tools_skipped` counts them (docs/02 section 5), so a stage whose whole pool has no adapter cannot look like a stage that ran and found nothing. This is the selection-time rule: a binary that was present at selection but cannot be spawned at run time is a `failed` result instead (see the adapter contract in section 3), not a skip. **`naabu` is scope-mode dependent (owner decision 2026-11-17; supersedes the permanent block of 11c-G-7/12i):**
 
@@ -1084,7 +1092,7 @@ truth). Two consequences for this table:
     This state rule is unconditional: no other input can change it.
   - "At least 2 agreeing checks when 2 are available" only sets confidence (LOW when only one check is available). It never changes the state.
   - Responses that look like WAF/CDN blocks (for example 403/429 with CDN markers) still count as `ALIVE`.
-- **Port-scan pre-check (Phase 2):** port scans require a stored `live` result for the host. If none is stored, skip the host and print a warning (`run live first`). If the stored `HostStatusRecord.waf` is set (from the `httpx` CDN/WAF JSON fields), skip it as CDN/WAF-fronted. `cdncheck` and `wafw00f` both write that field
+- **Port-scan pre-check (D110):** port scans require a stored `live` result for the host. If none is stored, skip the host and print a warning (`run live first`). If the stored `HostStatusRecord.waf` is set (from the `httpx` CDN/WAF JSON fields), skip it as CDN/WAF-fronted. `cdncheck` and `wafw00f` both write that field
   (wave 2 and wave 4), so either tool's match can trigger the skip.
   **Implemented 2026-11-21 (D110).** The engine calls `Store.waf_fronted_hosts()`
   before the ports stage and drops those hosts; `Store.host_rows()` reports no

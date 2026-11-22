@@ -58,7 +58,7 @@ tests/
 
 **Flow: passive scan with `--mock`**
 1. Run `reconkit passive -d example.com --mock`
-2. Fixtures load for every Phase 2 passive adapter
+2. Fixtures load for every passive adapter: each adapter in `ADAPTERS` has at least one fixture (AGENTS.md section 0e rule 5), and a target with no matching fixture is a skip, not a failure (PIT-71)
 3. Results merge; HIGH/MEDIUM/LOW appear as expected
 Expected: table printed, DB rows created, exit code 0.
 

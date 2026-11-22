@@ -120,13 +120,14 @@
 
 **Phase 1 (docs):** AGENTS.md, SETUP.md, docs 01-10, tools.yaml, config.yaml, scope.example.yaml.
 
-**Phase 2 (working core) - Must have:**
+**Phase 2 (working core) - Must have** (the phase names below are the original
+plan; the shipped build is v1.0.0, 2026-11-21):
 - Skeleton, config, scope gate, SQLite store, consensus engine, `--mock`.
 - Commands: `doctor`, `passive`, `live`, `ports`, `diff`, `status`; `db list`, `db export`, `export` and `scope import` are explicit Phase 3 stubs (exit 1) in this build, and docs/02 marks them as such. (`install`, `update` and `doctor --fix` existed in Phase 2 and were removed on 2026-11-17.)
 - Adapters: crtsh, certspotter, otx, hackertarget, subfinder, assetfinder, dnspython, pyprobe, httpx, pyscan, naabu.
 - Tests passing on Linux (fixtures only, no tools needed).
 
-**Phase 3 (one adapter or feature per prompt):** remaining tools in `tools.yaml`, `urls`/`tech`/`vulns`/`shots`, `passive`/`active`/`full`/`run` polish, `monitor` with webhook, `scope import`, URL pattern sorting (xss/sqli/ssrf/lfi/redirect candidate lists), intrusive tier.
+**Phase 3 (one adapter or feature per prompt):** shipped in v1.0.0 - the rest of `tools.yaml` (47 adapters), `urls`/`tech`/`vulns`/`shots`, the `passive`/`active`/`full`/`run` commands, PDF reports and per-scan logging. **Still open:** `monitor` with webhook, `scope import`, `export`/`db list`/`db export` (stubs, exit 1), URL candidate-pattern tagging (`urls.patterns_json`, docs/04 section 3.1), adapters for the three intrusive tools (`dalfox`, `crlfuzz`, `sqlmap`), and a findings table (docs/04 section 3).
 
 ## 9. Success Metrics
 

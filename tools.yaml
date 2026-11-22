@@ -172,7 +172,7 @@ tools:
   hakrawler:    {stage: urls, kind: binary, tier: core, mode: active, phase: 3, class: crawler, binary: hakrawler, source: "go install github.com/hakluke/hakrawler@latest"}
   gospider:     {stage: urls, kind: binary, tier: core, mode: active, phase: 3, class: crawler, binary: gospider, version_cmd: [gospider, --version], version_regex: 'Version: (\S+)', source: "go install github.com/jaeles-project/gospider@latest"}
   subjs:        {stage: urls, kind: binary, tier: core, mode: active, phase: 3, class: crawler, binary: subjs, version_cmd: [subjs, -version], version_regex: 'subjs version: (\S+)', source: "go install github.com/lc/subjs@latest", notes: "JS file discovery."}
-  unfurl:       {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: unfurl, source: "go install github.com/tomnomnom/unfurl@latest", notes: "Parameter/path extraction. Pattern sorting (xss/sqli/ssrf/lfi/redirect candidates) is done in Python, no traffic."}
+  unfurl:       {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, binary: unfurl, source: "go install github.com/tomnomnom/unfurl@latest", notes: "Parameter/path extraction only, no traffic. Candidate-pattern tagging (xss/sqli/ssrf/lfi/redirect) is NOT implemented in this build, so urls.patterns_json stays '[]' (docs/04 section 3.1)."}
   urlfinder:    {stage: urls, kind: binary, tier: core, mode: passive, phase: 3, class: archive, binary: urlfinder, version_cmd: [urlfinder, -version], version_regex: 'Current [Vv]ersion: (v?\d+\.\d+\.\d+)', source: "https://github.com/projectdiscovery/urlfinder/releases (or: go install github.com/projectdiscovery/urlfinder/cmd/urlfinder@latest)"}
 
   # ---------------- vulns (takeover, exposure) ----------------

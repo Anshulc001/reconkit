@@ -11890,3 +11890,103 @@ $ ruff format --check .
 $ mypy src/reconkit
 Success: no issues found in 66 source files
 ```
+
+## 2026-11-22 - audit: no failures, stale phase claims fixed (D118)
+
+- **Task (owner request):** check the whole tree and the logs, fix any error,
+  and say what is worth changing next.
+- **Baseline, unmodified tree:** gate green in both modes, CI green.
+
+```
+$ git status --short
+(no output)
+$ git log --oneline -5
+8acd8b4 docs: paste the real publish output in the D117 evidence block
+...
+$ pytest -q
+1262 passed, 3 skipped in 69.68s (0:01:09)
+$ FORCE_TERMINAL=1 pytest -q
+1262 passed, 3 skipped in 69.56s (0:01:09)
+$ ruff check .
+All checks passed!
+$ ruff format --check .
+103 files already formatted
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+$ pytest -q -rs | grep ^SKIPPED
+SKIPPED [1] tests/test_invariants.py:98: mix.example.com.txt is an error fixture: hackertarget: free quota exceeded
+SKIPPED [1] tests/test_invariants.py:98: quota.example.com.txt is an error fixture: hackertarget: free quota exceeded
+SKIPPED [1] tests/test_invariants.py:98: mix.example.com.synthetic.json is an error fixture: otx: expected passive_dns to be a list
+$ gh run list --limit 5
+completed  success  docs: paste the real publish output in the D117 evidence block  tests  main  push  ...
+(five most recent runs, all success)
+```
+
+The three skips are the invariant suite's deliberate "this fixture is an error
+fixture" cases, not disabled tests.
+
+- **CLI smoke:** `reconkit --version` -> `reconkit v1.0.0`; every command in
+  `--help` exists; `export`, `db list`, `db export` and `scope import` exit 1
+  with their documented stub message; a `--mock` run of `example.test` in a
+  scratch directory with `--config <repo>/config.yaml --db <tmp>/recon.db`
+  ended `EXIT=0` with `1 hosts: 0 ALIVE, 1 DNS_ONLY ... | tools: 16 ok, 0 failed,
+  8 skipped` and wrote `report.txt`, `report.json` and `report.pdf`.
+- **No code defect was found.** The audit's finding is documentation drift: six
+  live claims contradicted the shipped code.
+
+| Claim before | Reality (checked) |
+|---|---|
+| docs/09 section 4 had a `Phase 2 working` column (`ports`: `pyscan, naabu`) | all 6 ports adapters ship: `ADAPTERS` holds `nmap`, `rustscan`, `smap`, `masscan` too |
+| docs/01 section 8 listed `urls`/`tech`/`vulns`/`shots` and the mode commands as Phase 3 | all shipped in v1.0.0 (`reconkit --help`, docs/02) |
+| docs/04 section 3: `urls` "populated only by the Phase 3 urls stage" | the urls stage and `_persist_urls` write it (D115: 3,019 rows) |
+| docs/05 rule 7: "Phase 2 has no `cdncheck`; Phase 3 may add `cdncheck`/`wafw00f`" | both are `tech` tools in `tools.yaml`; `doctor` reports `cdncheck ... ok` |
+| docs/07 flow 1: "fixtures load for every Phase 2 passive adapter" | AGENTS 0e rule 5 requires a fixture for every adapter, and the invariant suite enforces it |
+| COMMANDS.md stage table: urls stores "URLs + patterns"; `tools.yaml` `unfurl` note: "pattern sorting is done in Python" | `_persist_urls` never passes `category` or `patterns`, so both columns keep their defaults |
+
+- **Fixes:** docs/09 section 4 now has three columns and a note that every pool
+  member has an adapter except the three intrusive tools; docs/01 section 8
+  states what shipped and what is still open; docs/04 section 3.1 is retitled
+  "Not filled: `urls.category` / `urls.patterns_json`" and says why; docs/05
+  rule 7 names the real `tech` sources; docs/07 flow 1 names the rule that
+  actually holds; docs/09's `UrlRecord`/`FindingRecord` comments say "v1.0.0";
+  COMMANDS.md and the `unfurl` note match the code.
+- **Regression test** (`tests/test_invariants.py`), shown failing before the doc
+  edit and passing after:
+
+```
+$ pytest -q tests/test_invariants.py -k docs_stage_table
+E       AssertionError: assert 'Phase 2' not in 'Stage Mode ...se 2 working'
+E         'Phase 2' is contained here:
+E           Stage Mode Pool (tier core unless noted) Phase 2 working
+FAILED tests/test_invariants.py::test_regression_docs_stage_table_describes_the_shipped_build
+
+$ pytest -q tests/test_invariants.py -k docs_stage_table      # after
+1 passed, 198 deselected
+```
+
+It parses docs/09 section 4 and asserts (a) no `Phase 2` column, (b) every
+registry tool appears in its stage row, (c) no row names a tool the registry does
+not list. Same-fix check: `pytest -q tests/test_invariants.py` -> `196 passed, 3
+skipped`.
+
+- **Gate after the change:**
+
+```
+$ pytest -q
+1263 passed, 3 skipped in 84.84s (0:01:24)
+$ FORCE_TERMINAL=1 pytest -q
+1263 passed, 3 skipped in 85.03s (0:01:25)
+$ ruff check .
+All checks passed!
+$ ruff format --check .
+103 files already formatted
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+```
+
+- **Not defects, recorded for the owner:** `reconkit doctor` reports
+  `47 installed, 0 manual, 1 needs attention (dnsreaper)` because
+  `~/.reconkit/opt` no longer exists on this box (reinstall with
+  `./scripts/setup.sh --only dnsreaper --yes`); the active venv is Python 3.14.6
+  while the CI matrix is 3.11-3.13; and the untracked `recon.db` / `results/`
+  from the D115 run are still present locally (ignored, not pushed).

@@ -422,7 +422,7 @@ A tool that cannot run without its key is a **selection skip** with the reason
 | **live** | subdomains | state, status code, title, redirect | `host_status_history` |
 | **ports** | ALIVE hosts | open ports, service, version | `ports`, `port_sources` |
 | **tech** | ALIVE hosts | technologies, WAF, CDN | `host_status_history.tech_json`, `.waf` |
-| **urls** | ALIVE hosts | discovered URLs + patterns | `urls` |
+| **urls** | ALIVE hosts | discovered URLs | `urls` (`category`/`patterns_json` are not filled in this build - docs/04 section 3.1) |
 | **url_probe** | stored in-scope URLs | HTTP status (`-1` no answer, `-2` unverified certificate) | `urls.status_code` |
 | **shots** | ALIVE hosts | screenshots + `screenshots.jsonl` | `results/<domain>/<ts>/screenshots/` (files, no rows — D17) |
 | **vulns** | ALIVE hosts | findings | `workspaces/<domain>/meta/<run_id>-<tool>.txt` and `--json` only (never `urls`/DB tables - not persisted) |

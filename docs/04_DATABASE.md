@@ -123,11 +123,11 @@ CREATE TABLE port_sources (
 );
 CREATE INDEX idx_port_sources_run ON port_sources(run_id);
 
-CREATE TABLE urls (                       -- created now; populated only by the Phase 3 urls stage
+CREATE TABLE urls (                       -- populated by the urls stage and url_probe
   id            INTEGER PRIMARY KEY,
   target_id     INTEGER NOT NULL REFERENCES targets(id),
   url           TEXT NOT NULL,
-  category      TEXT,                     -- js|json|html|param|other
+  category      TEXT,                     -- js|json|html|param|other (not filled in this build, 3.2)
   patterns_json TEXT NOT NULL DEFAULT '[]',   -- xss|sqli|ssrf|lfi|redirect candidates
   source_count  INTEGER NOT NULL DEFAULT 0,
   status_code   INTEGER,                       -- D23: HTTP status, NULL = not probed
@@ -162,7 +162,15 @@ CREATE TABLE monitor_changes (            -- Phase 3: not created in this build
 );
 ```
 
-### 3.1 Not stored: screenshots (D17)
+### 3.1 Not filled: `urls.category` / `urls.patterns_json`
+
+`urls.category` and `urls.patterns_json` exist but are **not filled in this
+build**: `_persist_urls` never passes them, so they keep their defaults (`NULL`
+and `'[]'`). Candidate-pattern tagging (xss/sqli/ssrf/lfi/redirect) is still a
+Phase 3 item (docs/01 section 8); nothing reads the columns yet, and a report or
+`--json` output never claims they are populated.
+
+### 3.2 Not stored: screenshots (D17)
 
 `gowitness` screenshots are **files, not rows**. They live under
 `results/<target>/<UTC stamp>/screenshots/*.png`, with a

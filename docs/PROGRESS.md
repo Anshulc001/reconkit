@@ -4,6 +4,31 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-22, D118): **audit found no gate or CI failure; the docs
+  still described shipped work as future.** Baseline on this checkout: `pytest
+  -q` 1262 passed / 3 skipped, the same with `FORCE_TERMINAL=1`, ruff, format
+  and mypy clean, and the five most recent GitHub Actions runs green. The stale
+  claims fixed: docs/09's stage table carried a `Phase 2 working` column listing
+  only the first-build subset (ports: `pyscan, naabu`) so installed adapters
+  (nmap, rustscan, smap, tlsx, puredns, ...) read as unshipped; docs/01 listed
+  `urls`/`tech`/`vulns`/`shots` and the modes as Phase 3 after v1.0.0 shipped
+  them; docs/04 said the `urls` table was "populated only by the Phase 3 urls
+  stage"; docs/05 said "Phase 2 has no `cdncheck`" while `cdncheck`/`wafw00f`
+  ship and D110 enforces the skip; docs/07 said fixtures cover "every Phase 2
+  passive adapter"; docs/09 labelled `UrlRecord`/`FindingRecord` Phase 3;
+  COMMANDS.md said the `urls` stage stores "URLs + patterns" although
+  `category`/`patterns_json` are never filled; and `tools.yaml`'s `unfurl` note
+  claimed pattern sorting runs in Python. New guard:
+  `test_regression_docs_stage_table_describes_the_shipped_build` parses docs/09
+  section 4 and fails if the table carries a phase column, misses a registry
+  tool in its stage row, or names a tool the registry does not list; it failed
+  on the pre-fix tree and passes now. Gate after the change: 1263 passed / 3
+  skipped plain and `FORCE_TERMINAL=1`, ruff/format/mypy clean, invariants 196
+  passed / 3 skipped. Not a defect, recorded for the owner: `doctor` reports
+  `dnsreaper` missing on this box (`~/.reconkit/opt` is gone; reinstall with
+  `./scripts/setup.sh --only dnsreaper --yes`), and the local venv is Python
+  3.14.6 while CI covers 3.11-3.13. Next action: none.
+
 - Status (2026-11-21, D117): **the tracked tree is verified clean, `main` is
   pushed, and `v1.0.0` points at the released commit.** An exact-pattern grep
   (every spelling of the real target name, case-insensitive) returns nothing

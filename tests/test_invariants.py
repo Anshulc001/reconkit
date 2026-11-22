@@ -7,6 +7,7 @@ default suite; a change that breaks one of them is not finished.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,7 @@ from reconkit.models import (
 )
 
 SPECS = load_tools()
+DOCS_09 = Path(__file__).resolve().parents[1] / "docs" / "09_TOOL_CONTRACTS.md"
 
 
 def _fixture_paths(name: str) -> list[Path]:
@@ -128,3 +130,36 @@ def test_natural_keys_keep_one_row_per_fact(tmp_path: Path) -> None:
         assert count("SELECT COUNT(*) AS n FROM urls") == 1
     finally:
         store.close()
+
+
+def _docs_stage_table() -> tuple[list[str], dict[str, set[str]]]:
+    """The stage registry table in docs/09 section 4 as (header, stage -> tokens)."""
+    text = DOCS_09.read_text(encoding="utf-8")
+    section = text.split("## 4. Stage Registry", 1)[1].split("Selection rules", 1)[0]
+    rows = [line.strip() for line in section.splitlines() if line.strip().startswith("|")]
+    header = [cell.strip() for cell in rows[0].strip("|").split("|")]
+    pools: dict[str, set[str]] = {}
+    for line in rows[2:]:
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        pools[cells[0]] = set(re.findall(r"[a-z0-9_]+", cells[2]))
+    return header, pools
+
+
+def test_regression_docs_stage_table_describes_the_shipped_build() -> None:
+    """docs/09 section 4 must describe this build, not a historical phase.
+
+    Regression: the table carried a `Phase 2 working` column that named only the
+    first-build subset (`pyscan, naabu` for ports), so the contract read as if
+    nmap, rustscan, smap, tlsx, puredns and the other installed adapters were
+    still future work, and the `urls`/`tech`/`vulns`/`shots` stages were marked
+    unshipped in docs/01 after they had shipped in v1.0.0.
+    """
+    header, pools = _docs_stage_table()
+    assert "Phase 2" not in " ".join(header)
+    assert header[:2] == ["Stage", "Mode"] and header[2].startswith("Pool"), header
+    for name, spec in SPECS.items():
+        assert name in pools[str(spec.stage)], f"{name} is missing from the {spec.stage} row"
+    for stage, tokens in pools.items():
+        known = {name for name, spec in SPECS.items() if str(spec.stage) == stage}
+        unknown = tokens - known - {"opt_in", "intrusive"}
+        assert unknown == set(), f"{stage} row names tools the registry does not list: {unknown}"
