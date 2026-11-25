@@ -212,6 +212,22 @@ def test_pitfall_ids_are_unique() -> None:
     assert duplicates == [], f"duplicate pitfall ids: {duplicates}"
 
 
+def test_the_resume_block_stays_short() -> None:
+    """A session boots on RESUME; it must not be a second history file.
+
+    Regression: PIT-76. By 2026-11-25 the block carried 62 status entries in 728
+    lines (~24k tokens), more than the whole rule set, so the first thing a new
+    session read was history. The three newest entries stay here and the rest
+    live under "Earlier statuses" at the end of the same file.
+    """
+    text = (ROOT / "docs" / "PROGRESS.md").read_text(encoding="utf-8")
+    block = text.split("## RESUME HERE", 1)[1].split("\n## ", 1)[0]
+    lines = block.splitlines()
+    assert len(lines) <= 60, f"RESUME is {len(lines)} lines; move older entries down"
+    assert block.count("- Status (") <= 4, "RESUME should carry only the newest status entries"
+    assert "Earlier statuses" in block
+
+
 def test_the_pitfall_table_is_not_duplicated_back_into_the_log() -> None:
     """The log is history; the rule set lives in one short file (D120).
 

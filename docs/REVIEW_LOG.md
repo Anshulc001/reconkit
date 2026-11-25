@@ -12108,3 +12108,60 @@ section says to ask the operator.
 
 **Not verified.** The CI `setup` job on GitHub Actions itself; this was a local
 container run.
+
+## 2026-11-25 (D122) - a new session boots on 39 lines and is routed to a file
+
+Owner instruction: a new session must read the relevant file instead of guessing,
+then decide - and it should actually receive the context it needs.
+
+**Measured before** (chars/4 estimate): AGENTS 5,425 + PITFALLS 11,284 + RESUME
+24,479 + last 3 entries 2,131 = **~43,319 tokens** for the minimum cold-start
+pack, because RESUME alone carried 62 status entries in 728 lines - more than the
+entire rule set.
+
+**Changed.**
+
+- `AGENTS.md` section 0 step 1: a task-to-doc routing list (CLI -> docs/02,
+  adapter -> docs/09, engine -> docs/03, schema -> docs/04, security -> docs/05,
+  tests -> docs/07, tools -> docs/10, journeys -> docs/08, style -> docs/06),
+  "read only those", and "if the area is not in that table, ask before writing
+  code".
+- `docs/PITFALLS.md`: a "Routing (which file to open)" section repeating it, so
+  the first file a session opens says it too.
+- `docs/PROGRESS.md`: RESUME keeps the three newest entries; D57-D118 and the
+  2026-11-17/18 batches moved unchanged to "Earlier statuses" at the end.
+- Guard `test_the_resume_block_stays_short` (PIT-76): fails above 60 lines or 4
+  entries.
+
+**Measured after.**
+
+```
+AGENTS.md          ~  5595 tokens
+docs/PITFALLS.md   ~ 11556 tokens
+PROGRESS RESUME    ~   610 tokens (39 lines)
+last 3 log entries ~  2131 tokens
+BOOT PACK TOTAL    ~ 19892 tokens (was ~43,319)
+```
+
+**Gate.**
+
+```
+$ pytest -q
+1270 passed, 3 skipped in 48.64s
+$ FORCE_TERMINAL=1 pytest -q
+1270 passed, 3 skipped in 48.66s
+$ pytest -q tests/test_invariants.py
+200 passed, 3 skipped in 0.22s
+$ ruff check .            -> exit 0
+$ ruff format --check .   -> exit 0
+$ mypy src/reconkit       -> exit 0
+```
+
+**CI on the previous push (80ec44f):** run `45697357994` -> `success`; jobs
+`test (3.11)`, `test (3.12)`, `test (3.13)` and `setup` all green, including the
+new `FORCE_TERMINAL=1 pytest -q`, invariant-file, mock-smoke and
+`setup.sh --check` steps.
+
+**What this does not prove.** The numbers are token estimates (chars/4), and they
+describe what `AGENTS.md` tells a session to read, not what every harness
+actually loads. A 19.9k-token boot pack is affordable; it is not free.

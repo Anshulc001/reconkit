@@ -4,6 +4,14 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-25, D122): **a new session boots on a short pack and is
+  routed to the right file.** RESUME held 62 status entries (728 lines, ~24k
+  tokens), so the first thing a session read was a second history file. The
+  newest three stay here; D57-D118 moved to "Earlier statuses" at the end of
+  this file. `AGENTS.md` step 1 now says to pick the docs for the area from
+  the section 2 table instead of reading `docs/` wholesale or guessing a file
+  name. Guard: `test_the_resume_block_stays_short` (PIT-76). Next action: none.
+
 - Status (2026-11-25, D121): **the Kali container check is documented and was run
   green on the committed state.** Inside `kalilinux/kali-rolling` (Python
   3.14.10): 1269 passed / 3 skipped, ruff/format/mypy clean, `--mock` exit 0.
@@ -29,706 +37,10 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
   `FORCE_TERMINAL=1`, invariants 199 passed / 3 skipped, ruff/format/mypy clean,
   mock exit 0, `setup.sh --check` exit 0. Next action: none.
 
-- Status (2026-11-22, D119): **the four Phase 3 stub commands are gone.**
-  `export`, `db list`, `db export` and `scope import` were removed from
-  `cli.py` on the owner's instruction: they only printed "not wired in Part 8"
-  and exited 1, `report` already rebuilds the saved report from the database,
-  and `scope.yaml` is written by the operator. Nothing else referenced them, so
-  the pipeline is untouched; the commands now fail as unknown commands (exit
-  2) and the `scope`/`db` group help no longer advertises them. Docs updated:
-  `docs/01` (Feature 8, section 8), `docs/02` (setup table, state/output table,
-  db section, the list-from-a-previous-run note, the `--json` note), `docs/05`
-  (the HTML-export line, which never matched a shipped feature), `docs/08`
-  (Flow 10 is now `report`), `COMMANDS.md` (glance table, db section, exit-code
-  table, known-limits row, and the stale `report -d X` spelling, which is
-  `--target`), `README.md`. New tests: the Typer tree has no such commands, all
-  four invocations exit 2 with `No such command`, and `scope`/`db` help does
-  not mention them. Gate: 1266 passed / 3 skipped plain and
-  `FORCE_TERMINAL=1`, invariants 196 passed / 3 skipped, ruff/format/mypy
-  clean, `--mock` run exit 0. `__version__` stays `1.0.0`: the removal is a
-  post-tag commit, and cutting a release needs the owner. Next action: none.
 
-- Status (2026-11-22, D118): **audit found no gate or CI failure; the docs
-  still described shipped work as future.** Baseline on this checkout: `pytest
-  -q` 1262 passed / 3 skipped, the same with `FORCE_TERMINAL=1`, ruff, format
-  and mypy clean, and the five most recent GitHub Actions runs green. The stale
-  claims fixed: docs/09's stage table carried a `Phase 2 working` column listing
-  only the first-build subset (ports: `pyscan, naabu`) so installed adapters
-  (nmap, rustscan, smap, tlsx, puredns, ...) read as unshipped; docs/01 listed
-  `urls`/`tech`/`vulns`/`shots` and the modes as Phase 3 after v1.0.0 shipped
-  them; docs/04 said the `urls` table was "populated only by the Phase 3 urls
-  stage"; docs/05 said "Phase 2 has no `cdncheck`" while `cdncheck`/`wafw00f`
-  ship and D110 enforces the skip; docs/07 said fixtures cover "every Phase 2
-  passive adapter"; docs/09 labelled `UrlRecord`/`FindingRecord` Phase 3;
-  COMMANDS.md said the `urls` stage stores "URLs + patterns" although
-  `category`/`patterns_json` are never filled; and `tools.yaml`'s `unfurl` note
-  claimed pattern sorting runs in Python. New guard:
-  `test_regression_docs_stage_table_describes_the_shipped_build` parses docs/09
-  section 4 and fails if the table carries a phase column, misses a registry
-  tool in its stage row, or names a tool the registry does not list; it failed
-  on the pre-fix tree and passes now. Gate after the change: 1263 passed / 3
-  skipped plain and `FORCE_TERMINAL=1`, ruff/format/mypy clean, invariants 196
-  passed / 3 skipped. Not a defect, recorded for the owner: `doctor` reports
-  `dnsreaper` missing on this box (`~/.reconkit/opt` is gone; reinstall with
-  `./scripts/setup.sh --only dnsreaper --yes`), and the local venv is Python
-  3.14.6 while CI covers 3.11-3.13. Next action: none.
-
-- Status (2026-11-21, D117): **the tracked tree is verified clean, `main` is
-  pushed, and `v1.0.0` points at the released commit.** An exact-pattern grep
-  (every spelling of the real target name, case-insensitive) returns nothing
-  in any tracked file; the only `slice` hits left are the
-  ordinary English word (`identity slice`, `distributed scan slice`) in
-  `docs/REVIEW_LOG.md` and `docs/tool_manuals/ports.md`. `main` fast-forwarded
-  from `6239806` and the annotated tag `v1.0.0` was re-created on the same
-  commit and force-pushed, so branch, tag, `pyproject.toml` and `__version__`
-  all say `1.0.0`. Still holding the real target, and deliberately out of this
-  batch: git history (an owner-approved filter rewrite plus force-push would be
-  needed), the untracked `recon.db` and the `results/` tree from the D115 run -
-  neither is tracked or pushed. Gate: 1262 passed, 3 skipped, plain and
-  `FORCE_TERMINAL=1`; ruff, format and mypy clean. Next action: none.
-
-- Status (2026-11-21, D116): **real target names removed from the tracked
-  tree.** D79's scrub missed 54 lines in 7 files; all real-target variants are
-  now `target.example`, and the older registrable `.com` placeholder was
-  migrated to the same reserved name. Scratch names derived from the target are
-  `target-*`. A grep for the removed target names returns nothing; the only
-  remaining matches are the ordinary English word. Public demo and vendor
-  domains (`testfire.net`, `github.com`, `example.com`) are intentionally left.
-  The untracked `scope.yaml`, local `recon.db`/`results/` and git history still
-  contain the real target; removing it from history needs a filter rewrite and
-  force-push, not done. Docs/comments only; gate 1262 passed, 3 skipped.
-
-- Status (2026-11-21, D115): **clean-DB and clean-results first pass
-  verified.** Backed up `recon.db` and `results/` to `/tmp`, wiped the DB
-  (0 targets, 0 subdomains, 0 URLs, 0 scan runs) and removed `results/`, then
-  ran the real `reconkit active -d target.example --no-scope`. Exit 0, **522 s**
-  wall; stages: subs 23 s, dns 1 s, live 34 s, tech 53 s, urls 198 s,
-  `url_probe` **178 s**. The probe reported `probing 2853 URL(s)` and
-  `finished 2853 URL(s)`; 6 URLs on unreachable hosts were skipped, with no cap
-  cut and 0 timeouts. Stored 3,019 URLs = 160 out-of-target + 6 unreachable +
-  2,853 probed. This pass saw 56 `429`s (the IP had just been re-probed); the
-  timing and coverage are the clean result, the status mix is not a pristine
-  control. `--mock` on an isolated `/tmp` DB exited 0 and skipped `url_probe`
-  (`7 URL(s) left unprobed`). Next action: none.
-
-- Status (2026-11-21, D114): **`url_probe` no longer waits for a 200-URL
-  batch, and its URL cap defaults to none.** `threads` still bounds requests in
-  flight; each finished answer is committed in groups of `batch_size`, so one
-  slow URL (or its `timeout_s` tail) no longer stalls the next group.
-  `max_urls: 0` (new default) means no cap; a positive value keeps the old
-  cut-and-warn behavior. Measured on the same 2,848-candidate `target.example`
-  pool: **335 s -> 177 s** (1.9x); the 158 s saved is about 15 batches x one
-  10 s tail. Of 3,013 stored URLs, 159 are out-of-target and 6 sit on
-  DEAD/DNS_ONLY hosts, so 2,848 were probed. Tests:
-  `test_url_probe_commits_finished_answers_before_a_slow_one` and
-  `test_url_probe_with_no_cap_probes_every_url`; the timeout regression still
-  keeps finished answers. Gate: 1262 passed plain and `FORCE_TERMINAL=1`, 3
-  skipped, ruff/format/mypy clean, invariants 195 passed. Next action: none.
-
-- Status (2026-11-21, D113): the contribution workflow is unconditional and
-  version/tag/docs must agree. AGENTS.md hard rule 11: every change, whether or
-  not the request asks for it, keeps the pipeline working, implements the
-  behavior properly, adds a regression test for new behavior or fixed defects,
-  and updates every affected doc in the same commit. Hard rule 12: `__version__`,
-  `pyproject.toml`, the release tag, banner/README examples, CLI help, flags,
-  defaults and docs must all say the same thing; a mismatch is a defect fixed in
-  the same batch. The package version and release tag are now both `1.0.0` and
-  `v1.0.0`; `v1.1.0` was deleted locally and on GitHub. Gate: 1260 passed,
-  3 skipped. Next action: none.
-
-- Status (2026-11-21, D112): workspace reset, and a rule to trace before
-  touching. `reconkit db wipe --yes` removed 8 targets, 27,669 subdomains,
-  13,617 URLs, 1,414 tool runs and 240 stage runs; the 92 MB `results/` tree was
-  deleted and is gone. The pre-wipe DB is at
-  `/tmp/recon-before-clean-20261121T163914.db`. AGENTS.md section 4.2 now
-  requires grepping and reading every affected file (source, tests, registry,
-  config, scripts and all docs, including `COMMANDS.md`, `README.md` and
-  `SETUP.md`) before editing one; section 0b points at it. The mock-skip rule is
-  now also stated in `COMMANDS.md`, `docs/02` and `README.md` (0df7049).
-  Verifying the clean tree exposed one more leak: the suite itself recreated
-  `results/mock/example.com` (280 folders) because `make_config()` left
-  `results_dir` at the repo-relative default. Fixed and guarded (PIT-72); both
-  gate modes now finish with `NO_RESULTS_DIR`. Gate: 1260 passed, 3 skipped.
-  Next action: none.
-
-- Status (2026-11-21, D111): **one fact, one row, for every target.** Stored
-  facts are now canonical at the engine boundary, not only in each adapter:
-  `normalize_url()` gives one spelling per page, `_persist_discovery` and
-  `_persist_ports` run `_clean_hosts()` (canonical + in-target) before a unique
-  key, and the ports key/protocol is `(host, ip, port, protocol)` so `tcp/53`
-  and `udp/53` cannot collapse. A mock target with no matching fixture is now
-  `SKIPPED` (`no fixture for <target>`), never a failed tool. Measured on the
-  real DB: 10 duplicate URL groups before, 0 after a fresh scan; run 2 on the
-  existing DB added 0 non-canonical URLs. Fresh `target.example`: 15 hosts, 12
-  ALIVE, 3057 URLs / 0 duplicate groups / 0 ports / 0 IP rows, exit 0.
-  `pentest-ground.com` (authorized, own DB): 43 hosts, 6 ALIVE, 390 URLs / 0
-  duplicates, exit 0. Mock on `example.org` (no scope) and `testfire.net`
-  (`scope_mode=enforced`) both exit 0 with 0 failed tools. AGENTS.md section 0e
-  states the machine-checked contribution invariants;  `tests/test_invariants.py`
-  enforces them. Gate: 1259 tests plain and `FORCE_TERMINAL=1`, ruff/format/mypy
-  clean. Deviations: legacy duplicate URL rows in an existing DB are left in
-  place (the fix prevents new ones and updates the legacy spelling); the old
-  `test_mock_mode_without_fixture_fails` now asserts `SKIPPED`. Next action: none.
-
-- Status (2026-11-21, D110): **a CDN/WAF host no longer produces port
-  findings.** `Store.waf_fronted_hosts()` reads the latest stored `waf`, the
-  engine drops those hosts before the ports stage (docs/05 rule 7, which was
-  documented but never implemented), and `host_rows()` returns no ports for a
-  fronted host plus the note `CDN: <waf>`. Stored rows are
-  kept. This is the `target.example` report showing 2982 "open" ports for
-  `b.target.example`: Cloudflare (172.65.64.158) answered TCP on **every** port
-  tried (1, 3, 7, 9, 31337, 65389, all ~184 ms), so the scan recorded the
-  edge's listeners. All 10 ALIVE `target.example` hosts are Cloudflare and now
-  report 0 ports. Tests: `test_cdn_fronted_host_reports_no_edge_ports`,
-  `test_ports_stage_skips_cdn_waf_fronted_hosts`. Gate: 1058 tests plain and
-  `FORCE_TERMINAL=1`, ruff/format/mypy clean. Next action: none.
-
-- Status (2026-11-21, D109): **fixture hosts cannot reach a real report, and
-  `gau` gets a silence window its own timeouts can meet.** A host whose every source row comes
-  from a mock run is now hidden by `Store.host_rows()` and `Store.subdomains()`
-  when the target also has a real run, so the four `*.example.com` names a
-  2026-11-17 mock run wrote into the real `recon.db` (run 69, `mock: true`) no
-  longer appear in a `testfire.net` table, resume seed set or url-derived host
-  set. A target whose only runs are mock keeps its fixtures, so `--mock`
-  reports are unchanged. `config.yaml` `runtime_idle.crawler` is 120 s (was
-  60): `gau` runs with its own 45 s request timeout and 1 retry, so 90 s of
-  silence is normal work, and the old window killed it on every scan (`killed
-  after 60s idle, 1029 partial`). A fresh run after the change still saw it
-  silent past 120 s (killed at stage 219.7 s with 479 partial): gau itself
-  stalls, the window is not the whole story, and partial output is kept with
-  exit 0. Regression tests:
-  `test_mock_only_hosts_are_hidden_from_reports` plus the updated class-window
-  assertions. Gate: 1056 tests plain and `FORCE_TERMINAL=1`, ruff/format/mypy
-  clean. Real runs on testfire.net: `passive` and `active --full` both exit 0
-  with a PDF; the 0 live hosts are testfire.net itself refusing :80/:443 from
-  this network (`curl` fails with connection refused), not a probe defect.
-  Next action: none.
-
-- Status (2026-11-21, D108): **one setup script; a stale venv repairs itself.**
-  `scripts/setup.sh` is now the only setup script (owner request):
-  `bootstrap.sh` and `install-tools.sh` are merged into it, so one file owns
-  the venv/editable install/git hooks/PATH half and the `tools.yaml` installer
-  half. It records `.venv/.reconkit-deps` (SHA-256 of `pyproject.toml`) after a
-  successful install and bootstraps again when that hash changes, the stamp is
-  missing, or `import reconkit.cli` fails. That is the fix for the
-  `ModuleNotFoundError: No module named 'reportlab'` a `git pull` caused in an
-  existing venv (D107's dependency never reached it). Two container findings
-  are fixed too: the old bootstrap ended with `awk` (absent from minimal
-  Kali/Debian images) and ran `git config` without a `.git` check.
-  `reconkit doctor` now has a Dependencies table with a `reportlab` row
-  (`pdf` in `--json`), and `cli.py` imports the PDF writer lazily, so a
-  missing dependency is a doctor row, not an ImportError before any command
-  can run. New network-free tests in `tests/test_package.py` cover the
-  staleness paths and the no-`awk` rule. Gate: 1055 tests plain and `FORCE_TERMINAL=1`,
-  ruff/format/mypy clean. Full first run verified in a
-  `kalilinux/kali-rolling` container as a non-root user. Next action: none.
-
-- Status (2026-11-21, D107): **branding, PDF reports and per-scan logging ship
-  as v1.1.0.** A human scan prints one ASCII banner (credits and live
-  `__version__`) to stderr, never under `--json`/`--silent` and never from a
-  child. Every scan writes `report.pdf` beside the unchanged `report.txt` and
-  `report.json`: five sections (cover, executive summary, results, technical
-  details, findings), navy theme, headers/footers and page numbers, alternating
-  table rows, repeated headers, `LongTable` pagination and clickable URLs. A
-  per-target log goes to `<results_dir>/logs/<target>/<UTC stamp>.log` with
-  UTC timestamps, five levels, redaction, and colored milestone lines on stderr.
-  New modules: `branding.py`, `logs.py`, `pdf_report.py`; new dependency
-  `reportlab>=4.2`; new defaulted config keys `report.pdf` and `logging.*`.
-  Gate: 1044 tests both plain and `FORCE_TERMINAL=1`, ruff/format/mypy clean.
-  Verified with a real mock scan (6-page PDF, log file) and a 1200-host
-  synthetic PDF (51 pages, no clipping). Next action: none.
-
-- Status (2026-11-21, D106): **the session handoff rule is now in AGENTS.md.**
-  Every change must update all affected docs plus the PROGRESS RESUME and a
-  REVIEW_LOG entry in the same commit; every error (review, CI, real run) gets
-  a regression test; the gate runs both plain and `FORCE_TERMINAL=1`. Also
-  removed the stale "scope-file writes in interactive mode" pre-approval, since
-  D104 deleted that path. Next action: none.
-
-- Status (2026-11-21, D105): **console ports are ALIVE-only, like the report.**
-  A `DNS_ONLY`/`DEAD` row no longer prints stored ports that no ports stage ran
-  for this scan; the column is omitted when no row is ALIVE. Also fixed
-  `test_bare_reconkit_shows_help_instead_of_scanning`, which failed on GitHub
-  Actions because `FORCE_TERMINAL` styles piped help; it now uses the existing
-  `help_text()`/`HELP_ENV` helper. Gate run both plain and with
-  `FORCE_TERMINAL=1`: 1033 tests, ruff/format/mypy clean. Next action: none.
-
-- Status (2026-11-21, D104): **interactive mode is removed; one input path.**
-  Every prompt, the plan dataclass, the `[a/b/c/d]` out-of-scope menu and
-  `ui.report_fields()` are gone; bare `reconkit` prints help (exit 2) and a scan
-  command without `-d`/`-l` keeps `provide a target with -d/--domain or
-  -l/--list` (exit 2). `tests/test_interactive_scan.py` is deleted; its
-  non-interactive coverage moved to `test_cli.py` (4) and `test_ui.py` (4).
-  Docs/02 section 2b, COMMANDS.md's interactive section and README's line are
-  removed. This reverses D103 and the interactive half of Part 13. Gate: 1031
-  tests, ruff/format/mypy clean, plus a CLI/mock harness and real runs on
-  testfire.net. Next action: none.
-
-- Status (2026-11-21, D103): **bare `reconkit` starts the interactive scan.**
-  `no_args_is_help=True` on the root `typer.Typer` printed usage before the
-  callback, so the documented no-command launch never reached the question
-  series. It is now `False`; the bare callback is the `passive` shorthand, so
-  a terminal gets the questions and a pipe keeps the `provide a target` error.
-  `--help` still exits 0. Gate: 1062 tests, ruff/format/mypy clean. Next
-  action: none.
-
-- Status (2026-11-21, D102): **user-facing docs now use the new mode commands.**
-  COMMANDS.md, README, docs/02, docs/08 and docs/09 spell mode invocations as
-  `passive`/`active`/`full` instead of `run --active`/`run --full`; `run`
-  remains for flag-driven cases. Tag `v1.0.0` re-cut on the current HEAD and
-  pushed. Next action: none.
-
-- Status (2026-11-21, D101): **the three modes are three commands; `lite` is
-  gone.** `reconkit active -d X` and `reconkit full -d X` now exist and are the
-  same run as `run -d X --active` / `run -d X --full`: a parametrized test
-  captures `ScanOptions` from both spellings and compares stages, mode, `active`
-  and `include_noisy`. `lite` was an exact duplicate of `passive` and was
-  removed; the bare `reconkit -d X` form is now `passive` internally and in
-  every doc. Refusals are unchanged (`passive --active` still exits 2; the
-  message now names `reconkit active -d X`). Gate: 1059 tests, ruff/format/mypy
-  clean, plus a mock smoke of all 10 scan commands and 3 refusals. Deviation:
-  ruff `extend-exclude` gained `sahmiye`. Next action: none.
-
-- Status (2026-11-20, D100): **dnsreaper is installed by setup and adapted, and
-  `vulns` is documented as full-only.** New `python:` source shape builds the
-  pinned checkout (`c1588b2`) in `~/.reconkit/opt/dnsreaper` with its own venv
-  (`requirements.txt` + `setuptools<81`) and writes the managed launcher; the
-  adapter reads `--out` JSON (`CONFIRMED` high, `POTENTIAL` medium, `UNLIKELY`
-  low) and a real run on zero.webappsecurity.com finished `ok` with 0 findings.
-  `run --active` never includes `vulns` (code already matched; docs corrected),
-  `run --full` runs nuclei, subzy, dnsreaper, nikto, ffuf. Gate: 1055 tests,
-  ruff/format/mypy clean. Next action: none.
-
-- Status (2026-11-20, D99): **the installer works on a partly-installed box.**
-  The planner printed one shared `name` for all rows, so `have()` asked about
-  `whatweb` for everything and printed `nothing to install` on a machine where
-  `whatweb` existed; each row now carries its own registry name (+ regression
-  test). `binary_search_dirs()` also skips the project venv's `bin`, so its
-  Python `httpx` CLI can no longer shadow the real binary, and `go install`
-  gets one retry on a transient `sum.golang.org` timeout. Fresh Ubuntu repro
-  with only whatweb preinstalled: plan correct, full run 47 installed, 1
-  manual, doctor clean, exit 0. Next action: none.
-
-- Status (2026-11-20, D98): **every installable tool now installs on Ubuntu.**
-  `findomain` (pinned 11.0.0 zip) and `rustscan` (pinned 2.4.1 .deb.zip) use new
-  `release:` sources with SHA-256 checks; `massdns` uses a pinned `build:` commit
-  plus make, and its version probe is `massdns --version`. Fresh Ubuntu run: 47
-  installed, 1 manual (`dnsreaper`), doctor 0 wrong-program, exit 0. Next
-  action: none.
-
-- Status (2026-11-20, D97): **one setup command.** `scripts/setup.sh` runs
-  bootstrap (only when needed), then `install-tools.sh` with all arguments
-  forwarded, then doctor. README/SETUP/docs/10 document it; `test_package`
-  checks its executable bit **and the mode git records** - `core.fileMode=false`
-  here let the first commit of `setup.sh` land as 100644. Next action: none.
-
-- Status (2026-11-20, D96): **a standalone stage command now uses stored
-  hosts.** `reconkit ports -d target.example --active` after a completed active
-  scan exited 0 with 0 tools and `Ports -`: `_stage_hosts(PORTS)` only saw the
-  in-memory `alive` set, which a `live`-less run never fills, and
-  `_seed_from_store` was `--resume`-only. Any run without `subs`/`dns`/`live`
-  now seeds from `Store.subdomains()`, and an empty `ports` run says
-  `run 'reconkit live' first` instead of silence. Regression
-  `test_ports_stage_command_uses_stored_alive_hosts`; suite 1048; gate clean.
-  Next action: none.
-
-- Status (2026-11-20, D95): **a fresh clone can install every tool its distro
-  packages.** Clean-room `ubuntu:24.04` run of `git clone` -> `bootstrap.sh` ->
-  `install-tools.sh --yes` found three real new-user defects: the script was
-  committed non-executable, its `have()` trusted `command -v` (so the venv's
-  Python `httpx` hid ProjectDiscovery's binary), and one unavailable apt
-  package aborted the whole apt batch. Fixed: executable mode, plan from
-  `reconkit doctor --json`, one apt package at a time with a warning per
-  unavailable one, and `amass` installs from its Go module on every distro.
-  README/SETUP now name the script. Suite 1047, ruff/format/mypy clean. Tag
-  `v1.0.0` moved to the new commit again (same version). Ubuntu still has no
-  `findomain`, `massdns` or `rustscan` package and `dnsreaper` stays manual;
-  the script reports those by name. Next action: none.
-
-- Status (2026-11-20, D94): **the binary lookup no longer depends on how the
-  shell was started.** `~/.reconkit/bin` is still first, but after it the
-  search covers PATH, `$GOPATH/bin`, `~/.local/bin`, `~/go/bin`, `~/.gobin`,
-  `/usr/local/bin`, `/usr/local/sbin`, `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`,
-  `/snap/bin`, plus the `SUDO_USER` bin dirs when running under sudo. The
-  identity probe gets `HOME` and a `PATH` led by the copy's own directory, so a
-  distro wrapper script (Kali's `/usr/bin/amass`) works. Doctor and the engine
-  share `adapters.base.binary_search_dirs()` / `identity_probe_env()`. Verified:
-  1046 passed, ruff/format/mypy clean; `doctor --json` reports 47 installed with
-  a normal PATH and with `PATH=/usr/bin:/bin` (the `dnsreaper` manual entry is
-  the 1 missing). Docs: docs/10 section 3, docs/09 adapter contract, docs/03.
-  `v1.0.0` was deleted and re-created on this commit (same version); the tag and
-  `main` were pushed. Next action: none.
-
-- Status (2026-11-20, D93): **the CI-fix work is one commit.** D88-D92 were
-  squashed into a single commit on `main` at the owner's request, and `v1.0.0`
-  was moved onto it, so history no longer carries the intermediate commits that
-  failed on GitHub Actions. The tree is unchanged from the verified D92 state:
-  1042 passed from `/tmp` under `GITHUB_ACTIONS=true`, ruff/format/mypy clean.
-  See the D92 entry in REVIEW_LOG for the ANSI cause; the decision labels
-  D88-D92 stay in that log as the record of the decisions themselves.
-
-- Status (2026-11-20, D92): **help assertions now survive GitHub Actions.**
-  D91's width pin was the wrong diagnosis (Typer's Rich help console ignores
-  `terminal_width`). On CI `GITHUB_ACTIONS` makes Typer force a terminal, so
-  Rich styles the help and splits `--only-alive` across escape runs; a raw
-  substring check misses it. Tests now read `help_text()`, which strips ANSI,
-  and pass `env=HELP_ENV` so the render stays wide enough. Verified: pre-fix
-  failure reproduced locally under `GITHUB_ACTIONS=true`; post-fix 22 help tests
-  and 1042 suite tests pass from `/tmp` with `GITHUB_ACTIONS=true`. Suite stays
-  1042.
-
-- Status (2026-11-20, D90): **adapter tests no longer need clean-runner
-  binaries or repository paths.** `puredns` injects `which("massdns")`; the
-  webanalyze missing-database test uses `tmp_path` as its workspace. The
-  `--reprobe-urls` flag was already registered; the CI failure was the D88
-  help-rendering issue, not a missing flag. Suite stays 1042.
-- Status (2026-11-20, D89): **CI active/full tests no longer depend on the
-  repository's local scope file.** The six mode/stage tests that did not chdir
-  now pass `--no-scope`; tests that need scope filtering still use the temp
-  scope written by `make_config`. This masked D82 locally because only the
-  checkout had `scope.yaml`. Suite stays 1042.
-- Status (2026-11-20, D88): **help no longer depends on a scope file.** The
-  fail-closed check is in the scan body (`cli._run_scan`), after Typer handles
-  `--help`/`--version`/argv; a source comment and two regressions now pin that.
-  The two help tests pin `COLUMNS=120`; `run --help` from a scope-free directory
-  shows `--active`, `--full`, `--no-scope` and `--reprobe-urls`. The width part
-  of that diagnosis was wrong and D92 replaced it. Tests 1041 -> 1042. No D82
-  weakening.
-- Status (2026-11-20, D82-D87 batch complete): **the v1.0.0 release blockers
-  are closed.** Active/full scans fail closed without `scope.yaml`; MIT LICENSE
-  and package metadata exist; version `1.0.0`, `--version` and the configured
-  User-Agent are consistent; `db delete` defaults to no and both db commands
-  report a locked database cleanly; GitHub Actions runs the gate on Python
-  3.11-3.13; stale docs and the `install:`/`max_speed` template keys are gone.
-  Suite **1041 passed**, ruff/format/mypy clean, tree clean before the final
-  push. The old `v1.0.0` tag (`db965ea`) was deleted locally and from origin,
-  and `v1.0.0` was re-created on the final release commit after this batch. See
-  the D82-D87 entry in REVIEW_LOG.
-- Status (2026-11-20, D87): **stale docs and dead keys are gone.** AGENTS.md
-  points at docs/10_TOOL_SOURCES.md, README says v1.0.0 is stable and
-  feature-complete for the documented scope, docs/01 no longer claims nuclei is
-  Phase 3, `scope.example.yaml` no longer advertises the removed `max_speed`,
-  and `config.yaml`/`AppConfig` no longer accept the ignored `install:` block.
-  Tests 1040 -> 1041 (the removed install block is rejected). Gate clean. See
-  D87 in REVIEW_LOG.
-- Status (2026-11-20, D86): **CI exists.** `.github/workflows/test.yml` runs on
-  every push and pull request to `main`, with a Python 3.11/3.12/3.13 matrix;
-  each job installs `.[dev]` and runs `pytest -q`, `ruff check .`,
-  `ruff format --check .` and `mypy src/reconkit`. The README carries the
-  workflow badge. No source or test change; suite stays 1040.
-- Status (2026-11-20, D85): **`db delete` now defaults to no, and both
-  destructive db commands fail cleanly on a locked database.** The prompt is
-  `[y/N]`; Enter cancels with exit 2. `core.store` translates
-  `sqlite3.OperationalError` to `StorageError` (the CLI must not import
-  `sqlite3`, per the layering test), and `db delete`/`db wipe` print
-  `Error: Database is locked. Is a scan running?` then exit 1 with no traceback.
-  If row deletion succeeds but `results/<domain>/` cannot be removed, `db delete`
-  prints a warning and exits 0. Tests 1036 -> 1040, including two real
-  `BEGIN IMMEDIATE` lock tests (about 10 s of the suite). Gate clean. See D85 in
-  REVIEW_LOG.
-- Status (2026-11-20, D84): **version and User-Agent now have one source of
-  truth.** `pyproject.toml` and `reconkit.__version__` are both `1.0.0`; the
-  root CLI prints `reconkit v1.0.0` for `--version` and exits 0; `adapters.base`
-  builds `USER_AGENT` from `__version__`; and `Engine` now builds every
-  `RunContext.user_agent` from `--user-agent`, else `config.user_agent` with
-  `{version}` replaced. Tests 1032 -> 1036 (CLI version, package/pyproject
-  consistency, config default, flag override). Gate clean. See D84 in
-  REVIEW_LOG.
-- Status (2026-11-20, D83): **the repo now has an MIT LICENSE and matching
-  package metadata.** Copyright 2026 Anshul. `pyproject.toml` carries
-  `license = {text = "MIT"}`, `authors = [{name = "Anshul"}]` and classifiers
-  (MIT, Python 3.11-3.13, POSIX Linux, Security); README ends with a License
-  section pointing at `LICENSE`. No behaviour change; suite stays 1032.
-- Status (2026-11-20, D82): **active/full scans now fail closed when no
-  `scope.yaml` is present.** The CLI refuses before `Engine.open` with exit 3 and
-  the exact message `Error: No scope.yaml found. Active scanning requires a scope
-  file. If you intend to scan without scope restrictions, you must explicitly
-  pass --no-scope.` `--no-scope` remains the explicit opt-out and records
-  `unrestricted_flag`; passive runs still need no file. The engine `_active_hosts`
-  keeps the same guard for direct callers. This supersedes D1's fail-open rule.
-  Docs/02, 03, 05, 08, 09, README, AGENTS and the naabu/ports notes were updated.
-  Tests 1029 -> 1032 (three D82 CLI tests; old no-file tests now assert refusal
-  or use the explicit flag). Gate: 1032 passed, ruff and mypy clean. See D82 in
-  REVIEW_LOG.
-- Status (2026-11-20, vulns docs): **the documented state of `vulns` now matches
-  the code.** The stage needs `--active` (or `--full`); `nuclei`/`subzy` are
-  core, `nikto`/`ffuf` opt_in, `dnsreaper` has no adapter, and the three
-  exploitation tools need explicit `--tools` and have no adapter yet. Findings
-  are **not persisted**: the only copies are the run's `--json`
-  (`stages[].results[]`, including `raw_path`) and
-  `workspaces/<target>/meta/<run_id>-<tool>.txt`. README, COMMANDS, docs/02,
-  docs/03 and docs/09 were corrected; no code changed and the findings table is
-  still deferred (docs/04). Suite stays 1029. Docs only.
-- Status (2026-11-20, attribution): **the last four commits were re-created
-  without AI attribution trailers**, per the rule already recorded below in this
-  file. Only messages changed; every tree is byte-identical. AGENTS.md section 0c
-  now states the rule explicitly so it cannot be missed again. Hashes:
-  `7803624` -> `eadf76a`, `2b62964` -> `aaf7ca5`, `edbaacf` -> `db965ea`,
-  `03ef49e` -> `18baa4f`. The published `v1.0.0` tag was re-created on the
-  rewritten D81 commit `db965ea` and force-pushed. See the top entry in
-  REVIEW_LOG.
-- Status (2026-11-20, D81): **`reconkit db delete` and `reconkit db wipe` exist.**
-  `db delete --target X [--yes]` counts the target's rows, asks (default yes),
-  then removes `port_sources`, `host_status_history`, `ports`,
-  `subdomain_sources`, `tool_runs`, `urls`, `subdomains`, `scan_runs` and the
-  target in one transaction, and removes `results/<domain>/` plus
-  `results/mock/<domain>/`; the summary is
-  `Deleted 1 target, 13 subdomains, 1177 URLs, 33 tool runs, 6 stage runs. Removed ...`.
-  A missing target is exit 2. `db wipe [--yes]` prints the ALL-data warning,
-  drops every table, recreates the current schema (12) and leaves `results/`
-  untouched with the manual `rm -rf results/` note. Both use the root
-  `--config`/`--db` options before `db`. **Found and fixed a latent store bug:**
-  `Store.transaction()` never committed the outermost block (`_commit()` declines
-  because `_batch_depth == 1`), so a transaction followed only by `close()`
-  rolled back; it now commits explicitly and a reopen test guards it. Suite
-  1023 -> 1029. Acceptance on `/tmp` copies only; real `recon.db` and `results/`
-  untouched. See D81 in REVIEW_LOG.
-- Status (2026-11-20, D80): **README, COMMANDS.md and docs/02 match the CLI as
-  shipped through D78.** Checked against raw `reconkit --help`, `run --help` and
-  `report --help`: `report` was missing from both command tables, the `active`
-  stage list still stopped at `live`, and README had no report-folder shape.
-  COMMANDS.md now dates its flag check 2026-11-20 and documents `report` flags;
-  README lists `report` and the `results/<target>/<stamp>/` tree including
-  `external_urls.txt` and `hosts/`; docs/02 corrects `--active` to
-  subs/dns/live/tech/urls/url_probe and adds `report` to State and output. The
-  report section already carried `urls_max: 0` (no cap) and the per-host
-  folders, so it was verified, not rewritten. Docs only; suite stays 1023.
-  See D80 in REVIEW_LOG.
-- Status (2026-11-20, D79): **no real target names remain in the repo.** The two
-  targets used for real verification (a university domain and a bank domain) and
-  the mock fixture name leaked into comments, fixtures, scripts and docs: 219
-  matching lines in 22 files. All are now `example.com` / `target.example` /
-  `example.test` (subdomains keep their label: `b.target.example`,
-  `www.example.com`). The six mock fixtures are `example.test.*`, the capture
-  script is `scripts/capture_example.sh`, and the fixture title is `Example
-  Bank`. No code logic changed; suite stays 1023. The batch named a pyprobe
-  fixture that does not exist - the real pyprobe fixture was the mock one, now
-  `example.test.json`. See D79 in REVIEW_LOG.
-- Status (2026-11-20, D76-D78): **third-party URLs no longer make hosts, folders or
-  URL groups.** `Engine._within_scope()` decides target or `*.target`;
-  `_persist_urls` tags every other URL `urls.source = 'external'` (schema 12), and
-  they reach the report only through `external_urls.txt`. The Tools table gained a
-  `Unique` column (new URL rows a tool contributed; `-` outside the `urls` stage).
-  The URL header now reads `N total, M probed this run, K already probed (use
-  --reprobe-urls)` and the run ends with the same `ℹ` note when K > 0;
-  `report.json` carries `urls_probed_this_run` and `urls_skipped_already_probed`
-  (both in-scope only). Suite 1016 -> 1023. Acceptances: a `example.test` mock run
-  wrote four third-party URLs to `external_urls.txt` and only
-  `hosts/example.test/`; a repeat run over seeded statuses printed
-  `ℹ 3 URL(s) were skipped because they already had a status code; use
-  --reprobe-urls to re-check them.` See D76-D78 in REVIEW_LOG.
-- Status (2026-11-20, post-D75): all queued code work closed. Two rulings closed by accepting the current
-workflow (see Open risks). 1016 tests, tree clean. Remaining items are: one real `--active` run to verify
-D69/D71/D72 on an authorized target (owner's step); export stubs (superseded by report); R15 masscan (needs
-written authorization); waybackurls CDX (upstream); urlfinder idle (deferred by evidence). Nothing is in flight.
-- Status (2026-11-19, D75): **a URL-derived host is tech-scanned on a later run.** D58's pass ran after
-  `urls`, so `tech` had already finished, and `url_only_hosts()` skipped the row it created forever
-  (`discovered` is seeded only for `--resume`). `Store.url_derived_unprocessed()` now finds rows whose
-  sources include the `url-derived` sentinel and whose newest status row has no `tech_json`; in
-  active/full the pass probes them with `pyprobe` and runs the `tech` pool, then `_persist_tech`. No
-  re-resolution (DNS still sees only names without a row), one round, passive unchanged. Crawl is still
-  not included. Suite 1012 -> 1016. Acceptance: `www.testfire.net` went from no status row to
-  `ALIVE 200 ["Java", "aws"]` written by the `urls` run, logs
-  `urls: 1 url-derived host(s) already known; tech-scanned on follow-up`. See D75 in REVIEW_LOG.
-- Status (2026-11-19, D73): **a repeat scan says how many URL answers came from earlier runs.**
-  `url_probe` never re-checks a stored answer, so the report now carries `urls_already_probed` (JSON) and
-  `urls: N total, M shown (K already probed in earlier runs; use --reprobe-urls to re-check)` (text).
-  `K` is counted once before any stage runs; `K = 0` writes neither. Verified on a mock run over a target DB
-  copy: K = 2856, matching the stored non-NULL count. Suite 1010 -> 1012. See D73 in REVIEW_LOG.
-- Status (2026-11-19, D72): **marketing/referral URLs rank below clean ones, and are never dropped.**
-  `ui.NOISE_PARAM_RE` (utm_*, fbclid, gclid, rc, ic, _branch_*, af_xp, pid, deep_link_*) is the
-  second sort key after "interesting path", so `/admin?utm_source=x` keeps tier 1 while `/product?utm_source=x`
-  falls below `/about`. `report.noise_params` (config, default `[]`) adds names without replacing the built-in
-  list. Suite 1006 -> 1010. See D72 in REVIEW_LOG.
-- Status (2026-11-19, D71): **a report folder now carries the host lists, per-host folders, and every URL.**
-  `report.txt`/`report.json` are unchanged except that `report.urls_max` defaults to `0` (no cap);
-  `subdomains.txt`, `alive.txt`, `dns_resolved.txt` (ALIVE + DNS_ONLY), `host-info.txt`, `host-info.json`
-  and `hosts/<hostname>/{urls.txt,info.json}` (only for hosts with URLs) are new. `report.emit_lists` and
-  `report.per_host_folders` (both true) switch them; `reconkit report` writes the same shape. Verified on
-  `results/mock/example.com/20261119T204517Z` (24 URLs, 3 hosts folders, 21 names). Suite 999 -> 1006.
-  Five non-doc files changed, exactly the item's limit. See D71 in REVIEW_LOG.
-- Status (2026-11-19, D70): **a URL-derived host gets DNS and (in active) a live check - never tech, never a crawl.**
-  The D58 pass runs after `urls`, so the last annotating stage has already finished; measured
-  `api`/`assets.target.example` as UNKNOWN with no status row and empty tech. Not implemented: a tech/crawl
-  step needs stage machinery (its own `scan_runs`/`tool_runs`, budget, per-host scope). New finding: a
-  plain follow-up run cannot pick the host up either - `discovered` is seeded from the store only for
-  `--resume`, and `url_only_hosts()` skips an existing row. Documented as a gap in docs/09 with the
-  enabler. Suite 999 (no code change).
-- Status (2026-11-19, D69): **an ALIVE host keeps the HTTP status the live pool saw.**
-  `_persist_live` used to hand `_write_host` the first ALIVE `HostStatusRecord` in
-  completion order, and `httprobe`/`tlsx` carry no status, so `target.example` run 203
-  stored NULL for all 9 ALIVE hosts while `url_probe` had 200 for `b.target.example`.
-  `_best_live_record()` now ranks records: ALIVE, then 2xx < 3xx < other known code <
-  no code, tie by tool name. `tech` was already innocent (`update_host_extras` never
-  writes `status_code`) and now has a guard test. Suite 996 -> 999. Historical rows
-  are not rewritten; a later live pass fills them. See D69 in REVIEW_LOG.
-- Status (2026-11-19, loop retry): **`live --urls-file` still deferred, now blocked from both sides.**
-The standalone route fails because `live` is the shared `_scan_command` (a flag would appear on every scan
-command) and because running the pool from `cli.py` bypasses `tool_runs`/budgets and violates the CLI
-layering test. Enabler unchanged: an explicit host list the engine accepts, plus an owner ruling for the
-flag. See docs/02 section 1 and the REVIEW_LOG retry entry.
-- Status (2026-11-19, loop): **`live --urls-file` deferred.** Needs explicit host-list plumbing in
-`ScanOptions`/engine (live hosts are `[target] + stored subdomains`), which is outside a
-cli+tests change; docs/02 section 1 names the gap and the enabler. **urlfinder idle stays 180s**:
-waybackurls is 0 in every run (so it does not explain the variance), and the 6-vs-6367 spread is
-inside urlfinder's own provider behaviour; a longer window would not add data.
-- Status (2026-11-19, D65): **`reconkit report --target <domain>` rebuilds a saved report from the DB.**
-`--run` (default: latest), `--db`, `--out`; same writer as a scan, `mode=ro` connection, no
-network and no adapter. `Store.open_readonly` + `engine.load_stored_report` are the read-only
-entry points; `host_snapshots`/`url_snapshots` are shared with the scan's own report so the two
-cannot drift. Non-existent run -> exit 2, nothing written. Suite 992 -> 996. Regenerated the
-example DB copy: 69 hosts, 7,421 stored URLs, 200 shown. The `export`/`db list`/`db export`
-stubs are left in place and documented as superseded for the host list.
-- Status (2026-11-19, D64): **a scope-refused active run labels its passive results.** The refusal already
-exited `3` and printed the pre-flight block, but the saved report looked like a normal scan. The run now ends
-with `⚠ ACTIVE STAGES SKIPPED BY SCOPE — this run is passive-only; the report says so.`, `report.json` adds
-`scope_limited: true` + `scope_limited_reason`, and `report.txt` carries the same line under `hosts:`. Exit stays
-`3` (deviation from the batch's exit-0 clause: docs/02 section 6 and docs/05 rule 2 define code 3 for a scope
-refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992.
-- Status (2026-11-19, D63): **`--exclude` names stages and report sections too, and `--include` forces a stage in.**
-  Both are resolved case-insensitively in stage -> adapter -> section order; a value matching a stage and a section
-  (`urls`) does both and prints one line (`--exclude urls: stage skipped, report section hidden`); an unknown value
-  warns and the run continues; naming one value on both sides is exit-2 `contradictory: --include and --exclude both
-  name X`. `--include` adds the stage (or the adapter's stage plus the adapter) at its documented position, prints
-  `⚠ --include <name> forces target contact; this is no longer a <mode> scan.`, promotes the CLI to active gating so
-  the scope file still decides, and both artifacts record `mode: active (forced by --include)`. `ScanOptions` gained
-  `include_tools` and `forced_contact`; no stage order, tool pool or exploitation rule changed. Suite 984 -> 990,
-  gate clean, `scope.yaml` unchanged, no scan run. See D63 and its REVIEW_LOG entry.
-- Status (2026-11-19, D62): **a saved report now carries a domain tree and its URLs, grouped by host.**
-  `report.json` keeps `hosts` byte-for-byte and adds `roots` (one entry: target, subdomains, host_count),
-  `urls_by_host` (`url` / `status_code` / `host_state`, omitted when the run stored no URL), `urls_total`,
-  `urls_shown`, `urls_truncated`; `report.txt` appends `=== Domains ===` and `=== URLs by host ===` after the
-  hosts table. URLs rank by interesting path, then query string, then 200/301/302, then the rest, and the whole
-  report is capped by `config.yaml` `report.urls_max` (default 200, 0 = no cap), with the cut stated in both files.
-  Both blocks are read from `urls`/`subdomains` only (`Store.url_report_rows()`, no request, no schema change);
-  the tree is one entry because one report covers one target (measured: 69 hosts in 20261119T185030Z's report,
-  whose `report.json` had 7 keys and whose `report.txt` had 0 section headings and 0 URLs before this). Suite
-  978 -> 984, `ruff`/`format`/`mypy` clean, `scope.yaml` unchanged, no scan run. See D62 and its REVIEW_LOG entry.
-- Status (2026-11-19, D59): **the list-check workflow is documented; the two gaps are recorded, not fixed.** docs/02
-  section 2 now shows the working hostname command (`reconkit live -l hosts.txt --active --scope scope.yaml`, each line
-  its own target, gate enforced), states plainly that URL lists are rejected by `validate_target()` and that the
-  smallest enabler is a new flag needing a ruling, and says that `export`/`db list`/`db export` are Phase 3 stubs while
-  the real list is `results/<target>/<timestamp>/report.json` `hosts[].hostname`. The same gap is recorded under "What
-  is explicitly open and why" with the exact stub message. Docs only; suite stays 978, `scope.yaml` unchanged.
-- Status (2026-11-19, D58): **a host only the URL pool names now gets a row, a state and a report line.** One bounded
-  pass runs right after `urls`: `Store.url_only_hosts()` (distinct URL hostnames with no `subdomains` row), the `dns`
-  stage's `dnspython` adapter resolves them through the normal `_persist_dns()` state rule, and in `active`/`full` the
-  `live` stage's `pyprobe` probes them through `_persist_live()` after `require_active()` drops any out-of-scope name.
-  Passive resolves and stops - DNS already happens in passive, HTTP does not. Bounded: candidates are read once, never
-  re-extracted, no new config key, and the pass runs under a stage budget (`urls` passive, `url_probe` active) that
-  never fails the run. Rows keep `provenance = 'dns'` plus one `subdomain_sources` sentinel `url-derived`. Suite
-  974 -> 978, `ruff`/`format`/`mypy` clean, `scope.yaml` byte-identical, no scan run. On `target.example` the count is the
-  3 hosts / 43 URLs the analysis found. See D58 and the D58 entry in REVIEW_LOG.
-- Analysis (2026-11-19, no code): **a passive run stores URLs and never reads them back** - nothing in-run consumes them, so the 3 hosts that only the `target.example` archives revealed (`nb.target.example` 40 URLs, `api.target.example` 2, `assets.target.example` 1) have no row, no state and no report line; `url_probe` is its own stage after `urls`, absent from `MODE_STAGES["passive"]`. Liveness of a prepared hostname list works today via `reconkit live -l hosts.txt --active --scope ...` (each line is its own target; URLs are rejected by `validate_target`), while `export`, `db list` and `db export` are Part-8 stubs. Four stage-order options and a recommendation (Option 4 now, Option 2 as a separate dated decision) are in REVIEW_LOG and await an owner ruling; no flag, order or code changed.
-
-- Status (2026-11-19, D57): **a timeout from an external API is a gap, so one slow third party no longer exits 5.**
-  The final run's only failure was `crtsh: request timed out` (30.71 s); `HttpAdapter._request` now raises
-  `ExternalServiceGap` for a timeout when the adapter is `external: true`, and keeps `FetchFailed` otherwise. A refused
-  connection after its one retry stays a failure, and local binaries are untouched (`classify_external_gap` has no
-  timeout rule). Suite 973 -> 974, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical
-  (`d45a3c90...eeee8b`), no re-run of example.com. See D57 and the D57 entry in REVIEW_LOG.
-- Previous status (2026-11-19, final run): **the complete build ran `example.com` in 488.0 s (was 1 060.685 s) and `url_probe`
-  in **39 s** (was 556 s) - the D54/D55 filter is the whole delta.** 973 tests, gate clean, tree clean, `scope.yaml`
-  byte-identical. Exit **5** for one new upstream failure (`crtsh: request timed out`, 30.7 s); 69 hosts (12 ALIVE,
-  27 DNS_ONLY, 29 DEAD, 1 UNKNOWN); `url_probe: skipping 1444 URL(s) whose host is unreachable`, 906 probed; the
-  1 371 newly discovered `www.example.com` URLs are left `NULL` (skipped, proven), `gau` 4 918, `katana` 543,
-  `urlfinder` 6 367, `waybackurls` 0. No code changed, nothing re-run. See the final-run entry in REVIEW_LOG.
-- Previous status (2026-11-19, D56): **R14 closed - `scope.yaml` can exclude CIDRs, and the run reports where it cannot enforce
-  them.** 973 tests, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (`d45a3c90...eeee8b`).
-  `pyscan` and the engine's pre-resolved `naabu` input honour `exclude_cidrs`; every other active tool resolves inside
-  its own child, so a non-empty `exclude_cidrs` produces one warning at run start and the same `scope_warnings` entry
-  in `report.txt`/`report.json` and `--json`. No migration (`scope.yaml` is runtime; `scan_runs.scope_mode` unchanged).
-  `--strict-cidr` is a future decision, recorded under Open risks. See D56 and the Part R14 entry in REVIEW_LOG.
-- Previous status (2026-11-19, D55): **the url_probe's 4 982 `-1` answers are DNS_ONLY hosts, not a probe bug - the unreachable
-  filter now covers DNS_ONLY too.** 966 tests, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical
-  (`d45a3c90...eeee8b`). On the example.com DB 4 916 of the 4 982 `-1` rows (98.7%) sit on DNS_ONLY hosts - 4 861 on
-  `www.example.com` alone - and 0 of the 20 sampled rows is "ALIVE host, wrong scheme"; the change takes unprobed
-  candidates 2 147 -> **707** (-67%) and `--reprobe-urls` 5 001 -> 733. `waybackurls` stays deferred (W). See D55 and
-  the Part X-Y entry in REVIEW_LOG.
-- Previous status: **Parts T and U done (`b6df719` plus this docs commit): per-request timeouts are adapter constants (D53),
-  and the first example.com engine run is recorded (D53 addendum).** 961 tests, `ruff`/`format`/`mypy` clean, tree
-  clean, `scope.yaml` byte-identical (`d45a3c90...eeee8b`). The run, made **once**, exited **0** in 1 060.685 s:
-  `69 hosts: 12 ALIVE, 27 DNS_ONLY, 0 SHUT_DOWN, 29 DEAD, 1 UNKNOWN | tools: 26 ok, 2 gap, 0 failed, 2 skipped,
-  0 timeout, 3 killed`; the one gap is the known `hackertarget`/`otx` pair and the three kills are idle windows
-  (`hakrawler` 60 s, `gospider` 60 s, `urlfinder` 180 s) with partial output kept. Two new observations are recorded
-  under Open risks (`url_probe` used 556 s of 600; `waybackurls` returned 0 items where `gau` returned 4 917), neither
-  fixed. D51 does not exist; R13/R14/R15 and the Part C dedup question are still open exactly as recorded. See D53
-  and its addendum below and 4a2d in `docs/09`. Previous status: **D52 done at `41387e0`: the per-tool runtime caps are deleted, runtime is idle-only.** 950 tests,
-  `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (sha256 `d45a3c90...eeee8b`). D48 and its
-  addendum are superseded by D52 (the classes stay, every cap goes); D51 does not exist. R13/R14/R15 and the Part C
-  dedup question are still open exactly as recorded. See D52 and its addendum below for the model, the scale numbers
-  and the example.com replay. Previous status: **Queued code work complete at `3d79524`; scalability phase open - see D48-D50.** 951 tests,
-  `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (sha256 `d45a3c90...eeee8b`). This batch added
-  D48 (per-tool caps from a tools.yaml `class:`), the D48 addendum (the D47 `external_api` ClassVar moved into
-  `external: true`), D50 (per-tool heartbeat) and stopped Part C by its own rule (no D49; the live record has no
-  answering URL). One measured consequence the owner should tune before the example.com batch: the crawler floor of
-  90 s caps `gau` at 466 URLs where the uncapped runs returned 1042-1508 - `runtime_caps.crawler.floor` is one config
-  line, no code. Previous status: **PROJECT CODE WORK COMPLETE at `6a6d47b` after Part T (2026-11-19).** 941 tests,
-  `ruff`/`format`/`mypy` clean, tree clean, 39 commits ahead of `reconkit/main` at that point. Final capstone
-  (`reconkit run -d testfire.net --active --phase-timeout 600`, temp config with `url_probe.max_urls: 20`):
-  `9 hosts: 8 ALIVE, 1 DEAD | tools: 30 ok, 1 gap, 0 failed, 2 skipped, 0 timeout`, exit **0**. The only non-ok row is
-  the known `otx: rate limited (HTTP 429)` gap; `crtsh` ran `ok 1 item(s)` and never returned a 404 in this run, and the
-  D47 classifier is what makes a future 404 a gap instead of a failure. All six `scan_runs` rows are `completed`. The
-  crtsh question is closed by D47; what remains is owner decisions, listed under "What is explicitly open and why".
-- Previous status: **Project code work complete at `9dfbeec`; the capstone exited 5 for one measured reason.** `reconkit run -d testfire.net --active --phase-timeout 300` (temp config, `url_probe.max_urls: 20`) finished `36 hosts: 8 ALIVE, 26 DEAD, 2 UNKNOWN | tools: 29 ok, 1 gap, 0 failed, 2 skipped, 1 timeout` and exit **5**: `gau` was still running when the `urls` stage hit its 300 s deadline, and a timeout is a hard failure by ruling. Every other non-ok row was a gap (`otx: rate limited (HTTP 429)`) or a selection skip (`chaos`, `github_subdomains`: no API key). Remaining work was owner decisions, not code: see "What is explicitly open and why" and the three questions before
-  "Notes for later tasks".
-- Previous status: **BATCH 2026-11-18 COMPLETE (Parts D-H) + acceptance follow-up.** Suite 908. The follow-up added the three D30 tests and the missing D29 stage-budget test, the missing `COMMANDS.md` probe-only note, and fixed a real bug the missing tests hid: the mock DB default did not create `~/.reconkit`, so a fresh machine failed with `unable to open database file`. Evidence in REVIEW_LOG "follow-up".
-- Previous status: **BATCH 2026-11-18 COMPLETE (Parts D-H).** D28 rulings recorded, D29 double-ceiling cleanup, D30 mock isolation, D31 withdrawn (premise disproved), D32 redaction routing. Suite 898 -> 903. Next action: none; report.
-- Previous status: **BATCH 2026-11-18 (Part F) DONE: D30 mock isolation.** Suite 899. Next action: Part G (mock ALIVE).
-- Previous status: **BATCH 2026-11-18 (Part E) DONE: D29 double-ceiling cleanup.** `urls.urlfinder_max_s` default 0; saturation logged. Suite 898 -> 899. Next action: Part F (mock isolation).
-- Previous status: **BATCH 2026-11-18 (Part D) DONE: four rulings recorded (D28), push-state line made durable.** Docs only. D28 added to MASTER_PLAN and PROGRESS; four Open-risks items closed by D28; probe-only-exits-4 note added to docs/02. D.3 found no current-tense contradiction beyond the deferred urlfinder.py docstring (Part E). Next action: Part E (D27 double-ceiling cleanup).
-- Previous status: **BATCH 2026-11-18 (Part C) DONE: stale claims reconciled, four rulings written down.** Only one of the four stale claims was still live: the push state. `reconkit/main` is `a49e4b5` and local `main` is ahead of it (10 commits at `aadd7b5`), so the 2026-11-18 "both refs are level" sentence was wrong and is now the verified fact - **the batch prompt's premise that HEAD is pushed did not hold, and no push was attempted**. The other three were already closed by the previous batch's Part 1 and are covered by dated notes in place: the `tech`/`urls`/`vulns` "no adapter" risk (`## Open risks`, "Closed 2026-11-17 (adapter waves 4-8)"), the "Suite 827" mentions (they sit inside dated historical status paragraphs, each already annotated, and the baseline line carries `898`), and `docs/05` section 5 (the D21 `scripts/install-tools.sh` paragraph). Four open rulings are appended to `## Open risks`: the `6488aad` stop-rule breach, probe-only exit 4, the `-2` sentinel, and the batch's 2 -> 1 -> 3 / two-commit Part 3 history. Nothing was acted on. Next action: none; report.
-- Previous status: **BATCH 2026-11-18 (Part B) DONE: urlfinder's cap scales with the host count (D27).** `cap_s = min(stage_budget, max(180, 4 * host_count))` replaces the flat 1800 s ceiling: 43 hosts -> 180 s (exactly the old tuned number), 100 -> 400 s, 500 -> 2000 s clipped to the 1800 s `timeouts.urls`. `host_count` is the number of rows on urlfinder's stdin; `stage_budget` is the deadline the stage already has (`--phase-timeout`, else `timeouts.urls`), so nothing new was added to the timeout plumbing and D26's probe deadline is untouched. New `urlfinder.max_enumeration_s` (0 = formula, non-zero overrides); `urls.urlfinder_max_s` stays a hard ceiling; the detail line is now `capped at 180s (hosts=43); kept partial output`. Disclosed behaviour change: a one-host urls stage now gets 180 s instead of 1800 s, so `test_url_tools_receive_the_configured_runtime_bounds` moved from (1800, 60, 180) to (180, 60, 180). Suite 892 -> 898. Next action: Part C (stale docs + four open rulings).
-- Previous status: **AUDIT CLOSE-OUT (Part A) DONE - the url_probe/httpx batch's five missing raw proofs are pasted in `docs/REVIEW_LOG.md` ("2026-11-18 (audit close-out)"), no code change.** A.1 the complete 196-line `~/.reconkit/bin/httpx -h` plus `flag provided but not defined: -insecure`; A.2 a fresh 20-row fixture (10 certificate-invalid https + 10 http 200) classified in one pass as `-2|10` / `200|10`; A.3 the full `_dedupe_www_variants` body before (`4b97928^`) and after; A.4 `grep -n 'url_probe' config.yaml` (`21:  url_probe: 600`, `36:url_probe:`); A.5 two identical 5-row DBs where the two stale `404` rows survive the default pass (`probing 3 URL(s)`, `404|2` + `200|3`) and are rewritten by `--reprobe-urls` (`probing 5 URL(s)`, `200|5`). Nothing contradicts the earlier report. Next action: Part B (urlfinder cap).
-- Previous status: **REGRESSION FIXED IN PART 1'S PROBE LOOP, AND PART 3 DONE (url_probe phase timeout, D26).** Part 1's client-reuse edit had left the per-batch commit block dedented out of the `for` loop, so a multi-batch pass would have written only its **last** batch; found while writing Part 3's partial-on-timeout test (`1/2 probed` with both rows still `NULL`), fixed by re-indenting the commit inside the loop, and disclosed in REVIEW_LOG. No real run hit it (every measured pass was a single batch). Part 3 then bounds the pass: `timeouts.url_probe` (600 s in `config.yaml`, new field on `Timeouts`) or `--phase-timeout` wraps `_run_url_probe` in `asyncio.wait_for`; on timeout the finished batches stay committed, the pass is recorded `partial`, the warning reads `url_probe: timed out after Ns (M/N URL(s) probed)`, a `CompletionGap` names it (`--json` `complete_with_gaps`) and the run exits **0**, never 5. Suite 888 -> 891. Next action: none; report.
-- Previous status: **VERIFICATION FOLLOW-UP, PART 1 DONE (D24) and PART 2 DONE (D25); Part 3 next.**
-- Previous status: **VERIFICATION FOLLOW-UP, PART 2 DONE (www dedup requires a known status, D25).** Verification of the four-part batch found `_dedupe_www_variants` comparing `status_code` with `==`, so `NULL == NULL` counted as "same status": a pair of ALIVE names with no HTTP status on either side but a shared IP was marked `duplicate_of` from DNS evidence alone (seen in a mock run: `www.testfire.net.duplicate_of = testfire.net` with both statuses `NULL`). The shared-IP branch now requires both codes present and equal; a no-status pair is left alone (no `duplicate_of`, no note). The 3xx/2xx, both-2xx and different-IP branches are unchanged; no schema, state or confidence change. Suite 882 -> 883. D25, PIT-61. **Part 1 of this follow-up (PD httpx batch probe) is BLOCKED on an owner ruling:** PD httpx v1.12.0 has no `-insecure` flag, skips TLS verification silently (a `www.-only` certificate on `https://testfire.net/` returns 200), emits **no JSON line at all** for a failed URL (no `tls_error`, no error field), and sends a random browser User-Agent by default; measured on 158 URLs it took 9.19 s against Python httpx's 4.59 s, so the speed premise did not hold on this box, and swapping transports would erase the `-2` distinction added in Part 4. Part 3 (url_probe phase timeout) waits with Part 1 because its shape depends on the transport decision. Next action: owner ruling on the probe transport; then Part 3.
-- Previous status: **BATCH 2026-11-18 PART 4 DONE (url_probe stage, D23) - batch complete.** The urls stage records what the archives and the crawler returned and never said which URLs still answer, so a 2019 `/admin` and a page that answered today were the same evidence. `Stage.URL_PROBE` now runs after `urls` in `active` and `full` (never `passive`: it sends HTTP) and is **engine-owned** - no adapter, no `tools.yaml` entry, no Tools-table row - through `Engine._run_url_probe()`: one httpx `GET` per stored URL with the honest `reconkit/0.1` UA, `threads`/`batch_size`/`timeout_s`/`max_urls` from the new `config.yaml` `url_probe:` block (5000/200/50/10 s), no retries, and the same `_active_hosts()` scope gate as every active stage. Results go to **`urls.status_code` (schema 9 -> 10, additive)**: the HTTP status, `-1` for no answer (refused, timeout, DNS failure), **`-2` when the server answered with a certificate that does not verify** (hostname mismatch or untrusted chain) - a case the first real testfire.net run exposed, where every URL stored `-1` and a live site looked dead because its certificate is issued for `www.testfire.net`; verification is never disabled, so the fact is recorded as itself. `NULL` alone means "not probed yet", a stored answer (`-1`/`-2`/status) is never retried, and `--skip-url-probe` removes the stage; `--mock` sends nothing, leaves NULLs and warns. `_empty_stages()` excludes it, so a tool-less probe cannot make a complete run exit 5. Host state, confidence, `diff` and every count query are untouched. Real proof (testfire.net, `max_urls: 20`, `--tools pyprobe,katana,gau`): `url_probe: finished 20 URL(s)`, `-2|40` and `|365` NULL in the DB, exit 0; three direct requests gave `http://testfire.net/` **200**, `https://www.testfire.net/` **-2**, `https://does-not-exist.testfire.net/` **-1**. Suite 869 -> 882, PIT-60. Next action: none - the four-part batch is closed; report and stop.
-- Previous status: **BATCH 2026-11-18 PART 3 DONE (www/non-www deduplication, D22).** `www.X` and `X` are one website: a post-`live` pass `Engine._dedupe_www_variants()` reads the rows the live stage just wrote (plus the current run's host set) and writes **metadata only** on the newest status row - new columns `host_status_history.duplicate_of` and `.www_note`, **schema 8 -> 9** (`_SCHEMA_V9`, additive, both `NULL` on every existing row; disclosed deviation: the brief said 7 -> 8, but 8 was already spent on Part 1's `tool_runs` rebuild). Rules: one 3xx and one 2xx -> the 3xx name is `duplicate_of` the 2xx name; both 2xx -> neither is marked, both get `has www sibling at <other>`; same non-2xx status and a shared IP -> `www.X` is `duplicate_of X`; same status, different **known** IPs -> neither marked, both get `www variant on a different server`; one alive one dead/DNS-only, or an unknown IP set -> nothing. `Store.set_host_duplicate()` updates the newest row and never appends one, so `state`, `status_code`, `confidence`, the confidence formula, `diff` and every count query are untouched. Display: a **Notes** column (added only when some row has a note, so an ordinary table keeps six columns) shows `-> redirects to <host>` / `-> duplicate of <host>` / `canonical` / the two sibling notes; the summary line gains `N hosts (M unique after www-dedup)` only when a duplicate exists; `--json` carries `hosts[].duplicate_of`, `hosts[].www_note` and a top-level `www_dedup` object. Mock proof (`run -d www-pair.test --active --no-scope --mock`, new synthetic fixtures `tests/fixtures/{dnspython,pyprobe}/www-pair.test.synthetic.json`): bare 301 -> `www.www-pair.test` 200 becomes `canonical`, bare row `-> redirects to www.www-pair.test`, `17 hosts (16 unique after www-dedup)`, `www_dedup.applied=true`; real testfire.net run (`--tools assetfinder,dnspython,pyprobe`) showed the other branch - both 200, so both got `has www sibling at ...` and nothing was marked. Suite 855 -> 869. Next action: Part 4 (url_probe stage).
-- Previous status: **BATCH 2026-11-18 PART 2 DONE (katana JSON skip, hakrawler/subjs caps, urlfinder inactivity kill).** Three defects from the example.com scan. (1) **`katana: invalid JSON line` threw away a whole crawl**: the parser now skips a line it cannot use (non-JSON, or JSON that is not an object) and keeps the rest; `hakrawler`, `gospider` and `subjs` got the same rule for a line with no usable URL. Skipped lines reach the Tools detail as one message per line up to 10, then `skipped N unusable line(s); last: ...`, and the status stays `ok`. `urlfinder` keeps its stricter archive rule. (2) **`hakrawler`/`subjs` owned the whole urls stage** (timeout, 0 items): they get `runtime_cap_s` 120 s and 60 s, keep their partial stdout and report `ok N` with `capped at <n>s; kept partial output` instead of `timeout` - a capped run with 0 items is also `ok`, because the tool worked and we stopped it. (3) **`urlfinder`'s flat 180 s cap is gone**: `urls.urlfinder_min_s/max_s/idle_s` (180/1800/60) give a floor, an inactivity kill and a ceiling in the new config block; the runner gained `idle_timeout`/`min_runtime` and `ExecResult.idle_killed`, and the engine hands the values down as `RunContext.limits`. Real: `katana ok 58`, `hakrawler ok 66`, `subjs ok 0`, then `urlfinder ok 933 in 18.1 s` and `gau ok 345`, all exit 0. Suite 840 -> 855. PIT-58. Next action: Part 3 (www/non-www deduplication).
-- Previous status: **BATCH 2026-11-18 PART 1 DONE (external-service gaps + stale docs).** A real `run -d example.com --active --no-scope` exited `5` although every failing tool had been *refused by its provider* (`otx` 429, `hackertarget` free quota, `crtsh` 502). Those are now the new tool status `gap` (owner ruling, no D number): one classifier `base.classify_external_gap()` (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx) feeds `ToolStatus.GAP` from `HttpAdapter` (status code), from a parser (quota body) and from `BaseToolAdapter.run` (binary stderr/exit). A gap is excluded from the failure total, becomes a completion gap (exit `0`, `completion.gaps`, the stderr block) and is stored as `tool_runs.status='gap'`, which is **schema 8** (`_SCHEMA_V8` rebuilds `tool_runs` because SQLite cannot alter a CHECK). A 404, a refused connection, a TLS error and a parse error stay `failed`. Real evidence on testfire.net: `subs` exited **0** with `tools: 7 ok, 2 gap, 0 failed` and the block naming both services; the same run exited 5 before. Same commit: the four stale statements from the state dump ("Nothing is pushed" - both refs are at `a49e4b5`; the `tech`/`urls`/`vulns` "no adapter" Open risk - waves 4-8 closed it; "Suite 827" - actually 824; `docs/05` "reconkit runs no installer script" - `scripts/install-tools.sh` exists since D21). Suite 824 -> 840. PIT-55. Next action: Part 2 of the same batch.
-- Previous status: **LINUX ONLY AND NUCLEI REDACTION FIXED (2026-11-18).** (1) **Linux only, no other platform anywhere** (owner decision): the OS-specific branches in `runner.py`/`workspace.py`/`subfinder.py`/`base.py`, the reserved-device-name rejection and the other-platform venv fallback are deleted, and every doc, log entry, script and gate instruction names Linux only; the docs commit is `6b904eb`. Suite 827 -> 821 because the reserved-name cases went with the behaviour they pinned (the "827" in this paragraph was itself stale: the verified count on this checkout is **824**, see the baseline line below). (2) **A real `--full` run on testfire.net found a real defect:** `nuclei` failed with `invalid JSON line`. Cause: the redaction patterns for `Cookie`/`Set-Cookie`/`Authorization` and the secret pairs ran to the next *real* newline, while a JSONL tool escapes its newlines, so every matching line had its remaining fields replaced by `***` (PIT-54). The value patterns now also stop at an escaped line end, the line stays valid JSON, and the cookie value is still masked. Regression: `test_redaction_keeps_a_jsonl_line_parseable`. (3) **Predictable runtimes** (owner request): `urlfinder` is killed at 180 s by a new `runtime_cap_s` and its partial stdout is parsed (its own `-max-time` is not enforced: measured still running at 5m52s with `-max-time 3`; before this a timeout discarded every URL found); `nikto` passes its own `-maxtime <share>s` per host so it stops cleanly and writes JSON instead of being killed at 600 s with 0 findings; `nuclei` gets `-or`, because the unused request/response pair pushed a real run past the 1 MB stdout cap and truncated the last JSON line (`invalid JSON line`). (4) Live evidence for this batch is recorded in REVIEW_LOG; every run used `testfire.net` from `scope.yaml`. The final `--full` run took **1466 s with 0 timeouts** (38 ok, 2 failed from upstream quotas): `nuclei ok 112`, `urlfinder ok 933 (capped)`, `nikto ok 8`, against 2027 s for the same command before the caps.
-- Previous status: **REPORTS IN BOTH MODES, LIVE SPINNER, AMASS FIXED (2026-11-18, D20).** Owner batch after a real `reconkit run -d testfire.net --active --no-scope --only-alive` run. Three changes, each with docs first: (1) **every scan now writes its report** - the writer was gated on the interactive plan, so a `-d`/`-l` run printed tables and saved nothing; it now writes `results/<domain>/<UTC stamp>/report.txt` + `report.json` on both paths, and a flagged run gets every `REPORT_FIELDS` key (the questions only choose columns). (2) **a live status line** - the durable progress lines only appear when a tool *finishes*, so a 600 s `gau` looked like a hang; a new transient `activity` channel carries `<stage>: <done>/<total> tool(s) done, <n>s elapsed - running: <tools>` to a Rich spinner on stderr, drawn only when stderr is a terminal and never on stdout. (3) **amass was broken** - v5.1.3 `enum` is a thin client for its own engine and prints only the `Session Scope` header, so the adapter harvested the target from that header and always reported exactly 1 item; findings are now read back with `amass subs -d DOMAIN -names` through a new documented `post_command` hook (real read-back for testfire.net: the same 8 hosts the table showed). **Two owner premises did not hold, and were reported instead of re-implemented:** stage tools were already concurrent (`asyncio.gather`, weights in REVIEW_LOG: urls did 1581 s of tool time in a 664 s stage), and no duplicates pass between stages (`discovered` is a `set`, `urls` is a `dict`, DB has `UNIQUE(target_id, fqdn)` / `UNIQUE(target_id, url)`; measured 1655 stored URLs = 1655 distinct, 41 hosts = 41 distinct, 0 duplicate groups). Then, with the owner's "do whatever is good, speed is only for the passive recon tools": (4) **the report follows the display filters** and records them (`selection: 8 of 42 hosts (ALIVE)`), so a `--only-alive` artifact matches the table without ever looking like a complete scan; the DB still keeps every host. (5) **the passive tools got their real timeout semantics back** - `gau --timeout` and `urlfinder -timeout` are *per-request HTTP timeouts*, and both adapters were passing the 600 s per-tool budget, so one slow archive source could block the whole stage; measured `gau` 0 items/600 s -> **345 items/31 s**, `urlfinder` 932/554 s -> **996 items/15 s**, and through the engine `reconkit urls -d testfire.net --active --no-scope --tools gau,urlfinder` finished the stage in **15 s wall clock** with `gau ok 345`, `urlfinder ok 933`. Active tools were not touched. (6) **waybackurls was asking one question 42 times** - the adapter fed every discovered host on stdin, but the tool asks `*.<line>/*` and its own `-no-subs` help proves one apex already covers its subdomains; it now gets the apex once (plus any host outside it, for multi-domain scopes) and does the same job in **2.4 s instead of 302 s**; the remaining 0 items are archive.org answering **503 Temporarily Offline** to wildcard CDX queries, not a reconkit defect (`gau` still returns 345 URLs from the same archive). Also verified the owner's question directly: `waybackurls`/`urlfinder`/`unfurl` are installed in `~/.reconkit/bin` and `reconkit doctor` shows `Installed yes / Identity ok` with the path - a bare `command -v` misses them only because that directory is on the child PATH. Suite 816 -> 827. Next action: none.
-- Previous status: **SHOTS STAGE WIRED (2026-11-17, D19).** `Stage.SHOTS` is no longer orphaned: it now sits in `STAGE_ORDER` between `urls` and `vulns` and therefore in `MODE_STAGES["full"]`; `passive` and `active` still do not request it and there is no `shots` stage command. `gowitness` is therefore runnable: `reconkit run -d testfire.net --full --no-scope --include-noisy --mock --tools pyprobe,httpx,tlsx,gowitness` prints `gowitness shots ok 2` and exit 0, while `--active` shows no shots stage at all (raw output in REVIEW_LOG). One gowitness fix was needed for that proof: `--mock` now takes the base fixture path before the empty-host early return, so a mock run reports the fixture's URLs instead of 0 items. `_persist_stage` deliberately has no `shots` branch - screenshots stay files plus `screenshots.jsonl` (D17). **Disclosed conflict:** the batch expected `gowitness` to be tier-skipped in `--full` without `--include-noisy`; it is not, because `--full` sets `include_noisy = True` in the CLI and `--tools` bypasses the tier gate by design. No stage-specific gate was invented; `test_full_runs_gowitness_without_the_noisy_flag_because_full_implies_it` pins the real behaviour and D19 records the ruling question. Suite 811 -> 816. Next action: none; ask the owner only if screenshots must stay behind an explicit flag in full mode.
-- Previous status: **FINAL ADAPTER PUSH, PART 2 DONE (2026-11-17): 44 OF 48 TOOLS ADAPTED.** Wave 8 shipped `dig`, `massdns`, `puredns` (dns/passive/core), `gowitness` (shots/active/opt_in) and `nikto` (vulns/active/opt_in). Resolvers are packaged (`src/reconkit/data/resolvers.txt`, 16 public resolvers, D16) with the new `--resolvers PATH` override; `puredns` passes `-b <abs massdns>` because a child process only gets the env keys the engine hands it. `nikto -h` lists `-Format json`, so the JSON path is taken (the pre-approved plain-text fallback was not needed) and every finding is `severity="info"`, `kind="nikto"`, one process per host. gowitness writes `results/<target>/<UTC stamp>/screenshots/*.png` plus a `screenshots.jsonl` manifest - **files, not DB rows** (D17, no model, no schema bump); it defaults to `jpeg`, so the adapter passes `--screenshot-format png`, and on this box it produced no file because Chromium is absent (`failed to initialize chrome context`), reported as an error string with 0 items. **`Stage.SHOTS` is in no `MODE_STAGES` row**, so no CLI path runs gowitness yet: wiring it is a mode-table change and needs a ruling; the adapter is complete and tested for a one-line wiring. `dig` was kept, not skipped as redundant: `dnspython` is the resolver with the wildcard/dangling-CNAME logic, `dig` is an independent second DNS source that raises a `DNS_ONLY` host from LOW to MEDIUM. Proofs: doctor `yes/ok` for all five; mock run `--tools pyprobe,httpx,tlsx,dig,massdns,puredns,nikto` -> `dig ok 3`, `massdns ok 3`, `puredns ok 3`, `nikto ok 2`, exit 0; the deferred **masscan sudo proof** ran under `echo kali | sudo -S` -> `masscan ok 3` (non-root control: `skipped requires root / sudo`); gowitness manifest proven with a stand-in binary (real gowitness cannot screenshot without Chrome). Suite 795 -> 811. Next action: owner ruling on wiring the `shots` stage; the adapter programme is closed (D15 dnsreaper + 3 intrusive tools remain by design).
-- Previous status: **FINAL ADAPTER PUSH, PART 1 DONE (2026-11-17): SUBS STAGE CLOSED.** `urlscan` (http), `amass`, `findomain`, `chaos` and `github_subdomains` are implemented, tested and committed; every `subs` tool now has an adapter. Real testfire.net run `--tools urlscan,findomain,pyprobe` -> `urlscan ok 3` (urlscan.io search API, no key needed), `findomain ok 35`, `pyprobe ok 7 ALIVE`; mock run -> `urlscan ok 2`, `amass ok 4`, `findomain ok 9`, `chaos skipped (requires PDCP_API_KEY)`, `github_subdomains skipped (requires GITHUB_TOKEN)`, exit 0. New rule: a tool that cannot run without a key is a **selection** skip via the adapter class attribute `requires_env` (D18), never a runtime SKIPPED. Real-output traps found: `amass --version` prints only `v5.1.3` (identity probe is `amass enum -h`), amass stdout is a `Session Scope`/`FQDN:` block rather than a name list, and `github-subdomains -o` defaults to `<domain>.txt` in the CWD so the adapter always passes a workspace path. **`dnsreaper` is closed as not adaptable (D15)**: no PyPI package, no console script; `subzy` covers takeover. Suite 780 -> 795. Next action: Part 2 (dig, massdns, puredns, gowitness, nikto) + the deferred masscan sudo proof.
-- Previous status: **WAVE 6 DONE (2026-11-17): PORTS STAGE CLOSED.** `nmap`, `rustscan`, `smap` and `masscan` (ports) are implemented, tested and committed; every stage except six tools now has an adapter (39). `--ports` reaches all four, but differently: `nmap` swaps `--top-ports 1000` for `-p`, `rustscan` swaps `--top` for `-p`, `masscan` gets `-p<list>` (its `DEFAULT_PORTS` fallback when the operator gave none, because it has no top-ports option), and `smap` **filters** its passive results because it cannot choose what Shodan observed. `masscan` is `needs_root`: a non-root process skips it at selection with `requires root / sudo` (recorded, not a gap, run stays exit 0) and never touches `sudo`; the adapter keeps the same guard. `rustscan` needs **no nmap** - verified with `PATH` emptied: `-g` prints `IP -> [ports]` with `No Nmap`, so the nmap dependency the brief assumed does not exist in 2.3.0 (no `--` passthrough either). `masscan` writes the **list** format (`-oL`), not JSON: `-oJ` cannot be observed without root and `sudo -n` asks for a password here. Real testfire.net run (`--tools pyprobe,nmap,rustscan,smap,masscan --ports 80,443,8080`) stored `80,443,8080` open with sources `nmap`+`rustscan`+`smap`, `HIGH`, and `Apache Tomcat/Coyote JSP engine 1.1` as the nmap version. That run exposed a real defect: `_persist_ports` threw away `service`/`version`, so the documented `-sV` confidence bump never fired - fixed (D14). Suite 758 -> 780. Next action: none; wave 7 (subs: urlscan, amass, findomain, chaos, github_subdomains) when the owner asks.
-- Previous status: **FFUF DONE; WAVE 6 PORTS IN PROGRESS (2026-11-17).** `ffuf` (vulns/opt_in) is implemented, tested and committed with the inline packaged wordlist `src/reconkit/data/wordlists/common.txt` (118 paths, package data, D13) and `--ffuf-wordlist PATH` to override it; findings are `FindingRecord(kind="path", severity="info")`. Real run on testfire.net stored 12 matches (`302 /admin`, `/admin/login`, ...). Two real-run defects were fixed before commit: the URL must use the `FFUF` keyword (`FUZZ` there exits 0 with no results), and the `FHOST` roots must not end in `/` (otherwise `//admin`). **`dnsreaper` is still unadapted**: it has no PyPI package and no `setup.py`/`pyproject.toml` - it is `main.py` + `requirements.txt`, so it needs a checkout plus a script-launching adapter kind that the contract does not have; reported, not improvised. Suite 751 -> 758. Next action: Part 2, ports adapters (nmap, rustscan, smap, masscan).
-- Previous status: **ADAPTER WAVE 5 PARTIAL (2026-11-17).** `nuclei` and `subzy` (vulns) are implemented, tested and committed; **`dnsreaper` and `ffuf` are blocked and not written** - dnsreaper is not installed on this box, so its real flags cannot be verified (AGENTS rule 7), and no ffuf wordlist exists anywhere in the repo or `~/.reconkit`, so an ffuf adapter would have to invent one (stop rule). Both need an owner ruling. Real runs on testfire.net: `nuclei ok 14` findings (swagger exposure, weak ciphers, missing security headers), `subzy ok 0` (no takeover); the first real runs found two output traps - nuclei prints `host` as `host:port` (PIT-53) and subzy writes `null` instead of `[]`. `FindingRecord` was reused (no new model) and its severity literal gained `unknown` (42 installed nuclei templates declare it); **findings are still not persisted** (no `findings` table, no VULNS persist branch) - they reach `--json` and the raw output file only. New shared hook `read_output(ctx)` for `--output`-only tools. Suite 742 -> 751. Next action: none until the two blockers are ruled on.
-- Previous status: **D12 DONE (2026-11-17).** D12 (owner ruling): the WAF merge is deterministic by a new `waf_priority` on `ToolSpec`/`tools.yaml` (`wafw00f` 100 > `cdncheck` 80 > `whatweb` 50 > `httpx_tech` 20 > everything 0), so two WAF tools can no longer flip the stored name with completion order. **This is a schema change: 6 -> 7** (`host_status_history.waf_priority INTEGER NOT NULL DEFAULT 0`, additive). Three fresh-DB mock runs store `Cloudflare`/100 every time where the wave-4 code stored `httpx_tech`'s `cloudflare`. Suite 736 -> 742. Next action: Part 2, adapter wave 5 (nuclei, subzy, dnsreaper, ffuf).
-- Previous status: **ADAPTER WAVE 4 DONE (2026-11-17).** `unfurl` (urls/passive, per `tools.yaml:158` - the brief said active; the registry won, same ruling as gau/urlfinder), `wafw00f` and `whatweb` (tech/active) and `httpx_tech` (tech/active, inherits the `httpx` command through the new `httpx_hosts()`/`httpx_fqdn()` helpers) are implemented, tested and committed. Every `tech` and `urls` tool now has an adapter. `whatweb --log-json=-` exits 1 without `--quiet` (verified on the binary), so `--quiet` is part of the command. The waf/tech merge question was answered from the code and left unchanged: `tech` is a merged list, `waf` is one string whose winner is the first tool to finish in a pass and the latest pass across runs - an open item for a ruling, since merging needs a schema change. Real: `doctor` all four `yes`/`ok`; mock run 5/5 tools (`httpx_tech ok 2`, `whatweb ok 1`, `wafw00f ok 1`, `unfurl ok 4`), DB `testfire.net tech_json=["Apache","Apache Tomcat","HTTPServer","Java"] waf=cloudflare`; adversarial PATH still rejects Python `/usr/bin/httpx` for `httpx_tech` (`wrong program`/`failed`). Suite 726 -> 736. Next action: none.
-- Previous status: **ADAPTER WAVE 3 DONE (2026-11-17).** `hakrawler`, `gospider`, `subjs` (urls/active) and `urlfinder` (urls/passive, per `tools.yaml:159` - the brief said active; the registry won, same ruling as gau) are implemented, tested and committed. The first real hakrawler crawl exposed PIT-52 (a page's `javascript:` link made the strict parser fail the tool); `base.is_non_web_reference()` now skips non-HTTP links in all four parsers. Real testfire.net runs: `hakrawler ok 66`, `gospider ok 67`, `subjs ok 0` (host has no `.js`), `urlfinder ok 932`; mock run 4/4 tools, 16 unique URLs stored. Suite 712 -> 726. Next action: none.
-- Previous status: **BOTH PARTS DONE (D10 mode expansion `756af8e`; D11 adapter wave 2 + tech persistence).** Wave 2 added `httprobe` (live), `webanalyze` + `cdncheck` (tech), `waybackurls` (urls/passive) and the tech-stage persistence they needed (D11: `_persist_tech` annotates the newest status row, never appends one). Suite 687 -> 691 (Part 1) -> 712 (Part 2). Real runs on testfire.net: `httprobe ok 1`, `webanalyze ok 1` with `tech_json = ["Apache Tomcat", "Java"]` stored, `cdncheck ok 0` (no CDN/WAF match, the documented shape); `waybackurls` runs `ok 0` because the archive endpoint times out from this box, so its parsing proof is `--mock`. Next action: none.
-- Previous status: **MODE EXPANSION DONE (D10); ADAPTER WAVE 2 IN PROGRESS.** D10 (2026-11-17): `passive` = subs+dns+urls (passive tools only), `active` = subs+dns+live+tech+urls, `full` unchanged. Confirmed by real `--mock` runs in all three modes (gau `ok` in passive, katana skipped `tool mode not included in passive mode`; active runs tech + both urls tools; full runs all seven). Suite 687 -> 691. Next action: Part 2, adapter wave 2 (httprobe, webanalyze, cdncheck, waybackurls), one commit, stop-and-report if any adapter balloons.
-- Previous status: **BATCH 2026-11-17 PARTS 1 AND 2 DONE.** Part 2 (adapter wave 1) added four adapters - `dnsx` (dns/passive), `tlsx` (live/active, liveness-only + SAN discovery), `katana` (urls/active), `gau` (urls/passive) - and fixed the live-discovery persistence bug found while scoping tlsx (PIT-49: `_persist_live_discoveries` now writes a `subdomains` row for every host a live pass discovered, not only for the hosts it was given). gau gained the Ruling C `version_regex`. Suite 672 -> 687. Open item for the owner: `urls` is not a stage of `--active`, so katana/gau only run in `--full` (the batch prompt assumed otherwise) - the mode table was left unchanged. Next action: none.
-- Previous status: **BATCH 2026-11-17 PART 1 DONE (D9 completion gaps).** Part 1: `--full`/`--active` now exit 0 when a requested stage had no runnable tool, with a stderr gaps block (`⚠ full scan completed with gaps — N stage(s) ...`) and a top-level `--json` `completion` object (`complete` / `complete_with_gaps` + `gaps`); exit 5 is reserved for a failed/timed-out tool or a stage emptied by a deliberate rule, and "nothing usable at all" still exits 4. AGENTS.md item 11 (adapter pre-approval) and MASTER_PLAN D9 added. Next action: Part 2 (four adapters, one commit, stop-and-report if any adapter balloons).
-- Previous status: **MODE UNIFICATION BATCH S1-S7 DONE (2026-11-17).** Scan modes are one table (`MODE_STAGES` + `MODE_TOOLS` in `engine.py`): passive = subs+dns/passive tools/core; active = subs+dns+live/passive+active/core; full = all seven stages/passive+active/core+opt_in+intrusive. `--full` is new (implies `--active` and `--include-noisy`); CLI `--active` narrows to subs+dns+live; `exploitation: true` tools (sqlmap, dalfox, crlfuzz) never auto-run in any mode. Also added: scope pre-flight warning, `--no-scope` + `scan_runs.scope_mode` (schema 6), `--only-alive`/`--only-states`/`--status-codes`, `--ports`/`--header`/`--user-agent`/`--redact-headers`, extended interactive Q&A, out-of-scope `[a/b/c/d]` prompt. Baseline before this batch: 637 passed. Next action: none.
-- Previous status: **PART 12 AND PART 13 ARE COMPLETE (2026-11-16).** Part 12 closed on 2026-11-15 (12a-12k). Part 13 - the interactive scan mode, stderr progress and per-domain saved reports - is implemented, tested, self-reviewed (S1-S7) and committed, with docs written first. Phase 1 of the same session (the `docs/tool_manuals/` library) is closed in `8dc2829`.
-- What Part 13 changed, in one line: a scan command with **no** `-d`/`-l` **and** a real terminal asks five questions and then runs the ordinary scan inputs; a domain file becomes the ordinary `-l` path (one full scan and one `results/<domain>/<UTC stamp>/` folder per domain, `report.txt` + `report.json`); progress now goes to stderr for every mode except `--silent`, including `--json`. Every flag-based invocation is unchanged, including no prompts and no report folders (tests `test_a_flagged_run_never_asks_a_question`, `test_a_listed_run_never_asks_a_question`, `test_a_flagged_run_writes_no_report_folder`). **Superseded 2026-11-18 (D20):** a flagged run now writes its own report folder too; the test is `test_a_flagged_run_writes_its_own_report_folder`. The no-prompt promise stands.
-- All four owner tasks (2026-11-17) are implemented, tested and committed: D1 `c99eaee`, D2 `6642ee4`, D3 `6a2db4d`, the interactive-mode fix `10b3a48`, Task 4 docs with this entry. Nothing else is queued; Part 13's uncertainties stay under "Open risks".
-- The verification follow-up (2026-11-17) closes the eight findings from the accepted 4-task batch (`F1`-`F8`, report section V-UNEXPECTED) in one commit: `--active` help text, the owner verification commands, five historical pacing markers, the core package docstring, two dead `pyproject` ignores, the AGENTS `config.yaml` row, two tool manuals and the D3 test counts. Documentation and help text only - no behaviour, flag, schema or test change.
-- **Owner-requested behavior changes (2026-11-17):** D1 (no scope file = unrestricted active scanning) is committed (`c99eaee`), D2 (naabu is scope-mode dependent) is committed (`6642ee4`), D3 (all speed/throttle control removed) is committed with this entry, and Task 4 (the end-to-end interactive-flow section in docs/02) is the next action.
-- **httpx_tech false positive FIXED (2026-11-17, MASTER_PLAN D5, V-UNEXPECTED item 1; commit `fix: httpx_tech rejects Python httpx via version_regex miss rule`).** `httpx_tech` was presence-only, so with only Python's `/usr/bin/httpx` visible doctor said `yes` / `identity: ok` where the `httpx` adapter row correctly said `wrong program`. It now carries `version_cmd: [httpx, -version]` + `version_regex: 'Current Version:\s*v?([0-9]+\.[0-9]+\.[0-9]+)'`, and `installed_version()` treats a declared regex that does not match as `None` (not installed). Re-tested both ways: normal PATH -> `version: "1.12.0"`; Python-only PATH -> `wrong program` / `identity: failed`. 638 passed. The other 12 presence-only tools stay as they are and are now documented as a known limitation (docs/10 section 3).
-- **Installer removal COMPLETE (2026-11-17, MASTER_PLAN D4, owner request "user-requested removal of install/update commands").** `install`, `update`, `doctor --fix` and `src/reconkit/installer/` are deleted; `tools.yaml` `install:` blocks became inert `source:` strings; `doctor` uses `ToolSpec` through `core/toolcheck.py` and no longer imports the installer. Full evidence, every changed test and the 730 -> 635 count reconciliation are in REVIEW_LOG "Installer removal D4". Nothing else queued; next action: none.
-- **Install/doc backlog batch (2026-11-17, T1-T6 + one correction; the commands named here were removed later the same day by D4).** `reconkit install rustscan` works from its real 2.3.0 release (`f638c05`); the seven banner-first tools show a real version (`e0ef81d`); smap/gospider/subjs/urlfinder show one and the five Go-flag tools are documented path rows (`cb1fcd2`); `assetfinder -h` exit code corrected (`74c9102`, `-version` exit 2 corrected in `a037014`); amass v5 note (`24f64a3`); webanalyze `-update` recorded (`583e530`). Every one confirmed against the real binaries on this box.
-- **Install residue removal S1-S7 COMPLETE (2026-11-17, cleanup only; commit `chore: remove install residue; docs/10 becomes tool reference (reconkit installs nothing)`).** Stale installer test bytecode deleted (5 `.pyc`; `__pycache__` dirs 73 -> 73); `config.yaml` `tool_versions` and its `AppConfig` field and `doctor` warning are gone; docs/10 is now a 149-line tool reference (48-row table, sections 1-4) with no install command anywhere; SETUP.md keeps only the editable self-install plus the doctor pointer; README, docs/01/02/05/08 and the seven tool manuals lost their install instructions; `tools.yaml`'s `source` comment is provenance-only, values unchanged. Full evidence in REVIEW_LOG "Install residue removal S1-S7".
-- **Doctor shows no version COMPLETE (2026-11-17, MASTER_PLAN D6, owner ruling; commit `feat: doctor shows installed/path/identity only; versions hidden (version_cmd kept for identity checks)`).** The table is now `Tool`, `Stage`, `Tier`, `Installed`, `Path`, `Identity`; `ToolCheck` and every `doctor --json` tool object lost the version key; the `Missing tools: N` footer now says `Scans will use the tools that are installed and skip the rest. Per-tool provenance: docs/10_TOOL_SOURCES.md.` `core.toolcheck.installed_version()`, `InstallStatus.version`, `tools.yaml`'s `version_cmd`/`version_regex` and every `source:` value are untouched, so the D5 identity check still rejects Python's `/usr/bin/httpx` (`wrong program` / `identity: failed`) while the real ProjectDiscovery copy is `yes` / `ok`. Full evidence in REVIEW_LOG "Doctor shows no version D6".
-- **Next action:** none. D21 (2026-11-18) adds `scripts/install-tools.sh`: the owner asked for one script that installs every tool with apt/go and then verifies with `doctor`. The CLI still installs nothing (D4 stands for the command surface and the safety rules); the script has no catalogue of its own, reads `tools.yaml` `source:` strings, downloads nothing itself, refuses to run as root, and ends with `doctor --json` so a wrong-program binary fails. Nine release-only ProjectDiscovery entries gained `(or: go install ...)` hints, each verified with `go install -n` before being written. Verified on this box: `--check` (33 have / 2 go / 3 manual), `--only gau` exit 0, `--only dalfox --yes` installed to `~/.reconkit/bin` in 13 s with `identity ok`. Also verified for the owner's question: `waybackurls`/`urlfinder`/`unfurl` were never missing - they live in `~/.reconkit/bin` and `doctor` already showed them; a bare `command -v` missed them because that directory is on the child PATH only. Suite 827. **Update (2026-11-18):** `findomain` and `rustscan` are no longer manual - Kali packages both (`apt-cache policy`: `11.0.0-beta.2-0kali2`, `2.4.1-0kali1`), so their `source:` is now `apt:` and the script installs them with sudo. Both apt builds were checked against the flags the adapters send (`-t/-q`, `-a/-g/-n/--ulimit/--top`), findomain printed bare subdomains on a real `-t example.com -q` run, and `doctor` resolves `/usr/bin` for both with `identity ok` after the hand-installed copies were moved to `/tmp/*.hand.bak`. Final counts: 38 have, 1 manual (`dnsreaper`). Two registry tests were rewritten to the new truth. Suite 827 at the time (re-verified 2026-11-18: **824**). The nested-archive item under "Open risks" is moot for reconkit (it installs nothing since D4) and stays only as a note about rustscan 2.4.1. Four follow-up items remain from the S1-S7 entry's Findings (the 19 frozen `source:` values, nine "Install command: nothing to install" manual bullets, AGENTS.md's stale installer references, the historical rustscan transcript); the doctor footer finding is now closed by D6.
-- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 10) after the 2026-11-18 batch's Part B (D27): `898 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After the same batch's Part A (docs only) and the verification follow-up's Part 3 (D26) including the config-default follow-up: `892 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). Immediately after Part 3 (`891 passed`), `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After the same follow-up's Part 1 (D24): `888 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After the same follow-up's Part 2 (D25): `883 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After Part 4 of the 2026-11-18 batch: `882 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After Part 3 (schema 9): `869 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After Part 2 (schema 8): `855 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After Part 1: `840 passed`, `ruff check .` clean, `ruff format --check .` 91 files, `mypy src/reconkit` clean (62 source files). Before the batch (schema version 7) after D20 (reports/spinner/amass/passive timeouts/waybackurls): **`824 passed`** (re-measured 2026-11-18; the earlier `827` here was stale by three), `ruff check .` clean, `ruff format --check .` 91 files, `mypy src/reconkit` clean (62 source files). After D19 (shots wiring): `816 passed`, `ruff check .` clean, `ruff format --check .` 90 files, `mypy src/reconkit` clean (62 source files). Before this batch: `811` after wave 8; `795` after wave 7. Earlier: `780` after wave 6. Before the ports adapters: `758` after ffuf. Earlier: `751` after wave 5, `742` after D12, `736` after wave 4, `726` after wave 3, `712` after wave 2, `691` after D10, `687` after wave 1, `672` after D9, `637` after D6. The count is unchanged from S1-S7 because one doctor test was deleted and one added; pre-S1 `638`; pre-D5 `635`; pre-D4 `730 passed`, 67 files, 35 source files.
-- **Push state (durable, D28):** `reconkit/main` is at `a49e4b5` (`docs: finish removing the last platform words and the /mnt/c example`); local `main` is ahead of it; nothing has been pushed since. Push only when the owner asks (`git push reconkit main`).
-- Already decided, do not reopen: no scope-bypass flag; consensus lives in `engine.py`; adapters never import `store`/`scope`/`ui`/`cli`; `subjack` replaced by `subzy` + nuclei takeover templates; reconkit installs nothing, so there is no installer platform rule (D4, 2026-11-17); free mode is default, keys only from `.env`; the ports ceiling is permanent (12i).
-- Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in `src/`; new lint/type suppressions; `shell=True`; the whole environment to a child; adapters importing store/scope/ui/cli; consensus outside `engine.py`; pushing.
-- Read first: `AGENTS.md`, this block, the last 3 per-part entries in `REVIEW_LOG` (they are above the archive section), and the current part in `docs/MASTER_PLAN.md`.
-
-### Deferred by R9 (needs owner, not attempted)
-
-- **B5 - out-of-scope CIDRs in `scope.yaml`.** `scope.yaml` has no CIDR/allow-list field, so a range-based authorization
-  cannot be expressed; adding one is a scope schema change and a scope-gate change, both owner-only. Deferred by R9.
-- **B6 - masscan/smap on a real large range.** Needs a real network and a written authorization for a range this project
-  has no scope field for (see B5); nothing can be measured honestly on testfire.net. Deferred by R9.
-- **B7 - interactive pty re-exercise.** The interactive flow needs a real pty session (`script`/pexpect) and a human at
-  the keyboard for the `[a]` scope-write prompt; the automated suite covers the non-interactive branches only. Deferred by
-  R9.
+- Earlier statuses (D57-D118 and the 2026-11-17/18 batches) are in
+  "Earlier statuses" at the end of this file. Read them only when a task
+  turns on how an older decision was made.
 
 ## Environment
 
@@ -767,6 +79,25 @@ refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992
 There is no `core/consensus.py`: consensus lives in `engine.py`. Order and module names follow docs/01 section 8 and docs/03 section 5. Per-part hashes and full evidence are in `REVIEW_LOG`; the old table is in its archive.
 
 ## Deviations and assumptions
+
+### D122 (2026-11-25) - a new session boots on a short pack and is routed to a file
+
+- Owner instruction: a new session must read the relevant file instead of
+  guessing, then decide.
+- `AGENTS.md` section 0 step 1 gained a task-to-doc routing list (CLI ->
+  `docs/02`, adapter -> `docs/09`, engine -> `docs/03`, schema -> `docs/04`,
+  security -> `docs/05`, tests -> `docs/07`, tools -> `docs/10`, journeys ->
+  `docs/08`, style -> `docs/06`), says to read only those files, and says to ask
+  when no row matches instead of inventing a file name.
+- `docs/PITFALLS.md` gained a "Routing (which file to open)" section with the
+  same rule, so the session-start file repeats it.
+- RESUME was 728 lines / 62 entries (~24k tokens, larger than the whole rule
+  set). It now holds the three newest entries (39 lines, ~610 tokens); D57-D118
+  and the 2026-11-17/18 batches moved, unchanged, to "Earlier statuses" at the
+  end of this file.
+- New guard `test_the_resume_block_stays_short` (PIT-76) fails above 60 lines or
+  four entries, so the block cannot grow back into a history file.
+- No code changed. Suite 1269 -> 1270 by the new test.
 
 ### D121 (2026-11-25) - the Kali container check is documented in AGENTS.md
 
@@ -2045,3 +1376,723 @@ reconkit run -d <authorized-host> --active --tools pyprobe,pyscan --db /tmp/veri
 reconkit run -d <authorized-host> --active --tools httpx --db /tmp/verify.db -v &
 # then Ctrl+C, and check `ps -ef | grep httpx` for an orphan process group
 ```
+
+
+## Earlier statuses (moved out of RESUME on 2026-11-25, D122)
+
+Moved from RESUME on 2026-11-25 (D122): the status entries from 2026-11-17 to
+2026-11-18, plus the 2026-11-19 analysis and open-blocker notes. Moved, not
+edited.
+
+
+- Status (2026-11-22, D119): **the four Phase 3 stub commands are gone.**
+  `export`, `db list`, `db export` and `scope import` were removed from
+  `cli.py` on the owner's instruction: they only printed "not wired in Part 8"
+  and exited 1, `report` already rebuilds the saved report from the database,
+  and `scope.yaml` is written by the operator. Nothing else referenced them, so
+  the pipeline is untouched; the commands now fail as unknown commands (exit
+  2) and the `scope`/`db` group help no longer advertises them. Docs updated:
+  `docs/01` (Feature 8, section 8), `docs/02` (setup table, state/output table,
+  db section, the list-from-a-previous-run note, the `--json` note), `docs/05`
+  (the HTML-export line, which never matched a shipped feature), `docs/08`
+  (Flow 10 is now `report`), `COMMANDS.md` (glance table, db section, exit-code
+  table, known-limits row, and the stale `report -d X` spelling, which is
+  `--target`), `README.md`. New tests: the Typer tree has no such commands, all
+  four invocations exit 2 with `No such command`, and `scope`/`db` help does
+  not mention them. Gate: 1266 passed / 3 skipped plain and
+  `FORCE_TERMINAL=1`, invariants 196 passed / 3 skipped, ruff/format/mypy
+  clean, `--mock` run exit 0. `__version__` stays `1.0.0`: the removal is a
+  post-tag commit, and cutting a release needs the owner. Next action: none.
+
+
+- Analysis (2026-11-19, no code): **a passive run stores URLs and never reads them back** - nothing in-run consumes them, so the 3 hosts that only the `target.example` archives revealed (`nb.target.example` 40 URLs, `api.target.example` 2, `assets.target.example` 1) have no row, no state and no report line; `url_probe` is its own stage after `urls`, absent from `MODE_STAGES["passive"]`. Liveness of a prepared hostname list works today via `reconkit live -l hosts.txt --active --scope ...` (each line is its own target; URLs are rejected by `validate_target`), while `export`, `db list` and `db export` are Part-8 stubs. Four stage-order options and a recommendation (Option 4 now, Option 2 as a separate dated decision) are in REVIEW_LOG and await an owner ruling; no flag, order or code changed.
+
+- Previous status (2026-11-19, final run): **the complete build ran `example.com` in 488.0 s (was 1 060.685 s) and `url_probe`
+  in **39 s** (was 556 s) - the D54/D55 filter is the whole delta.** 973 tests, gate clean, tree clean, `scope.yaml`
+  byte-identical. Exit **5** for one new upstream failure (`crtsh: request timed out`, 30.7 s); 69 hosts (12 ALIVE,
+  27 DNS_ONLY, 29 DEAD, 1 UNKNOWN); `url_probe: skipping 1444 URL(s) whose host is unreachable`, 906 probed; the
+  1 371 newly discovered `www.example.com` URLs are left `NULL` (skipped, proven), `gau` 4 918, `katana` 543,
+  `urlfinder` 6 367, `waybackurls` 0. No code changed, nothing re-run. See the final-run entry in REVIEW_LOG.
+- Previous status (2026-11-19, D56): **R14 closed - `scope.yaml` can exclude CIDRs, and the run reports where it cannot enforce
+  them.** 973 tests, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (`d45a3c90...eeee8b`).
+  `pyscan` and the engine's pre-resolved `naabu` input honour `exclude_cidrs`; every other active tool resolves inside
+  its own child, so a non-empty `exclude_cidrs` produces one warning at run start and the same `scope_warnings` entry
+  in `report.txt`/`report.json` and `--json`. No migration (`scope.yaml` is runtime; `scan_runs.scope_mode` unchanged).
+  `--strict-cidr` is a future decision, recorded under Open risks. See D56 and the Part R14 entry in REVIEW_LOG.
+- Previous status (2026-11-19, D55): **the url_probe's 4 982 `-1` answers are DNS_ONLY hosts, not a probe bug - the unreachable
+  filter now covers DNS_ONLY too.** 966 tests, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical
+  (`d45a3c90...eeee8b`). On the example.com DB 4 916 of the 4 982 `-1` rows (98.7%) sit on DNS_ONLY hosts - 4 861 on
+  `www.example.com` alone - and 0 of the 20 sampled rows is "ALIVE host, wrong scheme"; the change takes unprobed
+  candidates 2 147 -> **707** (-67%) and `--reprobe-urls` 5 001 -> 733. `waybackurls` stays deferred (W). See D55 and
+  the Part X-Y entry in REVIEW_LOG.
+- Previous status: **Parts T and U done (`b6df719` plus this docs commit): per-request timeouts are adapter constants (D53),
+  and the first example.com engine run is recorded (D53 addendum).** 961 tests, `ruff`/`format`/`mypy` clean, tree
+  clean, `scope.yaml` byte-identical (`d45a3c90...eeee8b`). The run, made **once**, exited **0** in 1 060.685 s:
+  `69 hosts: 12 ALIVE, 27 DNS_ONLY, 0 SHUT_DOWN, 29 DEAD, 1 UNKNOWN | tools: 26 ok, 2 gap, 0 failed, 2 skipped,
+  0 timeout, 3 killed`; the one gap is the known `hackertarget`/`otx` pair and the three kills are idle windows
+  (`hakrawler` 60 s, `gospider` 60 s, `urlfinder` 180 s) with partial output kept. Two new observations are recorded
+  under Open risks (`url_probe` used 556 s of 600; `waybackurls` returned 0 items where `gau` returned 4 917), neither
+  fixed. D51 does not exist; R13/R14/R15 and the Part C dedup question are still open exactly as recorded. See D53
+  and its addendum below and 4a2d in `docs/09`. Previous status: **D52 done at `41387e0`: the per-tool runtime caps are deleted, runtime is idle-only.** 950 tests,
+  `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (sha256 `d45a3c90...eeee8b`). D48 and its
+  addendum are superseded by D52 (the classes stay, every cap goes); D51 does not exist. R13/R14/R15 and the Part C
+  dedup question are still open exactly as recorded. See D52 and its addendum below for the model, the scale numbers
+  and the example.com replay. Previous status: **Queued code work complete at `3d79524`; scalability phase open - see D48-D50.** 951 tests,
+  `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical (sha256 `d45a3c90...eeee8b`). This batch added
+  D48 (per-tool caps from a tools.yaml `class:`), the D48 addendum (the D47 `external_api` ClassVar moved into
+  `external: true`), D50 (per-tool heartbeat) and stopped Part C by its own rule (no D49; the live record has no
+  answering URL). One measured consequence the owner should tune before the example.com batch: the crawler floor of
+  90 s caps `gau` at 466 URLs where the uncapped runs returned 1042-1508 - `runtime_caps.crawler.floor` is one config
+  line, no code. Previous status: **PROJECT CODE WORK COMPLETE at `6a6d47b` after Part T (2026-11-19).** 941 tests,
+  `ruff`/`format`/`mypy` clean, tree clean, 39 commits ahead of `reconkit/main` at that point. Final capstone
+  (`reconkit run -d testfire.net --active --phase-timeout 600`, temp config with `url_probe.max_urls: 20`):
+  `9 hosts: 8 ALIVE, 1 DEAD | tools: 30 ok, 1 gap, 0 failed, 2 skipped, 0 timeout`, exit **0**. The only non-ok row is
+  the known `otx: rate limited (HTTP 429)` gap; `crtsh` ran `ok 1 item(s)` and never returned a 404 in this run, and the
+  D47 classifier is what makes a future 404 a gap instead of a failure. All six `scan_runs` rows are `completed`. The
+  crtsh question is closed by D47; what remains is owner decisions, listed under "What is explicitly open and why".
+- Previous status: **Project code work complete at `9dfbeec`; the capstone exited 5 for one measured reason.** `reconkit run -d testfire.net --active --phase-timeout 300` (temp config, `url_probe.max_urls: 20`) finished `36 hosts: 8 ALIVE, 26 DEAD, 2 UNKNOWN | tools: 29 ok, 1 gap, 0 failed, 2 skipped, 1 timeout` and exit **5**: `gau` was still running when the `urls` stage hit its 300 s deadline, and a timeout is a hard failure by ruling. Every other non-ok row was a gap (`otx: rate limited (HTTP 429)`) or a selection skip (`chaos`, `github_subdomains`: no API key). Remaining work was owner decisions, not code: see "What is explicitly open and why" and the three questions before
+  "Notes for later tasks".
+- Previous status: **BATCH 2026-11-18 COMPLETE (Parts D-H) + acceptance follow-up.** Suite 908. The follow-up added the three D30 tests and the missing D29 stage-budget test, the missing `COMMANDS.md` probe-only note, and fixed a real bug the missing tests hid: the mock DB default did not create `~/.reconkit`, so a fresh machine failed with `unable to open database file`. Evidence in REVIEW_LOG "follow-up".
+- Previous status: **BATCH 2026-11-18 COMPLETE (Parts D-H).** D28 rulings recorded, D29 double-ceiling cleanup, D30 mock isolation, D31 withdrawn (premise disproved), D32 redaction routing. Suite 898 -> 903. Next action: none; report.
+- Previous status: **BATCH 2026-11-18 (Part F) DONE: D30 mock isolation.** Suite 899. Next action: Part G (mock ALIVE).
+- Previous status: **BATCH 2026-11-18 (Part E) DONE: D29 double-ceiling cleanup.** `urls.urlfinder_max_s` default 0; saturation logged. Suite 898 -> 899. Next action: Part F (mock isolation).
+- Previous status: **BATCH 2026-11-18 (Part D) DONE: four rulings recorded (D28), push-state line made durable.** Docs only. D28 added to MASTER_PLAN and PROGRESS; four Open-risks items closed by D28; probe-only-exits-4 note added to docs/02. D.3 found no current-tense contradiction beyond the deferred urlfinder.py docstring (Part E). Next action: Part E (D27 double-ceiling cleanup).
+- Previous status: **BATCH 2026-11-18 (Part C) DONE: stale claims reconciled, four rulings written down.** Only one of the four stale claims was still live: the push state. `reconkit/main` is `a49e4b5` and local `main` is ahead of it (10 commits at `aadd7b5`), so the 2026-11-18 "both refs are level" sentence was wrong and is now the verified fact - **the batch prompt's premise that HEAD is pushed did not hold, and no push was attempted**. The other three were already closed by the previous batch's Part 1 and are covered by dated notes in place: the `tech`/`urls`/`vulns` "no adapter" risk (`## Open risks`, "Closed 2026-11-17 (adapter waves 4-8)"), the "Suite 827" mentions (they sit inside dated historical status paragraphs, each already annotated, and the baseline line carries `898`), and `docs/05` section 5 (the D21 `scripts/install-tools.sh` paragraph). Four open rulings are appended to `## Open risks`: the `6488aad` stop-rule breach, probe-only exit 4, the `-2` sentinel, and the batch's 2 -> 1 -> 3 / two-commit Part 3 history. Nothing was acted on. Next action: none; report.
+- Previous status: **BATCH 2026-11-18 (Part B) DONE: urlfinder's cap scales with the host count (D27).** `cap_s = min(stage_budget, max(180, 4 * host_count))` replaces the flat 1800 s ceiling: 43 hosts -> 180 s (exactly the old tuned number), 100 -> 400 s, 500 -> 2000 s clipped to the 1800 s `timeouts.urls`. `host_count` is the number of rows on urlfinder's stdin; `stage_budget` is the deadline the stage already has (`--phase-timeout`, else `timeouts.urls`), so nothing new was added to the timeout plumbing and D26's probe deadline is untouched. New `urlfinder.max_enumeration_s` (0 = formula, non-zero overrides); `urls.urlfinder_max_s` stays a hard ceiling; the detail line is now `capped at 180s (hosts=43); kept partial output`. Disclosed behaviour change: a one-host urls stage now gets 180 s instead of 1800 s, so `test_url_tools_receive_the_configured_runtime_bounds` moved from (1800, 60, 180) to (180, 60, 180). Suite 892 -> 898. Next action: Part C (stale docs + four open rulings).
+- Previous status: **AUDIT CLOSE-OUT (Part A) DONE - the url_probe/httpx batch's five missing raw proofs are pasted in `docs/REVIEW_LOG.md` ("2026-11-18 (audit close-out)"), no code change.** A.1 the complete 196-line `~/.reconkit/bin/httpx -h` plus `flag provided but not defined: -insecure`; A.2 a fresh 20-row fixture (10 certificate-invalid https + 10 http 200) classified in one pass as `-2|10` / `200|10`; A.3 the full `_dedupe_www_variants` body before (`4b97928^`) and after; A.4 `grep -n 'url_probe' config.yaml` (`21:  url_probe: 600`, `36:url_probe:`); A.5 two identical 5-row DBs where the two stale `404` rows survive the default pass (`probing 3 URL(s)`, `404|2` + `200|3`) and are rewritten by `--reprobe-urls` (`probing 5 URL(s)`, `200|5`). Nothing contradicts the earlier report. Next action: Part B (urlfinder cap).
+- Previous status: **REGRESSION FIXED IN PART 1'S PROBE LOOP, AND PART 3 DONE (url_probe phase timeout, D26).** Part 1's client-reuse edit had left the per-batch commit block dedented out of the `for` loop, so a multi-batch pass would have written only its **last** batch; found while writing Part 3's partial-on-timeout test (`1/2 probed` with both rows still `NULL`), fixed by re-indenting the commit inside the loop, and disclosed in REVIEW_LOG. No real run hit it (every measured pass was a single batch). Part 3 then bounds the pass: `timeouts.url_probe` (600 s in `config.yaml`, new field on `Timeouts`) or `--phase-timeout` wraps `_run_url_probe` in `asyncio.wait_for`; on timeout the finished batches stay committed, the pass is recorded `partial`, the warning reads `url_probe: timed out after Ns (M/N URL(s) probed)`, a `CompletionGap` names it (`--json` `complete_with_gaps`) and the run exits **0**, never 5. Suite 888 -> 891. Next action: none; report.
+- Previous status: **VERIFICATION FOLLOW-UP, PART 1 DONE (D24) and PART 2 DONE (D25); Part 3 next.**
+- Previous status: **VERIFICATION FOLLOW-UP, PART 2 DONE (www dedup requires a known status, D25).** Verification of the four-part batch found `_dedupe_www_variants` comparing `status_code` with `==`, so `NULL == NULL` counted as "same status": a pair of ALIVE names with no HTTP status on either side but a shared IP was marked `duplicate_of` from DNS evidence alone (seen in a mock run: `www.testfire.net.duplicate_of = testfire.net` with both statuses `NULL`). The shared-IP branch now requires both codes present and equal; a no-status pair is left alone (no `duplicate_of`, no note). The 3xx/2xx, both-2xx and different-IP branches are unchanged; no schema, state or confidence change. Suite 882 -> 883. D25, PIT-61. **Part 1 of this follow-up (PD httpx batch probe) is BLOCKED on an owner ruling:** PD httpx v1.12.0 has no `-insecure` flag, skips TLS verification silently (a `www.-only` certificate on `https://testfire.net/` returns 200), emits **no JSON line at all** for a failed URL (no `tls_error`, no error field), and sends a random browser User-Agent by default; measured on 158 URLs it took 9.19 s against Python httpx's 4.59 s, so the speed premise did not hold on this box, and swapping transports would erase the `-2` distinction added in Part 4. Part 3 (url_probe phase timeout) waits with Part 1 because its shape depends on the transport decision. Next action: owner ruling on the probe transport; then Part 3.
+- Previous status: **BATCH 2026-11-18 PART 4 DONE (url_probe stage, D23) - batch complete.** The urls stage records what the archives and the crawler returned and never said which URLs still answer, so a 2019 `/admin` and a page that answered today were the same evidence. `Stage.URL_PROBE` now runs after `urls` in `active` and `full` (never `passive`: it sends HTTP) and is **engine-owned** - no adapter, no `tools.yaml` entry, no Tools-table row - through `Engine._run_url_probe()`: one httpx `GET` per stored URL with the honest `reconkit/0.1` UA, `threads`/`batch_size`/`timeout_s`/`max_urls` from the new `config.yaml` `url_probe:` block (5000/200/50/10 s), no retries, and the same `_active_hosts()` scope gate as every active stage. Results go to **`urls.status_code` (schema 9 -> 10, additive)**: the HTTP status, `-1` for no answer (refused, timeout, DNS failure), **`-2` when the server answered with a certificate that does not verify** (hostname mismatch or untrusted chain) - a case the first real testfire.net run exposed, where every URL stored `-1` and a live site looked dead because its certificate is issued for `www.testfire.net`; verification is never disabled, so the fact is recorded as itself. `NULL` alone means "not probed yet", a stored answer (`-1`/`-2`/status) is never retried, and `--skip-url-probe` removes the stage; `--mock` sends nothing, leaves NULLs and warns. `_empty_stages()` excludes it, so a tool-less probe cannot make a complete run exit 5. Host state, confidence, `diff` and every count query are untouched. Real proof (testfire.net, `max_urls: 20`, `--tools pyprobe,katana,gau`): `url_probe: finished 20 URL(s)`, `-2|40` and `|365` NULL in the DB, exit 0; three direct requests gave `http://testfire.net/` **200**, `https://www.testfire.net/` **-2**, `https://does-not-exist.testfire.net/` **-1**. Suite 869 -> 882, PIT-60. Next action: none - the four-part batch is closed; report and stop.
+- Previous status: **BATCH 2026-11-18 PART 3 DONE (www/non-www deduplication, D22).** `www.X` and `X` are one website: a post-`live` pass `Engine._dedupe_www_variants()` reads the rows the live stage just wrote (plus the current run's host set) and writes **metadata only** on the newest status row - new columns `host_status_history.duplicate_of` and `.www_note`, **schema 8 -> 9** (`_SCHEMA_V9`, additive, both `NULL` on every existing row; disclosed deviation: the brief said 7 -> 8, but 8 was already spent on Part 1's `tool_runs` rebuild). Rules: one 3xx and one 2xx -> the 3xx name is `duplicate_of` the 2xx name; both 2xx -> neither is marked, both get `has www sibling at <other>`; same non-2xx status and a shared IP -> `www.X` is `duplicate_of X`; same status, different **known** IPs -> neither marked, both get `www variant on a different server`; one alive one dead/DNS-only, or an unknown IP set -> nothing. `Store.set_host_duplicate()` updates the newest row and never appends one, so `state`, `status_code`, `confidence`, the confidence formula, `diff` and every count query are untouched. Display: a **Notes** column (added only when some row has a note, so an ordinary table keeps six columns) shows `-> redirects to <host>` / `-> duplicate of <host>` / `canonical` / the two sibling notes; the summary line gains `N hosts (M unique after www-dedup)` only when a duplicate exists; `--json` carries `hosts[].duplicate_of`, `hosts[].www_note` and a top-level `www_dedup` object. Mock proof (`run -d www-pair.test --active --no-scope --mock`, new synthetic fixtures `tests/fixtures/{dnspython,pyprobe}/www-pair.test.synthetic.json`): bare 301 -> `www.www-pair.test` 200 becomes `canonical`, bare row `-> redirects to www.www-pair.test`, `17 hosts (16 unique after www-dedup)`, `www_dedup.applied=true`; real testfire.net run (`--tools assetfinder,dnspython,pyprobe`) showed the other branch - both 200, so both got `has www sibling at ...` and nothing was marked. Suite 855 -> 869. Next action: Part 4 (url_probe stage).
+- Previous status: **BATCH 2026-11-18 PART 2 DONE (katana JSON skip, hakrawler/subjs caps, urlfinder inactivity kill).** Three defects from the example.com scan. (1) **`katana: invalid JSON line` threw away a whole crawl**: the parser now skips a line it cannot use (non-JSON, or JSON that is not an object) and keeps the rest; `hakrawler`, `gospider` and `subjs` got the same rule for a line with no usable URL. Skipped lines reach the Tools detail as one message per line up to 10, then `skipped N unusable line(s); last: ...`, and the status stays `ok`. `urlfinder` keeps its stricter archive rule. (2) **`hakrawler`/`subjs` owned the whole urls stage** (timeout, 0 items): they get `runtime_cap_s` 120 s and 60 s, keep their partial stdout and report `ok N` with `capped at <n>s; kept partial output` instead of `timeout` - a capped run with 0 items is also `ok`, because the tool worked and we stopped it. (3) **`urlfinder`'s flat 180 s cap is gone**: `urls.urlfinder_min_s/max_s/idle_s` (180/1800/60) give a floor, an inactivity kill and a ceiling in the new config block; the runner gained `idle_timeout`/`min_runtime` and `ExecResult.idle_killed`, and the engine hands the values down as `RunContext.limits`. Real: `katana ok 58`, `hakrawler ok 66`, `subjs ok 0`, then `urlfinder ok 933 in 18.1 s` and `gau ok 345`, all exit 0. Suite 840 -> 855. PIT-58. Next action: Part 3 (www/non-www deduplication).
+- Previous status: **BATCH 2026-11-18 PART 1 DONE (external-service gaps + stale docs).** A real `run -d example.com --active --no-scope` exited `5` although every failing tool had been *refused by its provider* (`otx` 429, `hackertarget` free quota, `crtsh` 502). Those are now the new tool status `gap` (owner ruling, no D number): one classifier `base.classify_external_gap()` (429/rate-limit/too-many-requests, quota/api-count-exceeded, upstream 502/503/504/5xx) feeds `ToolStatus.GAP` from `HttpAdapter` (status code), from a parser (quota body) and from `BaseToolAdapter.run` (binary stderr/exit). A gap is excluded from the failure total, becomes a completion gap (exit `0`, `completion.gaps`, the stderr block) and is stored as `tool_runs.status='gap'`, which is **schema 8** (`_SCHEMA_V8` rebuilds `tool_runs` because SQLite cannot alter a CHECK). A 404, a refused connection, a TLS error and a parse error stay `failed`. Real evidence on testfire.net: `subs` exited **0** with `tools: 7 ok, 2 gap, 0 failed` and the block naming both services; the same run exited 5 before. Same commit: the four stale statements from the state dump ("Nothing is pushed" - both refs are at `a49e4b5`; the `tech`/`urls`/`vulns` "no adapter" Open risk - waves 4-8 closed it; "Suite 827" - actually 824; `docs/05` "reconkit runs no installer script" - `scripts/install-tools.sh` exists since D21). Suite 824 -> 840. PIT-55. Next action: Part 2 of the same batch.
+- Previous status: **LINUX ONLY AND NUCLEI REDACTION FIXED (2026-11-18).** (1) **Linux only, no other platform anywhere** (owner decision): the OS-specific branches in `runner.py`/`workspace.py`/`subfinder.py`/`base.py`, the reserved-device-name rejection and the other-platform venv fallback are deleted, and every doc, log entry, script and gate instruction names Linux only; the docs commit is `6b904eb`. Suite 827 -> 821 because the reserved-name cases went with the behaviour they pinned (the "827" in this paragraph was itself stale: the verified count on this checkout is **824**, see the baseline line below). (2) **A real `--full` run on testfire.net found a real defect:** `nuclei` failed with `invalid JSON line`. Cause: the redaction patterns for `Cookie`/`Set-Cookie`/`Authorization` and the secret pairs ran to the next *real* newline, while a JSONL tool escapes its newlines, so every matching line had its remaining fields replaced by `***` (PIT-54). The value patterns now also stop at an escaped line end, the line stays valid JSON, and the cookie value is still masked. Regression: `test_redaction_keeps_a_jsonl_line_parseable`. (3) **Predictable runtimes** (owner request): `urlfinder` is killed at 180 s by a new `runtime_cap_s` and its partial stdout is parsed (its own `-max-time` is not enforced: measured still running at 5m52s with `-max-time 3`; before this a timeout discarded every URL found); `nikto` passes its own `-maxtime <share>s` per host so it stops cleanly and writes JSON instead of being killed at 600 s with 0 findings; `nuclei` gets `-or`, because the unused request/response pair pushed a real run past the 1 MB stdout cap and truncated the last JSON line (`invalid JSON line`). (4) Live evidence for this batch is recorded in REVIEW_LOG; every run used `testfire.net` from `scope.yaml`. The final `--full` run took **1466 s with 0 timeouts** (38 ok, 2 failed from upstream quotas): `nuclei ok 112`, `urlfinder ok 933 (capped)`, `nikto ok 8`, against 2027 s for the same command before the caps.
+- Previous status: **REPORTS IN BOTH MODES, LIVE SPINNER, AMASS FIXED (2026-11-18, D20).** Owner batch after a real `reconkit run -d testfire.net --active --no-scope --only-alive` run. Three changes, each with docs first: (1) **every scan now writes its report** - the writer was gated on the interactive plan, so a `-d`/`-l` run printed tables and saved nothing; it now writes `results/<domain>/<UTC stamp>/report.txt` + `report.json` on both paths, and a flagged run gets every `REPORT_FIELDS` key (the questions only choose columns). (2) **a live status line** - the durable progress lines only appear when a tool *finishes*, so a 600 s `gau` looked like a hang; a new transient `activity` channel carries `<stage>: <done>/<total> tool(s) done, <n>s elapsed - running: <tools>` to a Rich spinner on stderr, drawn only when stderr is a terminal and never on stdout. (3) **amass was broken** - v5.1.3 `enum` is a thin client for its own engine and prints only the `Session Scope` header, so the adapter harvested the target from that header and always reported exactly 1 item; findings are now read back with `amass subs -d DOMAIN -names` through a new documented `post_command` hook (real read-back for testfire.net: the same 8 hosts the table showed). **Two owner premises did not hold, and were reported instead of re-implemented:** stage tools were already concurrent (`asyncio.gather`, weights in REVIEW_LOG: urls did 1581 s of tool time in a 664 s stage), and no duplicates pass between stages (`discovered` is a `set`, `urls` is a `dict`, DB has `UNIQUE(target_id, fqdn)` / `UNIQUE(target_id, url)`; measured 1655 stored URLs = 1655 distinct, 41 hosts = 41 distinct, 0 duplicate groups). Then, with the owner's "do whatever is good, speed is only for the passive recon tools": (4) **the report follows the display filters** and records them (`selection: 8 of 42 hosts (ALIVE)`), so a `--only-alive` artifact matches the table without ever looking like a complete scan; the DB still keeps every host. (5) **the passive tools got their real timeout semantics back** - `gau --timeout` and `urlfinder -timeout` are *per-request HTTP timeouts*, and both adapters were passing the 600 s per-tool budget, so one slow archive source could block the whole stage; measured `gau` 0 items/600 s -> **345 items/31 s**, `urlfinder` 932/554 s -> **996 items/15 s**, and through the engine `reconkit urls -d testfire.net --active --no-scope --tools gau,urlfinder` finished the stage in **15 s wall clock** with `gau ok 345`, `urlfinder ok 933`. Active tools were not touched. (6) **waybackurls was asking one question 42 times** - the adapter fed every discovered host on stdin, but the tool asks `*.<line>/*` and its own `-no-subs` help proves one apex already covers its subdomains; it now gets the apex once (plus any host outside it, for multi-domain scopes) and does the same job in **2.4 s instead of 302 s**; the remaining 0 items are archive.org answering **503 Temporarily Offline** to wildcard CDX queries, not a reconkit defect (`gau` still returns 345 URLs from the same archive). Also verified the owner's question directly: `waybackurls`/`urlfinder`/`unfurl` are installed in `~/.reconkit/bin` and `reconkit doctor` shows `Installed yes / Identity ok` with the path - a bare `command -v` misses them only because that directory is on the child PATH. Suite 816 -> 827. Next action: none.
+- Previous status: **SHOTS STAGE WIRED (2026-11-17, D19).** `Stage.SHOTS` is no longer orphaned: it now sits in `STAGE_ORDER` between `urls` and `vulns` and therefore in `MODE_STAGES["full"]`; `passive` and `active` still do not request it and there is no `shots` stage command. `gowitness` is therefore runnable: `reconkit run -d testfire.net --full --no-scope --include-noisy --mock --tools pyprobe,httpx,tlsx,gowitness` prints `gowitness shots ok 2` and exit 0, while `--active` shows no shots stage at all (raw output in REVIEW_LOG). One gowitness fix was needed for that proof: `--mock` now takes the base fixture path before the empty-host early return, so a mock run reports the fixture's URLs instead of 0 items. `_persist_stage` deliberately has no `shots` branch - screenshots stay files plus `screenshots.jsonl` (D17). **Disclosed conflict:** the batch expected `gowitness` to be tier-skipped in `--full` without `--include-noisy`; it is not, because `--full` sets `include_noisy = True` in the CLI and `--tools` bypasses the tier gate by design. No stage-specific gate was invented; `test_full_runs_gowitness_without_the_noisy_flag_because_full_implies_it` pins the real behaviour and D19 records the ruling question. Suite 811 -> 816. Next action: none; ask the owner only if screenshots must stay behind an explicit flag in full mode.
+- Previous status: **FINAL ADAPTER PUSH, PART 2 DONE (2026-11-17): 44 OF 48 TOOLS ADAPTED.** Wave 8 shipped `dig`, `massdns`, `puredns` (dns/passive/core), `gowitness` (shots/active/opt_in) and `nikto` (vulns/active/opt_in). Resolvers are packaged (`src/reconkit/data/resolvers.txt`, 16 public resolvers, D16) with the new `--resolvers PATH` override; `puredns` passes `-b <abs massdns>` because a child process only gets the env keys the engine hands it. `nikto -h` lists `-Format json`, so the JSON path is taken (the pre-approved plain-text fallback was not needed) and every finding is `severity="info"`, `kind="nikto"`, one process per host. gowitness writes `results/<target>/<UTC stamp>/screenshots/*.png` plus a `screenshots.jsonl` manifest - **files, not DB rows** (D17, no model, no schema bump); it defaults to `jpeg`, so the adapter passes `--screenshot-format png`, and on this box it produced no file because Chromium is absent (`failed to initialize chrome context`), reported as an error string with 0 items. **`Stage.SHOTS` is in no `MODE_STAGES` row**, so no CLI path runs gowitness yet: wiring it is a mode-table change and needs a ruling; the adapter is complete and tested for a one-line wiring. `dig` was kept, not skipped as redundant: `dnspython` is the resolver with the wildcard/dangling-CNAME logic, `dig` is an independent second DNS source that raises a `DNS_ONLY` host from LOW to MEDIUM. Proofs: doctor `yes/ok` for all five; mock run `--tools pyprobe,httpx,tlsx,dig,massdns,puredns,nikto` -> `dig ok 3`, `massdns ok 3`, `puredns ok 3`, `nikto ok 2`, exit 0; the deferred **masscan sudo proof** ran under `echo kali | sudo -S` -> `masscan ok 3` (non-root control: `skipped requires root / sudo`); gowitness manifest proven with a stand-in binary (real gowitness cannot screenshot without Chrome). Suite 795 -> 811. Next action: owner ruling on wiring the `shots` stage; the adapter programme is closed (D15 dnsreaper + 3 intrusive tools remain by design).
+- Previous status: **FINAL ADAPTER PUSH, PART 1 DONE (2026-11-17): SUBS STAGE CLOSED.** `urlscan` (http), `amass`, `findomain`, `chaos` and `github_subdomains` are implemented, tested and committed; every `subs` tool now has an adapter. Real testfire.net run `--tools urlscan,findomain,pyprobe` -> `urlscan ok 3` (urlscan.io search API, no key needed), `findomain ok 35`, `pyprobe ok 7 ALIVE`; mock run -> `urlscan ok 2`, `amass ok 4`, `findomain ok 9`, `chaos skipped (requires PDCP_API_KEY)`, `github_subdomains skipped (requires GITHUB_TOKEN)`, exit 0. New rule: a tool that cannot run without a key is a **selection** skip via the adapter class attribute `requires_env` (D18), never a runtime SKIPPED. Real-output traps found: `amass --version` prints only `v5.1.3` (identity probe is `amass enum -h`), amass stdout is a `Session Scope`/`FQDN:` block rather than a name list, and `github-subdomains -o` defaults to `<domain>.txt` in the CWD so the adapter always passes a workspace path. **`dnsreaper` is closed as not adaptable (D15)**: no PyPI package, no console script; `subzy` covers takeover. Suite 780 -> 795. Next action: Part 2 (dig, massdns, puredns, gowitness, nikto) + the deferred masscan sudo proof.
+- Previous status: **WAVE 6 DONE (2026-11-17): PORTS STAGE CLOSED.** `nmap`, `rustscan`, `smap` and `masscan` (ports) are implemented, tested and committed; every stage except six tools now has an adapter (39). `--ports` reaches all four, but differently: `nmap` swaps `--top-ports 1000` for `-p`, `rustscan` swaps `--top` for `-p`, `masscan` gets `-p<list>` (its `DEFAULT_PORTS` fallback when the operator gave none, because it has no top-ports option), and `smap` **filters** its passive results because it cannot choose what Shodan observed. `masscan` is `needs_root`: a non-root process skips it at selection with `requires root / sudo` (recorded, not a gap, run stays exit 0) and never touches `sudo`; the adapter keeps the same guard. `rustscan` needs **no nmap** - verified with `PATH` emptied: `-g` prints `IP -> [ports]` with `No Nmap`, so the nmap dependency the brief assumed does not exist in 2.3.0 (no `--` passthrough either). `masscan` writes the **list** format (`-oL`), not JSON: `-oJ` cannot be observed without root and `sudo -n` asks for a password here. Real testfire.net run (`--tools pyprobe,nmap,rustscan,smap,masscan --ports 80,443,8080`) stored `80,443,8080` open with sources `nmap`+`rustscan`+`smap`, `HIGH`, and `Apache Tomcat/Coyote JSP engine 1.1` as the nmap version. That run exposed a real defect: `_persist_ports` threw away `service`/`version`, so the documented `-sV` confidence bump never fired - fixed (D14). Suite 758 -> 780. Next action: none; wave 7 (subs: urlscan, amass, findomain, chaos, github_subdomains) when the owner asks.
+- Previous status: **FFUF DONE; WAVE 6 PORTS IN PROGRESS (2026-11-17).** `ffuf` (vulns/opt_in) is implemented, tested and committed with the inline packaged wordlist `src/reconkit/data/wordlists/common.txt` (118 paths, package data, D13) and `--ffuf-wordlist PATH` to override it; findings are `FindingRecord(kind="path", severity="info")`. Real run on testfire.net stored 12 matches (`302 /admin`, `/admin/login`, ...). Two real-run defects were fixed before commit: the URL must use the `FFUF` keyword (`FUZZ` there exits 0 with no results), and the `FHOST` roots must not end in `/` (otherwise `//admin`). **`dnsreaper` is still unadapted**: it has no PyPI package and no `setup.py`/`pyproject.toml` - it is `main.py` + `requirements.txt`, so it needs a checkout plus a script-launching adapter kind that the contract does not have; reported, not improvised. Suite 751 -> 758. Next action: Part 2, ports adapters (nmap, rustscan, smap, masscan).
+- Previous status: **ADAPTER WAVE 5 PARTIAL (2026-11-17).** `nuclei` and `subzy` (vulns) are implemented, tested and committed; **`dnsreaper` and `ffuf` are blocked and not written** - dnsreaper is not installed on this box, so its real flags cannot be verified (AGENTS rule 7), and no ffuf wordlist exists anywhere in the repo or `~/.reconkit`, so an ffuf adapter would have to invent one (stop rule). Both need an owner ruling. Real runs on testfire.net: `nuclei ok 14` findings (swagger exposure, weak ciphers, missing security headers), `subzy ok 0` (no takeover); the first real runs found two output traps - nuclei prints `host` as `host:port` (PIT-53) and subzy writes `null` instead of `[]`. `FindingRecord` was reused (no new model) and its severity literal gained `unknown` (42 installed nuclei templates declare it); **findings are still not persisted** (no `findings` table, no VULNS persist branch) - they reach `--json` and the raw output file only. New shared hook `read_output(ctx)` for `--output`-only tools. Suite 742 -> 751. Next action: none until the two blockers are ruled on.
+- Previous status: **D12 DONE (2026-11-17).** D12 (owner ruling): the WAF merge is deterministic by a new `waf_priority` on `ToolSpec`/`tools.yaml` (`wafw00f` 100 > `cdncheck` 80 > `whatweb` 50 > `httpx_tech` 20 > everything 0), so two WAF tools can no longer flip the stored name with completion order. **This is a schema change: 6 -> 7** (`host_status_history.waf_priority INTEGER NOT NULL DEFAULT 0`, additive). Three fresh-DB mock runs store `Cloudflare`/100 every time where the wave-4 code stored `httpx_tech`'s `cloudflare`. Suite 736 -> 742. Next action: Part 2, adapter wave 5 (nuclei, subzy, dnsreaper, ffuf).
+- Previous status: **ADAPTER WAVE 4 DONE (2026-11-17).** `unfurl` (urls/passive, per `tools.yaml:158` - the brief said active; the registry won, same ruling as gau/urlfinder), `wafw00f` and `whatweb` (tech/active) and `httpx_tech` (tech/active, inherits the `httpx` command through the new `httpx_hosts()`/`httpx_fqdn()` helpers) are implemented, tested and committed. Every `tech` and `urls` tool now has an adapter. `whatweb --log-json=-` exits 1 without `--quiet` (verified on the binary), so `--quiet` is part of the command. The waf/tech merge question was answered from the code and left unchanged: `tech` is a merged list, `waf` is one string whose winner is the first tool to finish in a pass and the latest pass across runs - an open item for a ruling, since merging needs a schema change. Real: `doctor` all four `yes`/`ok`; mock run 5/5 tools (`httpx_tech ok 2`, `whatweb ok 1`, `wafw00f ok 1`, `unfurl ok 4`), DB `testfire.net tech_json=["Apache","Apache Tomcat","HTTPServer","Java"] waf=cloudflare`; adversarial PATH still rejects Python `/usr/bin/httpx` for `httpx_tech` (`wrong program`/`failed`). Suite 726 -> 736. Next action: none.
+- Previous status: **ADAPTER WAVE 3 DONE (2026-11-17).** `hakrawler`, `gospider`, `subjs` (urls/active) and `urlfinder` (urls/passive, per `tools.yaml:159` - the brief said active; the registry won, same ruling as gau) are implemented, tested and committed. The first real hakrawler crawl exposed PIT-52 (a page's `javascript:` link made the strict parser fail the tool); `base.is_non_web_reference()` now skips non-HTTP links in all four parsers. Real testfire.net runs: `hakrawler ok 66`, `gospider ok 67`, `subjs ok 0` (host has no `.js`), `urlfinder ok 932`; mock run 4/4 tools, 16 unique URLs stored. Suite 712 -> 726. Next action: none.
+- Previous status: **BOTH PARTS DONE (D10 mode expansion `756af8e`; D11 adapter wave 2 + tech persistence).** Wave 2 added `httprobe` (live), `webanalyze` + `cdncheck` (tech), `waybackurls` (urls/passive) and the tech-stage persistence they needed (D11: `_persist_tech` annotates the newest status row, never appends one). Suite 687 -> 691 (Part 1) -> 712 (Part 2). Real runs on testfire.net: `httprobe ok 1`, `webanalyze ok 1` with `tech_json = ["Apache Tomcat", "Java"]` stored, `cdncheck ok 0` (no CDN/WAF match, the documented shape); `waybackurls` runs `ok 0` because the archive endpoint times out from this box, so its parsing proof is `--mock`. Next action: none.
+- Previous status: **MODE EXPANSION DONE (D10); ADAPTER WAVE 2 IN PROGRESS.** D10 (2026-11-17): `passive` = subs+dns+urls (passive tools only), `active` = subs+dns+live+tech+urls, `full` unchanged. Confirmed by real `--mock` runs in all three modes (gau `ok` in passive, katana skipped `tool mode not included in passive mode`; active runs tech + both urls tools; full runs all seven). Suite 687 -> 691. Next action: Part 2, adapter wave 2 (httprobe, webanalyze, cdncheck, waybackurls), one commit, stop-and-report if any adapter balloons.
+- Previous status: **BATCH 2026-11-17 PARTS 1 AND 2 DONE.** Part 2 (adapter wave 1) added four adapters - `dnsx` (dns/passive), `tlsx` (live/active, liveness-only + SAN discovery), `katana` (urls/active), `gau` (urls/passive) - and fixed the live-discovery persistence bug found while scoping tlsx (PIT-49: `_persist_live_discoveries` now writes a `subdomains` row for every host a live pass discovered, not only for the hosts it was given). gau gained the Ruling C `version_regex`. Suite 672 -> 687. Open item for the owner: `urls` is not a stage of `--active`, so katana/gau only run in `--full` (the batch prompt assumed otherwise) - the mode table was left unchanged. Next action: none.
+- Previous status: **BATCH 2026-11-17 PART 1 DONE (D9 completion gaps).** Part 1: `--full`/`--active` now exit 0 when a requested stage had no runnable tool, with a stderr gaps block (`⚠ full scan completed with gaps — N stage(s) ...`) and a top-level `--json` `completion` object (`complete` / `complete_with_gaps` + `gaps`); exit 5 is reserved for a failed/timed-out tool or a stage emptied by a deliberate rule, and "nothing usable at all" still exits 4. AGENTS.md item 11 (adapter pre-approval) and MASTER_PLAN D9 added. Next action: Part 2 (four adapters, one commit, stop-and-report if any adapter balloons).
+- Previous status: **MODE UNIFICATION BATCH S1-S7 DONE (2026-11-17).** Scan modes are one table (`MODE_STAGES` + `MODE_TOOLS` in `engine.py`): passive = subs+dns/passive tools/core; active = subs+dns+live/passive+active/core; full = all seven stages/passive+active/core+opt_in+intrusive. `--full` is new (implies `--active` and `--include-noisy`); CLI `--active` narrows to subs+dns+live; `exploitation: true` tools (sqlmap, dalfox, crlfuzz) never auto-run in any mode. Also added: scope pre-flight warning, `--no-scope` + `scan_runs.scope_mode` (schema 6), `--only-alive`/`--only-states`/`--status-codes`, `--ports`/`--header`/`--user-agent`/`--redact-headers`, extended interactive Q&A, out-of-scope `[a/b/c/d]` prompt. Baseline before this batch: 637 passed. Next action: none.
+- Previous status: **PART 12 AND PART 13 ARE COMPLETE (2026-11-16).** Part 12 closed on 2026-11-15 (12a-12k). Part 13 - the interactive scan mode, stderr progress and per-domain saved reports - is implemented, tested, self-reviewed (S1-S7) and committed, with docs written first. Phase 1 of the same session (the `docs/tool_manuals/` library) is closed in `8dc2829`.
+- What Part 13 changed, in one line: a scan command with **no** `-d`/`-l` **and** a real terminal asks five questions and then runs the ordinary scan inputs; a domain file becomes the ordinary `-l` path (one full scan and one `results/<domain>/<UTC stamp>/` folder per domain, `report.txt` + `report.json`); progress now goes to stderr for every mode except `--silent`, including `--json`. Every flag-based invocation is unchanged, including no prompts and no report folders (tests `test_a_flagged_run_never_asks_a_question`, `test_a_listed_run_never_asks_a_question`, `test_a_flagged_run_writes_no_report_folder`). **Superseded 2026-11-18 (D20):** a flagged run now writes its own report folder too; the test is `test_a_flagged_run_writes_its_own_report_folder`. The no-prompt promise stands.
+- All four owner tasks (2026-11-17) are implemented, tested and committed: D1 `c99eaee`, D2 `6642ee4`, D3 `6a2db4d`, the interactive-mode fix `10b3a48`, Task 4 docs with this entry. Nothing else is queued; Part 13's uncertainties stay under "Open risks".
+- The verification follow-up (2026-11-17) closes the eight findings from the accepted 4-task batch (`F1`-`F8`, report section V-UNEXPECTED) in one commit: `--active` help text, the owner verification commands, five historical pacing markers, the core package docstring, two dead `pyproject` ignores, the AGENTS `config.yaml` row, two tool manuals and the D3 test counts. Documentation and help text only - no behaviour, flag, schema or test change.
+- **Owner-requested behavior changes (2026-11-17):** D1 (no scope file = unrestricted active scanning) is committed (`c99eaee`), D2 (naabu is scope-mode dependent) is committed (`6642ee4`), D3 (all speed/throttle control removed) is committed with this entry, and Task 4 (the end-to-end interactive-flow section in docs/02) is the next action.
+- **httpx_tech false positive FIXED (2026-11-17, MASTER_PLAN D5, V-UNEXPECTED item 1; commit `fix: httpx_tech rejects Python httpx via version_regex miss rule`).** `httpx_tech` was presence-only, so with only Python's `/usr/bin/httpx` visible doctor said `yes` / `identity: ok` where the `httpx` adapter row correctly said `wrong program`. It now carries `version_cmd: [httpx, -version]` + `version_regex: 'Current Version:\s*v?([0-9]+\.[0-9]+\.[0-9]+)'`, and `installed_version()` treats a declared regex that does not match as `None` (not installed). Re-tested both ways: normal PATH -> `version: "1.12.0"`; Python-only PATH -> `wrong program` / `identity: failed`. 638 passed. The other 12 presence-only tools stay as they are and are now documented as a known limitation (docs/10 section 3).
+- **Installer removal COMPLETE (2026-11-17, MASTER_PLAN D4, owner request "user-requested removal of install/update commands").** `install`, `update`, `doctor --fix` and `src/reconkit/installer/` are deleted; `tools.yaml` `install:` blocks became inert `source:` strings; `doctor` uses `ToolSpec` through `core/toolcheck.py` and no longer imports the installer. Full evidence, every changed test and the 730 -> 635 count reconciliation are in REVIEW_LOG "Installer removal D4". Nothing else queued; next action: none.
+- **Install/doc backlog batch (2026-11-17, T1-T6 + one correction; the commands named here were removed later the same day by D4).** `reconkit install rustscan` works from its real 2.3.0 release (`f638c05`); the seven banner-first tools show a real version (`e0ef81d`); smap/gospider/subjs/urlfinder show one and the five Go-flag tools are documented path rows (`cb1fcd2`); `assetfinder -h` exit code corrected (`74c9102`, `-version` exit 2 corrected in `a037014`); amass v5 note (`24f64a3`); webanalyze `-update` recorded (`583e530`). Every one confirmed against the real binaries on this box.
+- **Install residue removal S1-S7 COMPLETE (2026-11-17, cleanup only; commit `chore: remove install residue; docs/10 becomes tool reference (reconkit installs nothing)`).** Stale installer test bytecode deleted (5 `.pyc`; `__pycache__` dirs 73 -> 73); `config.yaml` `tool_versions` and its `AppConfig` field and `doctor` warning are gone; docs/10 is now a 149-line tool reference (48-row table, sections 1-4) with no install command anywhere; SETUP.md keeps only the editable self-install plus the doctor pointer; README, docs/01/02/05/08 and the seven tool manuals lost their install instructions; `tools.yaml`'s `source` comment is provenance-only, values unchanged. Full evidence in REVIEW_LOG "Install residue removal S1-S7".
+- **Doctor shows no version COMPLETE (2026-11-17, MASTER_PLAN D6, owner ruling; commit `feat: doctor shows installed/path/identity only; versions hidden (version_cmd kept for identity checks)`).** The table is now `Tool`, `Stage`, `Tier`, `Installed`, `Path`, `Identity`; `ToolCheck` and every `doctor --json` tool object lost the version key; the `Missing tools: N` footer now says `Scans will use the tools that are installed and skip the rest. Per-tool provenance: docs/10_TOOL_SOURCES.md.` `core.toolcheck.installed_version()`, `InstallStatus.version`, `tools.yaml`'s `version_cmd`/`version_regex` and every `source:` value are untouched, so the D5 identity check still rejects Python's `/usr/bin/httpx` (`wrong program` / `identity: failed`) while the real ProjectDiscovery copy is `yes` / `ok`. Full evidence in REVIEW_LOG "Doctor shows no version D6".
+- **Next action:** none. D21 (2026-11-18) adds `scripts/install-tools.sh`: the owner asked for one script that installs every tool with apt/go and then verifies with `doctor`. The CLI still installs nothing (D4 stands for the command surface and the safety rules); the script has no catalogue of its own, reads `tools.yaml` `source:` strings, downloads nothing itself, refuses to run as root, and ends with `doctor --json` so a wrong-program binary fails. Nine release-only ProjectDiscovery entries gained `(or: go install ...)` hints, each verified with `go install -n` before being written. Verified on this box: `--check` (33 have / 2 go / 3 manual), `--only gau` exit 0, `--only dalfox --yes` installed to `~/.reconkit/bin` in 13 s with `identity ok`. Also verified for the owner's question: `waybackurls`/`urlfinder`/`unfurl` were never missing - they live in `~/.reconkit/bin` and `doctor` already showed them; a bare `command -v` missed them because that directory is on the child PATH only. Suite 827. **Update (2026-11-18):** `findomain` and `rustscan` are no longer manual - Kali packages both (`apt-cache policy`: `11.0.0-beta.2-0kali2`, `2.4.1-0kali1`), so their `source:` is now `apt:` and the script installs them with sudo. Both apt builds were checked against the flags the adapters send (`-t/-q`, `-a/-g/-n/--ulimit/--top`), findomain printed bare subdomains on a real `-t example.com -q` run, and `doctor` resolves `/usr/bin` for both with `identity ok` after the hand-installed copies were moved to `/tmp/*.hand.bak`. Final counts: 38 have, 1 manual (`dnsreaper`). Two registry tests were rewritten to the new truth. Suite 827 at the time (re-verified 2026-11-18: **824**). The nested-archive item under "Open risks" is moot for reconkit (it installs nothing since D4) and stays only as a note about rustscan 2.4.1. Four follow-up items remain from the S1-S7 entry's Findings (the 19 frozen `source:` values, nine "Install command: nothing to install" manual bullets, AGENTS.md's stale installer references, the historical rustscan transcript); the doctor footer finding is now closed by D6.
+- Baseline on this checkout (`/home/kali/Desktop/reconkit`, Python 3.14.8, schema version 10) after the 2026-11-18 batch's Part B (D27): `898 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After the same batch's Part A (docs only) and the verification follow-up's Part 3 (D26) including the config-default follow-up: `892 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). Immediately after Part 3 (`891 passed`), `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After the same follow-up's Part 1 (D24): `888 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After the same follow-up's Part 2 (D25): `883 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After Part 4 of the 2026-11-18 batch: `882 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After Part 3 (schema 9): `869 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After Part 2 (schema 8): `855 passed`, `ruff check .` clean, `ruff format --check .` 92 files, `mypy src/reconkit` clean (62 source files). After Part 1: `840 passed`, `ruff check .` clean, `ruff format --check .` 91 files, `mypy src/reconkit` clean (62 source files). Before the batch (schema version 7) after D20 (reports/spinner/amass/passive timeouts/waybackurls): **`824 passed`** (re-measured 2026-11-18; the earlier `827` here was stale by three), `ruff check .` clean, `ruff format --check .` 91 files, `mypy src/reconkit` clean (62 source files). After D19 (shots wiring): `816 passed`, `ruff check .` clean, `ruff format --check .` 90 files, `mypy src/reconkit` clean (62 source files). Before this batch: `811` after wave 8; `795` after wave 7. Earlier: `780` after wave 6. Before the ports adapters: `758` after ffuf. Earlier: `751` after wave 5, `742` after D12, `736` after wave 4, `726` after wave 3, `712` after wave 2, `691` after D10, `687` after wave 1, `672` after D9, `637` after D6. The count is unchanged from S1-S7 because one doctor test was deleted and one added; pre-S1 `638`; pre-D5 `635`; pre-D4 `730 passed`, 67 files, 35 source files.
+- **Push state (durable, D28):** `reconkit/main` is at `a49e4b5` (`docs: finish removing the last platform words and the /mnt/c example`); local `main` is ahead of it; nothing has been pushed since. Push only when the owner asks (`git push reconkit main`).
+- Already decided, do not reopen: no scope-bypass flag; consensus lives in `engine.py`; adapters never import `store`/`scope`/`ui`/`cli`; `subjack` replaced by `subzy` + nuclei takeover templates; reconkit installs nothing, so there is no installer platform rule (D4, 2026-11-17); free mode is default, keys only from `.env`; the ports ceiling is permanent (12i).
+- Do NOT: new dependencies; new modules/files/CLI commands not in docs/02-03; `assert` in `src/`; new lint/type suppressions; `shell=True`; the whole environment to a child; adapters importing store/scope/ui/cli; consensus outside `engine.py`; pushing.
+- Read first: `AGENTS.md`, this block, the last 3 per-part entries in `REVIEW_LOG` (they are above the archive section), and the current part in `docs/MASTER_PLAN.md`.
+
+### Deferred by R9 (needs owner, not attempted)
+
+- **B5 - out-of-scope CIDRs in `scope.yaml`.** `scope.yaml` has no CIDR/allow-list field, so a range-based authorization
+  cannot be expressed; adding one is a scope schema change and a scope-gate change, both owner-only. Deferred by R9.
+- **B6 - masscan/smap on a real large range.** Needs a real network and a written authorization for a range this project
+  has no scope field for (see B5); nothing can be measured honestly on testfire.net. Deferred by R9.
+- **B7 - interactive pty re-exercise.** The interactive flow needs a real pty session (`script`/pexpect) and a human at
+  the keyboard for the `[a]` scope-write prompt; the automated suite covers the non-interactive branches only. Deferred by
+  R9.
+
+
+- Earlier statuses (D57-D118) are in "Earlier statuses" at the end of this
+  file. Read them only when a task turns on how an older decision was made.
+
+
+These are the status entries RESUME accumulated from D57 to D118. They are
+history: the newest three stay in RESUME so a session boots on the current
+state. Nothing here is rewritten; it was moved, not edited.
+
+- Status (2026-11-22, D118): **audit found no gate or CI failure; the docs
+  still described shipped work as future.** Baseline on this checkout: `pytest
+  -q` 1262 passed / 3 skipped, the same with `FORCE_TERMINAL=1`, ruff, format
+  and mypy clean, and the five most recent GitHub Actions runs green. The stale
+  claims fixed: docs/09's stage table carried a `Phase 2 working` column listing
+  only the first-build subset (ports: `pyscan, naabu`) so installed adapters
+  (nmap, rustscan, smap, tlsx, puredns, ...) read as unshipped; docs/01 listed
+  `urls`/`tech`/`vulns`/`shots` and the modes as Phase 3 after v1.0.0 shipped
+  them; docs/04 said the `urls` table was "populated only by the Phase 3 urls
+  stage"; docs/05 said "Phase 2 has no `cdncheck`" while `cdncheck`/`wafw00f`
+  ship and D110 enforces the skip; docs/07 said fixtures cover "every Phase 2
+  passive adapter"; docs/09 labelled `UrlRecord`/`FindingRecord` Phase 3;
+  COMMANDS.md said the `urls` stage stores "URLs + patterns" although
+  `category`/`patterns_json` are never filled; and `tools.yaml`'s `unfurl` note
+  claimed pattern sorting runs in Python. New guard:
+  `test_regression_docs_stage_table_describes_the_shipped_build` parses docs/09
+  section 4 and fails if the table carries a phase column, misses a registry
+  tool in its stage row, or names a tool the registry does not list; it failed
+  on the pre-fix tree and passes now. Gate after the change: 1263 passed / 3
+  skipped plain and `FORCE_TERMINAL=1`, ruff/format/mypy clean, invariants 196
+  passed / 3 skipped. Not a defect, recorded for the owner: `doctor` reports
+  `dnsreaper` missing on this box (`~/.reconkit/opt` is gone; reinstall with
+  `./scripts/setup.sh --only dnsreaper --yes`), and the local venv is Python
+  3.14.6 while CI covers 3.11-3.13. Next action: none.
+
+- Status (2026-11-21, D117): **the tracked tree is verified clean, `main` is
+  pushed, and `v1.0.0` points at the released commit.** An exact-pattern grep
+  (every spelling of the real target name, case-insensitive) returns nothing
+  in any tracked file; the only `slice` hits left are the
+  ordinary English word (`identity slice`, `distributed scan slice`) in
+  `docs/REVIEW_LOG.md` and `docs/tool_manuals/ports.md`. `main` fast-forwarded
+  from `6239806` and the annotated tag `v1.0.0` was re-created on the same
+  commit and force-pushed, so branch, tag, `pyproject.toml` and `__version__`
+  all say `1.0.0`. Still holding the real target, and deliberately out of this
+  batch: git history (an owner-approved filter rewrite plus force-push would be
+  needed), the untracked `recon.db` and the `results/` tree from the D115 run -
+  neither is tracked or pushed. Gate: 1262 passed, 3 skipped, plain and
+  `FORCE_TERMINAL=1`; ruff, format and mypy clean. Next action: none.
+
+- Status (2026-11-21, D116): **real target names removed from the tracked
+  tree.** D79's scrub missed 54 lines in 7 files; all real-target variants are
+  now `target.example`, and the older registrable `.com` placeholder was
+  migrated to the same reserved name. Scratch names derived from the target are
+  `target-*`. A grep for the removed target names returns nothing; the only
+  remaining matches are the ordinary English word. Public demo and vendor
+  domains (`testfire.net`, `github.com`, `example.com`) are intentionally left.
+  The untracked `scope.yaml`, local `recon.db`/`results/` and git history still
+  contain the real target; removing it from history needs a filter rewrite and
+  force-push, not done. Docs/comments only; gate 1262 passed, 3 skipped.
+
+- Status (2026-11-21, D115): **clean-DB and clean-results first pass
+  verified.** Backed up `recon.db` and `results/` to `/tmp`, wiped the DB
+  (0 targets, 0 subdomains, 0 URLs, 0 scan runs) and removed `results/`, then
+  ran the real `reconkit active -d target.example --no-scope`. Exit 0, **522 s**
+  wall; stages: subs 23 s, dns 1 s, live 34 s, tech 53 s, urls 198 s,
+  `url_probe` **178 s**. The probe reported `probing 2853 URL(s)` and
+  `finished 2853 URL(s)`; 6 URLs on unreachable hosts were skipped, with no cap
+  cut and 0 timeouts. Stored 3,019 URLs = 160 out-of-target + 6 unreachable +
+  2,853 probed. This pass saw 56 `429`s (the IP had just been re-probed); the
+  timing and coverage are the clean result, the status mix is not a pristine
+  control. `--mock` on an isolated `/tmp` DB exited 0 and skipped `url_probe`
+  (`7 URL(s) left unprobed`). Next action: none.
+
+- Status (2026-11-21, D114): **`url_probe` no longer waits for a 200-URL
+  batch, and its URL cap defaults to none.** `threads` still bounds requests in
+  flight; each finished answer is committed in groups of `batch_size`, so one
+  slow URL (or its `timeout_s` tail) no longer stalls the next group.
+  `max_urls: 0` (new default) means no cap; a positive value keeps the old
+  cut-and-warn behavior. Measured on the same 2,848-candidate `target.example`
+  pool: **335 s -> 177 s** (1.9x); the 158 s saved is about 15 batches x one
+  10 s tail. Of 3,013 stored URLs, 159 are out-of-target and 6 sit on
+  DEAD/DNS_ONLY hosts, so 2,848 were probed. Tests:
+  `test_url_probe_commits_finished_answers_before_a_slow_one` and
+  `test_url_probe_with_no_cap_probes_every_url`; the timeout regression still
+  keeps finished answers. Gate: 1262 passed plain and `FORCE_TERMINAL=1`, 3
+  skipped, ruff/format/mypy clean, invariants 195 passed. Next action: none.
+
+- Status (2026-11-21, D113): the contribution workflow is unconditional and
+  version/tag/docs must agree. AGENTS.md hard rule 11: every change, whether or
+  not the request asks for it, keeps the pipeline working, implements the
+  behavior properly, adds a regression test for new behavior or fixed defects,
+  and updates every affected doc in the same commit. Hard rule 12: `__version__`,
+  `pyproject.toml`, the release tag, banner/README examples, CLI help, flags,
+  defaults and docs must all say the same thing; a mismatch is a defect fixed in
+  the same batch. The package version and release tag are now both `1.0.0` and
+  `v1.0.0`; `v1.1.0` was deleted locally and on GitHub. Gate: 1260 passed,
+  3 skipped. Next action: none.
+
+- Status (2026-11-21, D112): workspace reset, and a rule to trace before
+  touching. `reconkit db wipe --yes` removed 8 targets, 27,669 subdomains,
+  13,617 URLs, 1,414 tool runs and 240 stage runs; the 92 MB `results/` tree was
+  deleted and is gone. The pre-wipe DB is at
+  `/tmp/recon-before-clean-20261121T163914.db`. AGENTS.md section 4.2 now
+  requires grepping and reading every affected file (source, tests, registry,
+  config, scripts and all docs, including `COMMANDS.md`, `README.md` and
+  `SETUP.md`) before editing one; section 0b points at it. The mock-skip rule is
+  now also stated in `COMMANDS.md`, `docs/02` and `README.md` (0df7049).
+  Verifying the clean tree exposed one more leak: the suite itself recreated
+  `results/mock/example.com` (280 folders) because `make_config()` left
+  `results_dir` at the repo-relative default. Fixed and guarded (PIT-72); both
+  gate modes now finish with `NO_RESULTS_DIR`. Gate: 1260 passed, 3 skipped.
+  Next action: none.
+
+- Status (2026-11-21, D111): **one fact, one row, for every target.** Stored
+  facts are now canonical at the engine boundary, not only in each adapter:
+  `normalize_url()` gives one spelling per page, `_persist_discovery` and
+  `_persist_ports` run `_clean_hosts()` (canonical + in-target) before a unique
+  key, and the ports key/protocol is `(host, ip, port, protocol)` so `tcp/53`
+  and `udp/53` cannot collapse. A mock target with no matching fixture is now
+  `SKIPPED` (`no fixture for <target>`), never a failed tool. Measured on the
+  real DB: 10 duplicate URL groups before, 0 after a fresh scan; run 2 on the
+  existing DB added 0 non-canonical URLs. Fresh `target.example`: 15 hosts, 12
+  ALIVE, 3057 URLs / 0 duplicate groups / 0 ports / 0 IP rows, exit 0.
+  `pentest-ground.com` (authorized, own DB): 43 hosts, 6 ALIVE, 390 URLs / 0
+  duplicates, exit 0. Mock on `example.org` (no scope) and `testfire.net`
+  (`scope_mode=enforced`) both exit 0 with 0 failed tools. AGENTS.md section 0e
+  states the machine-checked contribution invariants;  `tests/test_invariants.py`
+  enforces them. Gate: 1259 tests plain and `FORCE_TERMINAL=1`, ruff/format/mypy
+  clean. Deviations: legacy duplicate URL rows in an existing DB are left in
+  place (the fix prevents new ones and updates the legacy spelling); the old
+  `test_mock_mode_without_fixture_fails` now asserts `SKIPPED`. Next action: none.
+
+- Status (2026-11-21, D110): **a CDN/WAF host no longer produces port
+  findings.** `Store.waf_fronted_hosts()` reads the latest stored `waf`, the
+  engine drops those hosts before the ports stage (docs/05 rule 7, which was
+  documented but never implemented), and `host_rows()` returns no ports for a
+  fronted host plus the note `CDN: <waf>`. Stored rows are
+  kept. This is the `target.example` report showing 2982 "open" ports for
+  `b.target.example`: Cloudflare (172.65.64.158) answered TCP on **every** port
+  tried (1, 3, 7, 9, 31337, 65389, all ~184 ms), so the scan recorded the
+  edge's listeners. All 10 ALIVE `target.example` hosts are Cloudflare and now
+  report 0 ports. Tests: `test_cdn_fronted_host_reports_no_edge_ports`,
+  `test_ports_stage_skips_cdn_waf_fronted_hosts`. Gate: 1058 tests plain and
+  `FORCE_TERMINAL=1`, ruff/format/mypy clean. Next action: none.
+
+- Status (2026-11-21, D109): **fixture hosts cannot reach a real report, and
+  `gau` gets a silence window its own timeouts can meet.** A host whose every source row comes
+  from a mock run is now hidden by `Store.host_rows()` and `Store.subdomains()`
+  when the target also has a real run, so the four `*.example.com` names a
+  2026-11-17 mock run wrote into the real `recon.db` (run 69, `mock: true`) no
+  longer appear in a `testfire.net` table, resume seed set or url-derived host
+  set. A target whose only runs are mock keeps its fixtures, so `--mock`
+  reports are unchanged. `config.yaml` `runtime_idle.crawler` is 120 s (was
+  60): `gau` runs with its own 45 s request timeout and 1 retry, so 90 s of
+  silence is normal work, and the old window killed it on every scan (`killed
+  after 60s idle, 1029 partial`). A fresh run after the change still saw it
+  silent past 120 s (killed at stage 219.7 s with 479 partial): gau itself
+  stalls, the window is not the whole story, and partial output is kept with
+  exit 0. Regression tests:
+  `test_mock_only_hosts_are_hidden_from_reports` plus the updated class-window
+  assertions. Gate: 1056 tests plain and `FORCE_TERMINAL=1`, ruff/format/mypy
+  clean. Real runs on testfire.net: `passive` and `active --full` both exit 0
+  with a PDF; the 0 live hosts are testfire.net itself refusing :80/:443 from
+  this network (`curl` fails with connection refused), not a probe defect.
+  Next action: none.
+
+- Status (2026-11-21, D108): **one setup script; a stale venv repairs itself.**
+  `scripts/setup.sh` is now the only setup script (owner request):
+  `bootstrap.sh` and `install-tools.sh` are merged into it, so one file owns
+  the venv/editable install/git hooks/PATH half and the `tools.yaml` installer
+  half. It records `.venv/.reconkit-deps` (SHA-256 of `pyproject.toml`) after a
+  successful install and bootstraps again when that hash changes, the stamp is
+  missing, or `import reconkit.cli` fails. That is the fix for the
+  `ModuleNotFoundError: No module named 'reportlab'` a `git pull` caused in an
+  existing venv (D107's dependency never reached it). Two container findings
+  are fixed too: the old bootstrap ended with `awk` (absent from minimal
+  Kali/Debian images) and ran `git config` without a `.git` check.
+  `reconkit doctor` now has a Dependencies table with a `reportlab` row
+  (`pdf` in `--json`), and `cli.py` imports the PDF writer lazily, so a
+  missing dependency is a doctor row, not an ImportError before any command
+  can run. New network-free tests in `tests/test_package.py` cover the
+  staleness paths and the no-`awk` rule. Gate: 1055 tests plain and `FORCE_TERMINAL=1`,
+  ruff/format/mypy clean. Full first run verified in a
+  `kalilinux/kali-rolling` container as a non-root user. Next action: none.
+
+- Status (2026-11-21, D107): **branding, PDF reports and per-scan logging ship
+  as v1.1.0.** A human scan prints one ASCII banner (credits and live
+  `__version__`) to stderr, never under `--json`/`--silent` and never from a
+  child. Every scan writes `report.pdf` beside the unchanged `report.txt` and
+  `report.json`: five sections (cover, executive summary, results, technical
+  details, findings), navy theme, headers/footers and page numbers, alternating
+  table rows, repeated headers, `LongTable` pagination and clickable URLs. A
+  per-target log goes to `<results_dir>/logs/<target>/<UTC stamp>.log` with
+  UTC timestamps, five levels, redaction, and colored milestone lines on stderr.
+  New modules: `branding.py`, `logs.py`, `pdf_report.py`; new dependency
+  `reportlab>=4.2`; new defaulted config keys `report.pdf` and `logging.*`.
+  Gate: 1044 tests both plain and `FORCE_TERMINAL=1`, ruff/format/mypy clean.
+  Verified with a real mock scan (6-page PDF, log file) and a 1200-host
+  synthetic PDF (51 pages, no clipping). Next action: none.
+
+- Status (2026-11-21, D106): **the session handoff rule is now in AGENTS.md.**
+  Every change must update all affected docs plus the PROGRESS RESUME and a
+  REVIEW_LOG entry in the same commit; every error (review, CI, real run) gets
+  a regression test; the gate runs both plain and `FORCE_TERMINAL=1`. Also
+  removed the stale "scope-file writes in interactive mode" pre-approval, since
+  D104 deleted that path. Next action: none.
+
+- Status (2026-11-21, D105): **console ports are ALIVE-only, like the report.**
+  A `DNS_ONLY`/`DEAD` row no longer prints stored ports that no ports stage ran
+  for this scan; the column is omitted when no row is ALIVE. Also fixed
+  `test_bare_reconkit_shows_help_instead_of_scanning`, which failed on GitHub
+  Actions because `FORCE_TERMINAL` styles piped help; it now uses the existing
+  `help_text()`/`HELP_ENV` helper. Gate run both plain and with
+  `FORCE_TERMINAL=1`: 1033 tests, ruff/format/mypy clean. Next action: none.
+
+- Status (2026-11-21, D104): **interactive mode is removed; one input path.**
+  Every prompt, the plan dataclass, the `[a/b/c/d]` out-of-scope menu and
+  `ui.report_fields()` are gone; bare `reconkit` prints help (exit 2) and a scan
+  command without `-d`/`-l` keeps `provide a target with -d/--domain or
+  -l/--list` (exit 2). `tests/test_interactive_scan.py` is deleted; its
+  non-interactive coverage moved to `test_cli.py` (4) and `test_ui.py` (4).
+  Docs/02 section 2b, COMMANDS.md's interactive section and README's line are
+  removed. This reverses D103 and the interactive half of Part 13. Gate: 1031
+  tests, ruff/format/mypy clean, plus a CLI/mock harness and real runs on
+  testfire.net. Next action: none.
+
+- Status (2026-11-21, D103): **bare `reconkit` starts the interactive scan.**
+  `no_args_is_help=True` on the root `typer.Typer` printed usage before the
+  callback, so the documented no-command launch never reached the question
+  series. It is now `False`; the bare callback is the `passive` shorthand, so
+  a terminal gets the questions and a pipe keeps the `provide a target` error.
+  `--help` still exits 0. Gate: 1062 tests, ruff/format/mypy clean. Next
+  action: none.
+
+- Status (2026-11-21, D102): **user-facing docs now use the new mode commands.**
+  COMMANDS.md, README, docs/02, docs/08 and docs/09 spell mode invocations as
+  `passive`/`active`/`full` instead of `run --active`/`run --full`; `run`
+  remains for flag-driven cases. Tag `v1.0.0` re-cut on the current HEAD and
+  pushed. Next action: none.
+
+- Status (2026-11-21, D101): **the three modes are three commands; `lite` is
+  gone.** `reconkit active -d X` and `reconkit full -d X` now exist and are the
+  same run as `run -d X --active` / `run -d X --full`: a parametrized test
+  captures `ScanOptions` from both spellings and compares stages, mode, `active`
+  and `include_noisy`. `lite` was an exact duplicate of `passive` and was
+  removed; the bare `reconkit -d X` form is now `passive` internally and in
+  every doc. Refusals are unchanged (`passive --active` still exits 2; the
+  message now names `reconkit active -d X`). Gate: 1059 tests, ruff/format/mypy
+  clean, plus a mock smoke of all 10 scan commands and 3 refusals. Deviation:
+  ruff `extend-exclude` gained `sahmiye`. Next action: none.
+
+- Status (2026-11-20, D100): **dnsreaper is installed by setup and adapted, and
+  `vulns` is documented as full-only.** New `python:` source shape builds the
+  pinned checkout (`c1588b2`) in `~/.reconkit/opt/dnsreaper` with its own venv
+  (`requirements.txt` + `setuptools<81`) and writes the managed launcher; the
+  adapter reads `--out` JSON (`CONFIRMED` high, `POTENTIAL` medium, `UNLIKELY`
+  low) and a real run on zero.webappsecurity.com finished `ok` with 0 findings.
+  `run --active` never includes `vulns` (code already matched; docs corrected),
+  `run --full` runs nuclei, subzy, dnsreaper, nikto, ffuf. Gate: 1055 tests,
+  ruff/format/mypy clean. Next action: none.
+
+- Status (2026-11-20, D99): **the installer works on a partly-installed box.**
+  The planner printed one shared `name` for all rows, so `have()` asked about
+  `whatweb` for everything and printed `nothing to install` on a machine where
+  `whatweb` existed; each row now carries its own registry name (+ regression
+  test). `binary_search_dirs()` also skips the project venv's `bin`, so its
+  Python `httpx` CLI can no longer shadow the real binary, and `go install`
+  gets one retry on a transient `sum.golang.org` timeout. Fresh Ubuntu repro
+  with only whatweb preinstalled: plan correct, full run 47 installed, 1
+  manual, doctor clean, exit 0. Next action: none.
+
+- Status (2026-11-20, D98): **every installable tool now installs on Ubuntu.**
+  `findomain` (pinned 11.0.0 zip) and `rustscan` (pinned 2.4.1 .deb.zip) use new
+  `release:` sources with SHA-256 checks; `massdns` uses a pinned `build:` commit
+  plus make, and its version probe is `massdns --version`. Fresh Ubuntu run: 47
+  installed, 1 manual (`dnsreaper`), doctor 0 wrong-program, exit 0. Next
+  action: none.
+
+- Status (2026-11-20, D97): **one setup command.** `scripts/setup.sh` runs
+  bootstrap (only when needed), then `install-tools.sh` with all arguments
+  forwarded, then doctor. README/SETUP/docs/10 document it; `test_package`
+  checks its executable bit **and the mode git records** - `core.fileMode=false`
+  here let the first commit of `setup.sh` land as 100644. Next action: none.
+
+- Status (2026-11-20, D96): **a standalone stage command now uses stored
+  hosts.** `reconkit ports -d target.example --active` after a completed active
+  scan exited 0 with 0 tools and `Ports -`: `_stage_hosts(PORTS)` only saw the
+  in-memory `alive` set, which a `live`-less run never fills, and
+  `_seed_from_store` was `--resume`-only. Any run without `subs`/`dns`/`live`
+  now seeds from `Store.subdomains()`, and an empty `ports` run says
+  `run 'reconkit live' first` instead of silence. Regression
+  `test_ports_stage_command_uses_stored_alive_hosts`; suite 1048; gate clean.
+  Next action: none.
+
+- Status (2026-11-20, D95): **a fresh clone can install every tool its distro
+  packages.** Clean-room `ubuntu:24.04` run of `git clone` -> `bootstrap.sh` ->
+  `install-tools.sh --yes` found three real new-user defects: the script was
+  committed non-executable, its `have()` trusted `command -v` (so the venv's
+  Python `httpx` hid ProjectDiscovery's binary), and one unavailable apt
+  package aborted the whole apt batch. Fixed: executable mode, plan from
+  `reconkit doctor --json`, one apt package at a time with a warning per
+  unavailable one, and `amass` installs from its Go module on every distro.
+  README/SETUP now name the script. Suite 1047, ruff/format/mypy clean. Tag
+  `v1.0.0` moved to the new commit again (same version). Ubuntu still has no
+  `findomain`, `massdns` or `rustscan` package and `dnsreaper` stays manual;
+  the script reports those by name. Next action: none.
+
+- Status (2026-11-20, D94): **the binary lookup no longer depends on how the
+  shell was started.** `~/.reconkit/bin` is still first, but after it the
+  search covers PATH, `$GOPATH/bin`, `~/.local/bin`, `~/go/bin`, `~/.gobin`,
+  `/usr/local/bin`, `/usr/local/sbin`, `/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`,
+  `/snap/bin`, plus the `SUDO_USER` bin dirs when running under sudo. The
+  identity probe gets `HOME` and a `PATH` led by the copy's own directory, so a
+  distro wrapper script (Kali's `/usr/bin/amass`) works. Doctor and the engine
+  share `adapters.base.binary_search_dirs()` / `identity_probe_env()`. Verified:
+  1046 passed, ruff/format/mypy clean; `doctor --json` reports 47 installed with
+  a normal PATH and with `PATH=/usr/bin:/bin` (the `dnsreaper` manual entry is
+  the 1 missing). Docs: docs/10 section 3, docs/09 adapter contract, docs/03.
+  `v1.0.0` was deleted and re-created on this commit (same version); the tag and
+  `main` were pushed. Next action: none.
+
+- Status (2026-11-20, D93): **the CI-fix work is one commit.** D88-D92 were
+  squashed into a single commit on `main` at the owner's request, and `v1.0.0`
+  was moved onto it, so history no longer carries the intermediate commits that
+  failed on GitHub Actions. The tree is unchanged from the verified D92 state:
+  1042 passed from `/tmp` under `GITHUB_ACTIONS=true`, ruff/format/mypy clean.
+  See the D92 entry in REVIEW_LOG for the ANSI cause; the decision labels
+  D88-D92 stay in that log as the record of the decisions themselves.
+
+- Status (2026-11-20, D92): **help assertions now survive GitHub Actions.**
+  D91's width pin was the wrong diagnosis (Typer's Rich help console ignores
+  `terminal_width`). On CI `GITHUB_ACTIONS` makes Typer force a terminal, so
+  Rich styles the help and splits `--only-alive` across escape runs; a raw
+  substring check misses it. Tests now read `help_text()`, which strips ANSI,
+  and pass `env=HELP_ENV` so the render stays wide enough. Verified: pre-fix
+  failure reproduced locally under `GITHUB_ACTIONS=true`; post-fix 22 help tests
+  and 1042 suite tests pass from `/tmp` with `GITHUB_ACTIONS=true`. Suite stays
+  1042.
+
+- Status (2026-11-20, D90): **adapter tests no longer need clean-runner
+  binaries or repository paths.** `puredns` injects `which("massdns")`; the
+  webanalyze missing-database test uses `tmp_path` as its workspace. The
+  `--reprobe-urls` flag was already registered; the CI failure was the D88
+  help-rendering issue, not a missing flag. Suite stays 1042.
+- Status (2026-11-20, D89): **CI active/full tests no longer depend on the
+  repository's local scope file.** The six mode/stage tests that did not chdir
+  now pass `--no-scope`; tests that need scope filtering still use the temp
+  scope written by `make_config`. This masked D82 locally because only the
+  checkout had `scope.yaml`. Suite stays 1042.
+- Status (2026-11-20, D88): **help no longer depends on a scope file.** The
+  fail-closed check is in the scan body (`cli._run_scan`), after Typer handles
+  `--help`/`--version`/argv; a source comment and two regressions now pin that.
+  The two help tests pin `COLUMNS=120`; `run --help` from a scope-free directory
+  shows `--active`, `--full`, `--no-scope` and `--reprobe-urls`. The width part
+  of that diagnosis was wrong and D92 replaced it. Tests 1041 -> 1042. No D82
+  weakening.
+- Status (2026-11-20, D82-D87 batch complete): **the v1.0.0 release blockers
+  are closed.** Active/full scans fail closed without `scope.yaml`; MIT LICENSE
+  and package metadata exist; version `1.0.0`, `--version` and the configured
+  User-Agent are consistent; `db delete` defaults to no and both db commands
+  report a locked database cleanly; GitHub Actions runs the gate on Python
+  3.11-3.13; stale docs and the `install:`/`max_speed` template keys are gone.
+  Suite **1041 passed**, ruff/format/mypy clean, tree clean before the final
+  push. The old `v1.0.0` tag (`db965ea`) was deleted locally and from origin,
+  and `v1.0.0` was re-created on the final release commit after this batch. See
+  the D82-D87 entry in REVIEW_LOG.
+- Status (2026-11-20, D87): **stale docs and dead keys are gone.** AGENTS.md
+  points at docs/10_TOOL_SOURCES.md, README says v1.0.0 is stable and
+  feature-complete for the documented scope, docs/01 no longer claims nuclei is
+  Phase 3, `scope.example.yaml` no longer advertises the removed `max_speed`,
+  and `config.yaml`/`AppConfig` no longer accept the ignored `install:` block.
+  Tests 1040 -> 1041 (the removed install block is rejected). Gate clean. See
+  D87 in REVIEW_LOG.
+- Status (2026-11-20, D86): **CI exists.** `.github/workflows/test.yml` runs on
+  every push and pull request to `main`, with a Python 3.11/3.12/3.13 matrix;
+  each job installs `.[dev]` and runs `pytest -q`, `ruff check .`,
+  `ruff format --check .` and `mypy src/reconkit`. The README carries the
+  workflow badge. No source or test change; suite stays 1040.
+- Status (2026-11-20, D85): **`db delete` now defaults to no, and both
+  destructive db commands fail cleanly on a locked database.** The prompt is
+  `[y/N]`; Enter cancels with exit 2. `core.store` translates
+  `sqlite3.OperationalError` to `StorageError` (the CLI must not import
+  `sqlite3`, per the layering test), and `db delete`/`db wipe` print
+  `Error: Database is locked. Is a scan running?` then exit 1 with no traceback.
+  If row deletion succeeds but `results/<domain>/` cannot be removed, `db delete`
+  prints a warning and exits 0. Tests 1036 -> 1040, including two real
+  `BEGIN IMMEDIATE` lock tests (about 10 s of the suite). Gate clean. See D85 in
+  REVIEW_LOG.
+- Status (2026-11-20, D84): **version and User-Agent now have one source of
+  truth.** `pyproject.toml` and `reconkit.__version__` are both `1.0.0`; the
+  root CLI prints `reconkit v1.0.0` for `--version` and exits 0; `adapters.base`
+  builds `USER_AGENT` from `__version__`; and `Engine` now builds every
+  `RunContext.user_agent` from `--user-agent`, else `config.user_agent` with
+  `{version}` replaced. Tests 1032 -> 1036 (CLI version, package/pyproject
+  consistency, config default, flag override). Gate clean. See D84 in
+  REVIEW_LOG.
+- Status (2026-11-20, D83): **the repo now has an MIT LICENSE and matching
+  package metadata.** Copyright 2026 Anshul. `pyproject.toml` carries
+  `license = {text = "MIT"}`, `authors = [{name = "Anshul"}]` and classifiers
+  (MIT, Python 3.11-3.13, POSIX Linux, Security); README ends with a License
+  section pointing at `LICENSE`. No behaviour change; suite stays 1032.
+- Status (2026-11-20, D82): **active/full scans now fail closed when no
+  `scope.yaml` is present.** The CLI refuses before `Engine.open` with exit 3 and
+  the exact message `Error: No scope.yaml found. Active scanning requires a scope
+  file. If you intend to scan without scope restrictions, you must explicitly
+  pass --no-scope.` `--no-scope` remains the explicit opt-out and records
+  `unrestricted_flag`; passive runs still need no file. The engine `_active_hosts`
+  keeps the same guard for direct callers. This supersedes D1's fail-open rule.
+  Docs/02, 03, 05, 08, 09, README, AGENTS and the naabu/ports notes were updated.
+  Tests 1029 -> 1032 (three D82 CLI tests; old no-file tests now assert refusal
+  or use the explicit flag). Gate: 1032 passed, ruff and mypy clean. See D82 in
+  REVIEW_LOG.
+- Status (2026-11-20, vulns docs): **the documented state of `vulns` now matches
+  the code.** The stage needs `--active` (or `--full`); `nuclei`/`subzy` are
+  core, `nikto`/`ffuf` opt_in, `dnsreaper` has no adapter, and the three
+  exploitation tools need explicit `--tools` and have no adapter yet. Findings
+  are **not persisted**: the only copies are the run's `--json`
+  (`stages[].results[]`, including `raw_path`) and
+  `workspaces/<target>/meta/<run_id>-<tool>.txt`. README, COMMANDS, docs/02,
+  docs/03 and docs/09 were corrected; no code changed and the findings table is
+  still deferred (docs/04). Suite stays 1029. Docs only.
+- Status (2026-11-20, attribution): **the last four commits were re-created
+  without AI attribution trailers**, per the rule already recorded below in this
+  file. Only messages changed; every tree is byte-identical. AGENTS.md section 0c
+  now states the rule explicitly so it cannot be missed again. Hashes:
+  `7803624` -> `eadf76a`, `2b62964` -> `aaf7ca5`, `edbaacf` -> `db965ea`,
+  `03ef49e` -> `18baa4f`. The published `v1.0.0` tag was re-created on the
+  rewritten D81 commit `db965ea` and force-pushed. See the top entry in
+  REVIEW_LOG.
+- Status (2026-11-20, D81): **`reconkit db delete` and `reconkit db wipe` exist.**
+  `db delete --target X [--yes]` counts the target's rows, asks (default yes),
+  then removes `port_sources`, `host_status_history`, `ports`,
+  `subdomain_sources`, `tool_runs`, `urls`, `subdomains`, `scan_runs` and the
+  target in one transaction, and removes `results/<domain>/` plus
+  `results/mock/<domain>/`; the summary is
+  `Deleted 1 target, 13 subdomains, 1177 URLs, 33 tool runs, 6 stage runs. Removed ...`.
+  A missing target is exit 2. `db wipe [--yes]` prints the ALL-data warning,
+  drops every table, recreates the current schema (12) and leaves `results/`
+  untouched with the manual `rm -rf results/` note. Both use the root
+  `--config`/`--db` options before `db`. **Found and fixed a latent store bug:**
+  `Store.transaction()` never committed the outermost block (`_commit()` declines
+  because `_batch_depth == 1`), so a transaction followed only by `close()`
+  rolled back; it now commits explicitly and a reopen test guards it. Suite
+  1023 -> 1029. Acceptance on `/tmp` copies only; real `recon.db` and `results/`
+  untouched. See D81 in REVIEW_LOG.
+- Status (2026-11-20, D80): **README, COMMANDS.md and docs/02 match the CLI as
+  shipped through D78.** Checked against raw `reconkit --help`, `run --help` and
+  `report --help`: `report` was missing from both command tables, the `active`
+  stage list still stopped at `live`, and README had no report-folder shape.
+  COMMANDS.md now dates its flag check 2026-11-20 and documents `report` flags;
+  README lists `report` and the `results/<target>/<stamp>/` tree including
+  `external_urls.txt` and `hosts/`; docs/02 corrects `--active` to
+  subs/dns/live/tech/urls/url_probe and adds `report` to State and output. The
+  report section already carried `urls_max: 0` (no cap) and the per-host
+  folders, so it was verified, not rewritten. Docs only; suite stays 1023.
+  See D80 in REVIEW_LOG.
+- Status (2026-11-20, D79): **no real target names remain in the repo.** The two
+  targets used for real verification (a university domain and a bank domain) and
+  the mock fixture name leaked into comments, fixtures, scripts and docs: 219
+  matching lines in 22 files. All are now `example.com` / `target.example` /
+  `example.test` (subdomains keep their label: `b.target.example`,
+  `www.example.com`). The six mock fixtures are `example.test.*`, the capture
+  script is `scripts/capture_example.sh`, and the fixture title is `Example
+  Bank`. No code logic changed; suite stays 1023. The batch named a pyprobe
+  fixture that does not exist - the real pyprobe fixture was the mock one, now
+  `example.test.json`. See D79 in REVIEW_LOG.
+- Status (2026-11-20, D76-D78): **third-party URLs no longer make hosts, folders or
+  URL groups.** `Engine._within_scope()` decides target or `*.target`;
+  `_persist_urls` tags every other URL `urls.source = 'external'` (schema 12), and
+  they reach the report only through `external_urls.txt`. The Tools table gained a
+  `Unique` column (new URL rows a tool contributed; `-` outside the `urls` stage).
+  The URL header now reads `N total, M probed this run, K already probed (use
+  --reprobe-urls)` and the run ends with the same `ℹ` note when K > 0;
+  `report.json` carries `urls_probed_this_run` and `urls_skipped_already_probed`
+  (both in-scope only). Suite 1016 -> 1023. Acceptances: a `example.test` mock run
+  wrote four third-party URLs to `external_urls.txt` and only
+  `hosts/example.test/`; a repeat run over seeded statuses printed
+  `ℹ 3 URL(s) were skipped because they already had a status code; use
+  --reprobe-urls to re-check them.` See D76-D78 in REVIEW_LOG.
+- Status (2026-11-20, post-D75): all queued code work closed. Two rulings closed by accepting the current
+workflow (see Open risks). 1016 tests, tree clean. Remaining items are: one real `--active` run to verify
+D69/D71/D72 on an authorized target (owner's step); export stubs (superseded by report); R15 masscan (needs
+written authorization); waybackurls CDX (upstream); urlfinder idle (deferred by evidence). Nothing is in flight.
+- Status (2026-11-19, D75): **a URL-derived host is tech-scanned on a later run.** D58's pass ran after
+  `urls`, so `tech` had already finished, and `url_only_hosts()` skipped the row it created forever
+  (`discovered` is seeded only for `--resume`). `Store.url_derived_unprocessed()` now finds rows whose
+  sources include the `url-derived` sentinel and whose newest status row has no `tech_json`; in
+  active/full the pass probes them with `pyprobe` and runs the `tech` pool, then `_persist_tech`. No
+  re-resolution (DNS still sees only names without a row), one round, passive unchanged. Crawl is still
+  not included. Suite 1012 -> 1016. Acceptance: `www.testfire.net` went from no status row to
+  `ALIVE 200 ["Java", "aws"]` written by the `urls` run, logs
+  `urls: 1 url-derived host(s) already known; tech-scanned on follow-up`. See D75 in REVIEW_LOG.
+- Status (2026-11-19, D73): **a repeat scan says how many URL answers came from earlier runs.**
+  `url_probe` never re-checks a stored answer, so the report now carries `urls_already_probed` (JSON) and
+  `urls: N total, M shown (K already probed in earlier runs; use --reprobe-urls to re-check)` (text).
+  `K` is counted once before any stage runs; `K = 0` writes neither. Verified on a mock run over a target DB
+  copy: K = 2856, matching the stored non-NULL count. Suite 1010 -> 1012. See D73 in REVIEW_LOG.
+- Status (2026-11-19, D72): **marketing/referral URLs rank below clean ones, and are never dropped.**
+  `ui.NOISE_PARAM_RE` (utm_*, fbclid, gclid, rc, ic, _branch_*, af_xp, pid, deep_link_*) is the
+  second sort key after "interesting path", so `/admin?utm_source=x` keeps tier 1 while `/product?utm_source=x`
+  falls below `/about`. `report.noise_params` (config, default `[]`) adds names without replacing the built-in
+  list. Suite 1006 -> 1010. See D72 in REVIEW_LOG.
+- Status (2026-11-19, D71): **a report folder now carries the host lists, per-host folders, and every URL.**
+  `report.txt`/`report.json` are unchanged except that `report.urls_max` defaults to `0` (no cap);
+  `subdomains.txt`, `alive.txt`, `dns_resolved.txt` (ALIVE + DNS_ONLY), `host-info.txt`, `host-info.json`
+  and `hosts/<hostname>/{urls.txt,info.json}` (only for hosts with URLs) are new. `report.emit_lists` and
+  `report.per_host_folders` (both true) switch them; `reconkit report` writes the same shape. Verified on
+  `results/mock/example.com/20261119T204517Z` (24 URLs, 3 hosts folders, 21 names). Suite 999 -> 1006.
+  Five non-doc files changed, exactly the item's limit. See D71 in REVIEW_LOG.
+- Status (2026-11-19, D70): **a URL-derived host gets DNS and (in active) a live check - never tech, never a crawl.**
+  The D58 pass runs after `urls`, so the last annotating stage has already finished; measured
+  `api`/`assets.target.example` as UNKNOWN with no status row and empty tech. Not implemented: a tech/crawl
+  step needs stage machinery (its own `scan_runs`/`tool_runs`, budget, per-host scope). New finding: a
+  plain follow-up run cannot pick the host up either - `discovered` is seeded from the store only for
+  `--resume`, and `url_only_hosts()` skips an existing row. Documented as a gap in docs/09 with the
+  enabler. Suite 999 (no code change).
+- Status (2026-11-19, D69): **an ALIVE host keeps the HTTP status the live pool saw.**
+  `_persist_live` used to hand `_write_host` the first ALIVE `HostStatusRecord` in
+  completion order, and `httprobe`/`tlsx` carry no status, so `target.example` run 203
+  stored NULL for all 9 ALIVE hosts while `url_probe` had 200 for `b.target.example`.
+  `_best_live_record()` now ranks records: ALIVE, then 2xx < 3xx < other known code <
+  no code, tie by tool name. `tech` was already innocent (`update_host_extras` never
+  writes `status_code`) and now has a guard test. Suite 996 -> 999. Historical rows
+  are not rewritten; a later live pass fills them. See D69 in REVIEW_LOG.
+- Status (2026-11-19, loop retry): **`live --urls-file` still deferred, now blocked from both sides.**
+The standalone route fails because `live` is the shared `_scan_command` (a flag would appear on every scan
+command) and because running the pool from `cli.py` bypasses `tool_runs`/budgets and violates the CLI
+layering test. Enabler unchanged: an explicit host list the engine accepts, plus an owner ruling for the
+flag. See docs/02 section 1 and the REVIEW_LOG retry entry.
+- Status (2026-11-19, loop): **`live --urls-file` deferred.** Needs explicit host-list plumbing in
+`ScanOptions`/engine (live hosts are `[target] + stored subdomains`), which is outside a
+cli+tests change; docs/02 section 1 names the gap and the enabler. **urlfinder idle stays 180s**:
+waybackurls is 0 in every run (so it does not explain the variance), and the 6-vs-6367 spread is
+inside urlfinder's own provider behaviour; a longer window would not add data.
+- Status (2026-11-19, D65): **`reconkit report --target <domain>` rebuilds a saved report from the DB.**
+`--run` (default: latest), `--db`, `--out`; same writer as a scan, `mode=ro` connection, no
+network and no adapter. `Store.open_readonly` + `engine.load_stored_report` are the read-only
+entry points; `host_snapshots`/`url_snapshots` are shared with the scan's own report so the two
+cannot drift. Non-existent run -> exit 2, nothing written. Suite 992 -> 996. Regenerated the
+example DB copy: 69 hosts, 7,421 stored URLs, 200 shown. The `export`/`db list`/`db export`
+stubs are left in place and documented as superseded for the host list.
+- Status (2026-11-19, D64): **a scope-refused active run labels its passive results.** The refusal already
+exited `3` and printed the pre-flight block, but the saved report looked like a normal scan. The run now ends
+with `⚠ ACTIVE STAGES SKIPPED BY SCOPE — this run is passive-only; the report says so.`, `report.json` adds
+`scope_limited: true` + `scope_limited_reason`, and `report.txt` carries the same line under `hosts:`. Exit stays
+`3` (deviation from the batch's exit-0 clause: docs/02 section 6 and docs/05 rule 2 define code 3 for a scope
+refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992.
+- Status (2026-11-19, D63): **`--exclude` names stages and report sections too, and `--include` forces a stage in.**
+  Both are resolved case-insensitively in stage -> adapter -> section order; a value matching a stage and a section
+  (`urls`) does both and prints one line (`--exclude urls: stage skipped, report section hidden`); an unknown value
+  warns and the run continues; naming one value on both sides is exit-2 `contradictory: --include and --exclude both
+  name X`. `--include` adds the stage (or the adapter's stage plus the adapter) at its documented position, prints
+  `⚠ --include <name> forces target contact; this is no longer a <mode> scan.`, promotes the CLI to active gating so
+  the scope file still decides, and both artifacts record `mode: active (forced by --include)`. `ScanOptions` gained
+  `include_tools` and `forced_contact`; no stage order, tool pool or exploitation rule changed. Suite 984 -> 990,
+  gate clean, `scope.yaml` unchanged, no scan run. See D63 and its REVIEW_LOG entry.
+- Status (2026-11-19, D62): **a saved report now carries a domain tree and its URLs, grouped by host.**
+  `report.json` keeps `hosts` byte-for-byte and adds `roots` (one entry: target, subdomains, host_count),
+  `urls_by_host` (`url` / `status_code` / `host_state`, omitted when the run stored no URL), `urls_total`,
+  `urls_shown`, `urls_truncated`; `report.txt` appends `=== Domains ===` and `=== URLs by host ===` after the
+  hosts table. URLs rank by interesting path, then query string, then 200/301/302, then the rest, and the whole
+  report is capped by `config.yaml` `report.urls_max` (default 200, 0 = no cap), with the cut stated in both files.
+  Both blocks are read from `urls`/`subdomains` only (`Store.url_report_rows()`, no request, no schema change);
+  the tree is one entry because one report covers one target (measured: 69 hosts in 20261119T185030Z's report,
+  whose `report.json` had 7 keys and whose `report.txt` had 0 section headings and 0 URLs before this). Suite
+  978 -> 984, `ruff`/`format`/`mypy` clean, `scope.yaml` unchanged, no scan run. See D62 and its REVIEW_LOG entry.
+- Status (2026-11-19, D59): **the list-check workflow is documented; the two gaps are recorded, not fixed.** docs/02
+  section 2 now shows the working hostname command (`reconkit live -l hosts.txt --active --scope scope.yaml`, each line
+  its own target, gate enforced), states plainly that URL lists are rejected by `validate_target()` and that the
+  smallest enabler is a new flag needing a ruling, and says that `export`/`db list`/`db export` are Phase 3 stubs while
+  the real list is `results/<target>/<timestamp>/report.json` `hosts[].hostname`. The same gap is recorded under "What
+  is explicitly open and why" with the exact stub message. Docs only; suite stays 978, `scope.yaml` unchanged.
+- Status (2026-11-19, D58): **a host only the URL pool names now gets a row, a state and a report line.** One bounded
+  pass runs right after `urls`: `Store.url_only_hosts()` (distinct URL hostnames with no `subdomains` row), the `dns`
+  stage's `dnspython` adapter resolves them through the normal `_persist_dns()` state rule, and in `active`/`full` the
+  `live` stage's `pyprobe` probes them through `_persist_live()` after `require_active()` drops any out-of-scope name.
+  Passive resolves and stops - DNS already happens in passive, HTTP does not. Bounded: candidates are read once, never
+  re-extracted, no new config key, and the pass runs under a stage budget (`urls` passive, `url_probe` active) that
+  never fails the run. Rows keep `provenance = 'dns'` plus one `subdomain_sources` sentinel `url-derived`. Suite
+  974 -> 978, `ruff`/`format`/`mypy` clean, `scope.yaml` byte-identical, no scan run. On `target.example` the count is the
+  3 hosts / 43 URLs the analysis found. See D58 and the D58 entry in REVIEW_LOG.
+- Status (2026-11-19, D57): **a timeout from an external API is a gap, so one slow third party no longer exits 5.**
+  The final run's only failure was `crtsh: request timed out` (30.71 s); `HttpAdapter._request` now raises
+  `ExternalServiceGap` for a timeout when the adapter is `external: true`, and keeps `FetchFailed` otherwise. A refused
+  connection after its one retry stays a failure, and local binaries are untouched (`classify_external_gap` has no
+  timeout rule). Suite 973 -> 974, `ruff`/`format`/`mypy` clean, tree clean, `scope.yaml` byte-identical
+  (`d45a3c90...eeee8b`), no re-run of example.com. See D57 and the D57 entry in REVIEW_LOG.

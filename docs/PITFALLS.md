@@ -92,6 +92,16 @@ of code.
 
 | PIT-75 | A live rule could rot unseen: PIT-02 and PIT-31 cited guard tests that were deleted with their features, PIT-35 cited two names its guard had already been renamed away from, and PIT-37/PIT-38 were each used by two different rules | The table was prose at the top of a 12,000-line log, so nothing read it, nothing checked its citations, and its size pushed sessions to skim instead of read | The table lives in `docs/PITFALLS.md` as the session-start rule set; a row whose feature was removed moves to "Retired pitfalls" with the decision that removed it; `tests/test_invariants.py` fails on a cited guard that does not exist, on a duplicate ID, and on the table reappearing in the log | `test_every_cited_pitfall_guard_exists`, `test_pitfall_ids_are_unique`, `test_the_pitfall_table_is_not_duplicated_back_into_the_log` |
 
+| PIT-76 | A new session's first read was 728 lines of accumulated status history (62 entries, ~24k tokens) instead of the current state and the rule set, so it began from a stale narrative and paid more for the boot than for the task | RESUME was append-only: every batch prepended a status bullet and nothing ever moved the older ones, although `docs/MASTER_PLAN.md` G7 caps PROGRESS.md at 150 lines | RESUME carries at most the three newest entries plus a pointer; older entries live under "Earlier statuses" at the end of `docs/PROGRESS.md`, and `tests/test_invariants.py` fails when the block exceeds 60 lines or 4 entries | `test_the_resume_block_stays_short` (`Regression: PIT-76`) |
+
+## Routing (which file to open)
+
+Do not guess and do not read the whole `docs/` tree. The task-to-doc table is
+`AGENTS.md` section 2, and `AGENTS.md` section 0 step 1 lists the common cases
+(CLI -> docs/02, adapter -> docs/09, engine -> docs/03, schema -> docs/04,
+security -> docs/05, tests -> docs/07, tools -> docs/10). If no row matches your
+change, stop and ask instead of inventing a file.
+
 ## Retired pitfalls
 
 These rows guarded a feature that was deliberately removed. The lesson is kept so

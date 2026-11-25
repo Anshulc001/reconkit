@@ -4,7 +4,16 @@ Read this file first, every session. It points to the documents in `docs/`.
 
 ## 0. Session start (do this first, every session)
 
-1. Read `docs/PITFALLS.md` first: it is the live rule set (~90 lines) and every new change is checked against it. Then read the RESUME block at the top of docs/PROGRESS.md, the last 3 entries of docs/REVIEW_LOG.md, and the part you are on in docs/MASTER_PLAN.md. Then read the `docs/*.md` files for the area you will touch.
+1. Read `docs/PITFALLS.md` first: it is the live rule set (~90 lines) and every new change is checked against it. Then read the RESUME block at the top of docs/PROGRESS.md, the last 3 entries of docs/REVIEW_LOG.md, and the part you are on in docs/MASTER_PLAN.md. Then pick the docs for your area from the table in section 2 and read **only those**. Do not read `docs/01`-`docs/10` wholesale and do not guess a file name: if the area is not in that table, say so and ask before writing code. The routing, by task:
+   - CLI flag, command, output, exit code -> `docs/02` + `COMMANDS.md`
+   - adapter, parser, stage pool, confidence -> `docs/09`
+   - engine flow, layer, concurrency -> `docs/03`
+   - table, column, query, migration -> `docs/04`
+   - scope gate, subprocess, secrets, logging -> `docs/05`
+   - tests, fixtures, `--mock` -> `docs/07`
+   - tool source, install, doctor -> `docs/10` + `tools.yaml`
+   - user journey or expected terminal output -> `docs/08`
+   - style, errors, typing -> `docs/06`
 2. Run `git status --short` and `git log --oneline -10`.
 3. Activate the venv and run the gate, one command at a time:
 
