@@ -88,6 +88,8 @@ Expected: other results kept, run status `partial`, exit code 5.
 
 ```bash
 Test:        pytest -q
+Gate (2nd):  FORCE_TERMINAL=1 pytest -q   # the way GitHub Actions renders Rich
+Invariants:  pytest -q tests/test_invariants.py
 Live tests:  pytest -m live -q        # Kali/Ubuntu only, authorized target; none checked in yet
 Lint:        ruff check .
 Format:      ruff format --check .
@@ -104,6 +106,8 @@ Type check:  mypy src/reconkit
 - Adapter tests inject `finder`/`which` for companion binaries (`puredns` -> `massdns`) and set `ctx.workspace` to `tmp_path`; no test may require a system-installed tool or write under the repository's `workspaces/` (D90).
 - A mock target with no matching fixture is a **skip** (`no fixture for <target>`), never a failed tool: the fixture set only covers the targets it was recorded for, so `--mock` on an arbitrary target must still exit 0.
 - `tests/test_invariants.py` is the machine-checked half of AGENTS.md section 0e: every registry tool/adapter pair agrees on name and stage, every adapter has a fixture whose parsed records are canonical, every registry stage is a real stage, and the natural unique keys keep one row per fact. It runs in the default suite; never mark it skip.
+- `docs/PITFALLS.md` is the live rule set and is machine-checked too: every cited `test_*` name must exist, no ID may be used twice, and the table may not be duplicated back into `docs/REVIEW_LOG.md` (D120, PIT-75). A row whose feature was removed moves to "Retired pitfalls" there.
+- GitHub Actions runs the documented gate, not a subset: plain and `FORCE_TERMINAL=1` pytest, the invariant file, ruff, format and mypy, a `--mock` run that must exit 0, and `./scripts/setup.sh --check` in its own job (D120).
 
 ## 9. Definition of Done
 

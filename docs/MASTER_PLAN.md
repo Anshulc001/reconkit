@@ -13,7 +13,7 @@ A3. Context/limit safety: commit after every part. If you sense you are running 
 =====================================================
 GLOBAL PROTOCOL
 =====================================================
-G1. Start of every part: re-read AGENTS.md, the RESUME block, the last 3 REVIEW_LOG entries, the part's section of docs/MASTER_PLAN.md, and the docs it names. Read the Known pitfalls table at the top of docs/REVIEW_LOG.md before writing code, and check any new code against it. Set RESUME status "Part N: IN PROGRESS" before coding.
+G1. Start of every part: re-read AGENTS.md, the RESUME block, the last 3 REVIEW_LOG entries, the part's section of docs/MASTER_PLAN.md, and the docs it names. Read `docs/PITFALLS.md` before writing code, and check any new code against it. Set RESUME status "Part N: IN PROGRESS" before coding.
 G2. Docs change first, then code. Every deviation goes into the report, PROGRESS "Deviations", and REVIEW_LOG.
 G3. Not allowed unless a part explicitly says so: new dependencies; new modules/files/CLI commands not in docs/03 and docs/02 (apart from the 3 files authorized above); `assert` in src/; new lint or type suppressions (only scoped per-file ruff ignores with a reason in pyproject); shell=True; adapters importing store/scope/ui/cli; passing the whole environment to a child process; a scope-bypass flag (never add anything like --i-have-permission); consensus logic outside engine.py; a push.
 G4. External tool flags and JSON fields come from the real `--help` or a real sample. If the tool is not installed, fetch the official README/docs (network works), implement from that, name any non-real fixture `*.synthetic.*`, and list it under Open risks. Never guess a flag.
@@ -25,9 +25,9 @@ G7. PROGRESS.md stays short (task table with real hashes, Deviations, Open risks
 REGRESSION AND PITFALLS RULES
 =====================================================
 R1. Every bug fix adds a guarding test named `test_regression_<short_slug>` or containing a docstring that starts `Regression: <PIT-ID>`. Show it FAILING before the fix (record the raw output in REVIEW_LOG), then passing after the fix.
-R2. Add the pitfall row to the table at the top of docs/REVIEW_LOG.md in the SAME commit as the fix. A fix without a test is not allowed. If a bug truly cannot be tested (for example it needs real Linux), say why, add it to "Not verified", and mark the row UNTESTED.
+R2. Add the pitfall row to `docs/PITFALLS.md` in the SAME commit as the fix. A fix without a test is not allowed. If a bug truly cannot be tested (for example it needs real Linux), say why, add it to "Not verified", and mark the row UNTESTED.
 R3. Non-code problems (environment, tooling, platform, flaky tests, external API behavior) also get a row; the Guarding test column may be `n/a` with the reason, so the next session does not rediscover it.
-R4. Session start (G1) reads the Known pitfalls table. The pre-commit hook warns when the most recent commit subject starts `fix:` and the commit changes no file under `tests/`. The S7 report includes `Pitfalls added this part: <IDs or none>`.
+R4. Session start (G1) reads `docs/PITFALLS.md`; `tests/test_invariants.py` fails when a row cites a guard test that does not exist or an ID is used twice. The pre-commit hook warns when the most recent commit subject starts `fix:` and the commit changes no file under `tests/`. The S7 report includes `Pitfalls added this part: <IDs or none>`.
 R5. Back-fill: every bug already fixed in d03a231, e40091d, 80ddd93, the Part 3-AUDIT or later must have a `test_regression_*`/`Regression:` guard. If missing, add it (mutation first) in the addendum or the next `fix:` commit and fill its row.
 
 =====================================================

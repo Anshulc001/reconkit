@@ -4,7 +4,7 @@ Read this file first, every session. It points to the documents in `docs/`.
 
 ## 0. Session start (do this first, every session)
 
-1. Read the RESUME block at the top of docs/PROGRESS.md, the last 3 entries of docs/REVIEW_LOG.md, and the part you are on in docs/MASTER_PLAN.md. Read the Known pitfalls table at the top of docs/REVIEW_LOG.md before writing code, and check any new code against it. Then read the `docs/*.md` files for the area you will touch.
+1. Read `docs/PITFALLS.md` first: it is the live rule set (~90 lines) and every new change is checked against it. Then read the RESUME block at the top of docs/PROGRESS.md, the last 3 entries of docs/REVIEW_LOG.md, and the part you are on in docs/MASTER_PLAN.md. Then read the `docs/*.md` files for the area you will touch.
 2. Run `git status --short` and `git log --oneline -10`.
 3. Activate the venv and run the gate, one command at a time:
 
@@ -46,7 +46,7 @@ ask for the gate, the regression test or the doc updates.
 - No new dependencies without asking me.
 - Every deviation from the docs goes in the report AND in `docs/PROGRESS.md` "Deviations". Docs change first, then code.
 - **Update all affected docs after every change, in the same commit.** That means the doc for the area you touched (`docs/01`-`docs/10`), plus `docs/PROGRESS.md` (RESUME status and a dated `D<n>` entry) and a `docs/REVIEW_LOG.md` evidence entry with the real commands and their output. A later session must be able to resume from the docs alone; do not leave that knowledge only in the chat.
-- **Every error gets a test case.** A failing check, CI failure, or bug found in a real run is reproduced by a regression test in the same batch, then fixed. CI failures count: fix the test or the code, never the assertion's honesty.
+- **Every error gets a test case.** A failing check, CI failure, or bug found in a real run is reproduced by a regression test in the same batch, then fixed. CI failures count: fix the test or the code, never the assertion's honesty. Its row goes in `docs/PITFALLS.md` in the same commit and cites a guard test that exists; `tests/test_invariants.py` fails otherwise.
 - **Run the gate the way CI does.** GitHub Actions sets `FORCE_TERMINAL`, so run both `pytest -q` and `FORCE_TERMINAL=1 pytest -q` before pushing. Rich styling has broken raw substring assertions that passed locally (2026-11-21).
 - Adapters never import `store`, `scope`, `ui`, `cli`.
 - Do not create modules, files or CLI commands that are not in `docs/03` and `docs/02`. If one seems needed, change the docs first and tell me.
@@ -155,6 +155,7 @@ Before any significant change, read the relevant documents:
 | `docs/09_TOOL_CONTRACTS.md` | adapters, schemas, stage registry, confidence rules |
 | `docs/10_TOOL_SOURCES.md` | tool reference, sources, doctor |
 | `docs/MASTER_PLAN.md` | the part order, autonomy rules and self-review loop |
+| `docs/PITFALLS.md` | the live rule set: every known trap, the rule that prevents it, the test that guards it (read at session start) |
 | `docs/REVIEW_LOG.md` | evidence for every part: decisions, tests, mutations, check output |
 | `tools.yaml` | the registry of every tool (the only list of allowed tools) |
 | `config.yaml` | timeouts, thresholds |
@@ -229,6 +230,42 @@ run `./scripts/setup.sh --check` from the checkout: it must re-sync the venv
 (the install stamp, D108) and finish with `reconkit doctor`. Verify setup work
 from a clean environment (a fresh venv, or the Kali container check), never
 only from the already-warm developer venv.
+
+### 6b. Kali container check (Docker)
+
+Verified on this box on 2026-11-25 (D121). Use it for clean-environment work: a
+fresh venv proves a dependency is installed, this proves it on the platform the
+project targets.
+
+The daemon is not running by default and the login user is not in the `docker`
+group, so `sudo` is needed for `service docker start` and for every `docker` call.
+`sudo` wants the box password; pass it on stdin with `sudo -S`. Ask the operator
+for the password - never write it into a file, a commit or a logged command
+(rule 5, and this repository is public).
+
+```bash
+git clone -q . /tmp/rk-kali      # committed state, with .git for the index test
+printf '<password>\n' | sudo -S service docker start
+printf '<password>\n' | sudo -S docker pull kalilinux/kali-rolling
+cat > /tmp/rk-kali/kali_check.sh <<'EOS'
+set -e
+apt-get update -qq             # the base image ships NO python3
+apt-get install -y -qq python3 python3-venv python3-pip python3-yaml git
+useradd -m -u 1000 tester      # the suite must not run as root (see below)
+chown -R tester /repo
+su tester -c "cd /repo && python3 -m venv .venv && .venv/bin/pip install -q -e '.[dev]' && .venv/bin/pytest -q"
+su tester -c "cd /repo && .venv/bin/reconkit active -d example.com --mock --no-scope"
+EOS
+printf '<password>\n' | sudo -S docker run --rm -v /tmp/rk-kali:/repo -w /repo \
+  kalilinux/kali-rolling bash /repo/kali_check.sh
+```
+
+- **Run as a non-root user.** `scripts/setup.sh` refuses root by design, so the
+  seven `tests/test_package.py` setup cases fail under the container's default
+  root user. That is the script working, not a regression (D121).
+- **Clone, do not `git archive`.** `test_documented_scripts_are_executable` only
+  checks the git index when `.git` exists.
+- Expected result: `1269 passed, 3 skipped`, ruff/format/mypy clean, mock exit 0.
 
 ## 7. Recipe: adding a tool
 

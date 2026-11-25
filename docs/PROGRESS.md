@@ -4,6 +4,31 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-25, D121): **the Kali container check is documented and was run
+  green on the committed state.** Inside `kalilinux/kali-rolling` (Python
+  3.14.10): 1269 passed / 3 skipped, ruff/format/mypy clean, `--mock` exit 0.
+  Two environment facts it surfaced: the base image ships no `python3` (apt
+  first), and the suite must run as a non-root user because `setup.sh` refuses
+  root by design - running as root fails exactly the seven
+  `tests/test_package.py` setup cases. `AGENTS.md` section 6b has the commands,
+  including `sudo -S` for the box password and `sudo docker` (the login user is
+  not in the `docker` group). The password is not written anywhere. Next action:
+  none.
+
+- Status (2026-11-25, D120): **the rule set is short and self-checking, and CI
+  runs the gate AGENTS.md defines.** `docs/PITFALLS.md` (110 lines, 70 live rows)
+  is the pitfalls table, moved out of the top of the 12,000-line REVIEW_LOG,
+  which now points at it. Two obsolete rows moved to "Retired pitfalls" (PIT-02,
+  pacing, removed by D3; PIT-31, `install`/`update`, removed by D4); PIT-37 and
+  PIT-38 were each used twice, so the second of each is PIT-73/PIT-74. The red
+  run found 40 further guard cells pointing at renamed tests; all were repointed
+  to tests that exist today. Three new invariants (PIT-75) fail on a cited guard
+  that does not exist, a duplicate ID, or the table reappearing in the log. CI
+  now runs `FORCE_TERMINAL=1 pytest -q`, the invariant file, a `--mock` smoke run
+  and `./scripts/setup.sh --check`. Gate: 1269 passed / 3 skipped plain and
+  `FORCE_TERMINAL=1`, invariants 199 passed / 3 skipped, ruff/format/mypy clean,
+  mock exit 0, `setup.sh --check` exit 0. Next action: none.
+
 - Status (2026-11-22, D119): **the four Phase 3 stub commands are gone.**
   `export`, `db list`, `db export` and `scope import` were removed from
   `cli.py` on the owner's instruction: they only printed "not wired in Part 8"
@@ -742,6 +767,52 @@ refusal, and `0` would tell a pipeline the requested scan ran). Suite 990 -> 992
 There is no `core/consensus.py`: consensus lives in `engine.py`. Order and module names follow docs/01 section 8 and docs/03 section 5. Per-part hashes and full evidence are in `REVIEW_LOG`; the old table is in its archive.
 
 ## Deviations and assumptions
+
+### D121 (2026-11-25) - the Kali container check is documented in AGENTS.md
+
+- Owner instruction: the box password is available for `sudo`, so run the Docker
+  check and write the procedure into `AGENTS.md` for later sessions.
+- `AGENTS.md` section 6b now states: start the daemon with `sudo -S`, call
+  `sudo docker` (the login user is not in the `docker` group), clone the
+  committed state (not `git archive`, which drops `.git`), install
+  `python3 python3-venv python3-pip python3-yaml git` because the base image has
+  none, and run the suite as non-root uid 1000.
+- The password itself is deliberately not stored: the repository is public and
+  rule 5 forbids keeping a secret. Section 6b says to ask the operator.
+- No code changed; evidence (both the root-failure and the green non-root run) is
+  in the REVIEW_LOG entry for D121.
+- Not verified: the CI `setup` job on GitHub Actions itself (no runner here).
+
+### D120 (2026-11-25) - the pitfalls table is its own guarded file; CI runs the real gate
+
+- Owner request: fix the stale citations, add a guard test, move the table so a
+  new agent gets the rule set without opening the 12k-line log, and make CI run
+  everything `AGENTS.md` section 6 lists.
+- The table moved to `docs/PITFALLS.md` (110 lines, 70 live rows).
+  `docs/REVIEW_LOG.md` keeps a pointer and its append-only history (12,074 ->
+  11,999 lines). This is a new doc file; `AGENTS.md`, `docs/MASTER_PLAN.md`
+  (G1/R2/R4), `COMMANDS.md` and `docs/07` now name it.
+- The red run exposed more drift than the three known rows: 40 guard cells named
+  tests that the PIT back-fill had renamed. Each was repointed to the tests that
+  exist today plus any test carrying the row's `Regression: PIT-nn` docstring.
+  Rule text and behaviour are untouched; only the citations changed.
+- `PIT-02` (pacing) and `PIT-31` (nuclei template refresh) moved to "Retired
+  pitfalls" with the decisions that removed the features (D3, D4); the surviving
+  lesson of PIT-31 is PIT-65. `PIT-37`/`PIT-38` were each used by two different
+  rules, so the second of each is now `PIT-73`/`PIT-74`. New row `PIT-75`
+  records the drift and cites the three new guards.
+- `tests/test_invariants.py` gained `test_every_cited_pitfall_guard_exists`,
+  `test_pitfall_ids_are_unique` and
+  `test_the_pitfall_table_is_not_duplicated_back_into_the_log`; all three were
+  shown failing before the table was repaired.
+- CI (`.github/workflows/test.yml`) gained `FORCE_TERMINAL=1 pytest -q`, the
+  invariant file, `reconkit active -d example.com --mock --no-scope` (must exit
+  0), and a `setup` job running `./scripts/setup.sh --check` after installing
+  `python3-yaml` (the script parses `tools.yaml` with the system python, as its
+  own error message says).
+- Not verified: the `setup` job on GitHub Actions itself. The Docker daemon here
+  is unreachable and `sudo` cannot prompt, so the Kali container check did not
+  run; the local `setup.sh --check` (exit 0) is the evidence.
 
 ### D119 (2026-11-22) - the four Phase 3 stub commands are removed
 

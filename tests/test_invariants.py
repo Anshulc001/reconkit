@@ -29,7 +29,10 @@ from reconkit.models import (
 )
 
 SPECS = load_tools()
-DOCS_09 = Path(__file__).resolve().parents[1] / "docs" / "09_TOOL_CONTRACTS.md"
+ROOT = Path(__file__).resolve().parents[1]
+DOCS_09 = ROOT / "docs" / "09_TOOL_CONTRACTS.md"
+PITFALLS = ROOT / "docs" / "PITFALLS.md"
+REVIEW_LOG = ROOT / "docs" / "REVIEW_LOG.md"
 
 
 def _fixture_paths(name: str) -> list[Path]:
@@ -163,3 +166,62 @@ def test_regression_docs_stage_table_describes_the_shipped_build() -> None:
         known = {name for name, spec in SPECS.items() if str(spec.stage) == stage}
         unknown = tokens - known - {"opt_in", "intrusive"}
         assert unknown == set(), f"{stage} row names tools the registry does not list: {unknown}"
+
+
+# ---------------------------------------------------------------- pitfalls table
+
+
+def _pitfall_rows(text: str) -> list[tuple[str, list[str]]]:
+    """Every live `| PIT-nn |` row as (id, cited guard test names)."""
+    rows: list[tuple[str, list[str]]] = []
+    for line in text.splitlines():
+        match = re.match(r"^\| (PIT-\d+) \|", line)
+        if match is None:
+            continue
+        rows.append((match.group(1), re.findall(r"`(test_[A-Za-z0-9_]+)`", line)))
+    return rows
+
+
+def test_every_cited_pitfall_guard_exists() -> None:
+    """A row that cites a deleted guard reads as verified and is not.
+
+    Regression: PIT-75. `docs/PITFALLS.md` is the live rule set every session is
+    told to trust, but nothing executed it: PIT-02 and PIT-31 cited tests that
+    went away with pacing and with `install`/`update`, and PIT-35 cited the names
+    its guard had already been renamed away from. The table is checked now, so a
+    citation cannot rot silently again.
+    """
+    rows = _pitfall_rows(PITFALLS.read_text(encoding="utf-8"))
+    assert len(rows) >= 60, f"only {len(rows)} live pitfall rows; did the table move?"
+    source = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "tests").rglob("*.py"))
+    missing = sorted(
+        f"{pid} -> {name}" for pid, names in rows for name in names if f"def {name}(" not in source
+    )
+    assert missing == [], "pitfall rows cite guard tests that do not exist: " + ", ".join(missing)
+
+
+def test_pitfall_ids_are_unique() -> None:
+    """Two rules on one ID make every citation of that ID ambiguous.
+
+    Regression: PIT-75. PIT-37 and PIT-38 were each used twice (the reportlab
+    stamp and the httpx `UNKNOWN`; the `awk` setup fix and the empty stage), so
+    "see PIT-37" named two different traps.
+    """
+    ids = [pid for pid, _ in _pitfall_rows(PITFALLS.read_text(encoding="utf-8"))]
+    duplicates = sorted({pid for pid in ids if ids.count(pid) > 1})
+    assert duplicates == [], f"duplicate pitfall ids: {duplicates}"
+
+
+def test_the_pitfall_table_is_not_duplicated_back_into_the_log() -> None:
+    """The log is history; the rule set lives in one short file (D120).
+
+    Regression: PIT-75. While the table stood at the top of a 12,000-line log,
+    every session-start read paid for the whole log, and the two files could
+    disagree without anything noticing.
+    """
+    table_header = "| ID | Symptom | Root cause | Rule going forward | Guarding test |"
+    pitfalls = PITFALLS.read_text(encoding="utf-8")
+    log = REVIEW_LOG.read_text(encoding="utf-8")
+    assert table_header in pitfalls
+    assert table_header not in log
+    assert "The table lives in `docs/PITFALLS.md`" in log

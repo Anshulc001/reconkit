@@ -23,7 +23,27 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -e ".[dev]"
+      # AGENTS.md section 6: the gate is both pytest modes, plus the invariants.
+      # Rich styling has broken raw substring assertions that passed locally
+      # (FORCE_TERMINAL, 2026-11-21), so the second mode is not optional.
       - run: pytest -q
+      - run: FORCE_TERMINAL=1 pytest -q
+      - run: pytest -q tests/test_invariants.py
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy src/reconkit
+      # A mock run must exit 0 with no tools installed and no scope file.
+      - run: reconkit active -d example.com --mock --no-scope
+
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      # setup.sh parses tools.yaml with the system python3, the way an
+      # operator's machine does (the script says so in its own error message).
+      - run: sudo apt-get update -y && sudo apt-get install -y python3-yaml
+      - run: ./scripts/setup.sh --check

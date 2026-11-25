@@ -542,7 +542,7 @@ reconkit diff -d testfire.net
 ```bash
 cat AGENTS.md                    # hard rules
 sed -n '1,60p' docs/PROGRESS.md  # RESUME block and next action
-tail -80 docs/REVIEW_LOG.md      # recent evidence; pitfalls table at the top
+tail -80 docs/REVIEW_LOG.md      # recent evidence; the rules are in docs/PITFALLS.md
 grep -n "^D" docs/MASTER_PLAN.md # dated deviations
 
 source .venv/bin/activate
