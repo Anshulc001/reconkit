@@ -4,6 +4,15 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-25, D123): **the loop is executable.** `scripts/harness.py`
+  runs the gate from `--goal` + `--reason`, records evidence under
+  `results/harness/`, pulls the failing node ids and the first assertion line as
+  the cause, refuses to re-run an unchanged tree with the same failures, and
+  stops after `--loop` (default 3) with one question for the owner. 8 tests in
+  `tests/test_harness.py`; documented in AGENTS 0b, docs/03 section 5 and docs/07
+  section 10. Gate: 1278 passed / 3 skipped both modes, invariants 200,
+  lint/format/mypy clean; fresh venv 208 passed. Next action: none.
+
 - Status (2026-11-25, D122): **a new session boots on a short pack and is
   routed to the right file.** RESUME held 62 status entries (728 lines, ~24k
   tokens), so the first thing a session read was a second history file. The
@@ -79,6 +88,29 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 There is no `core/consensus.py`: consensus lives in `engine.py`. Order and module names follow docs/01 section 8 and docs/03 section 5. Per-part hashes and full evidence are in `REVIEW_LOG`; the old table is in its archive.
 
 ## Deviations and assumptions
+
+### D123 (2026-11-25) - the loop is executable: scripts/harness.py
+
+- Owner request: a harness that checks itself while implementing, retests after
+  a failure, and asks a question instead of guessing.
+- New `scripts/harness.py` (stdlib only, no new dependency) runs the gate and
+  records the evidence in `results/harness/state.json` (git-ignored). It requires
+  `--goal` and at least one `--reason`, extracts the failing node ids and the
+  first `E ...` assertion line as the cause, refuses to re-run against an
+  unchanged tree with the same failures, and stops after `--loop` (default 3, max
+  5) with one question for the owner. `--force` is the named flake escape hatch.
+- It is not a second gate: the pre-commit hook and CI still run the same
+  commands. This is the loop around them (AGENTS.md 0b).
+- `tests/test_harness.py` has 8 cases (green, red, cause extraction, both
+  refusals, budget stop, state file) driven by `/bin/true`, `/bin/false` and a
+  fake `sh -c`, so the harness never runs the real suite in its own tests.
+- `pyproject.toml` gained two scoped per-file ignores, reason on each line:
+  `scripts/harness.py` S603/S607 (fixed argv, bare names from the active venv)
+  and `tests/test_harness.py` S603 (it drives the script as a child).
+- Docs: AGENTS.md 0b, docs/03 section 5 and docs/07 section 10.
+- Verified on the real gate through the harness itself (1278 passed / 3 skipped
+  both modes, invariants 200, lint/format/mypy clean) and in a fresh venv
+  (208 passed); output in REVIEW_LOG.
 
 ### D122 (2026-11-25) - a new session boots on a short pack and is routed to a file
 

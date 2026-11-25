@@ -72,6 +72,8 @@ select = ["E", "F", "I", "B", "UP", "S"]
 "tests/test_package.py" = ["S603", "S607"]   # reads the git index mode; argv is a fixed git command
 "src/reconkit/core/runner.py" = ["S603"]   # argv is validated; sole subprocess entry
 "src/reconkit/adapters/nmap.py" = ["S314"]   # parses only the -oX file nmap itself wrote in this run
+"scripts/harness.py" = ["S603", "S607"]   # runs the documented gate commands: fixed argv, bare names resolved from the active venv, never a shell
+"tests/test_harness.py" = ["S603"]   # the test drives scripts/harness.py as a child process with a fixed argv
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

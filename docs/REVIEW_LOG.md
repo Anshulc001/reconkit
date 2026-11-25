@@ -12165,3 +12165,70 @@ new `FORCE_TERMINAL=1 pytest -q`, invariant-file, mock-smoke and
 **What this does not prove.** The numbers are token estimates (chars/4), and they
 describe what `AGENTS.md` tells a session to read, not what every harness
 actually loads. A 19.9k-token boot pack is affordable; it is not free.
+
+## 2026-11-25 (D123) - the loop is executable: scripts/harness.py
+
+Owner request: a harness that checks itself while implementing, retests after a
+failure, and asks a question instead of guessing.
+
+**New `scripts/harness.py`** (stdlib only, no new dependency). Contract: `--goal`
+and at least one `--reason` are required; it runs `pytest -q`,
+`FORCE_TERMINAL=1 pytest -q`, `pytest -q tests/test_invariants.py`,
+`ruff check .`, `ruff format --check .` and `mypy src/reconkit`; it extracts the
+failing node ids and the first `E ...` line as the cause; it writes
+`results/harness/state.json`; exit 0 = pass, 1 = red, 2 = blocked. It blocks on a
+missing goal/reason, an unchanged tree carrying the same failure signature, a
+spent `--loop` budget (default 3, max 5) and bad input. `--force` is the named
+escape hatch for a suspected flake.
+
+**Harness loop, red then green (its own tests).** Before the script existed:
+
+```
+$ pytest -q tests/test_harness.py
+8 failed in 0.18s
+```
+
+The first green attempt exposed two real gaps, both fixed rather than worked
+around: the budget message did not name `--loop` (the test asserted it), and ruff
+rejected two over-long lines in the refusal message. Then:
+
+```
+$ pytest -q tests/test_harness.py
+8 passed in 0.36s
+```
+
+**The harness on the real gate.**
+
+```
+$ python3 scripts/harness.py --goal "add a bounded self-checking gate loop ..." \
+    --reason "owner request ..." --reason "AGENTS.md 0b ..."
+goal: add a bounded self-checking gate loop that asks instead of guessing
+  ok   suite           49.22s  1278 passed, 3 skipped in 48.82s
+  ok   suite-styled    48.93s  1278 passed, 3 skipped in 48.53s
+  ok   invariants       0.48s  200 passed, 3 skipped in 0.21s
+  ok   lint             0.02s  All checks passed!
+  ok   format           0.02s  105 files already formatted
+  ok   types            0.13s  Success: no issues found in 66 source files
+HARNESS EXIT=0
+```
+
+State file `results/harness/state.json`: 2,157 bytes, `status: pass`,
+`iteration: 1`, 2 reasons recorded.
+
+**Fresh venv (AGENTS 8b).**
+
+```
+fresh venv: 3.14.10
+$ pytest -q tests/test_harness.py tests/test_invariants.py
+208 passed, 3 skipped in 0.62s
+$ python scripts/harness.py --goal ... --reason ... --check ok=/bin/true --json
+status: pass checks: ['ok']
+```
+
+**Lint scope.** Two per-file ignores were added, each with its reason on the line:
+`scripts/harness.py` S603/S607 (fixed argv, bare names resolved from the active
+venv, never a shell) and `tests/test_harness.py` S603 (it drives the script as a
+child process).
+
+**Not verified.** The harness inside the Kali container in this batch (no daemon
+session); the fresh-venv run is the clean-environment evidence.

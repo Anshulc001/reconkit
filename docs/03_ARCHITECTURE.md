@@ -48,6 +48,7 @@ reconkit/
   pyproject.toml
   docs/
   scripts/setup.sh          # single setup entry point: venv + tools (D108)
+  scripts/harness.py        # bounded self-checking gate loop: goal, reasons, cause (D123)
   src/reconkit/
     cli.py            # Typer app, command wiring only
     config.py         # load config.yaml, merge flags

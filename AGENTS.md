@@ -33,6 +33,23 @@ Read this file first, every session. It points to the documents in `docs/`.
 
 plan (5-10 lines, assumptions) -> trace every affected file (section 4.2) -> implement -> tests (normal, empty, malformed, failure) -> run checks -> update **every** doc the change touches -> update `docs/PROGRESS.md` RESUME + entry -> add a `docs/REVIEW_LOG.md` entry -> commit -> report -> stop.
 
+The loop is driven by `scripts/harness.py` (D123). It takes `--goal` and at least
+one `--reason`, runs the gate, and records the evidence under `results/harness/`:
+
+```bash
+python3 scripts/harness.py --goal "what this must achieve" \
+    --reason "the doc or test that says why" [--loop 3] [--json]
+```
+
+- Exit 0 = every check passed. Exit 1 = red, the loop may continue.
+- Exit 2 = blocked: no goal/reason, an **unchanged tree** with the same failures,
+  or the `--loop` budget spent. It then prints the first cause and says to ask
+  the owner one specific question.
+- A red run may be retried only after a change. Re-running the same checks on the
+  same tree is refused on purpose: it cannot teach anything, and a fourth guess is
+  worse than a question. `--force` exists for a suspected flake and must be named
+  in the report.
+
 Every error found in a review, CI run or real scan gets a regression test in the
 same batch: reproduce it, then fix it. No error is closed by prose alone.
 

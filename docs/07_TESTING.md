@@ -118,3 +118,46 @@ Type check:  mypy src/reconkit
 - [ ] Changed commands verified with `--mock`
 - [ ] Critical flow tests above pass
 - [ ] No blocking errors; no unrun checks claimed as passed
+
+## 10. The self-checking harness (`scripts/harness.py`)
+
+The gate is also a loop. `scripts/harness.py` runs the checks in order and records
+what it ran, why, and what it saw:
+
+```bash
+python3 scripts/harness.py --goal "what this must achieve" \
+    --reason "the doc or test that says why" [--loop 3] [--iteration N] [--json]
+```
+
+| Exit | Meaning |
+|---|---|
+| 0 | every check passed |
+| 1 | a check failed; fix the cause, then re-run |
+| 2 | blocked: no `--goal`/`--reason`, an unchanged tree with the same failures, or the `--loop` budget spent |
+
+What it enforces, and why each rule exists:
+
+- **A reason before a run.** `--goal` and at least one `--reason` are required, so
+  every check run is attached to a claim rather than to optimism.
+- **No blind retry.** If the previous run was red and `git status` plus `HEAD` are
+  unchanged, it refuses to run and says so. A retest that cannot see a change
+  cannot teach anything; the next move is a question, not a fourth guess. `--force`
+  overrides it for a suspected flake and must be named in the report.
+- **A cause, not a wall of text.** It pulls the failing node ids and the first
+  `E   ...` assertion line out of the output, which is what the report must quote.
+- **A hard stop.** After `--loop` iterations (default 3, max 5) it stops and says
+  to ask the owner one specific question - the same rule as `docs/MASTER_PLAN.md`
+  A2, now executable.
+- **Evidence.** Each run writes `results/harness/state.json` (git-ignored): goal,
+  reasons, iteration, tree signature, per-check exit code, duration, summary,
+  failing nodes and cause.
+
+Checks run, in this order: `pytest -q`, `FORCE_TERMINAL=1 pytest -q`,
+`pytest -q tests/test_invariants.py`, `ruff check .`, `ruff format --check .`,
+`mypy src/reconkit`. It is not a second gate - the pre-commit hook and CI still
+enforce the same commands; this is the loop around them.
+
+`tests/test_harness.py` drives it with `/bin/true`, `/bin/false` and a fake
+`sh -c` writer, so the harness's own tests never run the real suite. It covers:
+green, red, cause extraction, the two refusals, the budget stop, and the state
+file. Adding a harness rule means adding a case there in the same commit.
