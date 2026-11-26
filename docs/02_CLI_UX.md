@@ -3,7 +3,7 @@
 ## 1. Design Direction
 
 - **Style:** Technical, calm, readable. Tables for results, one-line status for progress.
-- **Branding (D107, 2026-11-21):** a human scan opens with the ReconKit ASCII banner (cyan), the tagline, `Made with ♥ by Pritam & Anshul` and the live `reconkit.__version__`, followed by a dim rule. It is written to stderr once, is suppressed by `--json` and `--silent`, and is never printed by an adapter or child process. `--no-color` keeps the text and drops the styling.
+- **Branding (D107, 2026-11-21; redesigned 2026-11-26, D124):** a human scan opens with a five-line slanted ReconKit wordmark (figlet `slant`, 50 columns, cyan-to-violet gradient), the tagline `Advanced Reconnaissance Framework`, and one meta line `v<version>  ·  made by Anshul`, followed by a dim rule (the live `reconkit.__version__`). It is written to stderr once, is suppressed by `--json` and `--silent`, and is never printed by an adapter or child process. `--no-color` keeps the text and drops the styling.
 - **Principles:**
   - Safe and polite by default (passive unless `--active` is asked for). Tools run at their own natural pace: there is no speed preset, delay or artificial throttling.
   - Every result shows where it came from and how much to trust it.

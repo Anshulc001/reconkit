@@ -4,24 +4,21 @@
 
 **ReconKit** is a command-line reconnaissance framework for **authorized** security testing. It orchestrates multiple recon tools per stage, merges and deduplicates their output, scores confidence by how many tools agree, and tracks what changed between scans in SQLite. Every scan produces a text report, a machine-readable JSON report and a professional PDF assessment report.
 
-Developed by **Pritam & Anshul**.
+Developed by **Anshul**.
 
 ```text
-██████╗ ███████╗ ██████╗ ██████╗ ███╗   ██╗██╗  ██╗██╗████████╗
-██╔══██╗██╔════╝██╔════╝██╔═══██╗████╗  ██║██║ ██╔╝██║╚══██╔══╝
-██████╔╝█████╗  ██║     ██║   ██║██╔██╗ ██║█████╔╝ ██║   ██║
-██╔══██╗██╔══╝  ██║     ██║   ██║██║╚██╗██║██╔═██╗ ██║   ██║
-██║  ██║███████╗╚██████╗╚██████╔╝██║ ╚████║██║  ██╗██║   ██║
-╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝   ╚═╝
+    ____  ________________  _   ____ __ __________
+   / __ \/ ____/ ____/ __ \/ | / / //_//  _/_  __/
+  / /_/ / __/ / /   / / / /  |/ / ,<   / /  / /
+ / _, _/ /___/ /___/ /_/ / /|  / /| |_/ /  / /
+/_/ |_/_____/\____/\____/_/ |_/_/ |_/___/ /_/
 
-              RECONKIT
-   Advanced Reconnaissance Framework
-
-   Made with ♥ by Pritam & Anshul
-   Version: 1.0.0
+Advanced Reconnaissance Framework
+v1.0.0  ·  made by Anshul
+────────────────────────────────────────────────────────────────────────
 ```
 
-The banner is printed once for a human scan (not for `--json`/`--silent`, and never from a child process), followed by a separator. The version comes from `reconkit.__version__`, the same value `reconkit --version` prints.
+The banner is printed once for a human scan (not for `--json`/`--silent`, and never from a child process), followed by a separator. The five-line wordmark is figlet's `slant` face in a cyan-to-violet gradient, and the version comes from `reconkit.__version__`, the same value `reconkit --version` prints.
 
 > `scope.yaml` is a safety guard against mistakes, not permission. Use ReconKit only on systems you own or have explicit written authorization to test.
 

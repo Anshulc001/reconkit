@@ -4,6 +4,16 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 
 ## RESUME HERE
 
+- Status (2026-11-26, D124): **the banner is redesigned and the credit names
+  one author.** The other contributor's name is gone from the banner, `README`,
+  `docs/02`, the PDF credits and two historical log lines; `DEVELOPERS` is
+  `Anshul`. The wordmark is figlet's `slant` face (five lines, 50 columns) in a
+  cyan-to-violet gradient, followed by the tagline and one meta line
+  `v<version>  ·  made by Anshul`; the heart is gone too. New guard
+  `test_the_removed_contributor_is_not_named_anywhere`. Gate: 1280 passed / 3
+  skipped plain and `FORCE_TERMINAL=1`, invariants 200 passed / 3 skipped,
+  ruff/format/mypy clean, `--mock` run exit 0. Next action: none.
+
 - Status (2026-11-25, D123): **the loop is executable.** `scripts/harness.py`
   runs the gate from `--goal` + `--reason`, records evidence under
   `results/harness/`, pulls the failing node ids and the first assertion line as
@@ -20,17 +30,6 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
   this file. `AGENTS.md` step 1 now says to pick the docs for the area from
   the section 2 table instead of reading `docs/` wholesale or guessing a file
   name. Guard: `test_the_resume_block_stays_short` (PIT-76). Next action: none.
-
-- Status (2026-11-25, D121): **the Kali container check is documented and was run
-  green on the committed state.** Inside `kalilinux/kali-rolling` (Python
-  3.14.10): 1269 passed / 3 skipped, ruff/format/mypy clean, `--mock` exit 0.
-  Two environment facts it surfaced: the base image ships no `python3` (apt
-  first), and the suite must run as a non-root user because `setup.sh` refuses
-  root by design - running as root fails exactly the seven
-  `tests/test_package.py` setup cases. `AGENTS.md` section 6b has the commands,
-  including `sudo -S` for the box password and `sudo docker` (the login user is
-  not in the `docker` group). The password is not written anywhere. Next action:
-  none.
 
 - Status (2026-11-25, D120): **the rule set is short and self-checking, and CI
   runs the gate AGENTS.md defines.** `docs/PITFALLS.md` (110 lines, 70 live rows)
@@ -88,6 +87,30 @@ Read this after `AGENTS.md`, before touching code. Update it in every commit tha
 There is no `core/consensus.py`: consensus lives in `engine.py`. Order and module names follow docs/01 section 8 and docs/03 section 5. Per-part hashes and full evidence are in `REVIEW_LOG`; the old table is in its archive.
 
 ## Deviations and assumptions
+
+### D124 (2026-11-26) - the banner is redesigned and the credit names one author
+
+- Owner instruction: remove the other contributor's name from the project (the
+  banner included), never put it in a commit message, and give the banner a
+  better design and font. Follow-up: remove the heart from the credit line too.
+- `branding.py`: `DEVELOPERS` is `Anshul`. The wordmark is figlet's `slant`
+  face (five lines, 50 columns) painted in a cyan-to-violet gradient, followed
+  by the tagline and one meta line `v<version>  ·  made by Anshul`. Behaviour is
+  unchanged: stderr once per human scan, never under `--json`/`--silent`, never
+  from a child process, `--no-color` keeps the text and drops the styling.
+- The PDF footer, cover line and document metadata read the same constant, so
+  they now say `Developed by Anshul` with no per-site edit.
+- Guard `test_the_removed_contributor_is_not_named_anywhere` scans `README`,
+  `AGENTS.md`, `COMMANDS.md`, `SETUP.md`, `pyproject.toml`, `config.yaml`,
+  `tools.yaml` and the `docs/`, `src/`, `tests/`, `scripts/` trees. The name is
+  assembled at runtime so the guard does not reintroduce it.
+- Deviation: the two historical `REVIEW_LOG` lines that quoted the old credit
+  (the D107 entry and its captured banner output) are rewritten to say "the
+  developer credit" without the name. AGENTS.md section 8 says history is not
+  rewritten; the owner's "from everywhere" instruction overrides it for these
+  two lines, and they still record that the banner carried a credit line.
+- Alignment: `README` shows the new banner and says `Developed by Anshul`;
+  `docs/02` section 1 describes the new face, gradient and meta line.
 
 ### D123 (2026-11-25) - the loop is executable: scripts/harness.py
 
@@ -1414,7 +1437,18 @@ reconkit run -d <authorized-host> --active --tools httpx --db /tmp/verify.db -v 
 
 Moved from RESUME on 2026-11-25 (D122): the status entries from 2026-11-17 to
 2026-11-18, plus the 2026-11-19 analysis and open-blocker notes. Moved, not
-edited.
+edited. The D121 entry moved down on 2026-11-26 (D124) to keep RESUME at three.
+
+- Status (2026-11-25, D121): **the Kali container check is documented and was run
+  green on the committed state.** Inside `kalilinux/kali-rolling` (Python
+  3.14.10): 1269 passed / 3 skipped, ruff/format/mypy clean, `--mock` exit 0.
+  Two environment facts it surfaced: the base image ships no `python3` (apt
+  first), and the suite must run as a non-root user because `setup.sh` refuses
+  root by design - running as root fails exactly the seven
+  `tests/test_package.py` setup cases. `AGENTS.md` section 6b has the commands,
+  including `sudo -S` for the box password and `sudo docker` (the login user is
+  not in the `docker` group). The password is not written anywhere. Next action:
+  none.
 
 
 - Status (2026-11-22, D119): **the four Phase 3 stub commands are gone.**

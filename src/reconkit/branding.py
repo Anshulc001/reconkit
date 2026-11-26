@@ -14,34 +14,39 @@ from rich.text import Text
 from reconkit import __version__
 from reconkit.ui import make_console
 
-DEVELOPERS = "Pritam & Anshul"
+DEVELOPERS = "Anshul"
 TAGLINE = "Advanced Reconnaissance Framework"
 
-# The width is fixed: the banner is branding, not a responsive table, and a
+# The wordmark is figlet's "slant" face: five lines, a 50-column budget. The
+# width is fixed - the banner is branding, not a responsive table, and a
 # half-drawn logo reads as broken output.
-BANNER_ART = r"""██████╗ ███████╗ ██████╗ ██████╗ ███╗   ██╗██╗  ██╗██╗████████╗
-██╔══██╗██╔════╝██╔════╝██╔═══██╗████╗  ██║██║ ██╔╝██║╚══██╔══╝
-██████╔╝█████╗  ██║     ██║   ██║██╔██╗ ██║█████╔╝ ██║   ██║
-██╔══██╗██╔══╝  ██║     ██║   ██║██║╚██╗██║██╔═██╗ ██║   ██║
-██║  ██║███████╗╚██████╗╚██████╔╝██║ ╚████║██║  ██╗██║   ██║
-╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝   ╚═╝"""
+BANNER_ART = r"""    ____  ________________  _   ____ __ __________
+   / __ \/ ____/ ____/ __ \/ | / / //_//  _/_  __/
+  / /_/ / __/ / /   / / / /  |/ / ,<   / /  / /
+ / _, _/ /___/ /___/ /_/ / /|  / /| |_/ /  / /
+/_/ |_/_____/\____/\____/_/ |_/_/ |_/___/ /_/"""
+
+# One colour stop per art line (cyan -> violet), so the wordmark reads as one
+# gradient instead of five unrelated colours. --no-color keeps the art and
+# drops only this.
+_ART_COLORS = ("#22d3ee", "#38bdf8", "#60a5fa", "#818cf8", "#a78bfa")
 
 _SEPARATOR_WIDTH = 72
 
 
 def banner_text() -> Text:
-    """The banner as styled Rich text: art, wordmark, credits, version."""
+    """The banner as styled Rich text: wordmark, tagline, credit, version."""
 
     text = Text()
-    text.append(BANNER_ART, style="bold cyan")
-    text.append("\n\n")
-    text.append("RECONKIT", style="bold white")
-    text.append("   ")
-    text.append(TAGLINE, style="italic grey70")
+    for line, color in zip(BANNER_ART.splitlines(), _ART_COLORS, strict=True):
+        text.append(line, style=f"bold {color}")
+        text.append("\n")
     text.append("\n")
-    text.append(f"Made with ♥ by {DEVELOPERS}", style="green")
+    text.append(TAGLINE, style="bold grey70")
     text.append("\n")
-    text.append(f"Version: {__version__}", style="yellow")
+    text.append(f"v{__version__}", style="bold white")
+    text.append("  ·  ", style="grey37")
+    text.append(f"made by {DEVELOPERS}", style="grey62")
     return text
 
 

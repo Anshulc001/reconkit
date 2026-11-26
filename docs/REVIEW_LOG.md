@@ -10785,8 +10785,8 @@ No CLI command, flag, scan stage, adapter or scope rule changed.
 formatted; `mypy src/reconkit` -> no issues.
 
 **What changed.**
-- New `src/reconkit/branding.py`: fixed ASCII banner, tagline, `Pritam & Anshul`,
-  `Version: <__version__>` and a dim separator. `cli._run_scan` prints it once to
+- New `src/reconkit/branding.py`: fixed ASCII banner, tagline, the developer
+  credit, `Version: <__version__>` and a dim separator. `cli._run_scan` prints it once to
   stderr for human scans; `--json`/`--silent` suppress it and no child process
   can print it.
 - New `src/reconkit/logs.py`: `ScanLog`/`open_scan_log` write
@@ -10839,7 +10839,7 @@ Success: no issues found in 66 source files
 ```
 $ reconkit passive -d example.com --mock --config config.yaml
 <cyan banner: RECONKIT / Advanced Reconnaissance Framework /
- Made with ♥ by Pritam & Anshul / Version: 1.1.0>
+ <credit line> / Version: 1.1.0>
 ────────────────────────────────────────────────────────────────────────
 [10:14:48] [INFO] Starting reconnaissance on example.com (passive)
 ...
@@ -12232,3 +12232,84 @@ child process).
 
 **Not verified.** The harness inside the Kali container in this batch (no daemon
 session); the fresh-venv run is the clean-environment evidence.
+
+## 2026-11-26 (D124) - the banner is redesigned and the credit names one author
+
+Owner instruction: the other contributor's name must leave the project (banner
+included), the banner needs a better design and font, and a commit message must
+never carry the name. Follow-up during the batch: remove the heart too.
+
+**Docs read.** `AGENTS.md` (0, 0c, 3, 8, 10), `docs/PITFALLS.md`,
+`docs/02_CLI_UX.md` section 1, `docs/03_ARCHITECTURE.md` (`branding.py` line and
+the terminal-writer rule), `docs/08_UX_FLOWS.md` flow 1,
+`docs/07_TESTING.md` (`test_branding.py` row), RESUME and the D107 entry.
+
+**What changed.**
+- `src/reconkit/branding.py`: `DEVELOPERS = "Anshul"`; the wordmark is now
+  figlet's `slant` face (five lines, 50 columns) instead of ANSI Shadow, each
+  line painted with one stop of a cyan-to-violet gradient; the tagline stays,
+  and the credit plus version collapse into one meta line
+  `v<version>  ·  made by Anshul`. No heart. Printing behaviour is untouched
+  (stderr, once, never `--json`/`--silent`, never in a child process,
+  `--no-color` keeps the text).
+- `tests/test_branding.py`: the credit/version assertions follow the new shape,
+  a new case pins the wordmark to five lines within 50 columns, and
+  `test_the_removed_contributor_is_not_named_anywhere` scans the hand-written
+  tree for the removed name (assembled at runtime, so the guard does not
+  reintroduce it).
+- `README.md`: new banner block, `Developed by **Anshul**`, and a sentence about
+  the `slant` face and the gradient.
+- `docs/02_CLI_UX.md` section 1: describes the five-line slanted wordmark, the
+  gradient and the single meta line.
+- `docs/REVIEW_LOG.md` (D107 entry) and `docs/PROGRESS.md` (D124): history
+  recording, with the two D107 credit quotes rewritten name-free (deviation
+  noted in PROGRESS D124).
+- The PDF footer, cover line and metadata import `DEVELOPERS`, so all three now
+  read `Developed by Anshul` with no separate edit.
+
+**Gate (run after the change, in the order CI uses).**
+
+```
+$ pytest -q
+1280 passed, 3 skipped in 51.27s
+PLAIN PASS
+$ FORCE_TERMINAL=1 pytest -q
+1280 passed, 3 skipped in 48.85s
+STYLED PASS
+$ pytest -q tests/test_invariants.py
+200 passed, 3 skipped in 0.21s
+INVARIANTS PASS
+$ ruff check .
+All checks passed!
+LINT PASS
+$ ruff format --check .
+105 files already formatted
+FORMAT PASS
+$ mypy src/reconkit
+Success: no issues found in 66 source files
+MYPY PASS
+```
+
+**Rendered banner (`FORCE_TERMINAL=1 reconkit passive -d example.com --mock --no-scope`, stderr head).**
+
+```
+    ____  ________________  _   ____ __ __________
+   / __ \/ ____/ ____/ __ \/ | / / //_//  _/_  __/
+  / /_/ / __/ / /   / / / /  |/ / ,<   / /  / /
+ / _, _/ /___/ /___/ /_/ / /|  / /| |_/ /  / /
+/_/ |_/_____/\____/\____/_/ |_/_/ |_/___/ /_/
+
+Advanced Reconnaissance Framework
+v1.0.0  ·  made by Anshul
+────────────────────────────────────────────────────────────────────────
+warning: --no-scope has no effect on a passive run; continuing
+```
+
+**Name sweep.** `grep -rin` over the checkout (no `.git`, `.venv`, `results`,
+`build`) now matches only the untracked, git-ignored `src/reconkit.egg-info/PKG-INFO`
+build metadata, which `pip install -e .` regenerates from `README.md`; the
+tracked tree is clean.
+
+**Not verified.** No screenshot of the banner in a real terminal was committed
+(`docs/images/` still holds placeholders only), so the gradient is verified as
+Rich styles in the test, not as pixels.
